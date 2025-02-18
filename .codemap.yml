@@ -15,7 +15,7 @@ use_gitignore: true
 remove_comments: false
 output_format: markdown
 output:
-  directory: documentation
+  directory: examples
   filename_format: '{base}.{directory}.{timestamp}.md'
   timestamp_format: '%Y%m%d_%H%M%S'
 sections:
