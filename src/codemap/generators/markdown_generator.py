@@ -64,11 +64,18 @@ class MarkdownGenerator:
         Returns:
             True if the path should be processed.
         """
-        if path.is_file():
-            return parser.should_parse(path)
-
         # Skip directories that match exclude patterns
-        return all(not self._matches_pattern(path, pattern) for pattern in self.config.get("exclude_patterns", []))
+        for pattern in self.config.get("exclude_patterns", []):
+            if self._matches_pattern(path, pattern):
+                return False
+
+        # Skip files that match gitignore patterns if enabled
+        if self.config.get("use_gitignore", True) and parser.gitignore_patterns:
+            for pattern in parser.gitignore_patterns:
+                if self._matches_pattern(path, pattern):
+                    return False
+
+        return True
 
     def _add_path_to_tree(
         self,
@@ -76,7 +83,8 @@ class MarkdownGenerator:
         state: TreeState,
         prefix: str = "",
         depth: int = 0,
-    ) -> None:
+        is_last: bool = True,
+    ) -> bool:
         """Add a path and its children to the tree representation.
 
         Args:
@@ -84,31 +92,80 @@ class MarkdownGenerator:
             state: Tree generation state.
             prefix: Current tree prefix for formatting.
             depth: Current depth in tree.
+            is_last: Whether this is the last item in its parent directory.
+
+        Returns:
+            True if all parseable files in this path (and subdirectories) are included.
         """
         if depth > state.max_depth:
-            return
+            return False
 
         if not self._should_process_path(path, state.parser):
-            return
+            return False
+
+        # Special handling for root directory
+        display_name = "root" if depth == 0 else path.name
+
+        # Determine the prefix symbol based on whether this is the last item
+        prefix_symbol = "└──" if is_last else "├──"
 
         if path.is_file():
+            # Show all files with checkboxes
             is_included = path.resolve() in state.included_files
-            checkbox = "[x]" if is_included else "[ ]"
-            state.tree.append(f"{prefix}├── {checkbox} {path.name}")
+            can_parse = state.parser.should_parse(path)
+            # Files that can be parsed should show inclusion status
+            checkbox = "[x]" if (can_parse and is_included) else "[ ]"
+            state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}")
+            return is_included if can_parse else True
         else:
-            state.tree.append(f"{prefix}└── {path.name}/")
             try:
                 children = sorted(path.iterdir())
-                for child in children:
+                # Process all children first to determine if all are included
+                all_parseable_included = True
+                has_parseable = False
+
+                # Process children but don't add to tree yet
+                child_results = []
+                for i, child in enumerate(children):
+                    is_last_child = i == len(children) - 1
+                    child_included = self._add_path_to_tree(
+                        child,
+                        TreeState(
+                            included_files=state.included_files,
+                            parser=state.parser,
+                            tree=[],  # Temporary tree for child
+                            max_depth=state.max_depth,
+                        ),
+                        prefix + ("    " if is_last else "│   "),
+                        depth + 1,
+                        is_last_child,
+                    )
+                    if state.parser.should_parse(child):
+                        has_parseable = True
+                        if not child_included:
+                            all_parseable_included = False
+                    child_results.append((child, child_included, is_last_child))
+
+                # Add directory with appropriate checkbox
+                checkbox = "[x]" if (has_parseable and all_parseable_included) else "[ ]"
+                state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}/")
+
+                # Now add all children to the real tree
+                for child, _, is_last_child in child_results:
                     self._add_path_to_tree(
                         child,
                         state,
-                        prefix + "    ",
+                        prefix + ("    " if is_last else "│   "),
                         depth + 1,
+                        is_last_child,
                     )
+
+                return all_parseable_included
+
             except (PermissionError, OSError):
                 # Skip directories we can't read or that have too many symlinks
-                pass
+                state.tree.append(f"{prefix}{prefix_symbol} [ ] {display_name}/")
+                return False
 
     def _generate_file_tree(self, parsed_files: dict[Path, dict[str, Any]], repo_root: Path) -> str:
         """Generate a tree representation of the repository structure with checkboxes.
@@ -187,7 +244,7 @@ class MarkdownGenerator:
         Returns:
             Generated dependencies section.
         """
-        deps = ["## Dependencies\n"]
+        deps = ["\n\n## Dependencies\n"]
         all_imports = set()
         for symbols in parsed_files.values():
             all_imports.update(symbols.get("imports", []))
@@ -326,7 +383,7 @@ class MarkdownGenerator:
                     ),
                 )
 
-                markdown.append("## Details\n")
+                markdown.append("\n\n## Details\n")
                 for file_path, symbols in sorted_files:
                     rel_path = file_path.relative_to(self.repo_root)
                     # No need to escape in headings
@@ -336,6 +393,6 @@ class MarkdownGenerator:
             else:
                 # Custom section
                 section_title = section.replace("_", " ").title()
-                markdown.append(f"## {section_title}\n")
+                markdown.append(f"\n\n## {section_title}\n")
 
         return "\n".join(markdown)
