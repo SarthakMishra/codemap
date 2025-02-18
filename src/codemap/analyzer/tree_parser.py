@@ -242,6 +242,7 @@ class CodeParser:
                                 "functions": [],
                                 "docstring": "",
                                 "references": [],
+                                "content": content,
                                 "error": "Failed to parse file: invalid syntax",
                             }
                     except (ValueError, RuntimeError, AttributeError) as e:
@@ -251,6 +252,7 @@ class CodeParser:
                             "functions": [],
                             "docstring": "",
                             "references": [],
+                            "content": content,
                             "error": f"Parsing error: {e!s}",
                         }
 
@@ -276,6 +278,7 @@ class CodeParser:
                 "functions": [],
                 "docstring": "",
                 "references": [],
+                "content": "",
                 "error": str(e),
             }
         else:
@@ -285,4 +288,5 @@ class CodeParser:
                 "functions": functions,
                 "docstring": docstring,
                 "references": [],
+                "content": content,
             }
