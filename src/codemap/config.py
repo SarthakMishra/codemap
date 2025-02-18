@@ -10,7 +10,7 @@ DEFAULT_CONFIG = {
         "*.pyd",
         ".git",
         ".env",
-        "venv",
+        ".venv",
     ],
     "use_gitignore": True,
     "remove_comments": False,
