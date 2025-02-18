@@ -15,6 +15,11 @@ DEFAULT_CONFIG = {
     "use_gitignore": True,
     "remove_comments": False,
     "output_format": "markdown",
+    "output": {
+        "directory": "documentation",
+        "filename_format": "{base}.{directory}.{timestamp}.md",
+        "timestamp_format": "%Y%m%d_%H%M%S",
+    },
     "sections": ["overview", "dependencies", "details"],
     "analysis": {
         "languages": ["python", "javascript", "typescript", "java", "go"],
