@@ -17,7 +17,7 @@ echo -e "${YELLOW}Upgrading might introduce breaking changes. Please backup your
 # Check for root/sudo privileges
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${RED}Error: This script requires root privileges to upgrade globally.${NC}"
-    echo -e "Please run with sudo: ${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/sarthakagrawal927/code-map/main/upgrade.sh | sudo bash${NC}"
+    echo -e "Please run with sudo: ${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/upgrade.sh | sudo bash${NC}"
     exit 1
 fi
 
@@ -25,7 +25,7 @@ fi
 if ! command -v codemap &> /dev/null; then
     echo -e "${RED}Error: CodeMap is not installed.${NC}"
     echo -e "Please install CodeMap first using the installation script:"
-    echo -e "${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/sarthakagrawal927/code-map/main/install.sh | sudo bash${NC}"
+    echo -e "${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/install.sh | sudo bash${NC}"
     exit 1
 fi
 
@@ -49,7 +49,7 @@ if [ -d "$CONFIG_DIR" ]; then
 fi
 
 echo -e "${GREEN}Cloning latest CodeMap version...${NC}"
-git clone https://github.com/sarthakagrawal927/code-map.git "$TEMP_DIR"
+git clone https://github.com/SarthakMishra/codemap.git "$TEMP_DIR"
 cd "$TEMP_DIR"
 
 echo -e "${GREEN}Upgrading CodeMap...${NC}"
@@ -70,6 +70,6 @@ fi
 
 echo -e "\n${GREEN}Upgrade complete!${NC}"
 echo -e "${YELLOW}Note: If you experience any issues after upgrading, please:${NC}"
-echo -e "1. Check the changelog at: ${GREEN}https://github.com/sarthakagrawal927/code-map/blob/main/CHANGELOG.md${NC}"
-echo -e "2. Report issues at: ${GREEN}https://github.com/sarthakagrawal927/code-map/issues${NC}"
+echo -e "1. Check the changelog at: ${GREEN}https://github.com/SarthakMishra/codemap/blob/main/CHANGELOG.md${NC}"
+echo -e "2. Report issues at: ${GREEN}https://github.com/SarthakMishra/codemap/issues${NC}"
 echo -e "3. Restore your backup configuration if needed" 

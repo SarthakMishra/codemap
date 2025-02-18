@@ -18,7 +18,7 @@ echo -e "${YELLOW}Use with caution in production environments.${NC}\n"
 # Check for root/sudo privileges
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${RED}Error: This script requires root privileges to install globally.${NC}"
-    echo -e "Please run with sudo: ${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/sarthakagrawal927/code-map/main/install.sh | sudo bash${NC}"
+    echo -e "Please run with sudo: ${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/install.sh | sudo bash${NC}"
     exit 1
 fi
 
@@ -40,7 +40,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo -e "${GREEN}Cloning CodeMap repository...${NC}"
-git clone https://github.com/sarthakagrawal927/code-map.git "$TEMP_DIR"
+git clone https://github.com/SarthakMishra/codemap.git "$TEMP_DIR"
 cd "$TEMP_DIR"
 
 echo -e "${GREEN}Installing CodeMap globally...${NC}"
