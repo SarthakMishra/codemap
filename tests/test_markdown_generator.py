@@ -60,8 +60,11 @@ def test_generate_documentation_with_files(generator: MarkdownGenerator, mock_re
     (mock_repo_root / "src").mkdir()
     (mock_repo_root / "src" / "main.py").write_text("# Sample content")
     (mock_repo_root / "src" / "utils.py").write_text("# Utility functions")
+    (mock_repo_root / "src" / "README.md").write_text("# Project documentation")
     (mock_repo_root / "__pycache__").mkdir()
     (mock_repo_root / "__pycache__" / "main.cpython-39.pyc").write_text("ignored")
+    (mock_repo_root / ".vscode").mkdir()
+    (mock_repo_root / ".vscode" / "settings.json").write_text("{}")
 
     mock_files = {
         mock_repo_root / "src" / "main.py": {
@@ -94,9 +97,25 @@ def test_generate_documentation_with_files(generator: MarkdownGenerator, mock_re
     assert "MainClass" in doc
     assert "UtilClass" in doc
 
+    # Check that root directory is labeled correctly with checkbox
+    assert "└── [ ] root/" in doc
+
+    # Check that non-Python files are shown with empty checkboxes
+    assert "[ ] README.md" in doc
+    assert "[x] README.md" not in doc
+
     # Check that excluded files are not in the tree
     assert "__pycache__" not in doc
     assert "main.cpython-39.pyc" not in doc
+    assert ".vscode" not in doc
+    assert "settings.json" not in doc
+
+    # Check that Python files have correct checkboxes
+    assert "[x] main.py" in doc
+    assert "[x] utils.py" in doc
+
+    # Check that src directory has [x] since all parseable files are included
+    assert "[x] src/" in doc
 
 
 def test_generate_documentation_with_custom_sections(mock_repo_root: Path) -> None:
@@ -138,7 +157,12 @@ def test_file_sorting(generator: MarkdownGenerator, mock_repo_root: Path) -> Non
     z_pos = details_section.find("z.py")
     m_pos = details_section.find("m.py")
 
-    assert a_pos >= 0 and z_pos >= 0 and m_pos >= 0, "All files should be present in Details section"
+    # Check that all files are present
+    assert a_pos >= 0, "File a.py should be present in Details section"
+    assert z_pos >= 0, "File z.py should be present in Details section"
+    assert m_pos >= 0, "File m.py should be present in Details section"
+
+    # Check that files are in correct order
     assert a_pos < z_pos < m_pos, "Files should be ordered by importance score (highest to lowest)"
 
 
