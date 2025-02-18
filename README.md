@@ -14,7 +14,9 @@ CodeMap is a powerful CLI tool that generates optimized markdown documentation f
 - 🔄 Automatic docstring extraction
 - 🎨 Language-aware syntax parsing
 
-## Installation
+## Installation & Upgrade
+
+### Global Installation
 
 Since CodeMap is currently in development, it can be installed globally directly from GitHub using our installation script:
 
@@ -28,16 +30,31 @@ This script will:
 3. Clean up temporary files automatically
 4. Make the `codemap` command available system-wide
 
+### Upgrading
+
+To upgrade an existing CodeMap installation to the latest version:
+
+```bash
+sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/code-map/main/scripts/upgrade.sh | sudo bash
+```
+
+The upgrade script will:
+1. Back up your existing configuration
+2. Install the latest version from GitHub
+3. Preserve your settings and customizations
+4. Provide rollback instructions if needed
+
+> **Note**: 
+> - Both installation and upgrade require sudo privileges as they modify system-wide Python packages
+> - The tool is under active development, you might encounter occasional issues
+> - Configuration backups are stored in `~/.codemap_backup_TIMESTAMP` during upgrades
+> - Please report any problems in the GitHub issues section
+
 After installation, you can use CodeMap from anywhere:
 
 ```bash
 codemap generate /path/to/your/project
 ```
-
-> **Note**: 
-> - This installation requires sudo privileges as it installs CodeMap globally.
-> - The tool is under active development, you might encounter occasional issues.
-> - Please report any problems in the GitHub issues section.
 
 ## Usage
 
@@ -186,6 +203,13 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 3. Commit your changes (`git commit -m 'Add some amazing feature'`)
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
+
+## Versioning
+
+We use semantic versioning (SemVer) for version numbers. When upgrading:
+- Major version changes (x.0.0) may include breaking changes
+- Minor version changes (0.x.0) add functionality in a backward-compatible manner
+- Patch version changes (0.0.x) include backward-compatible bug fixes
 
 ## License
 
