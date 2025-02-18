@@ -22,7 +22,7 @@ class CodeParser:
         """
         self.parsers: dict[str, Parser] = {}
         self.config = config or {}
-        self._gitignore_patterns: list[str] = []
+        self.gitignore_patterns: list[str] = []
         self._initialize_parsers()
         if self.config.get("use_gitignore", True):
             self._load_gitignore()
@@ -32,7 +32,46 @@ class CodeParser:
         gitignore_path = Path(".gitignore")
         if gitignore_path.exists():
             with gitignore_path.open() as f:
-                self._gitignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+                # Common patterns that should always be ignored
+                default_patterns = [
+                    "__pycache__/",
+                    "*.py[cod]",
+                    "*$py.class",
+                    ".Python",
+                    "build/",
+                    "develop-eggs/",
+                    "dist/",
+                    "downloads/",
+                    "eggs/",
+                    ".eggs/",
+                    "lib/",
+                    "lib64/",
+                    "parts/",
+                    "sdist/",
+                    "var/",
+                    "wheels/",
+                    "*.egg-info/",
+                    ".installed.cfg",
+                    "*.egg",
+                    ".env",
+                    ".venv",
+                    "env/",
+                    "venv/",
+                    "ENV/",
+                    ".pytest_cache/",
+                    ".coverage",
+                    "coverage.xml",
+                    "*.cover",
+                    ".hypothesis/",
+                    ".ruff_cache/",
+                    ".vscode/",
+                ]
+
+                # Read patterns from .gitignore
+                file_patterns = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+                # Combine and deduplicate patterns
+                self.gitignore_patterns = list(set(default_patterns + file_patterns))
 
     def _matches_pattern(self, file_path: Path, pattern: str) -> bool:
         """Check if a file path matches a glob pattern.
@@ -50,10 +89,35 @@ class CodeParser:
 
         # Handle directory patterns (ending with /)
         if pattern.endswith("/"):
-            return any(part == pattern.rstrip("/") for part in Path(path_str).parts)
+            pattern = pattern.rstrip("/")
+            # Check if any part of the path matches the pattern exactly
+            path_parts = Path(path_str).parts
+            return any(part == pattern for part in path_parts)
 
-        # Match against the full path and just the name
-        return fnmatch.fnmatch(path_str, pattern) or fnmatch.fnmatch(file_path.name, pattern)
+        # For .dot patterns (like .venv), match against both name and any part of the path
+        if pattern.startswith("."):
+            path_parts = Path(path_str).parts
+            # Check if any part of the path matches the pattern
+            if any(part == pattern for part in path_parts):
+                return True
+            # Also check if any part matches with the dot removed (e.g., "venv" matches ".venv")
+            if any(part == pattern[1:] for part in path_parts):
+                return True
+            # Check the full path against the pattern
+            return (
+                fnmatch.fnmatch(file_path.name, pattern)
+                or fnmatch.fnmatch(path_str, pattern)
+                or fnmatch.fnmatch(path_str, f"*/{pattern}")
+            )
+
+        # For patterns with directory separators (like **/temp/*), match the full path
+        if "/" in pattern:
+            # Support both exact matches and wildcard matches
+            return fnmatch.fnmatch(path_str, pattern) or fnmatch.fnmatch(path_str, f"**/{pattern}")
+
+        # For simple patterns (like *.py), match against any part of the path
+        path_parts = Path(path_str).parts
+        return any(fnmatch.fnmatch(part, pattern) for part in path_parts)
 
     def _initialize_parsers(self) -> None:
         """Initialize tree-sitter parsers for supported languages."""
@@ -116,7 +180,7 @@ class CodeParser:
         """Check if a file should be parsed based on configuration.
 
         Args:
-            file_path: Path to the file to check.
+            file_path: Path to check.
 
         Returns:
             True if the file should be parsed, False otherwise.
@@ -134,7 +198,7 @@ class CodeParser:
 
         # Check gitignore patterns if enabled
         if self.config.get("use_gitignore", True):
-            for pattern in self._gitignore_patterns:
+            for pattern in self.gitignore_patterns:
                 if self._matches_pattern(file_path, pattern):
                     return False
 
