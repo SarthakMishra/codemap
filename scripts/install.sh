@@ -11,6 +11,13 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
+# Check if script is being run through pipe
+if [ ! -t 0 ] && [ -z "$BASH_EXECUTION_STRING" ]; then
+    echo -e "${RED}Error: This script needs to be run with bash -s.${NC}"
+    echo -e "Please run: ${GREEN}curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/install.sh | sudo bash -s${NC}"
+    exit 1
+fi
+
 # Print warning
 echo -e "${YELLOW}WARNING: CodeMap is currently in active development and testing phase.${NC}"
 echo -e "${YELLOW}Use with caution in production environments.${NC}\n"

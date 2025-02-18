@@ -21,7 +21,7 @@ CodeMap is a powerful CLI tool that generates optimized markdown documentation f
 Since CodeMap is currently in development, it can be installed globally directly from GitHub using our installation script:
 
 ```bash
-sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/refs/heads/main/scripts/install.sh | sudo bash
+curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/install.sh | sudo bash -s
 ```
 
 This script will:
@@ -35,7 +35,7 @@ This script will:
 To upgrade an existing CodeMap installation to the latest version:
 
 ```bash
-sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/refs/heads/main/scripts/upgrade.sh | sudo bash
+curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/upgrade.sh | sudo bash -s
 ```
 
 The upgrade script will:
@@ -49,7 +49,7 @@ The upgrade script will:
 To completely remove CodeMap from your system:
 
 ```bash
-sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/refs/heads/main/scripts/uninstall.sh | sudo bash
+curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/uninstall.sh | sudo bash -s
 ```
 
 The uninstall script will:
