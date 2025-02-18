@@ -16,6 +16,8 @@ from codemap.generators.markdown_generator import MarkdownGenerator
 @pytest.fixture
 def mock_repo_root(tmp_path: Path) -> Path:
     """Create a temporary repository root for testing."""
+    # Create a .git directory to mark this as the repository root
+    (tmp_path / ".git").mkdir()
     return tmp_path
 
 
@@ -25,7 +27,7 @@ def basic_config() -> dict[str, list[str] | int]:
     return {
         "token_limit": 1000,
         "include_patterns": ["*.py"],
-        "exclude_patterns": [],
+        "exclude_patterns": ["__pycache__", "*.pyc"],
         "sections": ["overview", "dependencies", "details"],
     }
 
@@ -54,15 +56,22 @@ def test_generate_documentation_empty(generator: MarkdownGenerator) -> None:
 
 def test_generate_documentation_with_files(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
     """Test documentation generation with mock files."""
+    # Create some test files
+    (mock_repo_root / "src").mkdir()
+    (mock_repo_root / "src" / "main.py").write_text("# Sample content")
+    (mock_repo_root / "src" / "utils.py").write_text("# Utility functions")
+    (mock_repo_root / "__pycache__").mkdir()
+    (mock_repo_root / "__pycache__" / "main.cpython-39.pyc").write_text("ignored")
+
     mock_files = {
-        mock_repo_root / "main.py": {
+        mock_repo_root / "src" / "main.py": {
             "imports": ["os", "sys"],
             "classes": ["MainClass"],
             "functions": ["main"],
             "docstring": "Main module docstring",
             "content": "# Sample content",
         },
-        mock_repo_root / "utils.py": {
+        mock_repo_root / "src" / "utils.py": {
             "imports": ["typing"],
             "classes": ["UtilClass"],
             "functions": ["helper"],
@@ -85,6 +94,10 @@ def test_generate_documentation_with_files(generator: MarkdownGenerator, mock_re
     assert "MainClass" in doc
     assert "UtilClass" in doc
 
+    # Check that excluded files are not in the tree
+    assert "__pycache__" not in doc
+    assert "main.cpython-39.pyc" not in doc
+
 
 def test_generate_documentation_with_custom_sections(mock_repo_root: Path) -> None:
     """Test documentation generation with custom sections configuration."""
@@ -104,6 +117,11 @@ def test_generate_documentation_with_custom_sections(mock_repo_root: Path) -> No
 
 def test_file_sorting(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
     """Test that files are properly sorted in the documentation."""
+    # Create test files
+    (mock_repo_root / "z.py").write_text("")
+    (mock_repo_root / "a.py").write_text("")
+    (mock_repo_root / "m.py").write_text("")
+
     mock_files = {
         mock_repo_root / "z.py": {"importance_score": 0.5},
         mock_repo_root / "a.py": {"importance_score": 0.8},
@@ -112,12 +130,16 @@ def test_file_sorting(generator: MarkdownGenerator, mock_repo_root: Path) -> Non
 
     doc = generator.generate_documentation(mock_files)
 
-    # Check that files appear in order of importance score
-    a_pos = doc.find("a.py")
-    z_pos = doc.find("z.py")
-    m_pos = doc.find("m.py")
+    # Find the Details section
+    details_section = doc[doc.find("## Details") :]
 
-    assert a_pos < z_pos < m_pos
+    # Check that files appear in order of importance score in the Details section
+    a_pos = details_section.find("a.py")
+    z_pos = details_section.find("z.py")
+    m_pos = details_section.find("m.py")
+
+    assert a_pos >= 0 and z_pos >= 0 and m_pos >= 0, "All files should be present in Details section"
+    assert a_pos < z_pos < m_pos, "Files should be ordered by importance score (highest to lowest)"
 
 
 def test_markdown_escaping(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
@@ -128,8 +150,12 @@ def test_markdown_escaping(generator: MarkdownGenerator, mock_repo_root: Path) -
     2. Code content inside code blocks is not escaped
     3. Headings and other structural elements are not escaped
     """
+    # Create test file
+    test_file = mock_repo_root / "test.py"
+    test_file.write_text("# Code with *special* _characters_")
+
     mock_files = {
-        mock_repo_root / "test.py": {
+        test_file: {
             "docstring": "Contains * and _ and ` characters",
             "content": "# Code with *special* _characters_",
             "classes": ["Test_Class"],  # Underscore should not be escaped in headings
