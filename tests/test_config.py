@@ -1,7 +1,7 @@
 """Tests for configuration loading and validation."""
 
-from pathlib import Path
 import os
+from pathlib import Path
 
 import pytest
 import yaml
@@ -19,7 +19,7 @@ def temp_config_file(tmp_path: Path) -> Path:
 def test_default_config_loading(tmp_path: Path) -> None:
     """Test loading default configuration when no config file is provided."""
     # Change to a temporary directory to ensure we don't pick up any .codemap.yml
-    old_cwd = os.getcwd()
+    old_cwd = Path.cwd()
     os.chdir(str(tmp_path))
     try:
         config_loader = ConfigLoader(None)
