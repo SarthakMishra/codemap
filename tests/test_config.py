@@ -1,6 +1,7 @@
 """Tests for configuration loading and validation."""
 
 from pathlib import Path
+import os
 
 import pytest
 import yaml
@@ -15,13 +16,18 @@ def temp_config_file(tmp_path: Path) -> Path:
     return tmp_path / ".codemap.yml"
 
 
-def test_default_config_loading() -> None:
+def test_default_config_loading(tmp_path: Path) -> None:
     """Test loading default configuration when no config file is provided."""
-    config_loader = ConfigLoader(None)
-
-    # Compare each section individually for better error messages
-    for key in DEFAULT_CONFIG:
-        assert config_loader.config[key] == DEFAULT_CONFIG[key], f"Mismatch in {key} section"
+    # Change to a temporary directory to ensure we don't pick up any .codemap.yml
+    old_cwd = os.getcwd()
+    os.chdir(str(tmp_path))
+    try:
+        config_loader = ConfigLoader(None)
+        # Compare each section individually for better error messages
+        for key in DEFAULT_CONFIG:
+            assert config_loader.config[key] == DEFAULT_CONFIG[key], f"Mismatch in {key} section"
+    finally:
+        os.chdir(old_cwd)
 
 
 def test_custom_config_loading(temp_config_file: Path) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 
@@ -32,7 +33,10 @@ def basic_config() -> dict[str, list[str] | int]:
 @pytest.fixture
 def generator(mock_repo_root: Path, basic_config: dict[str, list[str] | int]) -> MarkdownGenerator:
     """Create a MarkdownGenerator instance for testing."""
-    return MarkdownGenerator(mock_repo_root, basic_config)
+    # Patch ConfigLoader to ensure it doesn't read .codemap.yml
+    with patch("codemap.utils.config_loader.ConfigLoader") as mock_loader:
+        mock_loader.return_value.config = basic_config
+        yield MarkdownGenerator(mock_repo_root, basic_config)
 
 
 def test_generator_initialization(generator: MarkdownGenerator) -> None:
@@ -117,15 +121,30 @@ def test_file_sorting(generator: MarkdownGenerator, mock_repo_root: Path) -> Non
 
 
 def test_markdown_escaping(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
-    """Test proper escaping of markdown special characters."""
+    """Test proper escaping of markdown special characters.
+
+    This test verifies that:
+    1. Inline formatting characters (* _ `) are escaped in docstrings
+    2. Code content inside code blocks is not escaped
+    3. Headings and other structural elements are not escaped
+    """
     mock_files = {
         mock_repo_root / "test.py": {
-            "docstring": "Contains * and _ and # characters",
+            "docstring": "Contains * and _ and ` characters",
             "content": "# Code with *special* _characters_",
+            "classes": ["Test_Class"],  # Underscore should not be escaped in headings
+            "functions": ["test_func"],  # Underscore should not be escaped in headings
         },
     }
 
     doc = generator.generate_documentation(mock_files)
 
-    # Verify special characters are properly escaped
-    assert r"Contains \* and \_ and \# characters" in doc
+    # Verify that inline formatting characters are escaped in docstrings
+    assert "Contains \\* and \\_ and \\` characters" in doc
+
+    # Verify that code content is not escaped (should be inside code block)
+    assert "# Code with *special* _characters_" in doc
+
+    # Verify that headings are not escaped
+    assert "#### Test_Class" in doc
+    assert "#### test_func" in doc
