@@ -71,10 +71,70 @@ class MarkdownGenerator:
 
         return "\n".join(deps)
 
-    def _generate_file_documentation(self, symbols: dict[str, Any]) -> str:
+    def _get_language_for_file(self, file_path: Path) -> str:
+        """Get the markdown code block language identifier based on file extension.
+
+        Args:
+            file_path: Path to the file.
+
+        Returns:
+            Language identifier for markdown code block.
+        """
+        extension_map = {
+            ".py": "python",
+            ".js": "javascript",
+            ".jsx": "javascript",
+            ".ts": "typescript",
+            ".tsx": "typescript",
+            ".java": "java",
+            ".go": "go",
+            ".rs": "rust",
+            ".rb": "ruby",
+            ".php": "php",
+            ".cs": "csharp",
+            ".cpp": "cpp",
+            ".c": "c",
+            ".h": "c",
+            ".hpp": "cpp",
+            ".sh": "bash",
+            ".yaml": "yaml",
+            ".yml": "yaml",
+            ".json": "json",
+            ".md": "markdown",
+            ".html": "html",
+            ".css": "css",
+            ".scss": "scss",
+            ".sql": "sql",
+            ".xml": "xml",
+            ".toml": "toml",
+        }
+        return extension_map.get(file_path.suffix.lower(), "")
+
+    def _escape_markdown(self, text: str) -> str:
+        """Escape markdown special characters that could affect formatting.
+
+        Only escapes characters that could be interpreted as markdown syntax
+        in regular text (not in code blocks or headings).
+
+        Args:
+            text: Text to escape.
+
+        Returns:
+            Escaped text.
+        """
+        # Only escape characters that could be interpreted as markdown syntax
+        # in regular text (not in code blocks or headings)
+        special_chars = ["*", "_", "`"]  # These are the main ones that affect inline formatting
+        escaped_text = text
+        for char in special_chars:
+            escaped_text = escaped_text.replace(char, f"\\{char}")
+        return escaped_text
+
+    def _generate_file_documentation(self, file_path: Path, symbols: dict[str, Any]) -> str:
         """Generate documentation for a single file.
 
         Args:
+            file_path: Path to the file being documented.
             symbols: Dictionary containing parsed symbols from the file.
 
         Returns:
@@ -83,35 +143,30 @@ class MarkdownGenerator:
         docs = []
 
         if "docstring" in symbols:
-            docs.append(symbols["docstring"])
+            # Escape docstrings since they can contain markdown formatting
+            docs.append(self._escape_markdown(symbols["docstring"]))
+            docs.append("")
+
+        if "content" in symbols:
+            language = self._get_language_for_file(file_path)
+            docs.append(f"```{language}")
+            docs.append(symbols["content"])
+            docs.append("```")
             docs.append("")
 
         if "classes" in symbols:
             for class_name in symbols["classes"]:
+                # No need to escape in headings
                 docs.append(f"#### {class_name}")
                 docs.append("")
 
         if "functions" in symbols:
             for func_name in symbols["functions"]:
+                # No need to escape in headings
                 docs.append(f"#### {func_name}")
                 docs.append("")
 
         return "\n".join(docs)
-
-    def _escape_markdown(self, text: str) -> str:
-        """Escape markdown special characters.
-
-        Args:
-            text: Text to escape.
-
-        Returns:
-            Escaped text.
-        """
-        special_chars = ["*", "_", "#", "`", "[", "]", "(", ")", ">", "+", "-", ".", "!"]
-        escaped_text = text
-        for char in special_chars:
-            escaped_text = escaped_text.replace(char, f"\\{char}")
-        return escaped_text
 
     def generate_documentation(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
         """Generate markdown documentation from parsed files.
@@ -143,9 +198,10 @@ class MarkdownGenerator:
                 markdown.append("## Details\n")
                 for file_path, symbols in sorted_files:
                     rel_path = file_path.relative_to(self.repo_root)
+                    # No need to escape in headings
                     markdown.append(f"\n### {rel_path}\n")
-                    file_docs = self._generate_file_documentation(symbols)
-                    markdown.append(self._escape_markdown(file_docs))
+                    file_docs = self._generate_file_documentation(file_path, symbols)
+                    markdown.append(file_docs)
             else:
                 # Custom section
                 section_title = section.replace("_", " ").title()
