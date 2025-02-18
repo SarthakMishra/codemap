@@ -1,7 +1,10 @@
 """Command-line interface for the codemap tool."""
 
+from __future__ import annotations
+
 import shutil
-from pathlib import Path
+from datetime import datetime, timezone
+from pathlib import Path  # noqa: TC003
 
 import typer
 import yaml
@@ -26,11 +29,10 @@ PATH_ARG = typer.Argument(
     show_default=True,
 )
 OUTPUT_OPT = typer.Option(
-    "documentation.md",
+    None,
     "--output",
     "-o",
-    help="Output file path",
-    show_default=True,
+    help="Output file path (overrides config)",
 )
 CONFIG_OPT = typer.Option(
     None,
@@ -43,6 +45,47 @@ MAP_TOKENS_OPT = typer.Option(
     "--map-tokens",
     help="Override token limit",
 )
+
+
+def _format_output_path(repo_root: Path, output_path: Path | None, config: dict) -> Path:
+    """Format the output path according to configuration.
+
+    Args:
+        repo_root: Root directory of the repository
+        output_path: Optional output path from command line
+        config: Configuration dictionary
+
+    Returns:
+        Formatted output path
+    """
+    if output_path:
+        return output_path
+
+    # Get output configuration
+    output_config = config.get("output", {})
+    base_dir = output_config.get("directory", "documentation")
+    filename_format = output_config.get("filename_format", "{base}.{directory}.{timestamp}.md")
+    timestamp_format = output_config.get("timestamp_format", "%Y%m%d_%H%M%S")
+
+    # Create base directory if it doesn't exist
+    base_path = repo_root / base_dir
+    base_path.mkdir(parents=True, exist_ok=True)
+
+    # Format the filename
+    timestamp = datetime.now(tz=timezone.utc).strftime(timestamp_format)
+    directory = repo_root.name
+    base = "documentation"
+
+    # Handle root directory case using ternary operator
+    filename = filename_format.replace(".{directory}", "") if directory == "" else filename_format
+
+    filename = filename.format(
+        base=base,
+        directory=directory,
+        timestamp=timestamp,
+    )
+
+    return base_path / filename
 
 
 @app.command()
@@ -61,14 +104,15 @@ def init(
         repo_root = path.resolve()
         config_file = repo_root / ".codemap.yml"
         cache_dir = repo_root / ".codemap_cache"
+        docs_dir = repo_root / DEFAULT_CONFIG["output"]["directory"]
 
         # Check if files/directories already exist
-        if not force_flag and (config_file.exists() or cache_dir.exists()):
+        if not force_flag and (config_file.exists() or cache_dir.exists() or docs_dir.exists()):
             console.print("[yellow]CodeMap files already exist. Use --force to overwrite.")
             raise typer.Exit(1)
 
         with Progress() as progress:
-            task = progress.add_task("Initializing CodeMap...", total=3)
+            task = progress.add_task("Initializing CodeMap...", total=4)
 
             # Create .codemap.yml
             config_file.write_text(yaml.dump(DEFAULT_CONFIG, sort_keys=False))
@@ -79,6 +123,12 @@ def init(
                 shutil.rmtree(cache_dir)
             cache_dir.mkdir(exist_ok=True)
             (cache_dir / ".gitignore").write_text("*\n!.gitignore\n")
+            progress.update(task, advance=1)
+
+            # Create documentation directory
+            if docs_dir.exists() and force_flag:
+                shutil.rmtree(docs_dir)
+            docs_dir.mkdir(exist_ok=True, parents=True)
             progress.update(task, advance=1)
 
             # Initialize parser and cache basic repository info
@@ -96,6 +146,7 @@ def init(
         console.print("\n✨ CodeMap initialized successfully!")
         console.print(f"[green]Created config file: {config_file}")
         console.print(f"[green]Created cache directory: {cache_dir}")
+        console.print(f"[green]Created documentation directory: {docs_dir}")
         console.print("\nNext steps:")
         console.print("1. Review and customize .codemap.yml")
         console.print("2. Run 'codemap generate' to create documentation")
@@ -150,8 +201,13 @@ def generate(
             )
             progress.update(task3, completed=100)
 
+        # Format and write output
+        output_path = _format_output_path(repo_root, output, config_data)
+
+        # Ensure output directory exists
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
         # Write output
-        output_path = Path(output)
         output_path.write_text(documentation)
         console.print(f"\n✨ Documentation generated successfully: {output_path}")
 
