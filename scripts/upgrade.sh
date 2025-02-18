@@ -10,8 +10,14 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Ensure script can read user input
-exec < /dev/tty || true
+# Function to read user input
+read_input() {
+    if [ -t 0 ]; then
+        read -n 1 -r
+    else
+        read -n 1 -r < /dev/tty
+    fi
+}
 
 # Print warning
 echo -e "${YELLOW}WARNING: CodeMap is currently in active development and testing phase.${NC}"
@@ -20,7 +26,7 @@ echo -e "${YELLOW}Upgrading might introduce breaking changes. Please backup your
 # Check for root/sudo privileges
 if [ "$EUID" -ne 0 ]; then 
     echo -e "${RED}Error: This script requires root privileges to upgrade globally.${NC}"
-    echo -e "Please run with sudo: ${GREEN}sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/upgrade.sh | sudo bash${NC}"
+    echo -e "Please run with sudo: ${GREEN}curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/upgrade.sh | sudo bash${NC}"
     exit 1
 fi
 
@@ -28,7 +34,7 @@ fi
 if ! command -v python3 &> /dev/null; then
     echo -e "${RED}Error: Python 3 is required but not installed.${NC}"
     echo -e "Would you like to continue after installing Python 3? (y/N) "
-    read -n 1 -r
+    read_input
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         exit 1
@@ -40,7 +46,7 @@ fi
 if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &> /dev/null; then
     echo -e "${RED}Error: pip3 is not installed.${NC}"
     echo -e "Would you like to continue after installing pip? (y/N) "
-    read -n 1 -r
+    read_input
     echo
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
         exit 1
