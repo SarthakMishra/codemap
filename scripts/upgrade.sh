@@ -21,6 +21,30 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Check Python version
+if ! command -v python3 &> /dev/null; then
+    echo -e "${RED}Error: Python 3 is required but not installed.${NC}"
+    echo -e "Would you like to continue after installing Python 3? (y/N) "
+    read -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+    exit 1
+fi
+
+# Check for pip
+if ! command -v pip3 &> /dev/null && ! python3 -m pip --version &> /dev/null; then
+    echo -e "${RED}Error: pip3 is not installed.${NC}"
+    echo -e "Would you like to continue after installing pip? (y/N) "
+    read -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        exit 1
+    fi
+    exit 1
+fi
+
 # Check if CodeMap is installed
 if ! command -v codemap &> /dev/null; then
     echo -e "${RED}Error: CodeMap is not installed.${NC}"
@@ -53,8 +77,13 @@ git clone https://github.com/SarthakMishra/codemap.git "$TEMP_DIR"
 cd "$TEMP_DIR"
 
 echo -e "${GREEN}Upgrading CodeMap...${NC}"
-pip3 install --upgrade pip
-pip3 install --upgrade .
+if command -v pip3 &> /dev/null; then
+    pip3 install --upgrade pip
+    pip3 install --upgrade .
+else
+    python3 -m pip install --upgrade pip
+    python3 -m pip install --upgrade .
+fi
 
 # Verify upgrade
 CURRENT_VERSION=$(codemap --version 2>/dev/null || echo "unknown")
