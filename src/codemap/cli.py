@@ -178,7 +178,7 @@ def generate(
         with Progress() as progress:
             # Parse files
             task1 = progress.add_task("Parsing files...", total=100)
-            parser = CodeParser()
+            parser = CodeParser(config=config_data)
             parsed_files = {}
 
             for file_path in repo_root.rglob("*"):

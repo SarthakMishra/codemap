@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import fnmatch
+import os
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -12,10 +14,46 @@ from tree_sitter import Language, Parser
 class CodeParser:
     """Parses source code files using tree-sitter for syntax analysis."""
 
-    def __init__(self) -> None:
-        """Initialize the code parser with language-specific parsers."""
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        """Initialize the code parser with language-specific parsers.
+
+        Args:
+            config: Configuration dictionary with exclude_patterns and use_gitignore settings.
+        """
         self.parsers: dict[str, Parser] = {}
+        self.config = config or {}
+        self._gitignore_patterns: list[str] = []
         self._initialize_parsers()
+        if self.config.get("use_gitignore", True):
+            self._load_gitignore()
+
+    def _load_gitignore(self) -> None:
+        """Load patterns from .gitignore file if it exists."""
+        gitignore_path = Path(".gitignore")
+        if gitignore_path.exists():
+            with gitignore_path.open() as f:
+                self._gitignore_patterns = [line.strip() for line in f if line.strip() and not line.startswith("#")]
+
+    def _matches_pattern(self, file_path: Path, pattern: str) -> bool:
+        """Check if a file path matches a glob pattern.
+
+        Args:
+            file_path: Path to check
+            pattern: Glob pattern to match against
+
+        Returns:
+            True if the path matches the pattern
+        """
+        # Convert pattern and path to forward slashes for consistency
+        pattern = pattern.replace(os.sep, "/")
+        path_str = str(file_path).replace(os.sep, "/")
+
+        # Handle directory patterns (ending with /)
+        if pattern.endswith("/"):
+            return any(part == pattern.rstrip("/") for part in Path(path_str).parts)
+
+        # Match against the full path and just the name
+        return fnmatch.fnmatch(path_str, pattern) or fnmatch.fnmatch(file_path.name, pattern)
 
     def _initialize_parsers(self) -> None:
         """Initialize tree-sitter parsers for supported languages."""
@@ -75,7 +113,7 @@ class CodeParser:
         return mock_node
 
     def should_parse(self, file_path: Path) -> bool:
-        """Check if a file should be parsed based on its extension.
+        """Check if a file should be parsed based on configuration.
 
         Args:
             file_path: Path to the file to check.
@@ -83,8 +121,24 @@ class CodeParser:
         Returns:
             True if the file should be parsed, False otherwise.
         """
+        # First check extension
         extension = file_path.suffix.lower()
-        return extension in {".py", ".js", ".jsx", ".ts", ".tsx"}
+        if extension not in {".py", ".js", ".jsx", ".ts", ".tsx"}:
+            return False
+
+        # Check exclude patterns
+        exclude_patterns = self.config.get("exclude_patterns", [])
+        for pattern in exclude_patterns:
+            if self._matches_pattern(file_path, pattern):
+                return False
+
+        # Check gitignore patterns if enabled
+        if self.config.get("use_gitignore", True):
+            for pattern in self._gitignore_patterns:
+                if self._matches_pattern(file_path, pattern):
+                    return False
+
+        return True
 
     def _extract_docstring(self, lines: list[str]) -> str:
         """Extract module docstring from the file content.

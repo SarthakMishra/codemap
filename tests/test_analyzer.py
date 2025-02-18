@@ -60,6 +60,57 @@ def test_should_parse() -> None:
     assert not parser.should_parse(Path(".gitignore"))
 
 
+def test_should_parse_with_exclude_patterns(tmp_path: Path) -> None:
+    """Test file filtering with exclude patterns."""
+    config = {
+        "exclude_patterns": ["test_*.py", "*.test.js", "**/temp/*"],
+    }
+    parser = CodeParser(config=config)
+
+    # Create test files
+    (tmp_path / "test_file.py").touch()
+    (tmp_path / "app.test.js").touch()
+    (tmp_path / "temp").mkdir()
+    (tmp_path / "temp" / "file.py").touch()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").touch()
+
+    assert not parser.should_parse(tmp_path / "test_file.py")
+    assert not parser.should_parse(tmp_path / "app.test.js")
+    assert not parser.should_parse(tmp_path / "temp" / "file.py")
+    assert parser.should_parse(tmp_path / "src" / "app.py")
+
+
+def test_should_parse_with_gitignore(tmp_path: Path) -> None:
+    """Test file filtering with gitignore patterns."""
+    # Create a temporary .gitignore file
+    gitignore = tmp_path / ".gitignore"
+    gitignore.write_text("*.log\ntemp/\n*.pyc\n")
+
+    # Create test files
+    (tmp_path / "debug.log").touch()
+    (tmp_path / "temp").mkdir()
+    (tmp_path / "temp" / "file.py").touch()
+    (tmp_path / "module.pyc").touch()
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "app.py").touch()
+
+    # Change to temp directory for the test
+    import os
+
+    old_cwd = Path.cwd()
+    os.chdir(str(tmp_path))
+
+    try:
+        parser = CodeParser(config={"use_gitignore": True})
+        assert not parser.should_parse(Path("debug.log"))
+        assert not parser.should_parse(Path("temp/file.py"))
+        assert not parser.should_parse(Path("module.pyc"))
+        assert parser.should_parse(Path("src/app.py"))
+    finally:
+        os.chdir(str(old_cwd))
+
+
 def test_python_file_parsing(sample_python_file: Path) -> None:
     """Test parsing of Python files."""
     parser = CodeParser()

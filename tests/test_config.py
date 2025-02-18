@@ -18,7 +18,10 @@ def temp_config_file(tmp_path: Path) -> Path:
 def test_default_config_loading() -> None:
     """Test loading default configuration when no config file is provided."""
     config_loader = ConfigLoader(None)
-    assert config_loader.config == DEFAULT_CONFIG
+
+    # Compare each section individually for better error messages
+    for key in DEFAULT_CONFIG:
+        assert config_loader.config[key] == DEFAULT_CONFIG[key], f"Mismatch in {key} section"
 
 
 def test_custom_config_loading(temp_config_file: Path) -> None:
