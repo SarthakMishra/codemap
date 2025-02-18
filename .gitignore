@@ -60,4 +60,4 @@ dist/
 PACKAGING.md
 
 # CodeMap cache
-.codemap_cache/
+.codemap_cache
