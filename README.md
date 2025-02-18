@@ -44,6 +44,27 @@ The upgrade script will:
 3. Preserve your settings and customizations
 4. Provide rollback instructions if needed
 
+### Uninstalling
+
+To completely remove CodeMap from your system:
+
+```bash
+sudo curl -LsSf https://raw.githubusercontent.com/SarthakMishra/code-map/main/scripts/uninstall.sh | sudo bash
+```
+
+The uninstall script will:
+1. Remove the CodeMap package
+2. Clean up configuration files (`~/.codemap`)
+3. Remove cache directories (`~/.codemap_cache`)
+4. Delete generated documentation files
+5. Clean up build artifacts and virtual environments
+
+The script includes safety features:
+- Requires explicit confirmation before proceeding
+- Preserves your source code and git repository
+- Provides detailed feedback about what's being removed
+- Handles errors gracefully
+
 > **Note**: 
 > - Both installation and upgrade require sudo privileges as they modify system-wide Python packages
 > - The tool is under active development, you might encounter occasional issues
