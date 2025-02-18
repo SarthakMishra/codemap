@@ -1,7 +1,7 @@
 """Default configuration settings for the codemap tool."""
 
 DEFAULT_CONFIG = {
-    "token_limit": 10000,
+    "token_limit": 1000,
     "include_patterns": ["*.py", "*.js", "*.ts"],
     "exclude_patterns": [
         "__pycache__",
