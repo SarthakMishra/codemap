@@ -2,14 +2,28 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
-if TYPE_CHECKING:
-    from pathlib import Path
+from codemap.analyzer.tree_parser import CodeParser
+
+
+@dataclass
+class TreeState:
+    """State for tree generation."""
+
+    included_files: set[Path]
+    parser: CodeParser
+    tree: list[str]
+    max_depth: int
 
 
 class MarkdownGenerator:
     """Generates markdown documentation from parsed code files."""
+
+    # Maximum depth for directory traversal to prevent infinite recursion
+    MAX_TREE_DEPTH = 20
 
     def __init__(self, repo_root: Path, config: dict[str, Any]) -> None:
         """Initialize the markdown generator.
@@ -21,21 +35,127 @@ class MarkdownGenerator:
         self.repo_root = repo_root
         self.config = config
 
-    def _generate_file_tree(self) -> str:
-        """Generate a tree representation of the repository structure."""
-        tree = ["```"]
+    def _find_repo_root(self, start_path: Path, max_levels: int = 5) -> Path:
+        """Find the repository root by looking for .git directory.
 
-        def add_to_tree(path: Path, prefix: str = "") -> None:
-            if path.is_file():
-                tree.append(f"{prefix}├── {path.name}")
-            else:
-                tree.append(f"{prefix}└── {path.name}/")
-                for child in sorted(path.iterdir()):
-                    add_to_tree(child, prefix + "    ")
+        Args:
+            start_path: Path to start searching from.
+            max_levels: Maximum number of parent directories to check.
 
-        add_to_tree(self.repo_root)
+        Returns:
+            Repository root path.
+        """
+        current_root = start_path
+        for _ in range(max_levels):
+            if (current_root / ".git").exists():
+                return current_root
+            if current_root.parent == current_root:  # reached filesystem root
+                break
+            current_root = current_root.parent
+        return start_path
+
+    def _should_process_path(self, path: Path, parser: CodeParser) -> bool:
+        """Check if a path should be processed based on configuration.
+
+        Args:
+            path: Path to check.
+            parser: CodeParser instance for checking parse rules.
+
+        Returns:
+            True if the path should be processed.
+        """
+        if path.is_file():
+            return parser.should_parse(path)
+
+        # Skip directories that match exclude patterns
+        return all(not self._matches_pattern(path, pattern) for pattern in self.config.get("exclude_patterns", []))
+
+    def _add_path_to_tree(
+        self,
+        path: Path,
+        state: TreeState,
+        prefix: str = "",
+        depth: int = 0,
+    ) -> None:
+        """Add a path and its children to the tree representation.
+
+        Args:
+            path: Path to add.
+            state: Tree generation state.
+            prefix: Current tree prefix for formatting.
+            depth: Current depth in tree.
+        """
+        if depth > state.max_depth:
+            return
+
+        if not self._should_process_path(path, state.parser):
+            return
+
+        if path.is_file():
+            is_included = path.resolve() in state.included_files
+            checkbox = "[x]" if is_included else "[ ]"
+            state.tree.append(f"{prefix}├── {checkbox} {path.name}")
+        else:
+            state.tree.append(f"{prefix}└── {path.name}/")
+            try:
+                children = sorted(path.iterdir())
+                for child in children:
+                    self._add_path_to_tree(
+                        child,
+                        state,
+                        prefix + "    ",
+                        depth + 1,
+                    )
+            except (PermissionError, OSError):
+                # Skip directories we can't read or that have too many symlinks
+                pass
+
+    def _generate_file_tree(self, parsed_files: dict[Path, dict[str, Any]], repo_root: Path) -> str:
+        """Generate a tree representation of the repository structure with checkboxes.
+
+        Args:
+            parsed_files: Dictionary mapping file paths to their parsed contents.
+            repo_root: Root directory of the repository.
+
+        Returns:
+            Generated tree representation with checkboxes.
+        """
+        tree = ["```markdown"]
+        state = TreeState(
+            included_files={file_path.resolve() for file_path in parsed_files},
+            parser=CodeParser(self.config),
+            tree=tree,
+            max_depth=self.MAX_TREE_DEPTH,
+        )
+
+        root_path = self._find_repo_root(repo_root)
+        self._add_path_to_tree(root_path, state)
         tree.append("```")
         return "\n".join(tree)
+
+    def _matches_pattern(self, path: Path, pattern: str) -> bool:
+        """Check if a path matches a glob pattern.
+
+        Args:
+            path: Path to check.
+            pattern: Glob pattern to match against.
+
+        Returns:
+            True if the path matches the pattern.
+        """
+        import fnmatch
+        import os
+
+        # Convert pattern and path to forward slashes for consistency
+        pattern = pattern.replace(os.sep, "/")
+        path_str = str(path).replace(os.sep, "/")
+
+        # Handle directory patterns (ending with /)
+        if pattern.endswith("/"):
+            return any(part == pattern.rstrip("/") for part in Path(path_str).parts)
+
+        # Match against the full path and just the name
+        return fnmatch.fnmatch(path_str, pattern) or fnmatch.fnmatch(path.name, pattern)
 
     def _generate_overview(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
         """Generate overview section.
@@ -49,6 +169,13 @@ class MarkdownGenerator:
         overview = ["## Overview\n"]
         overview.append("This documentation was generated by CodeMap.\n")
         overview.append(f"Total files analyzed: {len(parsed_files)}\n")
+
+        overview.append("\n### Repository Structure\n")
+        overview.append("Files marked with [x] are included in this documentation:\n")
+        overview.append(
+            self._generate_file_tree(parsed_files, next(iter(parsed_files)).parent if parsed_files else Path.cwd()),
+        )
+
         return "\n".join(overview)
 
     def _generate_dependencies(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
@@ -188,11 +315,15 @@ class MarkdownGenerator:
             elif section == "dependencies":
                 markdown.append(self._generate_dependencies(parsed_files))
             elif section == "details":
-                # Sort files by importance score if available
+                # Sort files by importance score if available, defaulting to 0
                 sorted_files = sorted(
                     parsed_files.items(),
-                    key=lambda x: x[1].get("importance_score", 0),
-                    reverse=True,
+                    key=lambda x: (
+                        # Primary sort by importance score (descending)
+                        -(x[1].get("importance_score", 0) or 0),
+                        # Secondary sort by file path (ascending) for stable ordering
+                        str(x[0]),
+                    ),
                 )
 
                 markdown.append("## Details\n")
