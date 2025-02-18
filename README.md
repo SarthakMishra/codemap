@@ -89,7 +89,11 @@ Create a `.codemap.yml` file in your project root to customize the behavior:
 
 ```yaml
 token_limit: 1000
-ignore_patterns:
+include_patterns:
+  - "*.py"
+  - "*.js"
+  - "*.ts"
+exclude_patterns:
   - "__pycache__"
   - "*.pyc"
   - "*.pyo"
@@ -100,6 +104,18 @@ ignore_patterns:
 use_gitignore: true
 remove_comments: false
 output_format: markdown
+output:
+  # Base directory for documentation files (relative to project root)
+  directory: "documentation"
+  # Format string for output filenames
+  # Available variables: {base}, {directory}, {timestamp}
+  filename_format: "{base}.{directory}.{timestamp}.md"
+  # strftime format for the timestamp
+  timestamp_format: "%Y%m%d_%H%M%S"
+sections:
+  - "overview"
+  - "dependencies"
+  - "details"
 analysis:
   languages:
     - python
@@ -110,6 +126,33 @@ analysis:
   include_private: false
   max_depth: 5
 ```
+
+#### Output Configuration
+
+The `output` section controls where and how documentation files are generated:
+
+- `directory`: Base directory for all documentation files (created if missing)
+- `filename_format`: Template for generated filenames with variables:
+  - `{base}`: Base filename (default: "documentation")
+  - `{directory}`: Current project directory name (omitted if empty)
+  - `{timestamp}`: Current timestamp using the specified format
+- `timestamp_format`: Python's strftime format for timestamps
+
+Examples of generated filenames:
+```
+documentation/documentation.my-project.20240315_143022.md
+documentation/documentation.20240315_143022.md  # When in root directory
+```
+
+You can override the output location using the `-o` flag:
+```bash
+codemap generate -o custom/path/docs.md
+```
+
+> **Note**: 
+> - Missing directories are automatically created
+> - Each run creates a new file with a unique timestamp
+> - Use custom formats to organize documentation as needed
 
 ## Development
 
