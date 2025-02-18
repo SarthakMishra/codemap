@@ -1,0 +1,74 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "codemap"
+version = "0.1.0"
+description = "CLI tool for generating optimized markdown documentation from codebases"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "networkx>=3.4.2",
+    "numpy>=1.26.4",
+    "pyyaml>=6.0.2",
+    "rich>=13.9.4",
+    "scipy>=1.15.2",
+    "tree-sitter>=0.20.1",
+    "typer>=0.15.1",
+]
+
+[dependency-groups]
+dev = [
+    "isort>=5.13.2",
+    "pylint>=2.17.7",
+    "pytest>=7.4.4",
+    "ruff>=0.9.6",
+]
+
+[tool.pyright]
+disableOrganizeImports = true
+ignore = ["*"]
+typeCheckingMode = "off"
+
+[project.scripts]
+codemap = "codemap.cli:main"
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+
+# Exclude files/directories
+exclude = [
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist"
+]
+
+[tool.ruff.lint]
+# Enable all rules by default, then selectively disable
+select = ["ALL"]
+ignore = [
+    # Rules that conflict with other tools/preferences
+    "D203",  # one-blank-line-before-class
+    "D212",  # multi-line-summary-first-line
+]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
+"tests/*" = ["S101", "PLR2004"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-branches = 12
+max-statements = 50
+
+[tool.ruff.lint.pydocstyle]
+convention = "google" 

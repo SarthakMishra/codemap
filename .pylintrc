@@ -1,0 +1,53 @@
+[MASTER]
+# Only enable checks not covered by Ruff
+disable=all
+enable=
+    # Enable rules not yet supported by Ruff (based on issue #970)
+    access-member-before-definition,
+    bad-except-order,
+    bad-reversed-sequence,
+    catching-non-exception,
+    invalid-metaclass,
+    invalid-sequence-index,
+    invalid-slice-index,
+    invalid-slice-step,
+    invalid-unary-operand-type,
+    misplaced-format-function,
+    missing-kwoa,
+    no-member,
+    no-value-for-parameter,
+    not-a-mapping,
+    not-an-iterable,
+    not-async-context-manager,
+    not-callable,
+    not-context-manager,
+    too-many-function-args,
+    undefined-variable,
+    unexpected-keyword-arg,
+    unsubscriptable-object,
+    unsupported-assignment-operation,
+    unsupported-binary-operation,
+    unsupported-delete-operation,
+    unsupported-membership-test
+
+# Discover python modules
+recursive=yes
+ignore=CVS,.git,__pycache__,.venv,venv,build,dist
+
+[FORMAT]
+max-line-length=88
+
+[BASIC]
+good-names=i,j,k,ex,Run,_,id,fp
+
+[MESSAGES CONTROL]
+# Disable specific warnings that might conflict with Ruff
+disable=
+    C0111, # missing-docstring (covered by Ruff)
+    C0103, # invalid-name (covered by Ruff)
+    C0301, # line-too-long (covered by Ruff)
+
+[REPORTS]
+output-format=colorized
+reports=no
+score=no 
