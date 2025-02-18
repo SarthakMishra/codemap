@@ -16,63 +16,24 @@ CodeMap is a powerful CLI tool that generates optimized markdown documentation f
 
 ## Installation & Upgrade
 
-### Global Installation
+CodeMap can be installed either globally using pipx or in a virtual environment for development.
 
-Since CodeMap is currently in development, it can be installed globally directly from GitHub using our installation script:
+### Global Installation (using pipx)
 
-```bash
-curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/install.sh | sudo bash -s
-```
-
-This script will:
-1. Clone the repository to a temporary directory
-2. Install CodeMap globally in your system Python environment
-3. Clean up temporary files automatically
-4. Make the `codemap` command available system-wide
-
-### Upgrading
-
-To upgrade an existing CodeMap installation to the latest version:
+> **Note**: We assume you have pipx already installed on your system.
 
 ```bash
-curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/upgrade.sh | sudo bash -s
+# Install
+pipx install git+https://github.com/SarthakMishra/codemap.git
+
+# Upgrade
+pipx upgrade codemap
+
+# Uninstall
+pipx uninstall codemap
 ```
-
-The upgrade script will:
-1. Back up your existing configuration
-2. Install the latest version from GitHub
-3. Preserve your settings and customizations
-4. Provide rollback instructions if needed
-
-### Uninstalling
-
-To completely remove CodeMap from your system:
-
-```bash
-curl -LsSf https://raw.githubusercontent.com/SarthakMishra/codemap/main/scripts/uninstall.sh | sudo bash -s
-```
-
-The uninstall script will:
-1. Remove the CodeMap package
-2. Clean up configuration files (`~/.codemap`)
-3. Remove cache directories (`~/.codemap_cache`)
-4. Delete generated documentation files
-5. Clean up build artifacts and virtual environments
-
-The script includes safety features:
-- Requires explicit confirmation before proceeding
-- Preserves your source code and git repository
-- Provides detailed feedback about what's being removed
-- Handles errors gracefully
-
-> **Note**: 
-> - Both installation and upgrade require sudo privileges as they modify system-wide Python packages
-> - The tool is under active development, you might encounter occasional issues
-> - Configuration backups are stored in `~/.codemap_backup_TIMESTAMP` during upgrades
-> - Please report any problems in the GitHub issues section
 
 After installation, you can use CodeMap from anywhere:
-
 ```bash
 codemap generate /path/to/your/project
 ```
