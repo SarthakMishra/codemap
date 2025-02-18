@@ -83,6 +83,7 @@ class MarkdownGenerator:
         state: TreeState,
         prefix: str = "",
         depth: int = 0,
+        *,
         is_last: bool = True,
     ) -> bool:
         """Add a path and its children to the tree representation.
@@ -117,55 +118,56 @@ class MarkdownGenerator:
             checkbox = "[x]" if (can_parse and is_included) else "[ ]"
             state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}")
             return is_included if can_parse else True
-        else:
-            try:
-                children = sorted(path.iterdir())
-                # Process all children first to determine if all are included
-                all_parseable_included = True
-                has_parseable = False
 
-                # Process children but don't add to tree yet
-                child_results = []
-                for i, child in enumerate(children):
-                    is_last_child = i == len(children) - 1
-                    child_included = self._add_path_to_tree(
-                        child,
-                        TreeState(
-                            included_files=state.included_files,
-                            parser=state.parser,
-                            tree=[],  # Temporary tree for child
-                            max_depth=state.max_depth,
-                        ),
-                        prefix + ("    " if is_last else "│   "),
-                        depth + 1,
-                        is_last_child,
-                    )
-                    if state.parser.should_parse(child):
-                        has_parseable = True
-                        if not child_included:
-                            all_parseable_included = False
-                    child_results.append((child, child_included, is_last_child))
+        # Handle directory
+        try:
+            children = sorted(path.iterdir())
+        except (PermissionError, OSError):
+            # Skip directories we can't read or that have too many symlinks
+            state.tree.append(f"{prefix}{prefix_symbol} [ ] {display_name}/")
+            return False
 
-                # Add directory with appropriate checkbox
-                checkbox = "[x]" if (has_parseable and all_parseable_included) else "[ ]"
-                state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}/")
+        # Process all children first to determine if all are included
+        all_parseable_included = True
+        has_parseable = False
 
-                # Now add all children to the real tree
-                for child, _, is_last_child in child_results:
-                    self._add_path_to_tree(
-                        child,
-                        state,
-                        prefix + ("    " if is_last else "│   "),
-                        depth + 1,
-                        is_last_child,
-                    )
+        # Process children but don't add to tree yet
+        child_results = []
+        for i, child in enumerate(children):
+            is_last_child = i == len(children) - 1
+            child_included = self._add_path_to_tree(
+                child,
+                TreeState(
+                    included_files=state.included_files,
+                    parser=state.parser,
+                    tree=[],  # Temporary tree for child
+                    max_depth=state.max_depth,
+                ),
+                prefix + ("    " if is_last else "│   "),
+                depth + 1,
+                is_last=is_last_child,
+            )
+            if state.parser.should_parse(child):
+                has_parseable = True
+                if not child_included:
+                    all_parseable_included = False
+            child_results.append((child, child_included, is_last_child))
 
-                return all_parseable_included
+        # Add directory with appropriate checkbox
+        checkbox = "[x]" if (has_parseable and all_parseable_included) else "[ ]"
+        state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}/")
 
-            except (PermissionError, OSError):
-                # Skip directories we can't read or that have too many symlinks
-                state.tree.append(f"{prefix}{prefix_symbol} [ ] {display_name}/")
-                return False
+        # Now add all children to the real tree
+        for child, _, is_last_child in child_results:
+            self._add_path_to_tree(
+                child,
+                state,
+                prefix + ("    " if is_last else "│   "),
+                depth + 1,
+                is_last=is_last_child,
+            )
+
+        return all_parseable_included
 
     def _generate_file_tree(self, parsed_files: dict[Path, dict[str, Any]], repo_root: Path) -> str:
         """Generate a tree representation of the repository structure with checkboxes.
