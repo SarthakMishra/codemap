@@ -14,7 +14,7 @@ dependencies = [
     "pyyaml>=6.0.2",
     "rich>=13.9.4",
     "scipy>=1.15.2",
-    "tree-sitter>=0.20.1",
+    "tree-sitter>=0.24.0",
     "typer>=0.15.1",
 ]
 
@@ -34,6 +34,11 @@ typeCheckingMode = "off"
 [project.scripts]
 codemap = "codemap.cli:main"
 
+[tool.pytest]
+testpaths = ["tests"]
+addopts = "--ignore=src/codemap/vendor"
+pythonpath = ["src"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py38"
@@ -46,7 +51,8 @@ exclude = [
     "venv",
     "__pycache__",
     "build",
-    "dist"
+    "dist",
+    "vendor"
 ]
 
 [tool.ruff.lint]
