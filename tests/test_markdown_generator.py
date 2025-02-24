@@ -1,200 +1,156 @@
-"""Tests for markdown documentation generation."""
+"""Tests for the markdown documentation generator."""
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-from unittest.mock import patch
+from pathlib import Path
 
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 from codemap.generators.markdown_generator import MarkdownGenerator
 
 
 @pytest.fixture
-def mock_repo_root(tmp_path: Path) -> Path:
-    """Create a temporary repository root for testing."""
-    # Create a .git directory to mark this as the repository root
-    (tmp_path / ".git").mkdir()
-    return tmp_path
+def generator(tmp_path: Path) -> MarkdownGenerator:
+    """Create a markdown generator instance."""
+    return MarkdownGenerator(tmp_path, {})
 
 
-@pytest.fixture
-def basic_config() -> dict[str, list[str] | int]:
-    """Provide a basic configuration for testing."""
-    return {
-        "token_limit": 1000,
-        "include_patterns": ["*.py"],
-        "exclude_patterns": ["__pycache__", "*.pyc"],
-        "sections": ["overview", "dependencies", "details"],
-    }
+def test_generate_documentation_with_files(generator: MarkdownGenerator, sample_repo: Path) -> None:
+    """Test documentation generation with real files."""
+    # Create test files with class definitions
+    (sample_repo / "models.py").write_text("""
+class BaseModel:
+    created_at: str
+    updated_at: str | None
 
+class User(BaseModel):
+    name: str
+    email: str
+    orders: list[Order]
 
-@pytest.fixture
-def generator(mock_repo_root: Path, basic_config: dict[str, list[str] | int]) -> MarkdownGenerator:
-    """Create a MarkdownGenerator instance for testing."""
-    # Patch ConfigLoader to ensure it doesn't read .codemap.yml
-    with patch("codemap.utils.config_loader.ConfigLoader") as mock_loader:
-        mock_loader.return_value.config = basic_config
-        yield MarkdownGenerator(mock_repo_root, basic_config)
+class Order(BaseModel):
+    order_id: str
+    user: User
+    total: float
+    items: list[OrderItem]
 
+class OrderItem(BaseModel):
+    order: Order
+    product: Product
+    quantity: int
+    price: float
 
-def test_generator_initialization(generator: MarkdownGenerator) -> None:
-    """Test MarkdownGenerator initialization."""
-    assert generator.repo_root is not None
-    assert generator.config is not None
+class Product(BaseModel):
+    name: str
+    price: float
+    description: str | None
+""")
 
-
-def test_generate_documentation_empty(generator: MarkdownGenerator) -> None:
-    """Test documentation generation with empty file set."""
-    doc = generator.generate_documentation({})
-    assert isinstance(doc, str)
-    assert "# Code Documentation" in doc
-
-
-def test_generate_documentation_with_files(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
-    """Test documentation generation with mock files."""
-    # Create some test files
-    (mock_repo_root / "src").mkdir()
-    (mock_repo_root / "src" / "main.py").write_text("# Sample content")
-    (mock_repo_root / "src" / "utils.py").write_text("# Utility functions")
-    (mock_repo_root / "src" / "README.md").write_text("# Project documentation")
-    (mock_repo_root / "__pycache__").mkdir()
-    (mock_repo_root / "__pycache__" / "main.cpython-39.pyc").write_text("ignored")
-    (mock_repo_root / ".vscode").mkdir()
-    (mock_repo_root / ".vscode" / "settings.json").write_text("{}")
-
-    mock_files = {
-        mock_repo_root / "src" / "main.py": {
-            "imports": ["os", "sys"],
-            "classes": ["MainClass"],
-            "functions": ["main"],
-            "docstring": "Main module docstring",
-            "content": "# Sample content",
-        },
-        mock_repo_root / "src" / "utils.py": {
-            "imports": ["typing"],
-            "classes": ["UtilClass"],
-            "functions": ["helper"],
-            "docstring": "Utilities module",
-            "content": "# Utility functions",
+    # Create parsed file data
+    parsed_files = {
+        sample_repo / "models.py": {
+            "docstring": "Sample models for testing.",
+            "classes": ["BaseModel", "User", "Order", "OrderItem", "Product"],
+            "imports": ["datetime"],
+            "references": [],
+            "bases": {
+                "User": ["BaseModel"],
+                "Order": ["BaseModel"],
+                "OrderItem": ["BaseModel"],
+                "Product": ["BaseModel"],
+            },
+            "attributes": {
+                "BaseModel": {"created_at": "datetime", "updated_at": "datetime | None"},
+                "User": {"name": "str", "email": "str", "orders": "list[Order]"},
+                "Order": {"order_id": "str", "user": "User", "total": "float", "items": "list[OrderItem]"},
+                "OrderItem": {"order": "Order", "product": "Product", "quantity": "int", "price": "float"},
+                "Product": {"name": "str", "price": "float", "description": "str | None"},
+            },
         },
     }
 
-    doc = generator.generate_documentation(mock_files)
-
-    # Check for expected sections
-    assert "# Code Documentation" in doc
-    assert "## Overview" in doc
-    assert "## Dependencies" in doc
-    assert "## Details" in doc
-
-    # Check for file content
-    assert "main.py" in doc
-    assert "utils.py" in doc
-    assert "MainClass" in doc
-    assert "UtilClass" in doc
-
-    # Check that root directory is labeled correctly with checkbox
-    assert "└── [ ] root/" in doc
-
-    # Check that non-Python files are shown with empty checkboxes
-    assert "[ ] README.md" in doc
-    assert "[x] README.md" not in doc
-
-    # Check that excluded files are not in the tree
-    assert "__pycache__" not in doc
-    assert "main.cpython-39.pyc" not in doc
-    assert ".vscode" not in doc
-    assert "settings.json" not in doc
-
-    # Check that Python files have correct checkboxes
-    assert "[x] main.py" in doc
-    assert "[x] utils.py" in doc
-
-    # Check that src directory has [x] since all parseable files are included
-    assert "[x] src/" in doc
+    doc = generator.generate_documentation(parsed_files)
+    assert doc
+    assert "# Project Documentation" in doc
+    assert "## File Structure" in doc
+    assert "models.py" in doc
+    assert "BaseModel" in doc
+    assert "User" in doc
+    assert "Order" in doc
+    assert "OrderItem" in doc
+    assert "Product" in doc
 
 
-def test_generate_documentation_with_custom_sections(mock_repo_root: Path) -> None:
-    """Test documentation generation with custom sections configuration."""
-    custom_config = {
-        "token_limit": 1000,
-        "include_patterns": ["*.py"],
-        "exclude_patterns": [],
-        "sections": ["custom_section"],
-    }
-
-    generator = MarkdownGenerator(mock_repo_root, custom_config)
-    doc = generator.generate_documentation({})
-
-    assert "## Custom Section" in doc
-    assert "## Overview" not in doc
-
-
-def test_file_sorting(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
+def test_file_sorting(generator: MarkdownGenerator, sample_repo: Path) -> None:
     """Test that files are properly sorted in the documentation."""
     # Create test files
-    (mock_repo_root / "z.py").write_text("")
-    (mock_repo_root / "a.py").write_text("")
-    (mock_repo_root / "m.py").write_text("")
+    (sample_repo / "z.py").write_text("class Z: pass")
+    (sample_repo / "a.py").write_text("class A: pass")
+    (sample_repo / "m.py").write_text("class M: pass")
 
-    mock_files = {
-        mock_repo_root / "z.py": {"importance_score": 0.5},
-        mock_repo_root / "a.py": {"importance_score": 0.8},
-        mock_repo_root / "m.py": {"importance_score": 0.3},
-    }
-
-    doc = generator.generate_documentation(mock_files)
-
-    # Find the Details section
-    details_section = doc[doc.find("## Details") :]
-
-    # Check that files appear in order of importance score in the Details section
-    a_pos = details_section.find("a.py")
-    z_pos = details_section.find("z.py")
-    m_pos = details_section.find("m.py")
-
-    # Check that all files are present
-    assert a_pos >= 0, "File a.py should be present in Details section"
-    assert z_pos >= 0, "File z.py should be present in Details section"
-    assert m_pos >= 0, "File m.py should be present in Details section"
-
-    # Check that files are in correct order
-    assert a_pos < z_pos < m_pos, "Files should be ordered by importance score (highest to lowest)"
-
-
-def test_markdown_escaping(generator: MarkdownGenerator, mock_repo_root: Path) -> None:
-    """Test proper escaping of markdown special characters.
-
-    This test verifies that:
-    1. Inline formatting characters (* _ `) are escaped in docstrings
-    2. Code content inside code blocks is not escaped
-    3. Headings and other structural elements are not escaped
-    """
-    # Create test file
-    test_file = mock_repo_root / "test.py"
-    test_file.write_text("# Code with *special* _characters_")
-
-    mock_files = {
-        test_file: {
-            "docstring": "Contains * and _ and ` characters",
-            "content": "# Code with *special* _characters_",
-            "classes": ["Test_Class"],  # Underscore should not be escaped in headings
-            "functions": ["test_func"],  # Underscore should not be escaped in headings
+    # Create parsed file data
+    parsed_files = {
+        sample_repo / "z.py": {
+            "docstring": "Z class",
+            "classes": ["Z"],
+            "imports": [],
+            "references": [],
+            "bases": {},
+            "attributes": {},
+        },
+        sample_repo / "a.py": {
+            "docstring": "A class",
+            "classes": ["A"],
+            "imports": [],
+            "references": [],
+            "bases": {},
+            "attributes": {},
+        },
+        sample_repo / "m.py": {
+            "docstring": "M class",
+            "classes": ["M"],
+            "imports": [],
+            "references": [],
+            "bases": {},
+            "attributes": {},
         },
     }
 
-    doc = generator.generate_documentation(mock_files)
+    doc = generator.generate_documentation(parsed_files)
+    assert doc
 
-    # Verify that inline formatting characters are escaped in docstrings
-    assert "Contains \\* and \\_ and \\` characters" in doc
+    # Check that files are sorted alphabetically
+    z_pos = doc.find("z.py")
+    a_pos = doc.find("a.py")
+    m_pos = doc.find("m.py")
+    assert a_pos < m_pos < z_pos
 
-    # Verify that code content is not escaped (should be inside code block)
-    assert "# Code with *special* _characters_" in doc
 
-    # Verify that headings are not escaped
-    assert "#### Test_Class" in doc
-    assert "#### test_func" in doc
+def test_markdown_escaping(tmp_path: Path) -> None:
+    """Test that markdown special characters are properly escaped."""
+    # Create a test file with content containing markdown special characters
+    test_file = tmp_path / "special.py"
+    test_file.write_text('"""A file with *special* _characters_."""\n\nclass Test:\n    pass')
+
+    # Initialize generator
+    generator = MarkdownGenerator(tmp_path, {})
+
+    # Create parsed file data with special characters
+    parsed_files = {
+        test_file: {
+            "docstring": "A file with *special* _characters_",
+            "classes": ["Test"],
+            "imports": [],
+            "references": [],
+            "bases": {},
+            "attributes": {},
+        },
+    }
+
+    # Generate documentation
+    docs = generator.generate_documentation(parsed_files)
+    assert docs
+
+    # Check that markdown characters are escaped
+    assert r"\*special\*" in docs
+    assert r"\_characters\_" in docs

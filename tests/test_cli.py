@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
@@ -30,6 +31,15 @@ def temp_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def sample_repo(tmp_path: Path) -> Path:
+    """Create a copy of the sample repository for testing."""
+    fixtures_path = Path(__file__).parent / "fixtures" / "sample_repo"
+    repo_path = tmp_path / "sample_repo"
+    shutil.copytree(fixtures_path, repo_path)
+    return repo_path
+
+
+@pytest.fixture
 def mock_code_parser() -> Mock:
     """Create a mock CodeParser instance."""
     with patch("codemap.cli.CodeParser") as mock:
@@ -38,44 +48,26 @@ def mock_code_parser() -> Mock:
         parser_instance.parse_file.return_value = {
             "imports": [],
             "classes": [],
-            "functions": [],
+            "references": [],
+            "bases": {},
+            "attributes": {},
             "docstring": "Test docstring",
         }
-        parser_instance.parsers = {"python": Mock(), "javascript": Mock()}
+        parser_instance.parsers = {"python": Mock()}
         mock.return_value = parser_instance
         yield mock
 
 
-@patch("codemap.cli.CodeParser")
-def test_init_command(mock_parser: Mock, temp_dir: Path) -> None:
+def test_init_command(temp_dir: Path) -> None:
     """Test the init command creates necessary files."""
-    # Setup mock
-    parser_instance = Mock()
-    parser_instance.should_parse.return_value = True
-    parser_instance.parsers = {"python": Mock(), "javascript": Mock()}
-    mock_parser.return_value = parser_instance
-
     result = runner.invoke(app, ["init", str(temp_dir)])
     assert result.exit_code == 0
-
-    # Check if files were created
-    config_file = temp_dir / ".codemap.yml"
-    cache_dir = temp_dir / ".codemap_cache"
-    assert config_file.exists()
-    assert cache_dir.exists()
-    assert (cache_dir / ".gitignore").exists()
-    assert (cache_dir / "info.json").exists()
+    assert (temp_dir / ".codemap.yml").exists()
+    assert (temp_dir / "documentation").exists()
 
 
-@patch("codemap.cli.CodeParser")
-def test_init_command_with_existing_files(mock_parser: Mock, temp_dir: Path) -> None:
+def test_init_command_with_existing_files(temp_dir: Path) -> None:
     """Test init command handles existing files correctly."""
-    # Setup mock
-    parser_instance = Mock()
-    parser_instance.should_parse.return_value = True
-    parser_instance.parsers = {"python": Mock(), "javascript": Mock()}
-    mock_parser.return_value = parser_instance
-
     # Create initial files
     runner.invoke(app, ["init", str(temp_dir)])
 
@@ -87,112 +79,115 @@ def test_init_command_with_existing_files(mock_parser: Mock, temp_dir: Path) -> 
     # Try with force flag
     result = runner.invoke(app, ["init", "-f", str(temp_dir)])
     assert result.exit_code == 0
+    assert "CodeMap initialized successfully" in result.stdout
 
 
-@patch("codemap.cli.CodeParser")
-@patch("codemap.cli.DependencyGraph")
-@patch("codemap.cli.MarkdownGenerator")
-def test_generate_command(
-    mock_generator: Mock,
-    mock_graph: Mock,
-    mock_parser: Mock,
-    temp_dir: Path,
-) -> None:
-    """Test the generate command with mocked components."""
-    # Setup mocks
-    parser_instance = Mock()
-    parser_instance.should_parse.return_value = True
-    parser_instance.parse_file.return_value = {
-        "imports": [],
-        "classes": [],
-        "functions": [],
-        "docstring": "Test docstring",
-    }
-    mock_parser.return_value = parser_instance
-
-    mock_graph_instance = mock_graph.return_value
-    mock_graph_instance.get_important_files.return_value = []
-
-    mock_generator_instance = mock_generator.return_value
-    mock_generator_instance.generate_documentation.return_value = "# Test Documentation"
+def test_generate_command(sample_repo: Path) -> None:
+    """Test the generate command with real files."""
+    # Initialize CodeMap in the sample repo
+    runner.invoke(app, ["init", str(sample_repo)])
 
     # Run generate command
-    output_file = temp_dir / "docs.md"
-    result = runner.invoke(app, ["generate", str(temp_dir), "-o", str(output_file)])
+    output_file = sample_repo / "docs.md"
+    result = runner.invoke(app, ["generate", str(sample_repo), "-o", str(output_file)])
 
     assert result.exit_code == 0
     assert output_file.exists()
-    assert "Documentation generated successfully" in result.stdout
+    assert output_file.read_text()
 
 
-@pytest.mark.usefixtures("temp_dir")
-@patch("codemap.cli.CodeParser")
-@patch("codemap.cli.DependencyGraph")
-def test_generate_command_with_config(
-    mock_dependency_graph_class: Mock,
-    mock_codeparser_class: Mock,
-    temp_dir: Path,
-) -> None:
+def test_generate_command_with_config(sample_repo: Path) -> None:
     """Test generate command with custom config file."""
-    # Create a real CodeParser and simply override its should_parse method
-    from codemap.analyzer.tree_parser import CodeParser
-
-    real_parser = CodeParser()
-
-    # Only parse Python files
-    real_parser.should_parse = lambda p: p.suffix.lower() == ".py"
-
-    # Patch so that anywhere the CLI does CodeParser(), it returns our real_parser
-    mock_codeparser_class.return_value = real_parser
-
-    # Mock the dependency graph
-    mock_graph = Mock()
-    mock_graph.get_important_files.return_value = []  # No important files for simplicity
-    mock_dependency_graph_class.return_value = mock_graph
-
     # Create a test config file
-    config_file = temp_dir / "test_config.yml"
-    config_file.write_text("token_limit: 1000\n")
+    config_file = sample_repo / "test_config.yml"
+    config = {
+        "token_limit": 1000,
+        "exclude_patterns": ["__pycache__", "*.pyc"],
+        "output": {
+            "directory": "docs",
+            "filename_format": "documentation.md",
+        },
+    }
+    config_file.write_text(yaml.dump(config))
 
-    # Create a dummy Python file to parse
-    (temp_dir / "test.py").write_text("print('hello')")
+    # Initialize CodeMap in the sample repo
+    runner.invoke(app, ["init", str(sample_repo)])
 
-    # Mock scipy dependency
-    scipy_mock = Mock()
-    scipy_mock.sparse = Mock()
-    scipy_mock.sparse.csr_matrix = Mock()
-    csr_mock = Mock()
-    csr_mock.__getitem__ = lambda _, __: Mock()
-    scipy_mock.sparse.csr_matrix.return_value = csr_mock
-    with patch.dict("sys.modules", {"scipy": scipy_mock}):
-        result = runner.invoke(
-            app,
-            ["generate", str(temp_dir), "--config", str(config_file), "--map-tokens", "2000"],
-        )
-        assert result.exit_code == 0
+    # Run generate command with config
+    result = runner.invoke(
+        app,
+        ["generate", str(sample_repo), "--config", str(config_file), "--map-tokens", "2000"],
+    )
+    assert result.exit_code == 0
 
 
-@patch("codemap.cli.CodeParser")
-def test_generate_command_with_invalid_path(mock_parser: Mock) -> None:
+def test_generate_command_with_invalid_path() -> None:
     """Test generate command with non-existent path."""
-    # Setup mock
-    parser_instance = Mock()
-    parser_instance.should_parse.return_value = True
-    mock_parser.return_value = parser_instance
-
     result = runner.invoke(app, ["generate", "/nonexistent/path"])
     assert result.exit_code == 2  # Changed from 1 to 2 to match typer's behavior
     assert "does not exist" in result.stdout
 
 
-def test_format_output_path_with_custom_path(temp_dir: Path) -> None:
+def test_generate_command_creates_output_directory(sample_repo: Path) -> None:
+    """Test generate command creates output directory if missing."""
+    # Initialize CodeMap in the sample repo
+    runner.invoke(app, ["init", str(sample_repo)])
+
+    # Create a nested output path
+    output_dir = sample_repo / "nested" / "docs"
+    output_file = output_dir / "documentation.md"
+
+    # Run generate command
+    result = runner.invoke(app, ["generate", str(sample_repo), "-o", str(output_file)])
+    assert result.exit_code == 0
+    assert output_file.exists()
+
+
+def test_generate_command_with_missing_parent_directory(sample_repo: Path) -> None:
+    """Test generate command fails gracefully with invalid output directory."""
+    # Initialize CodeMap in the sample repo
+    runner.invoke(app, ["init", str(sample_repo)])
+
+    # Try to generate to a path with non-existent parent
+    output_file = Path("/nonexistent/path/docs.md")
+    result = runner.invoke(app, ["generate", str(sample_repo), "-o", str(output_file)])
+    assert result.exit_code == 2
+    assert "File system error" in result.stdout
+
+
+def test_format_output_path() -> None:
+    """Test output path formatting."""
+    from codemap.cli import _format_output_path
+
+    repo_root = Path("/test/repo")
+    config = {
+        "output": {
+            "directory": "docs",
+            "filename_format": "{base}.{directory}.{timestamp}.md",
+            "timestamp_format": "%Y%m%d",
+        },
+    }
+
+    # Test with custom output path
+    custom_path = Path("custom/path.md")
+    assert _format_output_path(repo_root, custom_path, config) == custom_path
+
+    # Test with config-based path
+    result = _format_output_path(repo_root, None, config)
+    assert result.parent == repo_root / "docs"
+    assert result.suffix == ".md"
+    assert "documentation" in result.name
+    assert "repo" in result.name
+
+
+def test_format_output_path_with_custom_path(sample_repo: Path) -> None:
     """Test output path formatting when a custom path is provided."""
-    custom_path = temp_dir / "custom" / "docs.md"
-    result = _format_output_path(temp_dir, custom_path, DEFAULT_CONFIG)
+    custom_path = sample_repo / "custom" / "docs.md"
+    result = _format_output_path(sample_repo, custom_path, DEFAULT_CONFIG)
     assert result == custom_path
 
 
-def test_format_output_path_creates_directory(temp_dir: Path) -> None:
+def test_format_output_path_creates_directory(sample_repo: Path) -> None:
     """Test that output path formatting creates missing directories."""
     config = {
         "output": {
@@ -200,12 +195,12 @@ def test_format_output_path_creates_directory(temp_dir: Path) -> None:
             "filename_format": "doc.md",
         },
     }
-    result = _format_output_path(temp_dir, None, config)
+    result = _format_output_path(sample_repo, None, config)
     assert result.parent.exists()
-    assert result.parent == temp_dir / "nested" / "docs" / "dir"
+    assert result.parent == sample_repo / "nested" / "docs" / "dir"
 
 
-def test_format_output_path_with_timestamp(temp_dir: Path) -> None:
+def test_format_output_path_with_timestamp(sample_repo: Path) -> None:
     """Test output path formatting with timestamp."""
     current_time = datetime.now(tz=timezone.utc)
     config = {
@@ -218,12 +213,12 @@ def test_format_output_path_with_timestamp(temp_dir: Path) -> None:
 
     with patch("codemap.cli.datetime") as mock_datetime:
         mock_datetime.now.return_value = current_time
-        result = _format_output_path(temp_dir, None, config)
+        result = _format_output_path(sample_repo, None, config)
         expected_name = f"documentation.{current_time.strftime('%Y%m%d')}.md"
         assert result.name == expected_name
 
 
-def test_format_output_path_with_root_directory(temp_dir: Path) -> None:
+def test_format_output_path_with_root_directory(sample_repo: Path) -> None:
     """Test output path formatting when in root directory."""
     config = {
         "output": {
@@ -231,62 +226,5 @@ def test_format_output_path_with_root_directory(temp_dir: Path) -> None:
             "filename_format": "{base}.{directory}.{timestamp}.md",
         },
     }
-    result = _format_output_path(temp_dir, None, config)
-    assert temp_dir.name in result.name
-
-
-def test_generate_command_creates_output_directory(temp_dir: Path) -> None:
-    """Test generate command creates output directory if missing."""
-    # Setup
-    from codemap.analyzer.tree_parser import CodeParser
-
-    real_parser = CodeParser()
-    real_parser.should_parse = lambda p: p.suffix.lower() == ".py"
-
-    with patch("codemap.cli.CodeParser") as mock_codeparser_class, patch(
-        "codemap.cli.DependencyGraph",
-    ) as mock_graph_class:
-        # Setup mocks
-        mock_codeparser_class.return_value = real_parser
-        mock_graph = Mock()
-        mock_graph.get_important_files.return_value = []
-        mock_graph_class.return_value = mock_graph
-
-        # Create test files
-        config = {
-            "token_limit": 1000,
-            "output": {
-                "directory": "deeply/nested/docs",
-                "filename_format": "doc.md",
-            },
-        }
-        config_file = temp_dir / "test_config.yml"
-        config_file.write_text(yaml.dump(config))
-        (temp_dir / "test.py").write_text("print('hello')")
-
-        # Run command
-        result = runner.invoke(
-            app,
-            ["generate", str(temp_dir), "--config", str(config_file)],
-        )
-
-        # Verify
-        assert result.exit_code == 0
-        output_dir = temp_dir / "deeply" / "nested" / "docs"
-        assert output_dir.exists()
-        assert list(output_dir.glob("*.md"))
-
-
-def test_generate_command_with_missing_parent_directory(temp_dir: Path) -> None:
-    """Test generate command with output path in non-existent directory."""
-    missing_dir = temp_dir / "nonexistent"
-    output_path = missing_dir / "doc.md"
-
-    result = runner.invoke(
-        app,
-        ["generate", str(temp_dir), "--output", str(output_path)],
-    )
-
-    assert result.exit_code == 0
-    assert missing_dir.exists()
-    assert output_path.exists()
+    result = _format_output_path(sample_repo, None, config)
+    assert sample_repo.name in result.name

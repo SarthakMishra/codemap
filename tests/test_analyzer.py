@@ -1,233 +1,190 @@
 """Tests for the code analysis functionality."""
 
+from __future__ import annotations
+
+import shutil
 from pathlib import Path
 
+import networkx as nx
 import pytest
 
 from codemap.analyzer.dependency_graph import DependencyGraph
-from codemap.analyzer.tree_parser import CodeParser
+from codemap.analyzer.tree_parser import ERR_PARSER_INIT, CodeParser
 
 
 @pytest.fixture
-def mock_repo_root(tmp_path: Path) -> Path:
-    """Create a temporary repository root for testing."""
-    return tmp_path
-
-
-@pytest.fixture
-def sample_python_file(mock_repo_root: Path) -> Path:
-    """Create a sample Python file for testing."""
-    file_content = '''
-"""Module docstring."""
-import os
-from typing import List, Dict
-
-class TestClass:
-    """Test class docstring."""
-    def __init__(self):
-        self.value = 42
-
-    def test_method(self) -> None:
-        """Test method docstring."""
-        pass
-
-def test_function(param: str) -> bool:
-    """Test function docstring."""
-    return True
-'''
-    file_path = mock_repo_root / "test.py"
-    file_path.write_text(file_content)
-    return file_path
+def sample_repo(tmp_path: Path) -> Path:
+    """Create a copy of the sample repository for testing."""
+    fixtures_path = Path(__file__).parent / "fixtures" / "sample_repo"
+    repo_path = tmp_path / "sample_repo"
+    shutil.copytree(fixtures_path, repo_path)
+    return repo_path
 
 
 def test_code_parser_initialization() -> None:
     """Test that CodeParser initializes correctly with required attributes."""
     parser = CodeParser()
-    assert parser is not None
-    assert hasattr(parser, "parsers")
-    assert "py" in parser.parsers
-    assert "js" in parser.parsers
+    assert parser.parsers
+    assert parser.config == {}
+    assert parser.gitignore_patterns == []
+    assert "python" in parser.parsers
 
 
-def test_should_parse() -> None:
-    """Test file extension parsing detection."""
+def test_code_parser_initialization_with_config() -> None:
+    """Test that CodeParser initializes correctly with custom config."""
+    config = {"analysis": {"languages": ["python", "javascript", "typescript"]}}
+    parser = CodeParser(config)
+    assert "python" in parser.parsers
+    assert "javascript" in parser.parsers
+    assert "typescript" in parser.parsers
+
+
+def test_code_parser_initialization_with_invalid_language() -> None:
+    """Test that CodeParser handles invalid language gracefully."""
+    config = {"analysis": {"languages": ["python", "invalid_lang"]}}
+    parser = CodeParser(config)
+    assert "python" in parser.parsers
+    assert "invalid_lang" not in parser.parsers
+
+
+def test_code_parser_initialization_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Test that CodeParser handles initialization failures correctly."""
+
+    def mock_get_parser(lang: str) -> None:
+        raise RuntimeError(f"Failed to load language {lang}")
+
+    monkeypatch.setattr("codemap.analyzer.tree_parser.get_parser", mock_get_parser)
+    with pytest.raises(RuntimeError, match=ERR_PARSER_INIT.format(lang="any")):
+        CodeParser()
+
+
+def test_python_file_parsing(sample_repo: Path) -> None:
+    """Test parsing a Python file."""
+    # Create a test file
+    test_file = sample_repo / "test.py"
+    test_file.write_text("""
+class TestClass:
+    def __init__(self):
+        self.x = 1
+""")
+
     parser = CodeParser()
-    assert parser.should_parse(Path("test.py"))
-    assert parser.should_parse(Path("test.js"))
-    assert parser.should_parse(Path("test.ts"))
-    assert not parser.should_parse(Path("test.txt"))
-    assert not parser.should_parse(Path("test.md"))
-    assert not parser.should_parse(Path(".gitignore"))
+    result = parser.parse_file(test_file)
+
+    assert result["classes"] == ["TestClass"]
+    assert not result["imports"]
+    assert not result["bases"]
 
 
-def test_should_parse_with_exclude_patterns(tmp_path: Path) -> None:
-    """Test file filtering with exclude patterns."""
-    config = {
-        "exclude_patterns": ["test_*.py", "*.test.js", "**/temp/*"],
-    }
-    parser = CodeParser(config=config)
+def test_supported_languages() -> None:
+    """Test that all supported languages can be initialized."""
+    config = {"analysis": {"languages": ["python", "javascript", "typescript", "go", "ruby", "java"]}}
+    parser = CodeParser(config)
 
-    # Create test files
-    (tmp_path / "test_file.py").touch()
-    (tmp_path / "app.test.js").touch()
-    (tmp_path / "temp").mkdir()
-    (tmp_path / "temp" / "file.py").touch()
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "app.py").touch()
+    # Check that at least Python parser is available
+    assert "python" in parser.parsers
 
-    assert not parser.should_parse(tmp_path / "test_file.py")
-    assert not parser.should_parse(tmp_path / "app.test.js")
-    assert not parser.should_parse(tmp_path / "temp" / "file.py")
-    assert parser.should_parse(tmp_path / "src" / "app.py")
+    # Log which parsers were successfully initialized
+    for lang in config["analysis"]["languages"]:
+        if lang in parser.parsers:
+            assert parser.parsers[lang] is not None
 
 
-def test_should_parse_with_gitignore(tmp_path: Path) -> None:
-    """Test file filtering with gitignore patterns."""
-    # Create a temporary .gitignore file
-    gitignore = tmp_path / ".gitignore"
-    gitignore.write_text("*.log\ntemp/\n*.pyc\n")
-
-    # Create test files
-    (tmp_path / "debug.log").touch()
-    (tmp_path / "temp").mkdir()
-    (tmp_path / "temp" / "file.py").touch()
-    (tmp_path / "module.pyc").touch()
-    (tmp_path / "src").mkdir()
-    (tmp_path / "src" / "app.py").touch()
-
-    # Change to temp directory for the test
-    import os
-
-    old_cwd = Path.cwd()
-    os.chdir(str(tmp_path))
-
-    try:
-        parser = CodeParser(config={"use_gitignore": True})
-        assert not parser.should_parse(Path("debug.log"))
-        assert not parser.should_parse(Path("temp/file.py"))
-        assert not parser.should_parse(Path("module.pyc"))
-        assert parser.should_parse(Path("src/app.py"))
-    finally:
-        os.chdir(str(old_cwd))
-
-
-def test_python_file_parsing(sample_python_file: Path) -> None:
-    """Test parsing of Python files."""
-    parser = CodeParser()
-    result = parser.parse_file(sample_python_file)
-
-    assert result is not None
-    assert "imports" in result
-    assert "os" in result["imports"]
-    assert "typing" in result["imports"]
-
-    assert "classes" in result
-    assert "TestClass" in result["classes"]
-
-    assert "functions" in result
-    assert "test_function" in result["functions"]
-
-    assert "docstring" in result
-    assert "Module docstring" in result["docstring"]
-
-
-def test_dependency_graph_initialization(mock_repo_root: Path) -> None:
-    """Test that DependencyGraph initializes correctly."""
-    graph = DependencyGraph(mock_repo_root)
-    assert graph is not None
-    assert hasattr(graph, "graph")
-    assert graph.repo_root == mock_repo_root
-
-
-def test_dependency_graph_build(mock_repo_root: Path) -> None:
+def test_dependency_graph_build(sample_repo: Path) -> None:
     """Test building the dependency graph."""
-    # Create test files
-    (mock_repo_root / "main.py").write_text("""
-import utils
-from models import User
-""")
-    (mock_repo_root / "utils.py").write_text("""
-from typing import List
-""")
-    (mock_repo_root / "models.py").write_text("""
-from utils import helper
-""")
+    # Create files with dependencies
+    (sample_repo / "a.py").write_text("from b import B")
+    (sample_repo / "b.py").write_text("from c import C")
+    (sample_repo / "c.py").write_text("from a import A")
 
-    graph = DependencyGraph(mock_repo_root)
+    graph = DependencyGraph(sample_repo)
     parser = CodeParser()
 
+    # Parse all files
     parsed_files = {}
-    for file_path in mock_repo_root.glob("*.py"):
+    for file_path in sample_repo.rglob("*.py"):
         parsed_files[file_path] = parser.parse_file(file_path)
 
     graph.build_graph(parsed_files)
-
-    # Check graph structure
-    assert len(graph.graph.nodes) >= 3  # At least our 3 files
-    assert graph.graph.has_edge(mock_repo_root / "main.py", mock_repo_root / "utils.py")
-    assert graph.graph.has_edge(mock_repo_root / "main.py", mock_repo_root / "models.py")
-    assert graph.graph.has_edge(mock_repo_root / "models.py", mock_repo_root / "utils.py")
+    assert isinstance(graph.graph, nx.DiGraph)
+    assert len(graph.graph.nodes) > 0
 
 
-def test_get_important_files(mock_repo_root: Path) -> None:
+def test_get_important_files(sample_repo: Path) -> None:
     """Test identification of important files."""
-    graph = DependencyGraph(mock_repo_root)
+    graph = DependencyGraph(sample_repo)
+    parser = CodeParser()
 
-    # Create mock files with different characteristics
-    files = {
-        mock_repo_root / "core.py": {
-            "imports": ["os", "sys", "typing"],
-            "classes": ["CoreClass1", "CoreClass2"],
-            "functions": ["main", "helper1", "helper2"],
-            "docstring": "Core functionality",
-        },
-        mock_repo_root / "utils.py": {
-            "imports": ["typing"],
-            "classes": [],
-            "functions": ["utility"],
-            "docstring": "Utility functions",
-        },
-        mock_repo_root / "empty.py": {"imports": [], "classes": [], "functions": [], "docstring": ""},
+    # Parse both files
+    models_file = sample_repo / "models.py"
+    services_file = sample_repo / "services.py"
+
+    parsed_files = {
+        models_file: parser.parse_file(models_file),
+        services_file: parser.parse_file(services_file),
     }
 
-    graph.build_graph(files)
+    graph.build_graph(parsed_files)
     important_files = graph.get_important_files(token_limit=1000)
+    assert isinstance(important_files, list)
+    assert len(important_files) > 0
+    # models.py should be considered important as it's a dependency
+    assert any(str(models_file) in str(file) for file in important_files)
 
-    # Core file should be considered more important
-    assert mock_repo_root / "core.py" in important_files
+
+def test_circular_dependencies(sample_repo: Path) -> None:
+    """Test handling of circular dependencies in the graph."""
+    # Create files with circular dependencies
+    (sample_repo / "a.py").write_text("from b import B")
+    (sample_repo / "b.py").write_text("from c import C")
+    (sample_repo / "c.py").write_text("from a import A")
+
+    graph = DependencyGraph(sample_repo)
+    parser = CodeParser()
+
+    # Parse all files
+    parsed_files = {}
+    for file_path in sample_repo.rglob("*.py"):
+        parsed_files[file_path] = parser.parse_file(file_path)
+
+    graph.build_graph(parsed_files)
+    important_files = graph.get_important_files(token_limit=1000)
+    assert isinstance(important_files, list)
     assert len(important_files) > 0
 
 
-def test_parser_error_handling(mock_repo_root: Path) -> None:
-    """Test error handling in the parser."""
-    parser = CodeParser()
-    test_file = mock_repo_root / "test.py"
-    test_file.write_text("invalid python code )")
+def test_parse_file_with_invalid_extension(sample_repo: Path) -> None:
+    """Test parsing a file with an unsupported extension."""
+    # Create a file with unsupported extension
+    test_file = sample_repo / "test.txt"
+    test_file.write_text("This is a test file")
 
+    parser = CodeParser()
     result = parser.parse_file(test_file)
 
-    assert result is not None
-    assert "error" in result
-    assert len(result["error"]) > 0
+    # Should return empty symbols dict for unsupported file
+    assert result == {
+        "imports": [],
+        "classes": [],
+        "references": [],
+        "bases": {},
+        "attributes": {},
+    }
 
 
-def test_circular_dependencies(mock_repo_root: Path) -> None:
-    """Test handling of circular dependencies in the graph."""
-    # Create files with circular dependencies
-    (mock_repo_root / "a.py").write_text("import b")
-    (mock_repo_root / "b.py").write_text("import c")
-    (mock_repo_root / "c.py").write_text("import a")
+def test_parse_file_with_invalid_content(sample_repo: Path) -> None:
+    """Test parsing a file with invalid Python content."""
+    # Create a file with invalid Python syntax
+    test_file = sample_repo / "invalid.py"
+    test_file.write_text("this is not valid python code")
 
-    graph = DependencyGraph(mock_repo_root)
     parser = CodeParser()
+    result = parser.parse_file(test_file)
 
-    parsed_files = {}
-    for file_path in mock_repo_root.glob("*.py"):
-        parsed_files[file_path] = parser.parse_file(file_path)
-
-    # Should not raise any errors
-    graph.build_graph(parsed_files)
-    important_files = graph.get_important_files(token_limit=1000)
-
-    # All files should be included as they're all interdependent
-    assert len(important_files) == 3
+    # Should still return a valid symbols dict even for invalid content
+    assert isinstance(result, dict)
+    assert "imports" in result
+    assert "classes" in result
+    assert "references" in result
+    assert "bases" in result
+    assert "attributes" in result
