@@ -2,7 +2,7 @@
 
 ⚠️ **DEVELOPMENT STATUS**: CodeMap is currently in active development and testing phase. Use with caution in production environments.
 
-CodeMap is a powerful CLI tool that generates optimized markdown documentation from your codebase using tree-sitter analysis. It analyzes source code, creates repository maps, and generates markdown files that can be used as context for LLMs.
+CodeMap is a powerful CLI tool that generates optimized markdown documentation from your Python codebase using tree-sitter analysis. It analyzes source code, creates repository maps, generates ERD diagrams, and produces markdown files that can be used as context for LLMs.
 
 ## Features
 
@@ -12,7 +12,14 @@ CodeMap is a powerful CLI tool that generates optimized markdown documentation f
 - 📝 Rich markdown output with code structure
 - 🌳 Repository structure visualization
 - 🔄 Automatic docstring extraction
-- 🎨 Language-aware syntax parsing
+- 🎨 Python-focused syntax parsing
+- 📈 Entity Relationship Diagram (ERD) generation
+
+## Language Support
+
+- ✅ Python (fully supported)
+- 🔄 TypeScript/JavaScript (coming soon)
+- 🔜 More languages planned for future releases
 
 ## Installation & Upgrade
 
@@ -45,14 +52,6 @@ codemap generate /path/to/your/project
 Generate documentation for your project:
 
 ```bash
-codemap generate /path/to/your/project
-```
-
-The tool will analyze your codebase and create a `documentation.md` file in the current directory.
-
-### Command Options
-
-```bash
 codemap generate [OPTIONS] [PATH]
 
 Arguments:
@@ -62,8 +61,55 @@ Options:
   -o, --output PATH    Output file path [default: documentation.md]
   -c, --config PATH    Path to config file
   --map-tokens INT     Override token limit
+  -v, --verbose       Enable verbose output with debug logs
   --help              Show this message and exit
 ```
+
+### ERD Generation
+
+Generate an Entity Relationship Diagram (ERD) for your Python codebase:
+
+```bash
+codemap erd [OPTIONS] [PATH]
+
+Arguments:
+  PATH  Path to the codebase to analyze [default: .]
+
+Options:
+  -o, --output PATH    Output file path for the ERD (PDF format)
+  -c, --config PATH    Path to config file
+  -v, --verbose       Enable verbose output with debug logs
+  --help              Show this message and exit
+```
+
+The ERD command will:
+- Analyze your Python codebase for classes and their relationships
+- Generate a visual diagram showing:
+  - Classes and their attributes
+  - Inheritance relationships
+  - Composition/aggregation relationships
+  - Many-to-many relationships
+- Output a PDF file with the diagram
+
+> **Note**: This feature requires the `graphviz` system package to be installed:
+> - Ubuntu/Debian: `sudo apt-get install graphviz`
+> - macOS: `brew install graphviz`
+> - Windows: Download from [Graphviz Downloads](https://graphviz.org/download/)
+
+### Verbose Mode
+
+All commands support a verbose mode that provides detailed debug information:
+
+```bash
+codemap generate -v  # Generate documentation with debug logs
+codemap erd -v      # Generate ERD with debug logs
+```
+
+Use verbose mode to:
+- Debug issues with parsing or generation
+- See detailed progress information
+- Understand what files are being processed
+- View relationship extraction details
 
 ### Configuration
 
@@ -73,8 +119,6 @@ Create a `.codemap.yml` file in your project root to customize the behavior:
 token_limit: 1000
 include_patterns:
   - "*.py"
-  - "*.js"
-  - "*.ts"
 exclude_patterns:
   - "__pycache__"
   - "*.pyc"
@@ -83,16 +127,15 @@ exclude_patterns:
   - ".git"
   - ".env"
   - "venv"
+  - "build"
+  - "dist"
+  - "*.egg-info"
 use_gitignore: true
 remove_comments: false
 output_format: markdown
 output:
-  # Base directory for documentation files (relative to project root)
   directory: "documentation"
-  # Format string for output filenames
-  # Available variables: {base}, {directory}, {timestamp}
   filename_format: "{base}.{directory}.{timestamp}.md"
-  # strftime format for the timestamp
   timestamp_format: "%Y%m%d_%H%M%S"
 sections:
   - "overview"
@@ -101,12 +144,27 @@ sections:
 analysis:
   languages:
     - python
-    - javascript
-    - typescript
-    - java
-    - go
   include_private: false
   max_depth: 5
+erd:
+  format: "pdf"
+  rankdir: "LR"
+  fontname: "Arial"
+  fontsize: "10"
+  node_style:
+    shape: "record"
+    style: "filled"
+    fillcolor: "white"
+    fontname: "Arial"
+  edge_style:
+    inheritance:
+      arrowhead: "empty"
+      style: "solid"
+      color: "black"
+    composition:
+      arrowhead: "diamond"
+      style: "solid"
+      color: "black"
 ```
 
 #### Output Configuration

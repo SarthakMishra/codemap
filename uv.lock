@@ -51,7 +51,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0.2" },
     { name = "rich", specifier = ">=13.9.4" },
     { name = "scipy", specifier = ">=1.15.2" },
-    { name = "tree-sitter", specifier = ">=0.20.1" },
+    { name = "tree-sitter", specifier = ">=0.24.0" },
     { name = "typer", specifier = ">=0.15.1" },
 ]
 

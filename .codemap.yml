@@ -1,8 +1,6 @@
 token_limit: 10000
 include_patterns:
 - '*.py'
-- '*.js'
-- '*.ts'
 exclude_patterns:
 - __pycache__
 - '*.pyc'
@@ -15,7 +13,7 @@ use_gitignore: true
 remove_comments: false
 output_format: markdown
 output:
-  directory: examples
+  directory: documentation
   filename_format: '{base}.{directory}.{timestamp}.md'
   timestamp_format: '%Y%m%d_%H%M%S'
 sections:
@@ -31,3 +29,22 @@ analysis:
   - go
   include_private: false
   max_depth: 5
+erd:
+  format: pdf
+  rankdir: LR
+  fontname: Arial
+  fontsize: '10'
+  node_style:
+    shape: record
+    style: filled
+    fillcolor: white
+    fontname: Arial
+  edge_style:
+    inheritance:
+      arrowhead: empty
+      style: solid
+      color: black
+    composition:
+      arrowhead: diamond
+      style: solid
+      color: black
