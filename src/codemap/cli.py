@@ -340,6 +340,18 @@ def erd(
             task = progress.add_task("Generating ERD...", total=None)
             try:
                 erd_generator = ERDGenerator()
+
+                # If no output path is provided, use the configured output path
+                if output is None:
+                    # Format the output path based on configuration
+                    default_output = _format_output_path(repo_root, None, cfg)
+                    # Change extension to .md for ERD
+                    if default_output.suffix.lower() != ".md":
+                        default_output = default_output.with_suffix(".md")
+                    # Add erd to the filename to distinguish it from regular documentation
+                    default_output = default_output.with_stem(f"{default_output.stem}_erd")
+                    output = default_output
+
                 output_path = erd_generator.generate(parsed_files, output)
                 progress.update(task, completed=True)
                 console.print(f"\n✨ ERD generated successfully at: [bold blue]{output_path}[/]")
