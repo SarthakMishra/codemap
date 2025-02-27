@@ -346,9 +346,18 @@ class MarkdownGenerator:
             docs.append("")
 
         if "content" in symbols and symbols.get("content", "").strip():
+            # Limit the content to a reasonable size (first 30 lines or 1000 characters)
+            content = symbols["content"]
+            lines = content.splitlines()
+
+            if len(lines) > 30:
+                content = "\n".join(lines[:30]) + "\n\n... (content truncated, showing first 30 lines) ..."
+            elif len(content) > 1000:
+                content = content[:1000] + "\n\n... (content truncated, showing first 1000 characters) ..."
+
             language = self._get_language_for_file(file_path)
             docs.append(f"```{language}")
-            docs.append(symbols["content"])
+            docs.append(content)
             docs.append("```")
             docs.append("")
 

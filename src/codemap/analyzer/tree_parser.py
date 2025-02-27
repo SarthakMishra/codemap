@@ -193,6 +193,7 @@ class CodeParser:
             "references": [],
             "bases": {},
             "attributes": {},
+            "content": "",  # Initialize content key
         }
 
         if not self.should_parse(file_path):
@@ -200,6 +201,14 @@ class CodeParser:
 
         try:
             content = file_path.read_bytes()
+
+            # Store the file content as a string
+            try:
+                symbols["content"] = content.decode("utf-8")
+            except UnicodeDecodeError:
+                logger.warning("Could not decode file content as UTF-8: %s", file_path)
+                symbols["content"] = ""
+
             tree = self.parsers["python"].parse(content)
             if not tree:
                 logger.warning("Failed to parse file: %s", file_path)

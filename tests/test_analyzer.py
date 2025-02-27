@@ -169,6 +169,7 @@ def test_parse_file_with_invalid_extension(sample_repo: Path) -> None:
         "references": [],
         "bases": {},
         "attributes": {},
+        "content": "",
     }
 
 
