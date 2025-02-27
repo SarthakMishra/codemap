@@ -253,6 +253,20 @@ def generate(
             task2 = progress.add_task("Analyzing dependencies...", total=100)
             graph = DependencyGraph(repo_root)
             graph.build_graph(parsed_files)
+
+            # Calculate PageRank scores for all files
+            try:
+                import networkx as nx
+
+                scores = nx.pagerank(graph.graph)
+                # Add importance scores to parsed_files
+                for file_path, score in scores.items():
+                    if file_path in parsed_files:
+                        parsed_files[file_path]["importance_score"] = score
+            except Exception as e:
+                logger.warning("Failed to calculate PageRank scores: %s", e)
+
+            # Get important files based on token limit
             important_files = graph.get_important_files(config_data["token_limit"])
             progress.update(task2, completed=100)
 
