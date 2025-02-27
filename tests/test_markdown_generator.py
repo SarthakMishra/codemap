@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
 
 from codemap.generators.markdown_generator import MarkdownGenerator
+
+
+@pytest.fixture
+def sample_repo(tmp_path: Path) -> Path:
+    """Create a copy of the sample repository for testing."""
+    fixtures_path = Path(__file__).parent / "fixtures" / "sample_repo"
+    repo_path = tmp_path / "sample_repo"
+    shutil.copytree(fixtures_path, repo_path)
+    return repo_path
 
 
 @pytest.fixture
