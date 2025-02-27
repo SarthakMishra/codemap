@@ -1,3 +1,6 @@
+# Cursor
+.cursor
+
 # Python
 __pycache__/
 *.py[cod]

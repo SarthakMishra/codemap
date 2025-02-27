@@ -48,9 +48,11 @@ class DependencyGraph:
 
             # Add edges from references if they exist
             for ref in symbols.get("references", []):
-                target_file = ref.get("target_file")
-                if target_file and target_file in parsed_files:
-                    self.graph.add_edge(file_path, target_file)
+                # In the updated implementation, references are strings, not dictionaries
+                ref_name = ref.split(".")[-1] if isinstance(ref, str) else ""
+                for target_path in parsed_files:
+                    if target_path.stem == ref_name:
+                        self.graph.add_edge(file_path, target_path)
 
     def _count_tokens(self, file_path: Path) -> int:
         """Rough estimation of tokens in a file.
