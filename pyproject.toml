@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codemap"
-version = "0.1.0"
+version = "0.2.0"
 description = "CLI tool for generating optimized markdown documentation from codebases"
 readme = "README.md"
 requires-python = ">=3.12"
