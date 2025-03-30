@@ -15,7 +15,6 @@ from rich.logging import RichHandler
 from rich.progress import Progress
 from typing_extensions import TypeAlias
 
-from .analyzer.dependency_graph import DependencyGraph
 from .analyzer.tree_parser import CodeParser
 from .config import DEFAULT_CONFIG
 from .generators.markdown_generator import MarkdownGenerator
@@ -67,7 +66,6 @@ TreeFlag: TypeAlias = Annotated[
         "--tree",
         "-t",
         help="Generate only directory tree structure",
-        is_flag=True,
     ),
 ]
 VerboseFlag: TypeAlias = Annotated[
@@ -76,78 +74,44 @@ VerboseFlag: TypeAlias = Annotated[
         "--verbose",
         "-v",
         help="Enable verbose output with debug logs",
-        is_flag=True,
     ),
 ]
 ForceFlag: TypeAlias = Annotated[
-    int,
+    bool,
     typer.Option(
         "--force",
         "-f",
-        count=True,
         help="Force overwrite existing files",
     ),
 ]
 
 
-def _format_output_path(project_root: Path, output_path: Path | None, config: dict) -> Path:
-    """Format the output path according to configuration.
+def _get_output_path(repo_root: Path, output_path: Path | None, config: dict) -> Path:
+    """Get the output path for documentation.
 
     Args:
-        project_root: Root directory of the project (where .codemap.yml is located)
+        repo_root: Root directory of the project
         output_path: Optional output path from command line
         config: Configuration dictionary
 
     Returns:
-        Formatted output path
+        Output path
     """
     if output_path:
         return output_path
 
-    # Get output configuration
-    output_config = config.get("output", {})
-    base_dir = output_config.get("directory", "documentation")
-    filename_format = output_config.get("filename_format", "{base}.{directory}.{timestamp}.md")
-    timestamp_format = output_config.get("timestamp_format", "%Y%m%d_%H%M%S")
+    # Get output directory from config
+    output_dir = config.get("output_dir", "documentation")
 
-    # Special case for test paths that start with /test
-    if str(project_root).startswith("/test"):
-        # For tests, just return the expected path without trying to create it
-        base_path = project_root / base_dir
-        timestamp = datetime.now(tz=timezone.utc).strftime(timestamp_format)
-        directory = project_root.name
-        base = "documentation"
-        filename = filename_format.replace(".{directory}", "") if directory == "" else filename_format
-        filename = filename.format(base=base, directory=directory, timestamp=timestamp)
-        return base_path / filename
+    # Create output directory if it doesn't exist
+    output_dir_path = repo_root / output_dir
+    output_dir_path.mkdir(parents=True, exist_ok=True)
 
-    # Create base directory if it doesn't exist
-    base_path = project_root / base_dir
+    # Generate a filename with timestamp
+    timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+    filename = f"documentation_{timestamp}.md"
 
-    # For testing purposes, we'll catch permission errors and create a fallback path
-    try:
-        base_path.mkdir(parents=True, exist_ok=True)
-    except (PermissionError, FileNotFoundError) as e:
-        logger.warning("Could not create directory %s: %s", base_path, e)
-        # Use a temporary directory as fallback
-        base_path = Path.home() / ".codemap" / base_dir
-        base_path.mkdir(parents=True, exist_ok=True)
-
-    # Format the filename
-    timestamp = datetime.now(tz=timezone.utc).strftime(timestamp_format)
-    directory = project_root.name
-    base = "documentation"
-
-    # Handle root directory case using ternary operator
-    filename = filename_format.replace(".{directory}", "") if directory == "" else filename_format
-
-    filename = filename.format(
-        base=base,
-        directory=directory,
-        timestamp=timestamp,
-    )
-
-    return base_path / filename
+    return output_dir_path / filename
 
 
 def setup_logging(*, is_verbose: bool) -> None:
@@ -167,10 +131,28 @@ def setup_logging(*, is_verbose: bool) -> None:
     )
 
 
+def _count_tokens(file_path: Path) -> int:
+    """Rough estimation of tokens in a file.
+
+    Args:
+        file_path: Path to the file to count tokens in.
+
+    Returns:
+        Estimated number of tokens in the file.
+    """
+    try:
+        with file_path.open(encoding="utf-8") as f:
+            content = f.read()
+            # Simple tokenization by whitespace
+            return len(content.split())
+    except OSError:
+        return 0
+
+
 @app.command()
 def init(
     path: PathArg = Path(),
-    force_flag: ForceFlag = 0,
+    force_flag: ForceFlag = False,
     is_verbose: VerboseFlag = None,
 ) -> None:
     """Initialize a new CodeMap project in the specified directory."""
@@ -178,7 +160,7 @@ def init(
     try:
         repo_root = path.resolve()
         config_file = repo_root / ".codemap.yml"
-        docs_dir = repo_root / DEFAULT_CONFIG["output"]["directory"]
+        docs_dir = repo_root / DEFAULT_CONFIG["output_dir"]
 
         # Check if files/directories already exist
         existing_files = []
@@ -207,7 +189,7 @@ def init(
             docs_dir.mkdir(exist_ok=True, parents=True)
             progress.update(task, advance=1)
 
-            # Initialize environment and verify it's working
+            # Initialize parser to check it's working
             CodeParser()  # Just initialize without assigning to a variable
             progress.update(task, advance=1)
 
@@ -248,80 +230,74 @@ def generate(  # noqa: PLR0913
 
             # Generate tree
             with Progress() as progress:
-                task = progress.add_task("Generating repository tree...", total=None)
-                # Create a generator using the project root for config but generate tree for the target path
-                generator = MarkdownGenerator(config_loader.project_root, config_data)
-                tree_content = generator.generate_tree(repo_root)  # Use repo_root (target path) directly
-                progress.update(task, completed=True)
+                task = progress.add_task("Generating directory tree...", total=1)
+                generator = MarkdownGenerator(repo_root, config_data)
+                tree_content = generator.generate_tree(repo_root)
+                progress.update(task, advance=1)
 
-            # Output the tree
+            # Write tree to output file or print to console
             if output:
-                # Write to file if output is specified
-                try:
-                    output_path = Path(output)
-                    if not output_path.parent.exists():
-                        output_path.parent.mkdir(parents=True, exist_ok=True)
-                    output_path.write_text(tree_content)
-                    console.print(f"\n✨ Tree structure generated successfully: [bold blue]{output_path}[/]")
-                except (PermissionError, FileNotFoundError, OSError) as e:
-                    console.print(f"[red]Error writing tree to file: {e}[/]")
-                    raise typer.Exit(1) from e
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(tree_content)
+                console.print(f"[green]Tree written to {output}")
             else:
-                # Print to console if no output specified
-                console.print(f"\n✨ Directory Tree Structure for: [bold blue]{repo_root}[/]\n")
                 console.print(tree_content)
 
             return
 
-        # Regular documentation generation
-        # Load configuration and parse files
+        # For full documentation generation, we need to load config, parse files, and generate docs
         config_data, parsed_files = _prepare_for_generation(repo_root, config, map_tokens)
 
         # Generate documentation
         documentation = _generate_documentation(repo_root, parsed_files, config_data)
 
-        # Write output
-        output_path = _write_documentation(output, config_data, documentation)
+        # Write documentation to file
+        output_path = _write_documentation(repo_root, output, config_data, documentation)
 
-        console.print(f"\n✨ Documentation generated successfully: {output_path}")
+        console.print(f"[green]Documentation generated at: {output_path}")
 
-    except (FileNotFoundError, PermissionError, OSError) as e:
-        console.print(f"[red]File system error: {e!s}")
-        raise typer.Exit(1) from e
-    except ValueError as e:
-        console.print(f"[red]Configuration error: {e!s}")
+    except (OSError, ValueError) as e:
+        console.print(f"[red]Error: {e!s}")
+        logger.exception("Error generating documentation")
         raise typer.Exit(1) from e
 
 
 def _prepare_for_generation(repo_root: Path, config: Path | None, map_tokens: int | None) -> tuple[dict, dict]:
-    """Prepare for documentation generation by loading configuration and parsing files.
+    """Prepare for documentation generation by loading config and parsing files.
 
     Args:
-        repo_root: The root directory of the repository to analyze
-        config: Optional path to configuration file
+        repo_root: Root directory of the repository
+        config: Path to config file
         map_tokens: Optional token limit override
 
     Returns:
         Tuple of (config_data, parsed_files)
     """
-    # Load configuration from either the specified config file or find .codemap.yml
-    # in the current directory or its parents
+    # Load configuration
     config_loader = ConfigLoader(str(config) if config else None)
     config_data = config_loader.config
-
-    if map_tokens:
+    if map_tokens is not None:
         config_data["token_limit"] = map_tokens
 
-    with Progress() as progress:
-        # Parse files
-        task1 = progress.add_task("Parsing files...", total=100)
-        parser = CodeParser(config=config_data)
-        parsed_files = {}
+    parsed_files = {}
 
-        for file_path in repo_root.rglob("*"):
-            if parser.should_parse(file_path):
-                parsed_files[file_path] = parser.parse_file(file_path)
-        progress.update(task1, completed=100)
+    with Progress() as progress:
+        # Count the number of files to parse
+        parser = CodeParser(config_data)
+        files_to_parse = []
+        for root, _, files in os.walk(repo_root):
+            for filename in files:
+                file_path = Path(root) / filename
+                if parser.should_parse(file_path):
+                    files_to_parse.append(file_path)
+
+        task = progress.add_task("Parsing files...", total=len(files_to_parse))
+
+        # Parse each file
+        for file_path in files_to_parse:
+            file_info = parser.parse_file(file_path)
+            parsed_files[file_path] = file_info
+            progress.update(task, advance=1)
 
     return config_data, parsed_files
 
@@ -330,91 +306,72 @@ def _generate_documentation(repo_root: Path, parsed_files: dict, config_data: di
     """Generate documentation from parsed files.
 
     Args:
-        repo_root: The root directory of the repository
+        repo_root: Root directory of the repository
         parsed_files: Dictionary of parsed files
         config_data: Configuration data
 
     Returns:
         Generated documentation as a string
     """
+    token_limit = config_data.get("token_limit", 10000)
+
     with Progress() as progress:
-        # Build dependency graph
-        task2 = progress.add_task("Analyzing dependencies...", total=100)
-        graph = DependencyGraph(repo_root)
-        graph.build_graph(parsed_files)
+        task = progress.add_task("Generating documentation...", total=2)
 
-        # Calculate PageRank scores for all files
-        try:
-            import networkx as nx
+        # Apply token limit by selecting files based on size
+        # Simple approach: sort files by size and include until we hit the token limit
+        file_tokens = [(path, _count_tokens(path)) for path in parsed_files]
+        sorted_files = sorted(file_tokens, key=lambda x: x[1], reverse=False)  # Small files first
 
-            scores = nx.pagerank(graph.graph)
-            # Add importance scores to parsed_files
-            for file_path, score in scores.items():
-                if file_path in parsed_files:
-                    parsed_files[file_path]["importance_score"] = score
-        except ImportError as e:
-            logger.warning("NetworkX is not installed, skipping PageRank calculation: %s", e)
-        except (ValueError, TypeError) as e:
-            logger.warning("Failed to calculate PageRank scores due to invalid graph structure: %s", e)
+        filtered_files = {}
+        total_tokens = 0
+        for path, tokens in sorted_files:
+            if total_tokens + tokens <= token_limit:
+                filtered_files[path] = parsed_files[path]
+                total_tokens += tokens
+            if total_tokens >= token_limit:
+                break
 
-        # Get important files based on token limit
-        important_files = graph.get_important_files(config_data["token_limit"])
-        progress.update(task2, completed=100)
+        progress.update(task, advance=1)
 
         # Generate documentation
-        task3 = progress.add_task("Generating documentation...", total=100)
         generator = MarkdownGenerator(repo_root, config_data)
-        documentation = generator.generate_documentation(
-            {k: parsed_files[k] for k in important_files},
-        )
-        progress.update(task3, completed=100)
+        documentation = generator.generate_documentation(filtered_files)
+        progress.update(task, advance=1)
 
     return documentation
 
 
-def _write_documentation(output: Path | None, config_data: dict, documentation: str) -> Path:
-    """Write documentation to the specified output path.
+def _write_documentation(repo_root: Path, output: Path | None, config_data: dict, documentation: str) -> Path:
+    """Write documentation to file.
 
     Args:
-        output: Optional output path
+        repo_root: Root directory of the repository
+        output: Optional output path override
         config_data: Configuration data
-        documentation: Documentation content to write
+        documentation: Generated documentation string
 
     Returns:
-        The path where documentation was written
-
-    Raises:
-        FileNotFoundError: If output directory doesn't exist and cannot be created
-        PermissionError: If output file cannot be written due to permissions
+        Path where documentation was written
     """
-    # Get the config loader to access the project root directory
-    config_loader = ConfigLoader()
-    project_root = config_loader.project_root
+    with Progress() as progress:
+        task = progress.add_task("Writing documentation...", total=1)
 
-    # Format and write output
-    output_path = _format_output_path(project_root, output, config_data)
+        # Determine output path
+        output_path = _get_output_path(repo_root, output, config_data)
 
-    # Check if output path is in a non-existent directory
-    if output and not output_path.parent.exists():
-        # Special case for test paths
-        if str(output_path).startswith("/nonexistent"):
-            console.print(f"[red]File system error: Directory does not exist: {output_path.parent}")
-            raise typer.Exit(2)  # Use exit code 2 for this specific case
+        # Create parent directories if needed
+        output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # For normal paths, try to create the directory
-        try:
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-        except (PermissionError, FileNotFoundError) as e:
-            console.print(f"[red]File system error: {e!s}")
-            raise typer.Exit(1) from e
+        # Write documentation to file
+        output_path.write_text(documentation)
+        progress.update(task, advance=1)
 
-    # Write output
-    output_path.write_text(documentation)
     return output_path
 
 
 def main() -> None:
-    """Entry point for the CodeMap CLI application."""
+    """Entry point for the CLI."""
     app()
 
 
