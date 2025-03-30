@@ -14,12 +14,8 @@ class ConfigError(TypeError):
     """Custom error for configuration validation."""
 
     INVALID_TOKEN_LIMIT = "token_limit must be an integer"  # noqa: S105
-    EXCLUDE_PATTERNS_ERROR = "exclude_patterns must be a list"
-    INCLUDE_PATTERNS_ERROR = "include_patterns must be a list"
-    OUTPUT_CONFIG_ERROR = "output configuration must be a dictionary"
-    OUTPUT_DIRECTORY_ERROR = "output.directory must be a string"
-    OUTPUT_FORMAT_ERROR = "output.filename_format must be a string"
-    OUTPUT_TIMESTAMP_ERROR = "output.timestamp_format must be a string"
+    INVALID_USE_GITIGNORE = "use_gitignore must be a boolean"
+    INVALID_OUTPUT_DIR = "output_dir must be a string"
 
 
 class ConfigLoader:
@@ -45,29 +41,14 @@ class ConfigLoader:
         Raises:
             ConfigError: If any configuration values are invalid.
         """
-        if not isinstance(config.get("token_limit"), int):
+        if "token_limit" in config and not isinstance(config["token_limit"], int):
             raise ConfigError(ConfigError.INVALID_TOKEN_LIMIT)
 
-        if "exclude_patterns" in config and not isinstance(config["exclude_patterns"], list):
-            raise ConfigError(ConfigError.EXCLUDE_PATTERNS_ERROR)
+        if "use_gitignore" in config and not isinstance(config["use_gitignore"], bool):
+            raise ConfigError(ConfigError.INVALID_USE_GITIGNORE)
 
-        if "include_patterns" in config and not isinstance(config["include_patterns"], list):
-            raise ConfigError(ConfigError.INCLUDE_PATTERNS_ERROR)
-
-        # Validate output configuration
-        if "output" in config:
-            if not isinstance(config["output"], dict):
-                raise ConfigError(ConfigError.OUTPUT_CONFIG_ERROR)
-
-            output_config = config["output"]
-            if "directory" in output_config and not isinstance(output_config["directory"], str):
-                raise ConfigError(ConfigError.OUTPUT_DIRECTORY_ERROR)
-
-            if "filename_format" in output_config and not isinstance(output_config["filename_format"], str):
-                raise ConfigError(ConfigError.OUTPUT_FORMAT_ERROR)
-
-            if "timestamp_format" in output_config and not isinstance(output_config["timestamp_format"], str):
-                raise ConfigError(ConfigError.OUTPUT_TIMESTAMP_ERROR)
+        if "output_dir" in config and not isinstance(config["output_dir"], str):
+            raise ConfigError(ConfigError.INVALID_OUTPUT_DIR)
 
     def _load_config(self) -> dict[str, Any]:
         """Load and merge configuration.

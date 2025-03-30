@@ -34,22 +34,23 @@ def test_custom_config_loading(temp_config_file: Path) -> None:
     """Test loading custom configuration from file."""
     custom_config = {
         "token_limit": 2000,
-        "exclude_patterns": ["*.test.js", "*.spec.py"],
-        "include_patterns": ["*.py", "*.js", "*.ts"],
+        "use_gitignore": False,
+        "output_dir": "custom_docs",
     }
 
     temp_config_file.write_text(yaml.dump(custom_config))
     config_loader = ConfigLoader(str(temp_config_file))
 
     assert config_loader.config["token_limit"] == 2000
-    assert "*.test.js" in config_loader.config["exclude_patterns"]
+    assert config_loader.config["use_gitignore"] is False
+    assert config_loader.config["output_dir"] == "custom_docs"
 
 
 def test_config_validation(temp_config_file: Path) -> None:
     """Test configuration validation."""
     invalid_config = {
         "token_limit": "not_a_number",
-        "exclude_patterns": "not_a_list",
+        "use_gitignore": "not_a_boolean",
     }
 
     temp_config_file.write_text(yaml.dump(invalid_config))
@@ -68,8 +69,8 @@ def test_config_merging(temp_config_file: Path) -> None:
     config_loader = ConfigLoader(str(temp_config_file))
 
     assert config_loader.config["token_limit"] == 3000
-    assert "include_patterns" in config_loader.config
-    assert isinstance(config_loader.config["include_patterns"], list)
+    assert "use_gitignore" in config_loader.config
+    assert config_loader.config["output_dir"] == "documentation"
 
 
 def test_nonexistent_config_file() -> None:
