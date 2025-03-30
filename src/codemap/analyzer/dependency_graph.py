@@ -93,7 +93,7 @@ class DependencyGraph:
             # Filter files based on token limit
             total_tokens = 0
             important_files = []
-            for path, score in sorted_files:
+            for path, _score in sorted_files:
                 tokens = self._count_tokens(path)
                 if total_tokens + tokens <= token_limit:
                     important_files.append(path)

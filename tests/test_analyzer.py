@@ -51,7 +51,8 @@ def test_code_parser_initialization_failure(monkeypatch: pytest.MonkeyPatch) -> 
     """Test that CodeParser handles initialization failures correctly."""
 
     def mock_get_parser(lang: str) -> None:
-        raise RuntimeError(f"Failed to load language {lang}")
+        error_msg = f"Failed to load language {lang}"
+        raise RuntimeError(error_msg)
 
     monkeypatch.setattr("codemap.analyzer.tree_parser.get_parser", mock_get_parser)
     with pytest.raises(RuntimeError, match=ERR_PARSER_INIT.format(lang="any")):

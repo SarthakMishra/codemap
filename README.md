@@ -2,7 +2,7 @@
 
 ⚠️ **DEVELOPMENT STATUS**: CodeMap is currently in active development and testing phase. Use with caution in production environments.
 
-CodeMap is a powerful CLI tool that generates optimized markdown documentation from your Python codebase using tree-sitter analysis. It analyzes source code, creates repository maps, generates ERD diagrams, and produces markdown files that can be used as context for LLMs.
+CodeMap is a powerful CLI tool that generates optimized markdown documentation from your Python codebase using tree-sitter analysis. It analyzes source code, creates repository maps, and produces markdown files that can be used as context for LLMs.
 
 ## Features
 
@@ -13,7 +13,6 @@ CodeMap is a powerful CLI tool that generates optimized markdown documentation f
 - 🌳 Repository structure visualization
 - 🔄 Automatic docstring extraction
 - 🎨 Python-focused syntax parsing
-- 📈 Entity Relationship Diagram (ERD) generation
 
 ## Language Support
 
@@ -65,44 +64,12 @@ Options:
   --help              Show this message and exit
 ```
 
-### ERD Generation
-
-Generate an Entity Relationship Diagram (ERD) for your Python codebase:
-
-```bash
-codemap erd [OPTIONS] [PATH]
-
-Arguments:
-  PATH  Path to the codebase to analyze [default: .]
-
-Options:
-  -o, --output PATH    Output file path for the ERD (PDF format)
-  -c, --config PATH    Path to config file
-  -v, --verbose       Enable verbose output with debug logs
-  --help              Show this message and exit
-```
-
-The ERD command will:
-- Analyze your Python codebase for classes and their relationships
-- Generate a visual diagram showing:
-  - Classes and their attributes
-  - Inheritance relationships
-  - Composition/aggregation relationships
-  - Many-to-many relationships
-- Output a PDF file with the diagram
-
-> **Note**: This feature requires the `graphviz` system package to be installed:
-> - Ubuntu/Debian: `sudo apt-get install graphviz`
-> - macOS: `brew install graphviz`
-> - Windows: Download from [Graphviz Downloads](https://graphviz.org/download/)
-
 ### Verbose Mode
 
 All commands support a verbose mode that provides detailed debug information:
 
 ```bash
 codemap generate -v  # Generate documentation with debug logs
-codemap erd -v      # Generate ERD with debug logs
 ```
 
 Use verbose mode to:
@@ -146,25 +113,6 @@ analysis:
     - python
   include_private: false
   max_depth: 5
-erd:
-  format: "pdf"
-  rankdir: "LR"
-  fontname: "Arial"
-  fontsize: "10"
-  node_style:
-    shape: "record"
-    style: "filled"
-    fillcolor: "white"
-    fontname: "Arial"
-  edge_style:
-    inheritance:
-      arrowhead: "empty"
-      style: "solid"
-      color: "black"
-    composition:
-      arrowhead: "diamond"
-      style: "solid"
-      color: "black"
 ```
 
 #### Output Configuration

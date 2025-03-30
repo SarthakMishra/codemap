@@ -5,12 +5,11 @@ from __future__ import annotations
 import fnmatch
 import logging
 import os
-import subprocess
 from pathlib import Path
 from typing import Any
 
-from tree_sitter import Language, Node, Parser
 import tree_sitter_python
+from tree_sitter import Language, Node, Parser
 
 logger = logging.getLogger(__name__)
 
@@ -27,27 +26,29 @@ LANGUAGES_SO = VENDOR_PATH / "my-languages.so"
 
 
 def get_parser(language: str) -> Parser:
-    """Get a parser for the specified language.
+    """Get a tree-sitter parser for the specified language.
 
     Args:
-        language: The language to get a parser for.
+        language: Name of the language to parse.
 
     Returns:
-        A parser for the specified language.
+        A tree-sitter parser for the specified language.
 
     Raises:
-        RuntimeError: If the language is not supported or the parser could not be initialized.
+        RuntimeError: If parser could not be loaded for the specified language.
     """
     if language == "python":
         try:
             python_language = Language(tree_sitter_python.language())
             return Parser(python_language)
         except Exception as e:
-            logger.error("Failed to initialize %s parser: %s", language, e)
-            raise RuntimeError(f"Failed to load language {language}") from e
+            error_msg = f"Failed to load language {language}"
+            logger.exception("Failed to initialize %s parser", language)
+            raise RuntimeError(error_msg) from e
     else:
+        error_msg = f"Failed to load language {language}"
         logger.error("Unsupported language: %s", language)
-        raise RuntimeError(f"Failed to load language {language}")
+        raise RuntimeError(error_msg)
 
 
 class CodeParser:
@@ -80,13 +81,13 @@ class CodeParser:
                                 # In a real implementation, we would load the appropriate language
                                 mock_parser = Parser()
                                 self.parsers[lang] = mock_parser
-                        except Exception as e:
+                        except (ValueError, TypeError, RuntimeError) as e:
                             logger.warning("Failed to initialize %s parser: %s", lang, e)
 
             logger.debug("Successfully initialized Python parser")
 
         except Exception as e:
-            logger.error("Failed to initialize Python parser: %s", e)
+            logger.exception("Failed to initialize Python parser")
             raise RuntimeError(ERR_PARSER_INIT.format(lang="any")) from e
 
         # Only load gitignore patterns if explicitly enabled in config
@@ -226,8 +227,8 @@ class CodeParser:
         except OSError:
             logger.exception("Failed to read file")
             raise
-        except Exception as e:
-            logger.exception("Failed to parse file: %s", e)
+        except Exception:
+            logger.exception("Failed to parse file")
             return symbols
 
         return symbols
@@ -240,34 +241,19 @@ class CodeParser:
             symbols: Dictionary to store extracted symbols
         """
         try:
-            # Initialize class info
-            class_name = None
-            bases = []
-
             # Extract class name and base classes
-            for child in node.children:
-                if child.type == "identifier" and not class_name:
-                    class_name = child.text.decode("utf-8")
-                elif child.type == "argument_list":
-                    for base_node in child.children:
-                        if base_node.type == "identifier":
-                            bases.append(base_node.text.decode("utf-8"))
-
-            if not class_name:
-                logger.warning("Could not extract class name from node")
+            class_info = self._extract_class_info(node)
+            if not class_info:
                 return
+
+            class_name, bases = class_info
 
             # Skip private classes
             if class_name.startswith("_"):
                 return
 
-            # Initialize class data in symbols
-            if "classes" not in symbols:
-                symbols["classes"] = []
-            if "bases" not in symbols:
-                symbols["bases"] = {}
-            if "attributes" not in symbols:
-                symbols["attributes"] = {}
+            # Initialize class data in symbols if needed
+            self._initialize_class_symbols(symbols)
 
             # Add class info
             symbols["classes"].append(class_name)
@@ -275,13 +261,65 @@ class CodeParser:
                 symbols["bases"][class_name] = bases
 
             # Process class body for attributes
-            body_node = next((c for c in node.children if c.type == "block"), None)
-            if body_node:
-                symbols["attributes"][class_name] = self._extract_class_attributes(body_node)
-                logger.debug("Extracted attributes for %s: %s", class_name, symbols["attributes"][class_name])
+            self._process_class_body(node, class_name, symbols)
 
-        except Exception as e:
-            logger.debug("Error processing class node: %s", e)
+        except (AttributeError, UnicodeDecodeError) as e:
+            logger.debug("Error processing class node (decode): %s", e)
+        except (ValueError, IndexError) as e:
+            logger.debug("Error processing class node (index/value): %s", e)
+
+    def _extract_class_info(self, node: Node) -> tuple[str, list[str]] | None:
+        """Extract the class name and base classes from a class definition node.
+
+        Args:
+            node: The class definition node
+
+        Returns:
+            A tuple containing the class name and a list of base classes, or None if class name couldn't be extracted
+        """
+        class_name = None
+        bases = []
+
+        for child in node.children:
+            if child.type == "identifier" and not class_name:
+                class_name = child.text.decode("utf-8")
+            elif child.type == "argument_list":
+                # Use list comprehension instead of appending in a loop
+                bases = [
+                    base_node.text.decode("utf-8") for base_node in child.children if base_node.type == "identifier"
+                ]
+
+        if not class_name:
+            logger.warning("Could not extract class name from node")
+            return None
+
+        return class_name, bases
+
+    def _initialize_class_symbols(self, symbols: dict[str, Any]) -> None:
+        """Initialize class-related data structures in symbols dictionary if they don't exist.
+
+        Args:
+            symbols: Dictionary to store extracted symbols
+        """
+        if "classes" not in symbols:
+            symbols["classes"] = []
+        if "bases" not in symbols:
+            symbols["bases"] = {}
+        if "attributes" not in symbols:
+            symbols["attributes"] = {}
+
+    def _process_class_body(self, node: Node, class_name: str, symbols: dict[str, Any]) -> None:
+        """Process the class body to extract attributes.
+
+        Args:
+            node: The class definition node
+            class_name: Name of the class
+            symbols: Dictionary to store extracted symbols
+        """
+        body_node = next((c for c in node.children if c.type == "block"), None)
+        if body_node:
+            symbols["attributes"][class_name] = self._extract_class_attributes(body_node)
+            logger.debug("Extracted attributes for %s: %s", class_name, symbols["attributes"][class_name])
 
     def _extract_class_attributes(self, body_node: Node) -> dict[str, str]:
         """Extract attributes from a class body node.
@@ -293,41 +331,72 @@ class CodeParser:
             Dictionary mapping attribute names to their types
         """
         attributes = {}
-        for stmt in body_node.children:
-            try:
+
+        try:
+            for stmt in body_node.children:
                 # Handle different attribute definition patterns
                 if stmt.type == "expression_statement":
-                    expr = stmt.children[0] if stmt.children else None
-                    if expr and expr.type == "assignment":
-                        target = expr.children[0] if expr.children else None
-                        if target and target.type == "identifier":
-                            name = target.text.decode("utf-8")
-                            if not name.startswith("_"):  # Skip private attributes
-                                value = expr.children[-1] if len(expr.children) > 1 else None
-                                if value:
-                                    attr_type = self._infer_type(value)
-                                    if attr_type:
-                                        attributes[name] = attr_type
+                    self._process_expression_statement(stmt, attributes)
                 elif stmt.type == "annotated_assignment":
-                    target = stmt.children[0] if stmt.children else None
-                    annotation = next((c for c in stmt.children if c.type == "type"), None)
-                    if target and target.type == "identifier" and annotation:
-                        name = target.text.decode("utf-8")
-                        if not name.startswith("_"):  # Skip private attributes
-                            # Get the raw annotation text
-                            attr_type = annotation.text.decode("utf-8")
-                            # Clean up the type annotation (remove spaces, etc.)
-                            attr_type = attr_type.strip()
-                            # Extract the base type from complex annotations like "list[User]"
-                            if "[" in attr_type:
-                                inner_type = attr_type[attr_type.find("[") + 1 : attr_type.find("]")]
-                                if inner_type:
-                                    attr_type = inner_type
-                            attributes[name] = attr_type
-            except Exception as e:
-                logger.debug("Error processing attribute statement: %s", e)
+                    self._process_annotated_assignment(stmt, attributes)
+        except (AttributeError, UnicodeDecodeError, IndexError, ValueError) as e:
+            logger.debug("Error processing attribute statements: %s", e)
 
         return attributes
+
+    def _process_expression_statement(self, stmt: Node, attributes: dict[str, str]) -> None:
+        """Process an expression statement to extract class attributes.
+
+        Args:
+            stmt: The expression statement node
+            attributes: Dictionary to populate with extracted attributes
+        """
+        expr = stmt.children[0] if stmt.children else None
+        if expr and expr.type == "assignment":
+            target = expr.children[0] if expr.children else None
+            if target and target.type == "identifier":
+                name = target.text.decode("utf-8")
+                if not name.startswith("_"):  # Skip private attributes
+                    value = expr.children[-1] if len(expr.children) > 1 else None
+                    if value:
+                        attr_type = self._infer_type(value)
+                        if attr_type:
+                            attributes[name] = attr_type
+
+    def _process_annotated_assignment(self, stmt: Node, attributes: dict[str, str]) -> None:
+        """Process an annotated assignment to extract class attributes.
+
+        Args:
+            stmt: The annotated assignment node
+            attributes: Dictionary to populate with extracted attributes
+        """
+        target = stmt.children[0] if stmt.children else None
+        annotation = next((c for c in stmt.children if c.type == "type"), None)
+        if target and target.type == "identifier" and annotation:
+            name = target.text.decode("utf-8")
+            if not name.startswith("_"):  # Skip private attributes
+                # Get the raw annotation text
+                attr_type = annotation.text.decode("utf-8")
+                # Clean up the type annotation (remove spaces, etc.)
+                attr_type = attr_type.strip()
+                # Extract the base type from complex annotations like "list[User]"
+                attr_type = self._extract_inner_type(attr_type)
+                attributes[name] = attr_type
+
+    def _extract_inner_type(self, attr_type: str) -> str:
+        """Extract the inner type from a complex type annotation.
+
+        Args:
+            attr_type: The type annotation string
+
+        Returns:
+            The extracted inner type or the original type
+        """
+        if "[" in attr_type:
+            inner_type = attr_type[attr_type.find("[") + 1 : attr_type.find("]")]
+            if inner_type:
+                return inner_type
+        return attr_type
 
     def _infer_type(self, node: Node) -> str | None:
         """Infer the type of a node.
@@ -360,11 +429,12 @@ class CodeParser:
                     return func.text.decode("utf-8")
             elif node.type == "identifier":
                 return node.text.decode("utf-8")
-
-            return None
-        except Exception as e:
+        except (AttributeError, UnicodeDecodeError, IndexError) as e:
             logger.debug("Error inferring type: %s", e)
             return None
+
+        # If we get here, no type could be inferred
+        return None
 
     def _process_import_node(self, node: Node, symbols: dict[str, list[str]]) -> None:
         """Process an import statement node.
@@ -414,5 +484,9 @@ class CodeParser:
             for child in node.children:
                 if child:  # Skip None children
                     self._visit_node(child, symbols)
-        except Exception as e:
+        except (AttributeError, UnicodeDecodeError) as e:
             logger.debug("Error visiting node %s: %s", node.type, e)
+        except ValueError as e:
+            logger.debug("Value error processing node %s: %s", node.type, e)
+        except IndexError as e:
+            logger.debug("Index error processing node %s: %s", node.type, e)

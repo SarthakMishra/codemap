@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
@@ -20,7 +18,6 @@ from typing_extensions import TypeAlias
 from .analyzer.dependency_graph import DependencyGraph
 from .analyzer.tree_parser import CodeParser
 from .config import DEFAULT_CONFIG
-from .generators.erd_generator import ERDGenerator
 from .generators.markdown_generator import MarkdownGenerator
 from .utils.config_loader import ConfigLoader
 
@@ -67,9 +64,10 @@ MapTokensOpt: TypeAlias = Annotated[
 VerboseFlag: TypeAlias = Annotated[
     bool,
     typer.Option(
-        "--verbose/--no-verbose",
-        "-v/-nv",
+        "--verbose",
+        "-v",
         help="Enable verbose output with debug logs",
+        is_flag=True,
     ),
 ]
 ForceFlag: TypeAlias = Annotated[
@@ -123,7 +121,7 @@ def _format_output_path(repo_root: Path, output_path: Path | None, config: dict)
     except (PermissionError, FileNotFoundError) as e:
         logger.warning("Could not create directory %s: %s", base_path, e)
         # Use a temporary directory as fallback
-        base_path = Path(os.path.expanduser("~")) / ".codemap" / base_dir
+        base_path = Path.home() / ".codemap" / base_dir
         base_path.mkdir(parents=True, exist_ok=True)
 
     # Format the filename
@@ -164,7 +162,7 @@ def setup_logging(*, is_verbose: bool) -> None:
 def init(
     path: PathArg = Path(),
     force_flag: ForceFlag = 0,
-    is_verbose: VerboseFlag = False,
+    is_verbose: VerboseFlag = None,
 ) -> None:
     """Initialize a new CodeMap project in the specified directory."""
     setup_logging(is_verbose=is_verbose)
@@ -200,8 +198,8 @@ def init(
             docs_dir.mkdir(exist_ok=True, parents=True)
             progress.update(task, advance=1)
 
-            # Initialize parser to verify language support
-            parser = CodeParser()
+            # Initialize environment and verify it's working
+            CodeParser()  # Just initialize without assigning to a variable
             progress.update(task, advance=1)
 
         console.print("\n✨ CodeMap initialized successfully!")
@@ -210,7 +208,6 @@ def init(
         console.print("\nNext steps:")
         console.print("1. Review and customize .codemap.yml")
         console.print("2. Run 'codemap generate' to create documentation")
-        console.print("3. Run 'codemap erd' to generate class diagrams")
 
     except (FileNotFoundError, PermissionError, OSError) as e:
         console.print(f"[red]File system error: {e!s}")
@@ -226,77 +223,21 @@ def generate(
     output: OutputOpt = None,
     config: ConfigOpt = None,
     map_tokens: MapTokensOpt = None,
-    is_verbose: VerboseFlag = False,
+    is_verbose: VerboseFlag = None,
 ) -> None:
     """Generate documentation for the specified path."""
     setup_logging(is_verbose=is_verbose)
     try:
         repo_root = path.resolve()
-        config_loader = ConfigLoader(str(config) if config else None)
-        config_data = config_loader.config
+        # Load configuration and parse files
+        config_data, parsed_files = _prepare_for_generation(repo_root, config, map_tokens)
 
-        if map_tokens:
-            config_data["token_limit"] = map_tokens
-
-        with Progress() as progress:
-            # Parse files
-            task1 = progress.add_task("Parsing files...", total=100)
-            parser = CodeParser(config=config_data)
-            parsed_files = {}
-
-            for file_path in repo_root.rglob("*"):
-                if parser.should_parse(file_path):
-                    parsed_files[file_path] = parser.parse_file(file_path)
-            progress.update(task1, completed=100)
-
-            # Build dependency graph
-            task2 = progress.add_task("Analyzing dependencies...", total=100)
-            graph = DependencyGraph(repo_root)
-            graph.build_graph(parsed_files)
-
-            # Calculate PageRank scores for all files
-            try:
-                import networkx as nx
-
-                scores = nx.pagerank(graph.graph)
-                # Add importance scores to parsed_files
-                for file_path, score in scores.items():
-                    if file_path in parsed_files:
-                        parsed_files[file_path]["importance_score"] = score
-            except Exception as e:
-                logger.warning("Failed to calculate PageRank scores: %s", e)
-
-            # Get important files based on token limit
-            important_files = graph.get_important_files(config_data["token_limit"])
-            progress.update(task2, completed=100)
-
-            # Generate documentation
-            task3 = progress.add_task("Generating documentation...", total=100)
-            generator = MarkdownGenerator(repo_root, config_data)
-            documentation = generator.generate_documentation(
-                {k: parsed_files[k] for k in important_files},
-            )
-            progress.update(task3, completed=100)
-
-        # Format and write output
-        output_path = _format_output_path(repo_root, output, config_data)
-
-        # Check if output path is in a non-existent directory
-        if output and not output_path.parent.exists():
-            # Special case for test paths
-            if str(output_path).startswith("/nonexistent"):
-                console.print(f"[red]File system error: Directory does not exist: {output_path.parent}")
-                raise typer.Exit(2)  # Use exit code 2 for this specific case
-
-            # For normal paths, try to create the directory
-            try:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-            except (PermissionError, FileNotFoundError) as e:
-                console.print(f"[red]File system error: {e!s}")
-                raise typer.Exit(1) from e
+        # Generate documentation
+        documentation = _generate_documentation(repo_root, parsed_files, config_data)
 
         # Write output
-        output_path.write_text(documentation)
+        output_path = _write_documentation(repo_root, output, config_data, documentation)
+
         console.print(f"\n✨ Documentation generated successfully: {output_path}")
 
     except (FileNotFoundError, PermissionError, OSError) as e:
@@ -307,85 +248,119 @@ def generate(
         raise typer.Exit(1) from e
 
 
-@app.command()
-def erd(
-    path: PathArg = Path(),
-    output: OutputOpt = None,
-    config: ConfigOpt = None,
-    is_verbose: VerboseFlag = False,
-) -> None:
-    """Generate an Entity Relationship Diagram (ERD) for the codebase.
+def _prepare_for_generation(repo_root: Path, config: Path | None, map_tokens: int | None) -> tuple[dict, dict]:
+    """Prepare for documentation generation by loading configuration and parsing files.
 
-    This command analyzes the codebase and creates a markdown representation of:
-    - Classes and their attributes
-    - Inheritance relationships
-    - Composition/aggregation relationships
-    - Many-to-many relationships
+    Args:
+        repo_root: The root directory of the repository
+        config: Optional path to configuration file
+        map_tokens: Optional token limit override
 
-    The output is a markdown file that can be rendered as a diagram using tools like Mermaid.
+    Returns:
+        Tuple of (config_data, parsed_files)
     """
-    setup_logging(is_verbose=is_verbose)
-    try:
-        repo_root = path.resolve()
-        logger.debug("Starting ERD generation for repository: %s", repo_root)
+    config_loader = ConfigLoader(str(config) if config else None)
+    config_data = config_loader.config
 
-        with Progress() as progress:
-            # Load configuration
-            task = progress.add_task("Loading configuration...", total=None)
-            config_loader = ConfigLoader(str(config) if config else None)
-            cfg = config_loader.config
-            logger.debug("Loaded configuration: %s", cfg.get("erd", {}))
-            progress.update(task, completed=True)
+    if map_tokens:
+        config_data["token_limit"] = map_tokens
 
-            # Parse the codebase
-            task = progress.add_task("Parsing codebase...", total=None)
-            parser = CodeParser(config=cfg)
-            parsed_files = {}
-            file_count = 0
-            for file_path in repo_root.rglob("*"):
-                if parser.should_parse(file_path):
-                    logger.debug("Parsing file: %s", file_path)
-                    parsed_files[file_path] = parser.parse_file(file_path)
-                    file_count += 1
-            logger.debug("Parsed %d files", file_count)
-            progress.update(task, completed=True)
+    with Progress() as progress:
+        # Parse files
+        task1 = progress.add_task("Parsing files...", total=100)
+        parser = CodeParser(config=config_data)
+        parsed_files = {}
 
-            # Generate ERD
-            task = progress.add_task("Generating ERD...", total=None)
-            try:
-                erd_generator = ERDGenerator()
+        for file_path in repo_root.rglob("*"):
+            if parser.should_parse(file_path):
+                parsed_files[file_path] = parser.parse_file(file_path)
+        progress.update(task1, completed=100)
 
-                # If no output path is provided, use the configured output path
-                if output is None:
-                    # Format the output path based on configuration
-                    default_output = _format_output_path(repo_root, None, cfg)
-                    # Change extension to .md for ERD
-                    if default_output.suffix.lower() != ".md":
-                        default_output = default_output.with_suffix(".md")
-                    # Add erd to the filename to distinguish it from regular documentation
-                    default_output = default_output.with_stem(f"{default_output.stem}_erd")
-                    output = default_output
+    return config_data, parsed_files
 
-                output_path = erd_generator.generate(parsed_files, output)
-                progress.update(task, completed=True)
-                console.print(f"\n✨ ERD generated successfully at: [bold blue]{output_path}[/]")
-            except ValueError as e:
-                progress.update(task, completed=True)
-                console.print(f"\n[red]Error: {e}[/]")
-                raise typer.Exit(1) from e
-            except Exception as e:
-                progress.update(task, completed=True)
-                console.print(f"\n[red]Failed to generate ERD: {e}[/]")
-                if is_verbose:
-                    logger.exception("ERD generation failed")
-                raise typer.Exit(1) from e
 
-    except (FileNotFoundError, PermissionError, OSError) as e:
-        console.print(f"[red]File system error: {e!s}")
-        raise typer.Exit(1) from e
-    except ValueError as e:
-        console.print(f"[red]Configuration error: {e!s}")
-        raise typer.Exit(1) from e
+def _generate_documentation(repo_root: Path, parsed_files: dict, config_data: dict) -> str:
+    """Generate documentation from parsed files.
+
+    Args:
+        repo_root: The root directory of the repository
+        parsed_files: Dictionary of parsed files
+        config_data: Configuration data
+
+    Returns:
+        Generated documentation as a string
+    """
+    with Progress() as progress:
+        # Build dependency graph
+        task2 = progress.add_task("Analyzing dependencies...", total=100)
+        graph = DependencyGraph(repo_root)
+        graph.build_graph(parsed_files)
+
+        # Calculate PageRank scores for all files
+        try:
+            import networkx as nx
+
+            scores = nx.pagerank(graph.graph)
+            # Add importance scores to parsed_files
+            for file_path, score in scores.items():
+                if file_path in parsed_files:
+                    parsed_files[file_path]["importance_score"] = score
+        except ImportError as e:
+            logger.warning("NetworkX is not installed, skipping PageRank calculation: %s", e)
+        except (ValueError, TypeError) as e:
+            logger.warning("Failed to calculate PageRank scores due to invalid graph structure: %s", e)
+
+        # Get important files based on token limit
+        important_files = graph.get_important_files(config_data["token_limit"])
+        progress.update(task2, completed=100)
+
+        # Generate documentation
+        task3 = progress.add_task("Generating documentation...", total=100)
+        generator = MarkdownGenerator(repo_root, config_data)
+        documentation = generator.generate_documentation(
+            {k: parsed_files[k] for k in important_files},
+        )
+        progress.update(task3, completed=100)
+
+    return documentation
+
+
+def _write_documentation(repo_root: Path, output: Path | None, config_data: dict, documentation: str) -> Path:
+    """Write documentation to the specified output path.
+
+    Args:
+        repo_root: The root directory of the repository
+        output: Optional output path
+        config_data: Configuration data
+        documentation: Documentation content to write
+
+    Returns:
+        The path where documentation was written
+
+    Raises:
+        FileNotFoundError: If output directory doesn't exist and cannot be created
+        PermissionError: If output file cannot be written due to permissions
+    """
+    # Format and write output
+    output_path = _format_output_path(repo_root, output, config_data)
+
+    # Check if output path is in a non-existent directory
+    if output and not output_path.parent.exists():
+        # Special case for test paths
+        if str(output_path).startswith("/nonexistent"):
+            console.print(f"[red]File system error: Directory does not exist: {output_path.parent}")
+            raise typer.Exit(2)  # Use exit code 2 for this specific case
+
+        # For normal paths, try to create the directory
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        except (PermissionError, FileNotFoundError) as e:
+            console.print(f"[red]File system error: {e!s}")
+            raise typer.Exit(1) from e
+
+    # Write output
+    output_path.write_text(documentation)
+    return output_path
 
 
 def main() -> None:

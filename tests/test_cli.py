@@ -5,7 +5,6 @@ from __future__ import annotations
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 from unittest.mock import Mock, patch
 
 import pytest
@@ -14,9 +13,6 @@ from typer.testing import CliRunner
 
 from codemap.cli import _format_output_path, app
 from codemap.config import DEFAULT_CONFIG
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 runner = CliRunner()
 

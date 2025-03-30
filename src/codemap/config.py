@@ -38,28 +38,4 @@ DEFAULT_CONFIG = {
         "include_private": False,
         "max_depth": 5,
     },
-    "erd": {
-        "format": "pdf",
-        "rankdir": "LR",
-        "fontname": "Arial",
-        "fontsize": "10",
-        "node_style": {
-            "shape": "record",
-            "style": "filled",
-            "fillcolor": "white",
-            "fontname": "Arial",
-        },
-        "edge_style": {
-            "inheritance": {
-                "arrowhead": "empty",
-                "style": "solid",
-                "color": "black",
-            },
-            "composition": {
-                "arrowhead": "diamond",
-                "style": "solid",
-                "color": "black",
-            },
-        },
-    },
 }
