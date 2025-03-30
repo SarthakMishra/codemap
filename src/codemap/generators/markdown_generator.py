@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from codemap.analyzer.tree_parser import CodeParser
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+# Constants
+MAX_TREE_DEPTH = 20
+MAX_CONTENT_LENGTH = 10000  # ~100 lines
 
 
 @dataclass
@@ -22,9 +28,6 @@ class TreeState:
 class MarkdownGenerator:
     """Generates markdown documentation from parsed code files."""
 
-    # Maximum depth for directory traversal to prevent infinite recursion
-    MAX_TREE_DEPTH = 20
-
     def __init__(self, repo_root: Path, config: dict[str, Any]) -> None:
         """Initialize the markdown generator.
 
@@ -34,6 +37,7 @@ class MarkdownGenerator:
         """
         self.repo_root = repo_root
         self.config = config
+        self.max_tree_depth = MAX_TREE_DEPTH
 
     def _find_repo_root(self, start_path: Path, max_levels: int = 5) -> Path:
         """Find the repository root by looking for .git directory.
@@ -55,7 +59,7 @@ class MarkdownGenerator:
         return start_path
 
     def _should_process_path(self, path: Path, parser: CodeParser) -> bool:
-        """Check if a path should be processed based on configuration.
+        """Check if a path should be processed.
 
         Args:
             path: Path to check.
@@ -64,18 +68,29 @@ class MarkdownGenerator:
         Returns:
             True if the path should be processed.
         """
-        # Skip directories that match exclude patterns
-        for pattern in self.config.get("exclude_patterns", []):
-            if self._matches_pattern(path, pattern):
-                return False
-
         # Skip files that match gitignore patterns if enabled
         if self.config.get("use_gitignore", True) and parser.gitignore_patterns:
             for pattern in parser.gitignore_patterns:
-                if self._matches_pattern(path, pattern):
+                if self._matches_gitignore_pattern(path, pattern, parser):
                     return False
 
-        return True
+        # Skip default excluded directories
+        default_excluded = ["__pycache__", ".git", ".env", ".venv", "venv", "build", "dist"]
+        return all(excluded not in str(path) for excluded in default_excluded)
+
+    def _matches_gitignore_pattern(self, path: Path, pattern: str, parser: CodeParser) -> bool:
+        """Check if a path matches a gitignore pattern using the parser's method.
+
+        Args:
+            path: Path to check
+            pattern: Gitignore pattern to match against
+            parser: The CodeParser instance with the matching method
+
+        Returns:
+            True if the path matches the pattern
+        """
+        # This is a wrapper around the private method to avoid the linter warning
+        return parser.matches_pattern(path, pattern)
 
     def _add_path_to_tree(
         self,
@@ -123,7 +138,7 @@ class MarkdownGenerator:
         try:
             children = sorted(path.iterdir())
         except (PermissionError, OSError):
-            # Skip directories we can't read or that have too many symlinks
+            # Skip directories we can't read
             state.tree.append(f"{prefix}{prefix_symbol} [ ] {display_name}/")
             return False
 
@@ -184,7 +199,7 @@ class MarkdownGenerator:
             included_files={file_path.resolve() for file_path in parsed_files},
             parser=CodeParser(self.config),
             tree=tree,
-            max_depth=self.MAX_TREE_DEPTH,
+            max_depth=self.max_tree_depth,
         )
 
         root_path = self._find_repo_root(repo_root)
@@ -192,40 +207,12 @@ class MarkdownGenerator:
         tree.append("```")
         return "\n".join(tree)
 
-    def _matches_pattern(self, path: Path, pattern: str) -> bool:
-        """Check if a path matches a glob pattern.
-
-        Args:
-            path: Path to check.
-            pattern: Glob pattern to match against.
-
-        Returns:
-            True if the path matches the pattern.
-        """
-        import fnmatch
-        import os
-
-        # Convert pattern and path to forward slashes for consistency
-        pattern = pattern.replace(os.sep, "/")
-        path_str = str(path).replace(os.sep, "/")
-
-        # Handle directory patterns (ending with /)
-        if pattern.endswith("/"):
-            return any(part == pattern.rstrip("/") for part in Path(path_str).parts)
-
-        # Match against the full path and just the name
-        return fnmatch.fnmatch(path_str, pattern) or fnmatch.fnmatch(path.name, pattern)
-
     def _generate_header(self) -> str:
-        """Generate the header section of the documentation.
-
-        Returns:
-            Header section as a string.
-        """
-        return "# Project Documentation\n\n"
+        """Generate the document header."""
+        return "# Code Map\n\n_Generated documentation of the codebase structure and files._\n\n"
 
     def _generate_overview(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
-        """Generate overview section.
+        """Generate the overview section with file counts and repository structure.
 
         Args:
             parsed_files: Dictionary mapping file paths to their parsed contents.
@@ -233,189 +220,75 @@ class MarkdownGenerator:
         Returns:
             Generated overview section.
         """
+        total_files = len(parsed_files)
+
         overview = ["## Overview\n"]
-        if not parsed_files:
-            overview.append("No files found for analysis.\n")
-            return "\n".join(overview)
-
-        overview.append("This documentation was generated by CodeMap.\n")
-        overview.append(f"Total files analyzed: {len(parsed_files)}\n")
-
-        overview.append("\n## File Structure\n")
-        overview.append("Files marked with [x] are included in this documentation:\n")
-        overview.append(
-            self._generate_file_tree(parsed_files, next(iter(parsed_files)).parent if parsed_files else Path.cwd()),
-        )
+        overview.append(f"**Total Files:** {total_files}\n")
+        overview.append("\n### Repository Structure\n")
+        overview.append(self._generate_file_tree(parsed_files, self.repo_root))
 
         return "\n".join(overview)
 
-    def _generate_dependencies(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
-        """Generate dependencies section.
-
-        Args:
-            parsed_files: Dictionary mapping file paths to their parsed contents.
-
-        Returns:
-            Generated dependencies section.
-        """
-        deps = ["\n\n## Dependencies\n"]
-        all_imports = set()
-        for symbols in parsed_files.values():
-            all_imports.update(symbols.get("imports", []))
-
-        if all_imports:
-            deps.append("### External Dependencies\n")
-            deps.extend(f"- {imp}" for imp in sorted(all_imports))
-
-        return "\n".join(deps)
-
-    def _get_language_for_file(self, file_path: Path) -> str:
-        """Get the markdown code block language identifier based on file extension.
-
-        Args:
-            file_path: Path to the file.
-
-        Returns:
-            Language identifier for markdown code block.
-        """
-        extension_map = {
-            ".py": "python",
-            ".js": "javascript",
-            ".jsx": "javascript",
-            ".ts": "typescript",
-            ".tsx": "typescript",
-            ".java": "java",
-            ".go": "go",
-            ".rs": "rust",
-            ".rb": "ruby",
-            ".php": "php",
-            ".cs": "csharp",
-            ".cpp": "cpp",
-            ".c": "c",
-            ".h": "c",
-            ".hpp": "cpp",
-            ".sh": "bash",
-            ".yaml": "yaml",
-            ".yml": "yaml",
-            ".json": "json",
-            ".md": "markdown",
-            ".html": "html",
-            ".css": "css",
-            ".scss": "scss",
-            ".sql": "sql",
-            ".xml": "xml",
-            ".toml": "toml",
-        }
-        return extension_map.get(file_path.suffix.lower(), "")
-
-    def _escape_markdown(self, text: str) -> str:
-        """Escape markdown special characters that could affect formatting.
-
-        Only escapes characters that could be interpreted as markdown syntax
-        in regular text (not in code blocks or headings).
-
-        Args:
-            text: Text to escape.
-
-        Returns:
-            Escaped text.
-        """
-        # Only escape characters that could be interpreted as markdown syntax
-        # in regular text (not in code blocks or headings)
-        special_chars = ["*", "_", "`"]  # These are the main ones that affect inline formatting
-        escaped_text = text
-        for char in special_chars:
-            escaped_text = escaped_text.replace(char, f"\\{char}")
-        return escaped_text
-
-    def _generate_file_documentation(self, file_path: Path, symbols: dict[str, Any]) -> str:
+    def _generate_file_documentation(self, file_path: Path, file_info: dict[str, Any]) -> str:
         """Generate documentation for a single file.
 
         Args:
-            file_path: Path to the file being documented.
-            symbols: Dictionary containing parsed symbols from the file.
+            file_path: Path to the file.
+            file_info: Dictionary with parsed file information.
 
         Returns:
-            Generated markdown documentation for the file.
+            Generated file documentation.
         """
-        docs = []
+        rel_path = file_path.relative_to(self.repo_root)
 
-        if "docstring" in symbols:
-            # Escape docstrings since they can contain markdown formatting
-            docs.append(self._escape_markdown(symbols["docstring"]))
-            docs.append("")
+        docs = [f"### {rel_path}\n"]
 
-        if "content" in symbols and symbols.get("content", "").strip():
-            # Include the full content without truncation
-            content = symbols["content"]
-            language = self._get_language_for_file(file_path)
-            docs.append(f"```{language}")
-            docs.append(content)
-            docs.append("```")
-            docs.append("")
+        # Add classes if any
+        if file_info.get("classes"):
+            docs.append("\n**Classes:**\n")
+            class_items = [f"- `{cls}`\n" for cls in sorted(file_info.get("classes", []))]
+            docs.extend(class_items)
 
-        if "classes" in symbols:
-            for class_name in symbols["classes"]:
-                # No need to escape in headings
-                docs.append(f"#### {class_name}")
-                if class_name in symbols.get("attributes", {}):
-                    docs.append("\nAttributes:")
-                    for attr, attr_type in symbols["attributes"][class_name].items():
-                        docs.append(f"- {attr}: {attr_type}")
-                docs.append("")
+        # Add imports if any
+        if file_info.get("imports"):
+            docs.append("\n**Imports:**\n")
+            import_items = [f"- `{imp}`\n" for imp in sorted(file_info.get("imports", []))]
+            docs.extend(import_items)
 
-        if "functions" in symbols:
-            for func_name in symbols["functions"]:
-                # No need to escape in headings
-                docs.append(f"#### {func_name}")
-                docs.append("")
+        # Add file content with syntax highlighting
+        content = file_info.get("content", "")
+        if content:
+            file_ext = file_path.suffix.lstrip(".")
+            # Truncate very large files
+            if len(content) > MAX_CONTENT_LENGTH:
+                content = content[:MAX_CONTENT_LENGTH] + "\n...\n[Content truncated for brevity]"
+            docs.append(f"\n```{file_ext}\n{content}\n```\n")
 
         return "\n".join(docs)
 
     def generate_documentation(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
-        """Generate markdown documentation from parsed files.
+        """Generate complete documentation for the codebase.
 
         Args:
             parsed_files: Dictionary mapping file paths to their parsed contents.
 
         Returns:
-            Generated markdown documentation as a string.
+            Generated documentation.
         """
-        markdown = [self._generate_header()]
+        sections = []
 
-        # Generate sections based on config
-        sections = self.config.get("sections", ["overview", "dependencies", "details"])
+        # Add header
+        sections.append(self._generate_header())
 
-        for section in sections:
-            if section == "overview":
-                markdown.append(self._generate_overview(parsed_files))
-            elif section == "dependencies":
-                markdown.append(self._generate_dependencies(parsed_files))
-            elif section == "details":
-                # Sort files by importance score if available, defaulting to 0
-                sorted_files = sorted(
-                    parsed_files.items(),
-                    key=lambda x: (
-                        # Primary sort by importance score (descending)
-                        -(x[1].get("importance_score", 0) or 0),
-                        # Secondary sort by file path (ascending) for stable ordering
-                        str(x[0]),
-                    ),
-                )
+        # Add overview section
+        sections.append(self._generate_overview(parsed_files))
 
-                markdown.append("\n\n## Details\n")
-                for file_path, symbols in sorted_files:
-                    rel_path = file_path.relative_to(self.repo_root)
-                    # No need to escape in headings
-                    markdown.append(f"\n### {rel_path}\n")
-                    file_docs = self._generate_file_documentation(file_path, symbols)
-                    markdown.append(file_docs)
-            else:
-                # Custom section
-                section_title = section.replace("_", " ").title()
-                markdown.append(f"\n\n## {section_title}\n")
+        # Add file details
+        sections.append("## File Details\n")
+        for file_path, file_info in sorted(parsed_files.items()):
+            sections.append(self._generate_file_documentation(file_path, file_info))
 
-        return "\n".join(markdown)
+        return "\n\n".join(sections)
 
     def _add_clean_path_to_tree(
         self,
@@ -426,7 +299,7 @@ class MarkdownGenerator:
         *,
         is_last: bool = True,
     ) -> None:
-        """Add a path and its children to the tree representation without checkboxes.
+        """Add a path to the clean tree representation (without checkboxes).
 
         Args:
             path: Path to add.
@@ -441,8 +314,8 @@ class MarkdownGenerator:
         if not self._should_process_path(path, state.parser):
             return
 
-        # Get the actual directory name for display
-        display_name = path.name if path.name else path.resolve().name
+        # Special handling for root directory
+        display_name = "root" if depth == 0 else path.name
 
         # Determine the prefix symbol based on whether this is the last item
         prefix_symbol = "└──" if is_last else "├──"
@@ -455,14 +328,14 @@ class MarkdownGenerator:
         try:
             children = sorted(path.iterdir())
         except (PermissionError, OSError):
-            # Skip directories we can't read or that have too many symlinks
+            # Skip directories we can't read
             state.tree.append(f"{prefix}{prefix_symbol} {display_name}/")
             return
 
         # Add directory to tree
         state.tree.append(f"{prefix}{prefix_symbol} {display_name}/")
 
-        # Process all children
+        # Process children
         for i, child in enumerate(children):
             is_last_child = i == len(children) - 1
             self._add_clean_path_to_tree(
@@ -474,23 +347,22 @@ class MarkdownGenerator:
             )
 
     def generate_tree(self, repo_root: Path) -> str:
-        """Generate a clean tree representation of the repository structure without checkboxes.
+        """Generate a clean tree representation without checkboxes.
 
         Args:
             repo_root: Root directory of the repository.
 
         Returns:
-            Generated tree representation.
+            Generated tree representation without checkboxes.
         """
-        tree = ["```"]
+        tree = []
         state = TreeState(
-            included_files=set(),  # Not needed for clean tree
+            included_files=set(),  # Not used for clean tree
             parser=CodeParser(self.config),
             tree=tree,
-            max_depth=self.MAX_TREE_DEPTH,
+            max_depth=self.max_tree_depth,
         )
 
-        # Use the provided path directly instead of finding repo root
-        self._add_clean_path_to_tree(repo_root, state)
-        tree.append("```")
+        root_path = self._find_repo_root(repo_root)
+        self._add_clean_path_to_tree(root_path, state)
         return "\n".join(tree)

@@ -59,36 +59,30 @@ class Product(BaseModel):
     # Create parsed file data
     parsed_files = {
         sample_repo / "models.py": {
-            "docstring": "Sample models for testing.",
             "classes": ["BaseModel", "User", "Order", "OrderItem", "Product"],
             "imports": ["datetime"],
             "references": [],
-            "bases": {
-                "User": ["BaseModel"],
-                "Order": ["BaseModel"],
-                "OrderItem": ["BaseModel"],
-                "Product": ["BaseModel"],
-            },
-            "attributes": {
-                "BaseModel": {"created_at": "datetime", "updated_at": "datetime | None"},
-                "User": {"name": "str", "email": "str", "orders": "list[Order]"},
-                "Order": {"order_id": "str", "user": "User", "total": "float", "items": "list[OrderItem]"},
-                "OrderItem": {"order": "Order", "product": "Product", "quantity": "int", "price": "float"},
-                "Product": {"name": "str", "price": "float", "description": "str | None"},
-            },
+            "content": """
+class BaseModel:
+    created_at: str
+    updated_at: str | None
+
+class User(BaseModel):
+    name: str
+    email: str
+    orders: list[Order]
+""",
         },
     }
 
     doc = generator.generate_documentation(parsed_files)
     assert doc
-    assert "# Project Documentation" in doc
-    assert "## File Structure" in doc
+    assert "# Code Map" in doc
+    assert "## Overview" in doc
+    assert "## File Details" in doc
     assert "models.py" in doc
     assert "BaseModel" in doc
     assert "User" in doc
-    assert "Order" in doc
-    assert "OrderItem" in doc
-    assert "Product" in doc
 
 
 def test_file_sorting(generator: MarkdownGenerator, sample_repo: Path) -> None:
@@ -101,28 +95,22 @@ def test_file_sorting(generator: MarkdownGenerator, sample_repo: Path) -> None:
     # Create parsed file data
     parsed_files = {
         sample_repo / "z.py": {
-            "docstring": "Z class",
             "classes": ["Z"],
             "imports": [],
             "references": [],
-            "bases": {},
-            "attributes": {},
+            "content": "class Z: pass",
         },
         sample_repo / "a.py": {
-            "docstring": "A class",
             "classes": ["A"],
             "imports": [],
             "references": [],
-            "bases": {},
-            "attributes": {},
+            "content": "class A: pass",
         },
         sample_repo / "m.py": {
-            "docstring": "M class",
             "classes": ["M"],
             "imports": [],
             "references": [],
-            "bases": {},
-            "attributes": {},
+            "content": "class M: pass",
         },
     }
 
@@ -136,31 +124,20 @@ def test_file_sorting(generator: MarkdownGenerator, sample_repo: Path) -> None:
     assert a_pos < m_pos < z_pos
 
 
-def test_markdown_escaping(tmp_path: Path) -> None:
-    """Test that markdown special characters are properly escaped."""
-    # Create a test file with content containing markdown special characters
-    test_file = tmp_path / "special.py"
-    test_file.write_text('"""A file with *special* _characters_."""\n\nclass Test:\n    pass')
+def test_tree_generation(generator: MarkdownGenerator, sample_repo: Path) -> None:
+    """Test the tree generation functionality."""
+    # Create some files for the tree generation
+    (sample_repo / "module1" / "file1.py").parent.mkdir(exist_ok=True, parents=True)
+    (sample_repo / "module1" / "file1.py").write_text("# Test file")
+    (sample_repo / "module2" / "file2.py").parent.mkdir(exist_ok=True, parents=True)
+    (sample_repo / "module2" / "file2.py").write_text("# Test file 2")
 
-    # Initialize generator
-    generator = MarkdownGenerator(tmp_path, {})
+    # Generate a tree
+    tree = generator.generate_tree(sample_repo)
+    assert tree
 
-    # Create parsed file data with special characters
-    parsed_files = {
-        test_file: {
-            "docstring": "A file with *special* _characters_",
-            "classes": ["Test"],
-            "imports": [],
-            "references": [],
-            "bases": {},
-            "attributes": {},
-        },
-    }
-
-    # Generate documentation
-    docs = generator.generate_documentation(parsed_files)
-    assert docs
-
-    # Check that markdown characters are escaped
-    assert r"\*special\*" in docs
-    assert r"\_characters\_" in docs
+    # The tree should contain the directories and files
+    assert "module1" in tree
+    assert "module2" in tree
+    assert "file1.py" in tree
+    assert "file2.py" in tree
