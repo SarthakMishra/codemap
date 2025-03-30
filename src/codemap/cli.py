@@ -81,11 +81,11 @@ ForceFlag: TypeAlias = Annotated[
 ]
 
 
-def _format_output_path(repo_root: Path, output_path: Path | None, config: dict) -> Path:
+def _format_output_path(project_root: Path, output_path: Path | None, config: dict) -> Path:
     """Format the output path according to configuration.
 
     Args:
-        repo_root: Root directory of the repository
+        project_root: Root directory of the project (where .codemap.yml is located)
         output_path: Optional output path from command line
         config: Configuration dictionary
 
@@ -102,18 +102,18 @@ def _format_output_path(repo_root: Path, output_path: Path | None, config: dict)
     timestamp_format = output_config.get("timestamp_format", "%Y%m%d_%H%M%S")
 
     # Special case for test paths that start with /test
-    if str(repo_root).startswith("/test"):
+    if str(project_root).startswith("/test"):
         # For tests, just return the expected path without trying to create it
-        base_path = repo_root / base_dir
+        base_path = project_root / base_dir
         timestamp = datetime.now(tz=timezone.utc).strftime(timestamp_format)
-        directory = repo_root.name
+        directory = project_root.name
         base = "documentation"
         filename = filename_format.replace(".{directory}", "") if directory == "" else filename_format
         filename = filename.format(base=base, directory=directory, timestamp=timestamp)
         return base_path / filename
 
     # Create base directory if it doesn't exist
-    base_path = repo_root / base_dir
+    base_path = project_root / base_dir
 
     # For testing purposes, we'll catch permission errors and create a fallback path
     try:
@@ -126,7 +126,7 @@ def _format_output_path(repo_root: Path, output_path: Path | None, config: dict)
 
     # Format the filename
     timestamp = datetime.now(tz=timezone.utc).strftime(timestamp_format)
-    directory = repo_root.name
+    directory = project_root.name
     base = "documentation"
 
     # Handle root directory case using ternary operator
@@ -236,7 +236,7 @@ def generate(
         documentation = _generate_documentation(repo_root, parsed_files, config_data)
 
         # Write output
-        output_path = _write_documentation(repo_root, output, config_data, documentation)
+        output_path = _write_documentation(output, config_data, documentation)
 
         console.print(f"\n✨ Documentation generated successfully: {output_path}")
 
@@ -252,13 +252,15 @@ def _prepare_for_generation(repo_root: Path, config: Path | None, map_tokens: in
     """Prepare for documentation generation by loading configuration and parsing files.
 
     Args:
-        repo_root: The root directory of the repository
+        repo_root: The root directory of the repository to analyze
         config: Optional path to configuration file
         map_tokens: Optional token limit override
 
     Returns:
         Tuple of (config_data, parsed_files)
     """
+    # Load configuration from either the specified config file or find .codemap.yml
+    # in the current directory or its parents
     config_loader = ConfigLoader(str(config) if config else None)
     config_data = config_loader.config
 
@@ -325,11 +327,10 @@ def _generate_documentation(repo_root: Path, parsed_files: dict, config_data: di
     return documentation
 
 
-def _write_documentation(repo_root: Path, output: Path | None, config_data: dict, documentation: str) -> Path:
+def _write_documentation(output: Path | None, config_data: dict, documentation: str) -> Path:
     """Write documentation to the specified output path.
 
     Args:
-        repo_root: The root directory of the repository
         output: Optional output path
         config_data: Configuration data
         documentation: Documentation content to write
@@ -341,8 +342,12 @@ def _write_documentation(repo_root: Path, output: Path | None, config_data: dict
         FileNotFoundError: If output directory doesn't exist and cannot be created
         PermissionError: If output file cannot be written due to permissions
     """
+    # Get the config loader to access the project root directory
+    config_loader = ConfigLoader()
+    project_root = config_loader.project_root
+
     # Format and write output
-    output_path = _format_output_path(repo_root, output, config_data)
+    output_path = _format_output_path(project_root, output, config_data)
 
     # Check if output path is in a non-existent directory
     if output and not output_path.parent.exists():

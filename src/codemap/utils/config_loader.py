@@ -32,6 +32,8 @@ class ConfigLoader:
             config_path: Path to a custom config file. Uses .codemap.yml if not provided.
         """
         self.config_path = config_path or ".codemap.yml"
+        self.config_file = Path(self.config_path)
+        self.project_root = self.config_file.parent if self.config_path != ".codemap.yml" else Path.cwd()
         self.config = self._load_config()
 
     def _validate_config(self, config: dict[str, Any]) -> None:
@@ -77,18 +79,27 @@ class ConfigLoader:
             FileNotFoundError: If config file doesn't exist.
             ConfigError: If config values are invalid.
         """
-        config_file = Path(self.config_path)
+        # If we're looking for a default .codemap.yml in the current directory, try to find it in parent directories
+        if self.config_path == ".codemap.yml":
+            current_dir = Path.cwd()
+            while current_dir != current_dir.parent:
+                config_file_path = current_dir / ".codemap.yml"
+                if config_file_path.exists():
+                    self.config_file = config_file_path
+                    self.project_root = current_dir
+                    break
+                current_dir = current_dir.parent
 
-        # If no config path was specified, use default config
-        if self.config_path == ".codemap.yml" and not config_file.exists():
+        # If no config path was specified and not found in parent directories, use default config
+        if self.config_path == ".codemap.yml" and not self.config_file.exists():
             return DEFAULT_CONFIG.copy()
 
         # If specific config path was provided but doesn't exist, raise error
-        if not config_file.exists():
+        if not self.config_file.exists():
             msg = f"Config file not found: {self.config_path}"
             raise FileNotFoundError(msg)
 
-        with config_file.open() as f:
+        with self.config_file.open() as f:
             user_config = yaml.safe_load(f) or {}
 
         self._validate_config(user_config)
