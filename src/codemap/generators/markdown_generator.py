@@ -416,3 +416,81 @@ class MarkdownGenerator:
                 markdown.append(f"\n\n## {section_title}\n")
 
         return "\n".join(markdown)
+
+    def _add_clean_path_to_tree(
+        self,
+        path: Path,
+        state: TreeState,
+        prefix: str = "",
+        depth: int = 0,
+        *,
+        is_last: bool = True,
+    ) -> None:
+        """Add a path and its children to the tree representation without checkboxes.
+
+        Args:
+            path: Path to add.
+            state: Tree generation state.
+            prefix: Current tree prefix for formatting.
+            depth: Current depth in tree.
+            is_last: Whether this is the last item in its parent directory.
+        """
+        if depth > state.max_depth:
+            return
+
+        if not self._should_process_path(path, state.parser):
+            return
+
+        # Get the actual directory name for display
+        display_name = path.name if path.name else path.resolve().name
+
+        # Determine the prefix symbol based on whether this is the last item
+        prefix_symbol = "└──" if is_last else "├──"
+
+        if path.is_file():
+            state.tree.append(f"{prefix}{prefix_symbol} {display_name}")
+            return
+
+        # Handle directory
+        try:
+            children = sorted(path.iterdir())
+        except (PermissionError, OSError):
+            # Skip directories we can't read or that have too many symlinks
+            state.tree.append(f"{prefix}{prefix_symbol} {display_name}/")
+            return
+
+        # Add directory to tree
+        state.tree.append(f"{prefix}{prefix_symbol} {display_name}/")
+
+        # Process all children
+        for i, child in enumerate(children):
+            is_last_child = i == len(children) - 1
+            self._add_clean_path_to_tree(
+                child,
+                state,
+                prefix + ("    " if is_last else "│   "),
+                depth + 1,
+                is_last=is_last_child,
+            )
+
+    def generate_tree(self, repo_root: Path) -> str:
+        """Generate a clean tree representation of the repository structure without checkboxes.
+
+        Args:
+            repo_root: Root directory of the repository.
+
+        Returns:
+            Generated tree representation.
+        """
+        tree = ["```"]
+        state = TreeState(
+            included_files=set(),  # Not needed for clean tree
+            parser=CodeParser(self.config),
+            tree=tree,
+            max_depth=self.MAX_TREE_DEPTH,
+        )
+
+        # Use the provided path directly instead of finding repo root
+        self._add_clean_path_to_tree(repo_root, state)
+        tree.append("```")
+        return "\n".join(tree)

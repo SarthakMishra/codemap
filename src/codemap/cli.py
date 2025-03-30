@@ -61,6 +61,15 @@ MapTokensOpt: TypeAlias = Annotated[
         help="Override token limit",
     ),
 ]
+TreeFlag: TypeAlias = Annotated[
+    bool,
+    typer.Option(
+        "--tree",
+        "-t",
+        help="Generate only directory tree structure",
+        is_flag=True,
+    ),
+]
 VerboseFlag: TypeAlias = Annotated[
     bool,
     typer.Option(
@@ -218,17 +227,53 @@ def init(
 
 
 @app.command()
-def generate(
+def generate(  # noqa: PLR0913
     path: PathArg = Path(),
     output: OutputOpt = None,
     config: ConfigOpt = None,
     map_tokens: MapTokensOpt = None,
+    tree: TreeFlag = None,
     is_verbose: VerboseFlag = None,
 ) -> None:
     """Generate documentation for the specified path."""
     setup_logging(is_verbose=is_verbose)
     try:
         repo_root = path.resolve()
+
+        # If tree-only mode is requested, generate and output the tree
+        if tree:
+            # Load configuration
+            config_loader = ConfigLoader(str(config) if config else None)
+            config_data = config_loader.config
+
+            # Generate tree
+            with Progress() as progress:
+                task = progress.add_task("Generating repository tree...", total=None)
+                # Create a generator using the project root for config but generate tree for the target path
+                generator = MarkdownGenerator(config_loader.project_root, config_data)
+                tree_content = generator.generate_tree(repo_root)  # Use repo_root (target path) directly
+                progress.update(task, completed=True)
+
+            # Output the tree
+            if output:
+                # Write to file if output is specified
+                try:
+                    output_path = Path(output)
+                    if not output_path.parent.exists():
+                        output_path.parent.mkdir(parents=True, exist_ok=True)
+                    output_path.write_text(tree_content)
+                    console.print(f"\n✨ Tree structure generated successfully: [bold blue]{output_path}[/]")
+                except (PermissionError, FileNotFoundError, OSError) as e:
+                    console.print(f"[red]Error writing tree to file: {e}[/]")
+                    raise typer.Exit(1) from e
+            else:
+                # Print to console if no output specified
+                console.print(f"\n✨ Directory Tree Structure for: [bold blue]{repo_root}[/]\n")
+                console.print(tree_content)
+
+            return
+
+        # Regular documentation generation
         # Load configuration and parse files
         config_data, parsed_files = _prepare_for_generation(repo_root, config, map_tokens)
 
