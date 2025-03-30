@@ -60,8 +60,23 @@ Options:
   -o, --output PATH    Output file path [default: documentation.md]
   -c, --config PATH    Path to config file
   --map-tokens INT     Override token limit
-  -v, --verbose       Enable verbose output with debug logs
-  --help              Show this message and exit
+  -t, --tree           Generate only directory tree structure
+  -v, --verbose        Enable verbose output with debug logs
+  --help               Show this message and exit
+```
+
+#### Directory Tree Generation
+
+Generate just the directory tree structure for your project:
+
+```bash
+codemap generate --tree [PATH]
+```
+
+This will display a clean directory tree without checkboxes. You can also save the tree to a file:
+
+```bash
+codemap generate --tree [PATH] -o tree.txt
 ```
 
 ### Verbose Mode
