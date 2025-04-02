@@ -47,12 +47,13 @@ Arguments:
   PATH  Path to the codebase to analyze [default: .]
 
 Options:
-  -o, --output PATH    Output file path [default: documentation.md]
-  -c, --config PATH    Path to config file
-  --map-tokens INT     Override token limit
-  -t, --tree           Generate only directory tree structure
-  -v, --verbose        Enable verbose output with debug logs
-  --help               Show this message and exit
+  -o, --output PATH                Output file path [default: documentation.md]
+  -c, --config PATH                Path to config file
+  --map-tokens INT                 Override token limit (set to 0 for unlimited)
+  --max-content-length INT         Maximum content length for file display (set to 0 for unlimited)
+  -t, --tree                       Generate only directory tree structure
+  -v, --verbose                    Enable verbose output with debug logs
+  --help                           Show this message and exit
 ```
 
 #### Directory Tree Generation
@@ -88,7 +89,7 @@ Use verbose mode to:
 Create a `.codemap.yml` file in your project root to customize the behavior:
 
 ```yaml
-# Maximum number of tokens to include in the documentation
+# Maximum number of tokens to include in the documentation (0 for unlimited)
 token_limit: 10000
 
 # Whether to respect gitignore patterns
@@ -96,20 +97,28 @@ use_gitignore: true
 
 # Directory to store documentation files
 output_dir: documentation
+
+# Maximum content length for file display (0 for unlimited)
+max_content_length: 5000
 ```
 
 #### Configuration Options
 
-- `token_limit`: Controls how many tokens of content to include in the documentation
+- `token_limit`: Controls how many tokens of content to include in the documentation (set to 0 for unlimited)
 - `use_gitignore`: When enabled, files matched by patterns in .gitignore will be excluded
 - `output_dir`: The directory where documentation files will be saved
+- `max_content_length`: Controls the maximum length of each file's content in the output (set to 0 for unlimited)
 
 When you run CodeMap without specifying an output file, it will create a file in the format `documentation_TIMESTAMP.md` in the configured output directory.
 
 You can override the configuration file using the command-line options:
 
 ```bash
-codemap generate --map-tokens 5000 -o custom/path/docs.md
+# Set unlimited token processing and file content length
+codemap generate --map-tokens 0 --max-content-length 0 /path/to/project
+
+# Set a specific token limit but unlimited file content display
+codemap generate --map-tokens 5000 --max-content-length 0 -o custom/path/docs.md
 ```
 
 ## License

@@ -57,7 +57,14 @@ MapTokensOpt: TypeAlias = Annotated[
     int | None,
     typer.Option(
         "--map-tokens",
-        help="Override token limit",
+        help="Override token limit (set to 0 for unlimited)",
+    ),
+]
+MaxContentLengthOpt: TypeAlias = Annotated[
+    int | None,
+    typer.Option(
+        "--max-content-length",
+        help="Maximum content length for file display (set to 0 for unlimited)",
     ),
 ]
 TreeFlag: TypeAlias = Annotated[
@@ -165,7 +172,7 @@ def _process_file(
     Args:
         file_path: Path to the file to process
         parser: CodeParser instance
-        token_limit: Maximum number of tokens allowed
+        token_limit: Maximum number of tokens allowed (0 means infinite)
         total_tokens: Current token count
         progress: Optional progress bar to update
 
@@ -179,7 +186,8 @@ def _process_file(
         file_info = parser.parse_file(file_path)
         tokens = _count_tokens(file_path)
 
-        if total_tokens + tokens > token_limit:
+        # Only check token limit if it's greater than 0 (not infinite)
+        if token_limit > 0 and total_tokens + tokens > token_limit:
             logger.warning("Token limit reached, skipping remaining files")
             return None, total_tokens
 
@@ -261,7 +269,7 @@ def _process_directory(
     Args:
         target_path: Path to process
         parser: CodeParser instance
-        token_limit: Maximum number of tokens allowed
+        token_limit: Maximum number of tokens allowed (0 means infinite)
 
     Returns:
         Dictionary of parsed files
@@ -280,9 +288,11 @@ def _process_directory(
                 if file_info is not None:
                     parsed_files[file_path] = file_info
                     total_tokens = new_total
-                if total_tokens >= token_limit:
+                # Only break if token_limit > 0 and we've exceeded it
+                if token_limit > 0 and total_tokens >= token_limit:
                     break
-            if total_tokens >= token_limit:
+            # Only break if token_limit > 0 and we've exceeded it
+            if token_limit > 0 and total_tokens >= token_limit:
                 break
 
     return parsed_files
@@ -294,6 +304,7 @@ def generate(  # noqa: PLR0913, PLR0915, C901, PLR0912
     output: OutputOpt = None,
     config: ConfigOpt = None,
     map_tokens: MapTokensOpt = None,
+    max_content_length: MaxContentLengthOpt = None,
     tree: TreeFlag = None,
     is_verbose: VerboseFlag = None,
 ) -> None:
@@ -312,6 +323,10 @@ def generate(  # noqa: PLR0913, PLR0915, C901, PLR0912
         # Override token limit if specified
         if map_tokens is not None:
             config_data["token_limit"] = map_tokens
+
+        # Override max content length if specified
+        if max_content_length is not None:
+            config_data["max_content_length"] = max_content_length
 
         # If tree-only mode is requested, generate and output the tree
         if tree:

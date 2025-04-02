@@ -36,6 +36,7 @@ class MarkdownGenerator:
         self.target_path = Path(repo_path).resolve()
         self.config = config or {}
         self.max_tree_depth = self.config.get("max_tree_depth", MAX_TREE_DEPTH)
+        self.max_content_length = self.config.get("max_content_length", MAX_CONTENT_LENGTH)
         self.repo_root = self._find_repo_root(self.target_path)
 
         # Default excluded directories
@@ -302,9 +303,9 @@ class MarkdownGenerator:
         if content:
             # Use the correct language for syntax highlighting
             highlight_lang = language if language != "unknown" else file_path.suffix.lstrip(".")
-            # Truncate very large files
-            if len(content) > MAX_CONTENT_LENGTH:
-                content = content[:MAX_CONTENT_LENGTH] + "\n...\n[Content truncated for brevity]"
+            # Truncate very large files if max_content_length is set and not zero (infinite)
+            if self.max_content_length > 0 and len(content) > self.max_content_length:
+                content = content[: self.max_content_length] + "\n...\n[Content truncated for brevity]"
             docs.append(f"\n```{highlight_lang}\n{content}\n```\n")
 
         return "\n".join(docs)
