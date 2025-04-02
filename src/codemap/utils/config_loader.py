@@ -35,6 +35,8 @@ class ConfigLoader:
         self._config: dict[str, Any] = {}
         self.config_file_dir: Path | None = None
         self._load_config(config_path)
+        # Validate the loaded configuration
+        self._validate_config(self._config)
 
     def _find_config_file(self) -> str | None:
         """Find a configuration file by searching current and parent directories.
@@ -67,6 +69,10 @@ class ConfigLoader:
 
         Args:
             config_path: Path to configuration file.
+
+        Raises:
+            FileNotFoundError: If a specific config path is provided but not found.
+            yaml.YAMLError: If the YAML in the config file is invalid.
         """
         # Start with default config
         self._config = DEFAULT_CONFIG.copy()
@@ -76,8 +82,9 @@ class ConfigLoader:
         if config_path:
             config_file = Path(config_path)
             if not config_file.exists():
-                logger.warning("Specified config file not found: %s", config_path)
-                config_file = None
+                error_msg = f"Config file not found: {config_path}"
+                logger.warning(error_msg)
+                raise FileNotFoundError(error_msg)
         else:
             found_path = self._find_config_file()
             if found_path:
@@ -98,8 +105,13 @@ class ConfigLoader:
                     # Update default config with file config
                     self._config.update(file_config)
                     logger.debug("Loaded config from %s", config_file)
-            except (yaml.YAMLError, OSError) as e:
+            except yaml.YAMLError as e:
+                error_msg = f"Error parsing YAML in config file: {e}"
                 logger.warning("Error loading config file: %s", e)
+                raise
+            except OSError as e:
+                logger.warning("Error reading config file: %s", e)
+                raise
         else:
             logger.debug("Using default configuration")
 

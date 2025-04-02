@@ -403,7 +403,45 @@ class MarkdownGenerator:
         # Use target path by default
         root_path = path or self.target_path
 
-        # Create a parser for determining which files to include
+        # When parsed_files is specified, create a simplified tree showing only those files
+        if parsed_files is not None:
+            # Create a tree manually from parsed_files
+            lines = []
+            prefix = "└── "
+
+            # Map of directory to files in that directory
+            dir_files = {}
+
+            # Group files by directory
+            for file_path in sorted(parsed_files):
+                # Get path relative to the root path
+                # Skip files that are not under root_path
+                if not self._is_path_under_root(file_path, root_path):
+                    continue
+
+                rel_path = file_path.relative_to(root_path)
+                parent = str(rel_path.parent)
+                # Add file to its parent directory
+                if parent not in dir_files:
+                    dir_files[parent] = []
+                dir_files[parent].append(rel_path.name)
+
+            # Build a simple tree of included files
+            for directory, files in sorted(dir_files.items()):
+                if directory != ".":
+                    lines.append(f"{prefix}{directory}/")
+                    for i, file in enumerate(sorted(files)):
+                        file_prefix = "    └── " if i == len(files) - 1 else "    ├── "
+                        lines.append(f"{prefix}{file_prefix}{file}")
+                else:
+                    # Root directory files
+                    for i, file in enumerate(sorted(files)):
+                        file_prefix = "└── " if i == len(files) - 1 else "├── "
+                        lines.append(f"{file_prefix}{file}")
+
+            return "\n".join(lines)
+
+        # If no parsed_files specified, use the standard tree generation
         parser = CodeParser(self.config)
 
         state = TreeState(
@@ -418,3 +456,20 @@ class MarkdownGenerator:
 
         # Convert tree to markdown
         return self._generate_file_tree(state.tree)
+
+    def _is_path_under_root(self, path: Path, root_path: Path) -> bool:
+        """Check if a path is under the root path.
+
+        Args:
+            path: The path to check
+            root_path: The root path
+
+        Returns:
+            True if the path is under the root path, False otherwise
+        """
+        try:
+            path.relative_to(root_path)
+        except ValueError:
+            return False
+        else:
+            return True

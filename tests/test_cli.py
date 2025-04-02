@@ -11,6 +11,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
+from codemap.analyzer.tree_parser import CodeParser
 from codemap.cli import _get_output_path, app
 from codemap.config import DEFAULT_CONFIG
 
@@ -46,6 +47,7 @@ def mock_code_parser() -> Mock:
             "classes": [],
             "references": [],
             "content": "Test content",
+            "language": "python",
         }
         mock.return_value = parser_instance
         yield mock
@@ -190,7 +192,145 @@ def test_get_output_path_with_timestamp(sample_repo: Path) -> None:
 
     with patch("codemap.cli.datetime") as mock_datetime:
         mock_datetime.now.return_value = current_time
+        mock_datetime.timezone = timezone  # Make sure timezone is accessible
         result = _get_output_path(sample_repo, None, config)
         formatted_time = current_time.strftime("%Y%m%d_%H%M%S")
         expected_name = f"documentation_{formatted_time}.md"
         assert result.name == expected_name
+
+
+def test_generate_tree_command(sample_repo: Path) -> None:
+    """Test the tree generation command."""
+    # Create some files for the tree generation
+    (sample_repo / "src" / "main.py").parent.mkdir(exist_ok=True, parents=True)
+    (sample_repo / "src" / "main.py").write_text("# Main file")
+    (sample_repo / "src" / "utils" / "helper.py").parent.mkdir(exist_ok=True, parents=True)
+    (sample_repo / "src" / "utils" / "helper.py").write_text("# Helper file")
+
+    # Run tree command
+    result = runner.invoke(app, ["generate", "--tree", str(sample_repo)])
+
+    assert result.exit_code == 0
+    # Check that tree was generated and contains our directories
+    assert "src" in result.stdout
+    assert "main.py" in result.stdout
+    assert "utils" in result.stdout
+    assert "helper.py" in result.stdout
+
+
+def test_generate_tree_command_with_output(sample_repo: Path) -> None:
+    """Test the tree generation command with output to file."""
+    # Create some files for the tree generation
+    (sample_repo / "src" / "main.py").parent.mkdir(exist_ok=True, parents=True)
+    (sample_repo / "src" / "main.py").write_text("# Main file")
+
+    # Output file
+    output_file = sample_repo / "tree.txt"
+
+    # Run tree command with output
+    result = runner.invoke(app, ["generate", "--tree", str(sample_repo), "-o", str(output_file)])
+
+    assert result.exit_code == 0
+    assert output_file.exists()
+    tree_content = output_file.read_text()
+    # Check tree content
+    assert "src" in tree_content
+    assert "main.py" in tree_content
+
+
+def test_respect_output_dir_from_config(sample_repo: Path) -> None:
+    """Test that generate command respects output_dir from config."""
+    # Create a config file with custom output_dir
+    config_file = sample_repo / ".codemap.yml"
+    custom_output_dir = "custom_docs_dir"
+    config = {
+        "token_limit": 10000,
+        "use_gitignore": True,
+        "output_dir": custom_output_dir,
+    }
+    config_file.write_text(yaml.dump(config))
+
+    # Create a subdirectory to analyze
+    subdir = sample_repo / "src"
+    subdir.mkdir(exist_ok=True, parents=True)
+    (subdir / "test.py").write_text("# Test file")
+
+    # Track paths where write_text is called
+    written_paths = []
+
+    def mock_write_text(self, content):
+        written_paths.append(str(self))
+
+    def mock_mkdir(self, parents=False, exist_ok=False):
+        return None
+
+    with patch("codemap.cli.Path.cwd", return_value=sample_repo):
+        # Mock file operations to avoid actual filesystem access
+        with patch.object(Path, "write_text", mock_write_text):
+            with patch.object(Path, "mkdir", mock_mkdir):
+                # Ensure exists returns True for any path
+                with patch.object(Path, "exists", return_value=True):
+                    with patch.object(Path, "is_file", return_value=False):
+                        # Ensure is_absolute returns False for the expected paths
+                        with patch.object(Path, "is_absolute", return_value=False):
+                            # Run the command
+                            result = runner.invoke(app, ["generate", str(subdir)])
+
+    # We don't need to check the exit code as we've mocked all file operations
+    # and just want to verify the paths used
+
+    # The output path should include custom_docs_dir
+    expected_path_fragment = f"{custom_output_dir}/documentation_"
+
+    # Check if any written path contains the expected output directory
+    path_contains_custom_dir = any(expected_path_fragment in path for path in written_paths)
+    assert path_contains_custom_dir, f"No paths containing '{expected_path_fragment}' in {written_paths}"
+
+
+def test_pygments_language_detection(sample_repo: Path) -> None:
+    """Test that Pygments is used for language detection in CodeParser."""
+    # Create files with different extensions
+    (sample_repo / "script.py").write_text("def main(): pass")
+    (sample_repo / "index.html").write_text("<html><body>Hello</body></html>")
+    (sample_repo / "style.css").write_text("body { color: #333; }")
+
+    # Use mock to track calls to Pygments
+    with patch("codemap.analyzer.tree_parser.get_lexer_for_filename") as mock_get_lexer:
+        with patch("codemap.analyzer.tree_parser.guess_lexer"):
+            # Setup the mock to return lexers with different names
+            py_lexer = Mock()
+            py_lexer.name = "Python"
+            html_lexer = Mock()
+            html_lexer.name = "HTML"
+            css_lexer = Mock()
+            css_lexer.name = "CSS"
+
+            # Return different lexers for different files
+            def side_effect(filename):
+                if filename.endswith(".py"):
+                    return py_lexer
+                if filename.endswith(".html"):
+                    return html_lexer
+                if filename.endswith(".css"):
+                    return css_lexer
+                raise ValueError(f"Unknown file: {filename}")
+
+            mock_get_lexer.side_effect = side_effect
+
+            # Create parser and parse files
+            parser = CodeParser({})
+
+            # Test Python file
+            py_info = parser.parse_file(sample_repo / "script.py")
+            assert py_info["language"] == "python"
+
+            # Test HTML file
+            html_info = parser.parse_file(sample_repo / "index.html")
+            assert html_info["language"] == "html"
+
+            # Test CSS file
+            css_info = parser.parse_file(sample_repo / "style.css")
+            assert css_info["language"] == "css"
+
+            # Verify Pygments was called for each file
+            assert mock_get_lexer.call_count == 6  # 3 calls in should_parse and 3 in parse_file

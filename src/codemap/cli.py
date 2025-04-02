@@ -103,13 +103,17 @@ def _get_output_path(repo_root: Path, output_path: Path | None, config: dict) ->
     # Get output directory from config
     output_dir = config.get("output_dir", "documentation")
 
-    # Create output directory if it doesn't exist
-    output_dir_path = repo_root / output_dir
+    # If output_dir is absolute, use it directly
+    output_dir_path = Path(output_dir)
+    if not output_dir_path.is_absolute():
+        # Otherwise, create the output directory in the project root
+        output_dir_path = repo_root / output_dir
+
     output_dir_path.mkdir(parents=True, exist_ok=True)
 
     # Generate a filename with timestamp
     timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"documentation.code-map.{timestamp}.md"
+    filename = f"documentation_{timestamp}.md"
 
     return output_dir_path / filename
 
@@ -285,7 +289,7 @@ def _process_directory(
 
 
 @app.command()
-def generate(  # noqa: PLR0913, PLR0915
+def generate(  # noqa: PLR0913, PLR0915, C901, PLR0912
     path: PathArg = Path(),
     output: OutputOpt = None,
     config: ConfigOpt = None,
@@ -358,13 +362,22 @@ def generate(  # noqa: PLR0913, PLR0915
         else:
             # Get output directory from config
             output_dir = config_data.get("output_dir", "documentation")
-            # Create the output directory in the project root
-            output_dir_path = project_root / output_dir
-            output_dir_path.mkdir(parents=True, exist_ok=True)
+
+            # If output_dir is absolute, use it directly
+            output_dir_path = Path(output_dir)
+            if not output_dir_path.is_absolute():
+                # Otherwise, create the output directory relative to the project root
+                output_dir_path = project_root / output_dir
+
+            try:
+                output_dir_path.mkdir(parents=True, exist_ok=True)
+            except (PermissionError, OSError) as e:
+                console.print(f"[red]Unable to create output directory {output_dir_path}: {e!s}")
+                raise typer.Exit(1) from e
 
             # Generate a timestamp for the filename
             timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-            filename = f"documentation.code-map.{timestamp}.md"
+            filename = f"documentation_{timestamp}.md"
             output_path = output_dir_path / filename
 
         # Write documentation to file
@@ -373,11 +386,16 @@ def generate(  # noqa: PLR0913, PLR0915
             TextColumn("[progress.description]{task.description}"),
         ) as progress:
             task = progress.add_task("Writing documentation...", total=1)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-            output_path.write_text(documentation)
-            progress.update(task, advance=1)
-
-        console.print(f"[green]Documentation written to {output_path}")
+            try:
+                # Ensure parent directory exists
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(documentation)
+                progress.update(task, advance=1)
+                console.print(f"[green]Documentation written to {output_path}")
+            except (PermissionError, OSError) as e:
+                progress.update(task, advance=1)
+                console.print(f"[red]Error writing documentation to {output_path}: {e!s}")
+                raise typer.Exit(1) from e
 
     except (FileNotFoundError, PermissionError, OSError) as e:
         console.print(f"[red]File system error: {e!s}")
