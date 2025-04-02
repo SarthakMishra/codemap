@@ -1,13 +1,16 @@
-"""Configuration loading and management for the CodeMap tool."""
+"""Configuration loading utilities for the CodeMap tool."""
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from codemap.config import DEFAULT_CONFIG
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigError(TypeError):
@@ -19,18 +22,95 @@ class ConfigError(TypeError):
 
 
 class ConfigLoader:
-    """Handles loading and merging of default and user-provided configurations."""
+    """Load and validate configuration for the CodeMap tool."""
 
     def __init__(self, config_path: str | None = None) -> None:
-        """Initialize the config loader.
+        """Initialize the configuration loader.
 
         Args:
-            config_path: Path to a custom config file. Uses .codemap.yml if not provided.
+            config_path: Optional path to the configuration file.
+                         If None, will search for .codemap.yml in the current
+                         directory and parent directories.
         """
-        self.config_path = config_path or ".codemap.yml"
-        self.config_file = Path(self.config_path)
-        self.project_root = self.config_file.parent if self.config_path != ".codemap.yml" else Path.cwd()
-        self.config = self._load_config()
+        self._config: dict[str, Any] = {}
+        self.config_file_dir: Path | None = None
+        self._load_config(config_path)
+
+    def _find_config_file(self) -> str | None:
+        """Find a configuration file by searching current and parent directories.
+
+        Returns:
+            Path to the configuration file, or None if not found.
+        """
+        # Start in current directory
+        current_dir = Path.cwd()
+        max_depth = 10  # Allow more levels to find the repo root
+
+        # Try current directory and parents
+        for _ in range(max_depth):
+            config_path = current_dir / ".codemap.yml"
+            if config_path.exists():
+                logger.debug("Found config file at: %s", config_path)
+                return str(config_path.resolve())
+
+            # Go up one level
+            parent_dir = current_dir.parent
+            if parent_dir == current_dir:  # We've reached the root
+                break
+            current_dir = parent_dir
+
+        logger.debug("No config file found in directory hierarchy")
+        return None
+
+    def _load_config(self, config_path: str | None) -> None:
+        """Load configuration from file or use defaults.
+
+        Args:
+            config_path: Path to configuration file.
+        """
+        # Start with default config
+        self._config = DEFAULT_CONFIG.copy()
+
+        # Try to find a config file if not specified
+        config_file = None
+        if config_path:
+            config_file = Path(config_path)
+            if not config_file.exists():
+                logger.warning("Specified config file not found: %s", config_path)
+                config_file = None
+        else:
+            found_path = self._find_config_file()
+            if found_path:
+                config_file = Path(found_path)
+                logger.debug("Using config file: %s", found_path)
+
+        # Load from file if available
+        if config_file and config_file.exists():
+            try:
+                with config_file.open(encoding="utf-8") as f:
+                    file_config = yaml.safe_load(f)
+
+                # Store the directory containing the config file
+                self.config_file_dir = config_file.parent.resolve()
+                logger.debug("Config file directory: %s", self.config_file_dir)
+
+                if file_config:
+                    # Update default config with file config
+                    self._config.update(file_config)
+                    logger.debug("Loaded config from %s", config_file)
+            except (yaml.YAMLError, OSError) as e:
+                logger.warning("Error loading config file: %s", e)
+        else:
+            logger.debug("Using default configuration")
+
+    @property
+    def config(self) -> dict[str, Any]:
+        """Get the configuration dictionary.
+
+        Returns:
+            Configuration dictionary
+        """
+        return self._config
 
     def _validate_config(self, config: dict[str, Any]) -> None:
         """Validate configuration values.
@@ -49,39 +129,3 @@ class ConfigLoader:
 
         if "output_dir" in config and not isinstance(config["output_dir"], str):
             raise ConfigError(ConfigError.INVALID_OUTPUT_DIR)
-
-    def _load_config(self) -> dict[str, Any]:
-        """Load and merge configuration.
-
-        Returns:
-            Merged configuration dictionary.
-
-        Raises:
-            FileNotFoundError: If config file doesn't exist.
-            ConfigError: If config values are invalid.
-        """
-        # If we're looking for a default .codemap.yml in the current directory, try to find it in parent directories
-        if self.config_path == ".codemap.yml":
-            current_dir = Path.cwd()
-            while current_dir != current_dir.parent:
-                config_file_path = current_dir / ".codemap.yml"
-                if config_file_path.exists():
-                    self.config_file = config_file_path
-                    self.project_root = current_dir
-                    break
-                current_dir = current_dir.parent
-
-        # If no config path was specified and not found in parent directories, use default config
-        if self.config_path == ".codemap.yml" and not self.config_file.exists():
-            return DEFAULT_CONFIG.copy()
-
-        # If specific config path was provided but doesn't exist, raise error
-        if not self.config_file.exists():
-            msg = f"Config file not found: {self.config_path}"
-            raise FileNotFoundError(msg)
-
-        with self.config_file.open() as f:
-            user_config = yaml.safe_load(f) or {}
-
-        self._validate_config(user_config)
-        return {**DEFAULT_CONFIG, **user_config}

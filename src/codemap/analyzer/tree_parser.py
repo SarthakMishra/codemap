@@ -9,11 +9,14 @@ import re
 from pathlib import Path
 from typing import Any
 
+from pygments.lexers import get_lexer_for_filename, guess_lexer
+from pygments.util import ClassNotFound
+
 logger = logging.getLogger(__name__)
 
 
 class CodeParser:
-    """Parses Python source code files to extract basic file information."""
+    """Parses source code files to extract basic file information."""
 
     def __init__(self, config: dict[str, Any] | None = None) -> None:
         """Initialize the file parser.
@@ -101,10 +104,6 @@ class CodeParser:
         Returns:
             True if the file should be parsed, False otherwise.
         """
-        # Only parse Python files
-        if not file_path.name.endswith(".py"):
-            return False
-
         # Default excluded directories and files
         default_excluded = ["__pycache__", ".git", ".env", ".venv", "venv", "build", "dist"]
         for excluded in default_excluded:
@@ -117,7 +116,13 @@ class CodeParser:
                 if self._matches_pattern(file_path, pattern):
                     return False
 
-        return True
+        # Try to get a lexer for the file - if successful, we can parse it
+        try:
+            get_lexer_for_filename(file_path.name)
+        except ClassNotFound:
+            return False
+        else:
+            return True
 
     def parse_file(self, file_path: Path) -> dict[str, Any]:
         """Parse a file and extract basic information.
@@ -139,6 +144,7 @@ class CodeParser:
             "classes": [],
             "references": [],
             "content": "",
+            "language": "unknown",
         }
 
         if not self.should_parse(file_path):
@@ -150,15 +156,31 @@ class CodeParser:
                 content = f.read()
                 file_info["content"] = content
 
-                # Extract basic imports using regex
-                import_pattern = re.compile(r"^(?:from|import)\s+([^\s]+)", re.MULTILINE)
-                imports = import_pattern.findall(content)
-                file_info["imports"] = [imp.strip() for imp in imports]
+                # Try to detect language using Pygments
+                try:
+                    # First try by filename
+                    lexer = get_lexer_for_filename(file_path.name)
+                except ClassNotFound:
+                    try:
+                        # If that fails, try to guess from content
+                        lexer = guess_lexer(content)
+                    except ClassNotFound:
+                        lexer = None
 
-                # Extract class names using regex
-                class_pattern = re.compile(r"^\s*class\s+([^\s(:]+)", re.MULTILINE)
-                classes = class_pattern.findall(content)
-                file_info["classes"] = [cls.strip() for cls in classes]
+                if lexer:
+                    file_info["language"] = lexer.name.lower()
+
+                # Only extract imports and classes for Python files
+                if file_path.suffix == ".py":
+                    # Extract basic imports using regex
+                    import_pattern = re.compile(r"^(?:from|import)\s+([^\s]+)", re.MULTILINE)
+                    imports = import_pattern.findall(content)
+                    file_info["imports"] = [imp.strip() for imp in imports]
+
+                    # Extract class names using regex
+                    class_pattern = re.compile(r"^\s*class\s+([^\s(:]+)", re.MULTILINE)
+                    classes = class_pattern.findall(content)
+                    file_info["classes"] = [cls.strip() for cls in classes]
 
                 return file_info
         except (OSError, UnicodeDecodeError):

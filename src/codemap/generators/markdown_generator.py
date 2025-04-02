@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from typing import Any
 
 from codemap.analyzer.tree_parser import CodeParser
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
 # Constants
-MAX_TREE_DEPTH = 20
-MAX_CONTENT_LENGTH = 10000  # ~100 lines
+MAX_TREE_DEPTH = 5
+MAX_CONTENT_LENGTH = 5000
 
 
 @dataclass
@@ -21,41 +19,69 @@ class TreeState:
 
     included_files: set[Path]
     parser: CodeParser
-    tree: list[str]
+    tree: dict[str, Any]
     max_depth: int
 
 
 class MarkdownGenerator:
-    """Generates markdown documentation from parsed code files."""
+    """Generates markdown documentation for a code repository."""
 
-    def __init__(self, repo_root: Path, config: dict[str, Any]) -> None:
+    def __init__(self, repo_path: Path, config: dict[str, Any] | None = None) -> None:
         """Initialize the markdown generator.
 
         Args:
-            repo_root: Root directory of the repository.
-            config: Configuration dictionary for documentation generation.
+            repo_path: Path to the repository or specific target to analyze
+            config: Configuration dictionary
         """
-        self.repo_root = repo_root
-        self.config = config
-        self.max_tree_depth = MAX_TREE_DEPTH
+        self.target_path = Path(repo_path).resolve()
+        self.config = config or {}
+        self.max_tree_depth = self.config.get("max_tree_depth", MAX_TREE_DEPTH)
+        self.repo_root = self._find_repo_root(self.target_path)
 
-    def _find_repo_root(self, start_path: Path, max_levels: int = 5) -> Path:
-        """Find the repository root by looking for .git directory.
+        # Default excluded directories
+        self.default_excluded = [
+            "__pycache__",
+            ".git",
+            ".env",
+            ".venv",
+            "venv",
+            "node_modules",
+            "build",
+            "dist",
+        ]
+
+    def _find_repo_root(self, start_path: Path) -> Path:
+        """Find the root of the repository by looking for .git directory.
 
         Args:
-            start_path: Path to start searching from.
-            max_levels: Maximum number of parent directories to check.
+            start_path: Path to start searching from
 
         Returns:
-            Repository root path.
+            Path to the repository root
         """
-        current_root = start_path
-        for _ in range(max_levels):
-            if (current_root / ".git").exists():
-                return current_root
-            if current_root.parent == current_root:  # reached filesystem root
+        # If the start_path is a file or a specific directory that exists,
+        # use its parent or the path itself as the root
+        if start_path.is_file():
+            return start_path.parent
+        if start_path.is_dir() and start_path.exists():
+            return start_path
+
+        # Otherwise, try to find the Git root
+        current_path = start_path
+        max_depth = 10  # Guard against infinite loop
+
+        for _ in range(max_depth):
+            if (current_path / ".git").exists():
+                return current_path
+
+            # Stop if we've reached the filesystem root
+            parent_path = current_path.parent
+            if parent_path == current_path:
                 break
-            current_root = current_root.parent
+
+            current_path = parent_path
+
+        # If we can't find a .git directory, just use the start_path
         return start_path
 
     def _should_process_path(self, path: Path, parser: CodeParser) -> bool:
@@ -75,8 +101,7 @@ class MarkdownGenerator:
                     return False
 
         # Skip default excluded directories
-        default_excluded = ["__pycache__", ".git", ".env", ".venv", "venv", "build", "dist"]
-        return all(excluded not in str(path) for excluded in default_excluded)
+        return all(excluded not in str(path) for excluded in self.default_excluded)
 
     def _matches_gitignore_pattern(self, path: Path, pattern: str, parser: CodeParser) -> bool:
         """Check if a path matches a gitignore pattern using the parser's method.
@@ -131,7 +156,7 @@ class MarkdownGenerator:
             can_parse = state.parser.should_parse(path)
             # Files that can be parsed should show inclusion status
             checkbox = "[x]" if (can_parse and is_included) else "[ ]"
-            state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}")
+            state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} {checkbox} {display_name}"
             return is_included if can_parse else True
 
         # Handle directory
@@ -139,7 +164,7 @@ class MarkdownGenerator:
             children = sorted(path.iterdir())
         except (PermissionError, OSError):
             # Skip directories we can't read
-            state.tree.append(f"{prefix}{prefix_symbol} [ ] {display_name}/")
+            state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} [ ] {display_name}/"
             return False
 
         # Process all children first to determine if all are included
@@ -155,7 +180,7 @@ class MarkdownGenerator:
                 TreeState(
                     included_files=state.included_files,
                     parser=state.parser,
-                    tree=[],  # Temporary tree for child
+                    tree={},  # Temporary tree for child
                     max_depth=state.max_depth,
                 ),
                 prefix + ("    " if is_last else "│   "),
@@ -170,7 +195,7 @@ class MarkdownGenerator:
 
         # Add directory with appropriate checkbox
         checkbox = "[x]" if (has_parseable and all_parseable_included) else "[ ]"
-        state.tree.append(f"{prefix}{prefix_symbol} {checkbox} {display_name}/")
+        state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} {checkbox} {display_name}/"
 
         # Now add all children to the real tree
         for child, _, is_last_child in child_results:
@@ -184,28 +209,36 @@ class MarkdownGenerator:
 
         return all_parseable_included
 
-    def _generate_file_tree(self, parsed_files: dict[Path, dict[str, Any]], repo_root: Path) -> str:
+    def _generate_file_tree(self, tree: dict[str, Any]) -> str:
         """Generate a tree representation of the repository structure with checkboxes.
 
         Args:
-            parsed_files: Dictionary mapping file paths to their parsed contents.
-            repo_root: Root directory of the repository.
+            tree: Dictionary representing the tree structure or parsed files
 
         Returns:
             Generated tree representation with checkboxes.
         """
-        tree = ["```markdown"]
-        state = TreeState(
-            included_files={file_path.resolve() for file_path in parsed_files},
-            parser=CodeParser(self.config),
-            tree=tree,
-            max_depth=self.max_tree_depth,
-        )
+        # Check if we're getting a tree or parsed_files dictionary
+        if "content" in tree:
+            # It's a proper tree structure with content
+            return "\n".join(list(tree["content"].values()))
 
-        root_path = self._find_repo_root(repo_root)
-        self._add_path_to_tree(root_path, state)
-        tree.append("```")
-        return "\n".join(tree)
+        # It's a parsed_files dictionary, generate a simple list
+        lines = []
+        for file_path in sorted(tree.keys()):
+            # Get relative path from target_path for better display
+            # Determine if file is within target path first to avoid try-except in loop
+            if str(file_path).startswith(str(self.target_path)):
+                try:
+                    rel_path = file_path.relative_to(self.target_path)
+                    lines.append(f"- {rel_path}")
+                except ValueError:
+                    # Fallback in case of unexpected error
+                    lines.append(f"- {file_path}")
+            else:
+                # File is not under target_path, show full path
+                lines.append(f"- {file_path}")
+        return "\n".join(lines)
 
     def _generate_header(self) -> str:
         """Generate the document header."""
@@ -220,12 +253,19 @@ class MarkdownGenerator:
         Returns:
             Generated overview section.
         """
-        total_files = len(parsed_files)
+        # Count files by language
+        language_counts = {}
+        for file_info in parsed_files.values():
+            lang = file_info.get("language", "unknown")
+            language_counts[lang] = language_counts.get(lang, 0) + 1
 
         overview = ["## Overview\n"]
-        overview.append(f"**Total Files:** {total_files}\n")
-        overview.append("\n### Repository Structure\n")
-        overview.append(self._generate_file_tree(parsed_files, self.repo_root))
+        overview.append(f"**Total Files:** {len(parsed_files)}\n")
+
+        if language_counts:
+            overview.append("\n**Files by Language:**\n")
+            for lang, count in sorted(language_counts.items()):
+                overview.append(f"- {lang.capitalize()}: {count}\n")
 
         return "\n".join(overview)
 
@@ -240,17 +280,19 @@ class MarkdownGenerator:
             Generated file documentation.
         """
         rel_path = file_path.relative_to(self.repo_root)
+        language = file_info.get("language", "unknown")
 
         docs = [f"### {rel_path}\n"]
+        docs.append(f"**Language:** {language.capitalize()}\n")
 
-        # Add classes if any
-        if file_info.get("classes"):
+        # Add classes if any (Python only)
+        if language == "python" and file_info.get("classes"):
             docs.append("\n**Classes:**\n")
             class_items = [f"- `{cls}`\n" for cls in sorted(file_info.get("classes", []))]
             docs.extend(class_items)
 
-        # Add imports if any
-        if file_info.get("imports"):
+        # Add imports if any (Python only)
+        if language == "python" and file_info.get("imports"):
             docs.append("\n**Imports:**\n")
             import_items = [f"- `{imp}`\n" for imp in sorted(file_info.get("imports", []))]
             docs.extend(import_items)
@@ -258,37 +300,39 @@ class MarkdownGenerator:
         # Add file content with syntax highlighting
         content = file_info.get("content", "")
         if content:
-            file_ext = file_path.suffix.lstrip(".")
+            # Use the correct language for syntax highlighting
+            highlight_lang = language if language != "unknown" else file_path.suffix.lstrip(".")
             # Truncate very large files
             if len(content) > MAX_CONTENT_LENGTH:
                 content = content[:MAX_CONTENT_LENGTH] + "\n...\n[Content truncated for brevity]"
-            docs.append(f"\n```{file_ext}\n{content}\n```\n")
+            docs.append(f"\n```{highlight_lang}\n{content}\n```\n")
 
         return "\n".join(docs)
 
     def generate_documentation(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
-        """Generate complete documentation for the codebase.
+        """Generate markdown documentation for the codebase.
 
         Args:
-            parsed_files: Dictionary mapping file paths to their parsed contents.
+            parsed_files: Dictionary of parsed files
 
         Returns:
-            Generated documentation.
+            Markdown documentation as a string
         """
-        sections = []
+        parts: list[str] = []
 
-        # Add header
-        sections.append(self._generate_header())
+        # Start directly with overview (removing header)
+        parts.append(self._generate_overview(parsed_files))
 
-        # Add overview section
-        sections.append(self._generate_overview(parsed_files))
+        # Generate file tree
+        parts.append("## 📁 Project Structure")
+        parts.append(self.generate_tree(self.target_path, parsed_files=set(parsed_files.keys())))
 
-        # Add file details
-        sections.append("## File Details\n")
+        # Generate documentation for each file
+        parts.append("## 📄 Files")
         for file_path, file_info in sorted(parsed_files.items()):
-            sections.append(self._generate_file_documentation(file_path, file_info))
+            parts.append(self._generate_file_documentation(file_path, file_info))
 
-        return "\n\n".join(sections)
+        return "\n\n".join(parts)
 
     def _add_clean_path_to_tree(
         self,
@@ -321,7 +365,7 @@ class MarkdownGenerator:
         prefix_symbol = "└──" if is_last else "├──"
 
         if path.is_file():
-            state.tree.append(f"{prefix}{prefix_symbol} {display_name}")
+            state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} {display_name}"
             return
 
         # Handle directory
@@ -329,11 +373,11 @@ class MarkdownGenerator:
             children = sorted(path.iterdir())
         except (PermissionError, OSError):
             # Skip directories we can't read
-            state.tree.append(f"{prefix}{prefix_symbol} {display_name}/")
+            state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} {display_name}/"
             return
 
         # Add directory to tree
-        state.tree.append(f"{prefix}{prefix_symbol} {display_name}/")
+        state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} {display_name}/"
 
         # Process children
         for i, child in enumerate(children):
@@ -346,23 +390,31 @@ class MarkdownGenerator:
                 is_last=is_last_child,
             )
 
-    def generate_tree(self, repo_root: Path) -> str:
-        """Generate a clean tree representation without checkboxes.
+    def generate_tree(self, path: Path | None = None, parsed_files: set[Path] | None = None) -> str:
+        """Generate a tree structure of the repository.
 
         Args:
-            repo_root: Root directory of the repository.
+            path: Root path to generate tree from, defaults to repo root
+            parsed_files: Set of parsed file paths to highlight in the tree
 
         Returns:
-            Generated tree representation without checkboxes.
+            Markdown-formatted tree structure
         """
-        tree = []
+        # Use target path by default
+        root_path = path or self.target_path
+
+        # Create a parser for determining which files to include
+        parser = CodeParser(self.config)
+
         state = TreeState(
-            included_files=set(),  # Not used for clean tree
-            parser=CodeParser(self.config),
-            tree=tree,
+            included_files=parsed_files or set(),
+            parser=parser,
+            tree={"name": root_path.name, "content": {}, "is_dir": True},
             max_depth=self.max_tree_depth,
         )
 
-        root_path = self._find_repo_root(repo_root)
+        # Use the clean path tree method to build the tree
         self._add_clean_path_to_tree(root_path, state)
-        return "\n".join(tree)
+
+        # Convert tree to markdown
+        return self._generate_file_tree(state.tree)

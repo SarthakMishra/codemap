@@ -6,13 +6,13 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 import yaml
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.progress import Progress
+from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing_extensions import TypeAlias
 
 from .analyzer.tree_parser import CodeParser
@@ -61,7 +61,7 @@ MapTokensOpt: TypeAlias = Annotated[
     ),
 ]
 TreeFlag: TypeAlias = Annotated[
-    bool,
+    bool | None,
     typer.Option(
         "--tree",
         "-t",
@@ -69,15 +69,15 @@ TreeFlag: TypeAlias = Annotated[
     ),
 ]
 VerboseFlag: TypeAlias = Annotated[
-    bool,
+    bool | None,
     typer.Option(
         "--verbose",
         "-v",
-        help="Enable verbose output with debug logs",
+        help="Enable verbose logging",
     ),
 ]
 ForceFlag: TypeAlias = Annotated[
-    bool,
+    bool | None,
     typer.Option(
         "--force",
         "-f",
@@ -109,7 +109,7 @@ def _get_output_path(repo_root: Path, output_path: Path | None, config: dict) ->
 
     # Generate a filename with timestamp
     timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-    filename = f"documentation_{timestamp}.md"
+    filename = f"documentation.code-map.{timestamp}.md"
 
     return output_dir_path / filename
 
@@ -145,18 +145,57 @@ def _count_tokens(file_path: Path) -> int:
             content = f.read()
             # Simple tokenization by whitespace
             return len(content.split())
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         return 0
+
+
+def _process_file(
+    file_path: Path,
+    parser: CodeParser,
+    token_limit: int,
+    total_tokens: int,
+    progress: Progress | None = None,
+) -> tuple[dict[str, Any] | None, int]:
+    """Process a single file and return its info and updated token count.
+
+    Args:
+        file_path: Path to the file to process
+        parser: CodeParser instance
+        token_limit: Maximum number of tokens allowed
+        total_tokens: Current token count
+        progress: Optional progress bar to update
+
+    Returns:
+        Tuple of (file_info, new_total_tokens)
+    """
+    try:
+        if not parser.should_parse(file_path):
+            return None, total_tokens
+
+        file_info = parser.parse_file(file_path)
+        tokens = _count_tokens(file_path)
+
+        if total_tokens + tokens > token_limit:
+            logger.warning("Token limit reached, skipping remaining files")
+            return None, total_tokens
+
+        if progress:
+            progress.update(progress.task_ids[0], advance=1)
+
+        return file_info, total_tokens + tokens
+    except (OSError, UnicodeDecodeError) as e:
+        logger.warning("Failed to parse file %s: %s", file_path, e)
+        return None, total_tokens
 
 
 @app.command()
 def init(
     path: PathArg = Path(),
-    force_flag: ForceFlag = False,
+    force_flag: ForceFlag = None,
     is_verbose: VerboseFlag = None,
 ) -> None:
     """Initialize a new CodeMap project in the specified directory."""
-    setup_logging(is_verbose=is_verbose)
+    setup_logging(is_verbose=bool(is_verbose))
     try:
         repo_root = path.resolve()
         config_file = repo_root / ".codemap.yml"
@@ -208,8 +247,45 @@ def init(
         raise typer.Exit(1) from e
 
 
+def _process_directory(
+    target_path: Path,
+    parser: CodeParser,
+    token_limit: int,
+) -> dict[Path, dict[str, Any]]:
+    """Process a directory and return parsed files.
+
+    Args:
+        target_path: Path to process
+        parser: CodeParser instance
+        token_limit: Maximum number of tokens allowed
+
+    Returns:
+        Dictionary of parsed files
+    """
+    parsed_files: dict[Path, dict[str, Any]] = {}
+    total_tokens = 0
+
+    with Progress() as progress:
+        _task = progress.add_task("Parsing files...", total=None)
+
+        for root, _, files in os.walk(target_path):
+            root_path = Path(root)
+            for file in files:
+                file_path = root_path / file
+                file_info, new_total = _process_file(file_path, parser, token_limit, total_tokens, progress)
+                if file_info is not None:
+                    parsed_files[file_path] = file_info
+                    total_tokens = new_total
+                if total_tokens >= token_limit:
+                    break
+            if total_tokens >= token_limit:
+                break
+
+    return parsed_files
+
+
 @app.command()
-def generate(  # noqa: PLR0913
+def generate(  # noqa: PLR0913, PLR0915
     path: PathArg = Path(),
     output: OutputOpt = None,
     config: ConfigOpt = None,
@@ -218,21 +294,28 @@ def generate(  # noqa: PLR0913
     is_verbose: VerboseFlag = None,
 ) -> None:
     """Generate documentation for the specified path."""
-    setup_logging(is_verbose=is_verbose)
+    setup_logging(is_verbose=bool(is_verbose))
     try:
-        repo_root = path.resolve()
+        target_path = path.resolve()
+
+        # Always use the current working directory as project root
+        project_root = Path.cwd()
+
+        # Load config and respect the configured output directory
+        config_loader = ConfigLoader(str(config) if config else None)
+        config_data = config_loader.config
+
+        # Override token limit if specified
+        if map_tokens is not None:
+            config_data["token_limit"] = map_tokens
 
         # If tree-only mode is requested, generate and output the tree
         if tree:
-            # Load configuration
-            config_loader = ConfigLoader(str(config) if config else None)
-            config_data = config_loader.config
-
             # Generate tree
             with Progress() as progress:
                 task = progress.add_task("Generating directory tree...", total=1)
-                generator = MarkdownGenerator(repo_root, config_data)
-                tree_content = generator.generate_tree(repo_root)
+                generator = MarkdownGenerator(target_path, config_data)
+                tree_content = generator.generate_tree(target_path)
                 progress.update(task, advance=1)
 
             # Write tree to output file or print to console
@@ -245,129 +328,63 @@ def generate(  # noqa: PLR0913
 
             return
 
-        # For full documentation generation, we need to load config, parse files, and generate docs
-        config_data, parsed_files = _prepare_for_generation(repo_root, config, map_tokens)
+        # Initialize parser and parse files
+        parser = CodeParser(config_data)
+        token_limit = config_data.get("token_limit", 10000)
+
+        # Process files based on whether target is a file or directory
+        if target_path.is_file():
+            parsed_files = {}
+            file_info, _ = _process_file(target_path, parser, token_limit, 0)
+            if file_info is not None:
+                parsed_files[target_path] = file_info
+        else:
+            parsed_files = _process_directory(target_path, parser, token_limit)
 
         # Generate documentation
-        documentation = _generate_documentation(repo_root, parsed_files, config_data)
-
-        # Write documentation to file
-        output_path = _write_documentation(repo_root, output, config_data, documentation)
-
-        console.print(f"[green]Documentation generated at: {output_path}")
-
-    except (OSError, ValueError) as e:
-        console.print(f"[red]Error: {e!s}")
-        logger.exception("Error generating documentation")
-        raise typer.Exit(1) from e
-
-
-def _prepare_for_generation(repo_root: Path, config: Path | None, map_tokens: int | None) -> tuple[dict, dict]:
-    """Prepare for documentation generation by loading config and parsing files.
-
-    Args:
-        repo_root: Root directory of the repository
-        config: Path to config file
-        map_tokens: Optional token limit override
-
-    Returns:
-        Tuple of (config_data, parsed_files)
-    """
-    # Load configuration
-    config_loader = ConfigLoader(str(config) if config else None)
-    config_data = config_loader.config
-    if map_tokens is not None:
-        config_data["token_limit"] = map_tokens
-
-    parsed_files = {}
-
-    with Progress() as progress:
-        # Count the number of files to parse
-        parser = CodeParser(config_data)
-        files_to_parse = []
-        for root, _, files in os.walk(repo_root):
-            for filename in files:
-                file_path = Path(root) / filename
-                if parser.should_parse(file_path):
-                    files_to_parse.append(file_path)
-
-        task = progress.add_task("Parsing files...", total=len(files_to_parse))
-
-        # Parse each file
-        for file_path in files_to_parse:
-            file_info = parser.parse_file(file_path)
-            parsed_files[file_path] = file_info
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+        ) as progress:
+            task = progress.add_task("Generating documentation...", total=1)
+            generator = MarkdownGenerator(target_path, config_data)
+            documentation = generator.generate_documentation(parsed_files)
             progress.update(task, advance=1)
 
-    return config_data, parsed_files
-
-
-def _generate_documentation(repo_root: Path, parsed_files: dict, config_data: dict) -> str:
-    """Generate documentation from parsed files.
-
-    Args:
-        repo_root: Root directory of the repository
-        parsed_files: Dictionary of parsed files
-        config_data: Configuration data
-
-    Returns:
-        Generated documentation as a string
-    """
-    token_limit = config_data.get("token_limit", 10000)
-
-    with Progress() as progress:
-        task = progress.add_task("Generating documentation...", total=2)
-
-        # Apply token limit by selecting files based on size
-        # Simple approach: sort files by size and include until we hit the token limit
-        file_tokens = [(path, _count_tokens(path)) for path in parsed_files]
-        sorted_files = sorted(file_tokens, key=lambda x: x[1], reverse=False)  # Small files first
-
-        filtered_files = {}
-        total_tokens = 0
-        for path, tokens in sorted_files:
-            if total_tokens + tokens <= token_limit:
-                filtered_files[path] = parsed_files[path]
-                total_tokens += tokens
-            if total_tokens >= token_limit:
-                break
-
-        progress.update(task, advance=1)
-
-        # Generate documentation
-        generator = MarkdownGenerator(repo_root, config_data)
-        documentation = generator.generate_documentation(filtered_files)
-        progress.update(task, advance=1)
-
-    return documentation
-
-
-def _write_documentation(repo_root: Path, output: Path | None, config_data: dict, documentation: str) -> Path:
-    """Write documentation to file.
-
-    Args:
-        repo_root: Root directory of the repository
-        output: Optional output path override
-        config_data: Configuration data
-        documentation: Generated documentation string
-
-    Returns:
-        Path where documentation was written
-    """
-    with Progress() as progress:
-        task = progress.add_task("Writing documentation...", total=1)
-
         # Determine output path
-        output_path = _get_output_path(repo_root, output, config_data)
+        if output:
+            # Use explicit output path if provided
+            output_path = output
+        else:
+            # Get output directory from config
+            output_dir = config_data.get("output_dir", "documentation")
+            # Create the output directory in the project root
+            output_dir_path = project_root / output_dir
+            output_dir_path.mkdir(parents=True, exist_ok=True)
 
-        # Create parent directories if needed
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+            # Generate a timestamp for the filename
+            timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
+            filename = f"documentation.code-map.{timestamp}.md"
+            output_path = output_dir_path / filename
 
         # Write documentation to file
-        output_path.write_text(documentation)
-        progress.update(task, advance=1)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+        ) as progress:
+            task = progress.add_task("Writing documentation...", total=1)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(documentation)
+            progress.update(task, advance=1)
 
-    return output_path
+        console.print(f"[green]Documentation written to {output_path}")
+
+    except (FileNotFoundError, PermissionError, OSError) as e:
+        console.print(f"[red]File system error: {e!s}")
+        raise typer.Exit(1) from e
+    except ValueError as e:
+        console.print(f"[red]Configuration error: {e!s}")
+        raise typer.Exit(1) from e
 
 
 def main() -> None:
