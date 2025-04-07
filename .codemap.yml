@@ -1,4 +1,4 @@
-token_limit: 10000
+token_limit: 0
 use_gitignore: true
 output_dir: documentation
-max_content_length: 1000
+max_content_length: 0
