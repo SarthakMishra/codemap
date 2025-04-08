@@ -280,3 +280,22 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
 
     # Return the list of other staged files that weren't part of this commit
     return other_staged
+
+
+def get_untracked_files() -> list[str]:
+    """Get a list of untracked files in the repository.
+
+    These are files that are not yet tracked by Git (new files that haven't been staged).
+
+    Returns:
+        List of untracked file paths
+
+    Raises:
+        GitError: If git command fails
+    """
+    try:
+        # Use ls-files with --others to get untracked files and --exclude-standard to respect gitignore
+        return run_git_command(["git", "ls-files", "--others", "--exclude-standard"]).splitlines()
+    except GitError as e:
+        msg = "Failed to get untracked files"
+        raise GitError(msg) from e
