@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 class CommitCommand:
     """Handles the commit command workflow."""
 
-    def __init__(self, path: Path | None = None, model: str = "gpt-3.5-turbo") -> None:
+    def __init__(self, path: Path | None = None, model: str = "gpt-4o-mini") -> None:
         """Initialize the commit command.
 
         Args:
