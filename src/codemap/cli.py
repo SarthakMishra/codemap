@@ -445,7 +445,7 @@ def commit(
             "-m",
             help="LLM model to use for message generation",
         ),
-    ] = "gpt-3.5-turbo",
+    ] = "gpt-4o-mini",
     api_key: Annotated[
         str | None,
         typer.Option(
