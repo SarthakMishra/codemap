@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 import sys
 
 # Import the run function directly
 from codemap.cli.commit import RunConfig, run
+from codemap.utils.git_utils import GitError
+
+logger = logging.getLogger(__name__)
 
 
 def main() -> int:
@@ -14,7 +18,8 @@ def main() -> int:
         # Create a default config with string strategy
         config = RunConfig(split_strategy="file")  # Use string value
         return run(config)
-    except Exception:
+    except (GitError, ValueError, OSError, TypeError):
+        logger.exception("Error running CodeMap commit")
         return 1
 
 
