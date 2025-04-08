@@ -249,7 +249,8 @@ def test_tree_with_specific_path(generator: MarkdownGenerator, sample_repo: Path
         assert "another_file.py" not in tree
 
 
-def test_tree_with_parsed_files_highlighting(generator: MarkdownGenerator, tmp_path: Path) -> None:
+@pytest.mark.usefixtures("generator")
+def test_tree_with_parsed_files_highlighting(tmp_path: Path) -> None:
     """Test tree generation with parsed_files parameter to highlight specific files."""
     # Create a clean test directory (not using sample_repo which has other files)
     test_dir = tmp_path / "test_tree"
