@@ -2,3 +2,34 @@ token_limit: 0
 use_gitignore: true
 output_dir: documentation
 max_content_length: 0
+
+# Commit feature configuration
+commit:
+  # Strategy for splitting diffs: file, hunk, semantic
+  strategy: file
+  
+  # LLM configuration
+  llm:
+    model: meta-llama/llama-4-scout-17b-16e-instruct
+    provider: groq
+    # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
+  
+  # Commit convention settings
+  convention:
+    types:
+      - feat     # New feature
+      - fix      # Bug fix
+      - docs     # Documentation
+      - style    # Formatting, missing semicolons, etc.
+      - refactor # Code change that neither fixes a bug nor adds a feature
+      - perf     # Performance improvement
+      - test     # Adding or updating tests
+      - build    # Build system or external dependencies
+      - ci       # CI configuration
+      - chore    # Other changes that don't modify src or test files
+    
+    # Optional scopes for your project (derived from directory structure if empty)
+    scopes: []
+    
+    # Maximum length for commit message subject line
+    max_length: 72
