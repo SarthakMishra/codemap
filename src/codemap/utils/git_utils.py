@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import subprocess
 from dataclasses import dataclass
@@ -158,7 +159,75 @@ def commit(message: str) -> None:
         raise GitError(msg) from e
 
 
-def commit_only_files(files: list[str], message: str) -> None:
+def get_other_staged_files(targeted_files: list[str]) -> list[str]:
+    """Get staged files that are not part of the targeted files.
+
+    Args:
+        targeted_files: List of files that are meant to be committed
+
+    Returns:
+        List of other staged files that might be committed inadvertently
+
+    Raises:
+        GitError: If git command fails
+    """
+    try:
+        # Get all staged files
+        all_staged = run_git_command(["git", "diff", "--cached", "--name-only"]).splitlines()
+
+        # Filter out the targeted files
+        return [f for f in all_staged if f not in targeted_files]
+    except GitError as e:
+        msg = "Failed to check for other staged files"
+        raise GitError(msg) from e
+
+
+def stash_staged_changes(exclude_files: list[str]) -> bool:
+    """Temporarily stash staged changes except for specified files.
+
+    This is used to ensure only specific files are committed when other
+    files might be mistakenly staged.
+
+    Args:
+        exclude_files: Files to exclude from stashing (to keep staged)
+
+    Returns:
+        Whether stashing was performed
+
+    Raises:
+        GitError: If git operations fail
+    """
+    try:
+        # First check if there are any other staged files
+        other_files = get_other_staged_files(exclude_files)
+        if not other_files:
+            return False
+
+        # Create a temporary index to save current state
+        run_git_command(["git", "stash", "push", "--keep-index", "--message", "CodeMap: temporary stash for commit"])
+    except GitError as e:
+        msg = "Failed to stash other staged changes"
+        raise GitError(msg) from e
+    else:
+        return True
+
+
+def unstash_changes() -> None:
+    """Restore previously stashed changes.
+
+    Raises:
+        GitError: If git operations fail
+    """
+    try:
+        stash_list = run_git_command(["git", "stash", "list"])
+        if "CodeMap: temporary stash for commit" in stash_list:
+            run_git_command(["git", "stash", "pop"])
+    except GitError as e:
+        msg = "Failed to restore stashed changes; you may need to manually run 'git stash pop'"
+        raise GitError(msg) from e
+
+
+def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False) -> None:
     """Create a commit with only the specified files.
 
     This ensures that we don't inadvertently commit other staged files.
@@ -168,16 +237,46 @@ def commit_only_files(files: list[str], message: str) -> None:
     Args:
         files: List of files to commit
         message: Commit message
+        ignore_hooks: Whether to ignore git hooks on failure
 
     Raises:
         GitError: If commit fails
     """
+    other_staged = []
+    did_stash = False
+
     try:
+        # Check for other staged files
+        other_staged = get_other_staged_files(files)
+
         # Stage the files
         run_git_command(["git", "add", *files])
 
         # Commit only the specified files by using pathspec
-        run_git_command(["git", "commit", "-m", message, "--", *files])
+        commit_cmd = ["git", "commit", "-m", message, "--", *files]
+        try:
+            run_git_command(commit_cmd)
+        except GitError as e:
+            # Check if failure might be due to git hooks
+            if "hook" in str(e).lower() and ignore_hooks:
+                # Try again with --no-verify to bypass hooks
+                run_git_command([*commit_cmd, "--no-verify"])
+            else:
+                raise
+
     except GitError as e:
+        if did_stash:
+            with contextlib.suppress(GitError):
+                unstash_changes()
+
         msg = f"Failed to commit files: {', '.join(files)}"
+        if "hook" in str(e).lower():
+            msg += " (git hook failed - check your hook scripts)"
         raise GitError(msg) from e
+    finally:
+        if did_stash:
+            with contextlib.suppress(GitError):
+                unstash_changes()
+
+    # Return the list of other staged files that weren't part of this commit
+    return other_staged
