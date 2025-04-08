@@ -9,11 +9,16 @@ description = "CLI tool for generating optimized markdown documentation from cod
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "litellm>=1.65.4.post1",
     "numpy>=1.26.4",
     "pygments>=2.19.1",
+    "python-dotenv>=1.1.0",
     "pyyaml>=6.0.2",
+    "questionary>=2.1.0",
+    "requests>=2.32.3",
     "rich>=13.9.4",
     "typer>=0.15.1",
+    "typing-extensions>=4.9.0",
 ]
 
 [dependency-groups]
@@ -30,7 +35,7 @@ ignore = ["*"]
 typeCheckingMode = "off"
 
 [project.scripts]
-codemap = "codemap.cli:main"
+codemap = "codemap.cli_entry:main"
 
 [tool.pytest]
 testpaths = ["tests"]
@@ -59,11 +64,14 @@ ignore = [
     # Rules that conflict with other tools/preferences
     "D203",  # one-blank-line-before-class
     "D212",  # multi-line-summary-first-line
+    "FBT001",  # Boolean positional arg in function definition (required for typer)
+    "FBT002",  # Boolean default value in function definition (required for typer)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = ["S101", "PLR2004"]
+"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003"]
+"src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
