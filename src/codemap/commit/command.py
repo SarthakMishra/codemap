@@ -12,6 +12,7 @@ from codemap.utils.git_utils import (
     get_repo_root,
     get_staged_diff,
     get_unstaged_diff,
+    get_untracked_files,
     stage_files,
 )
 
@@ -64,6 +65,19 @@ class CommitCommand:
             unstaged = get_unstaged_diff()
             if unstaged.files:
                 changes.append(unstaged)
+
+            # Check for untracked (new) files
+            untracked = get_untracked_files()
+            if untracked:
+                # Create a GitDiff object for untracked files
+                # Note: These won't have actual diff content since they're new
+                untracked_diff = GitDiff(
+                    files=untracked,
+                    content="",  # No content for untracked files
+                    is_staged=False,
+                )
+                changes.append(untracked_diff)
+
         except GitError as e:
             msg = f"Failed to get changes: {e}"
             raise RuntimeError(msg) from e
