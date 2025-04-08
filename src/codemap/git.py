@@ -79,7 +79,7 @@ class GitWrapper:
         self.stage_files(files)
         commit(message)
 
-    def commit_only_specified_files(self, files: list[str], message: str) -> None:
+    def commit_only_specified_files(self, files: list[str], message: str, ignore_hooks: bool = False) -> list[str]:
         """Stage and commit only the specified files.
 
         This ensures other staged changes don't get committed.
@@ -87,8 +87,12 @@ class GitWrapper:
         Args:
             files: List of files to commit
             message: Commit message
+            ignore_hooks: Whether to bypass git hooks on failure
+
+        Returns:
+            List of any other files that were staged but not included in this commit
 
         Raises:
             GitError: If commit fails
         """
-        commit_only_files(files, message)
+        return commit_only_files(files, message, ignore_hooks)
