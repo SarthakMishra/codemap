@@ -49,7 +49,7 @@ class CommitOptions:
     repo_path: Path
     split_strategy: SplitStrategy
     generation_mode: GenerationMode = field(default=GenerationMode.SMART)
-    model: str = field(default="gpt-3.5-turbo")
+    model: str = field(default="gpt-4o-mini")
     provider: str | None = field(default=None)
     api_base: str | None = field(default=None)
     commit: bool = field(default=True)
@@ -557,7 +557,7 @@ class RunConfig:
     split_strategy: SplitStrategy = SplitStrategy.FILE
     force_simple: bool = False
     api_key: str | None = None
-    model: str = "gpt-3.5-turbo"
+    model: str = "gpt-4o-mini"
     provider: str | None = None
     api_base: str | None = None
     commit: bool = True
