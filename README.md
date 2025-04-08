@@ -124,6 +124,30 @@ codemap commit --model gpt-4
 codemap commit --api-key YOUR_API_KEY
 ```
 
+#### Diff Splitting Strategies
+
+CodeMap offers three strategies for splitting your changes into logical chunks:
+
+1. **File Strategy** (`--strategy file`, default) ✅ **Recommended**
+   - Splits changes by individual files
+   - Each file with changes becomes a separate commit
+   - Best for most workflows and easiest to understand
+   - Ideal when your changes in different files are unrelated
+
+2. **Hunk Strategy** (`--strategy hunk`)
+   - Splits changes by hunks within files (chunks of changed lines)
+   - More granular than file-based splitting
+   - Creates separate commits for different sections of the same file
+   - Useful when you've made multiple unrelated changes to the same file
+
+3. **Semantic Strategy** (`--strategy semantic`)
+   - Groups related files together based on semantic relationships
+   - Intelligently combines changes that belong together
+   - Considers directory structure, naming patterns, and common file relationships
+   - Best for complex changes that touch multiple related files (e.g., implementation + tests)
+
+The default **file strategy** is recommended for most users as it provides a good balance between simplicity and effective organization. More advanced users may benefit from the other strategies depending on their specific workflow.
+
 You can configure the commit feature in your `.codemap.yml`:
 
 ```yaml
