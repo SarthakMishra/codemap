@@ -270,10 +270,53 @@ def handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> Non
         git: Git wrapper
     """
     try:
+        # Check for other staged files not part of this chunk
+        from codemap.utils.git_utils import GitError, get_other_staged_files
+
+        other_staged = get_other_staged_files(chunk.files)
+
+        if other_staged:
+            # Alert user about other staged files
+            console.print("[yellow]Warning:[/yellow] The following files are also staged but not part of this commit:")
+            for file in other_staged:
+                console.print(f"  - {file}")
+
+            # Ask user what to do
+            choices = [
+                {"value": "continue", "name": "Continue with just the selected files"},
+                {"value": "all", "name": "Include all staged files in this commit"},
+                {"value": "cancel", "name": "Cancel this commit"},
+            ]
+            action = questionary.select("Other files are staged. What would you like to do?", choices=choices).ask()
+
+            if action == "cancel":
+                console.print("[yellow]Commit cancelled[/yellow]")
+                return
+            if action == "all":
+                # Add all staged files to the chunk
+                chunk.files.extend(other_staged)
+
         # Use the more specific commit method to only commit these files
-        git.commit_only_specified_files(chunk.files, message)
-        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except (OSError, ValueError, RuntimeError) as e:
+        try:
+            git.commit_only_specified_files(chunk.files, message)
+            console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
+        except (GitError, OSError, ValueError, RuntimeError) as e:
+            # Check if this might be a git hook error
+            if "hook" in str(e).lower():
+                console.print(f"[yellow]Warning:[/yellow] Git hook failed: {e!s}")
+
+                # Ask if user wants to bypass hooks
+                if questionary.confirm("Would you like to try again bypassing git hooks?").ask():
+                    # Call with ignore_hooks=True
+                    from codemap.utils.git_utils import commit_only_files
+
+                    commit_only_files(chunk.files, message, ignore_hooks=True)
+                    console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s) (hooks bypassed)")
+                else:
+                    console.print("[yellow]Commit cancelled due to hook failure[/yellow]")
+            else:
+                console.print(f"[red]Error:[/red] {e!s}")
+    except (OSError, ValueError, RuntimeError, GitError) as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
@@ -289,10 +332,55 @@ def handle_edit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
     new_message = questionary.text("Edit commit message:", default=message).ask()
     if new_message:
         try:
+            # Check for other staged files not part of this chunk
+            from codemap.utils.git_utils import GitError, get_other_staged_files
+
+            other_staged = get_other_staged_files(chunk.files)
+
+            if other_staged:
+                # Alert user about other staged files
+                console.print(
+                    "[yellow]Warning:[/yellow] The following files are also staged but not part of this commit:",
+                )
+                for file in other_staged:
+                    console.print(f"  - {file}")
+
+                # Ask user what to do
+                choices = [
+                    {"value": "continue", "name": "Continue with just the selected files"},
+                    {"value": "all", "name": "Include all staged files in this commit"},
+                    {"value": "cancel", "name": "Cancel this commit"},
+                ]
+                action = questionary.select("Other files are staged. What would you like to do?", choices=choices).ask()
+
+                if action == "cancel":
+                    console.print("[yellow]Commit cancelled[/yellow]")
+                    return
+                if action == "all":
+                    # Add all staged files to the chunk
+                    chunk.files.extend(other_staged)
+
             # Use the more specific commit method to only commit these files
-            git.commit_only_specified_files(chunk.files, new_message)
-            console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-        except (OSError, ValueError, RuntimeError) as e:
+            try:
+                git.commit_only_specified_files(chunk.files, new_message)
+                console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
+            except (GitError, OSError, ValueError, RuntimeError) as e:
+                # Check if this might be a git hook error
+                if "hook" in str(e).lower():
+                    console.print(f"[yellow]Warning:[/yellow] Git hook failed: {e!s}")
+
+                    # Ask if user wants to bypass hooks
+                    if questionary.confirm("Would you like to try again bypassing git hooks?").ask():
+                        # Call with ignore_hooks=True
+                        from codemap.utils.git_utils import commit_only_files
+
+                        commit_only_files(chunk.files, new_message, ignore_hooks=True)
+                        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s) (hooks bypassed)")
+                    else:
+                        console.print("[yellow]Commit cancelled due to hook failure[/yellow]")
+                else:
+                    console.print(f"[red]Error:[/red] {e!s}")
+        except (OSError, ValueError, RuntimeError, GitError) as e:
             console.print(f"[red]Error:[/red] {e!s}")
 
 
