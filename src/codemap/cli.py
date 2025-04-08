@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated, Any
 
-import typer
-import yaml
+import typer  # type: ignore[import]
+import yaml  # type: ignore[import]
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
@@ -211,7 +212,7 @@ def init(
     try:
         repo_root = path.resolve()
         config_file = repo_root / ".codemap.yml"
-        docs_dir = repo_root / DEFAULT_CONFIG["output_dir"]
+        docs_dir = repo_root / str(DEFAULT_CONFIG["output_dir"])
 
         # Check if files/directories already exist
         existing_files = []
@@ -420,10 +421,77 @@ def generate(  # noqa: PLR0913, PLR0915, C901, PLR0912
         raise typer.Exit(1) from e
 
 
-def main() -> None:
+@app.command()
+def commit(
+    path: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Path to repository or file to commit",
+            exists=True,
+        ),
+    ] = None,
+    strategy: Annotated[
+        str,
+        typer.Option(
+            "--strategy",
+            "-s",
+            help="Strategy for splitting changes",
+        ),
+    ] = "file",
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            "-m",
+            help="LLM model to use for message generation",
+        ),
+    ] = "gpt-3.5-turbo",
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help="OpenAI API key (or set OPENAI_API_KEY env var)",
+            envvar="OPENAI_API_KEY",
+        ),
+    ] = None,
+    is_verbose: VerboseFlag = None,
+) -> None:
+    """Generate and apply conventional commits from changes in a Git repository."""
+    setup_logging(is_verbose=is_verbose is True)
+
+    try:
+        from .commit import CommitCommand
+
+        # Set API key in environment if provided
+        if api_key:
+            import os
+
+            os.environ["OPENAI_API_KEY"] = api_key
+
+        command = CommitCommand(path, model=model)
+        if not command.run(strategy):
+            # Use try/finally pattern instead of raise
+            console.print("[red]Error: Command failed[/]")
+            sys.exit(1)
+
+    except ImportError as e:
+        console.print("[red]Failed to import commit feature. Please check your installation.[/]")
+        logger.debug("Import error: %s", e)
+        raise typer.Exit(1) from e
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+        logger.debug("Error running commit command", exc_info=True)
+        raise typer.Exit(1) from e
+
+
+def main() -> int:
     """Entry point for the CLI."""
-    app()
+    try:
+        app()
+        return 0
+    except Exception:
+        return 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
