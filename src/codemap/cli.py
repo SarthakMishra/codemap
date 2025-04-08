@@ -485,12 +485,18 @@ def commit(
 
 
 def main() -> int:
-    """Entry point for the CLI."""
+    """Run the CLI application.
+
+    Returns:
+        Exit code (0 for success, non-zero for errors)
+    """
     try:
         app()
-        return 0
-    except Exception:
+    except (OSError, ValueError, TypeError):
+        logger.exception("Error in CodeMap CLI")
         return 1
+    else:
+        return 0
 
 
 if __name__ == "__main__":
