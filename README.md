@@ -35,19 +35,6 @@ After installation, you can use CodeMap from anywhere:
 codemap generate /path/to/your/project
 ```
 
-### Optional Dependencies
-
-For enhanced semantic commit features:
-```bash
-# Install with semantic chunking dependencies
-pipx install "git+https://github.com/SarthakMishra/codemap.git#egg=codemap[semantic]"
-
-# Or add the dependencies to an existing installation
-pip install sentence-transformers
-```
-
-The semantic chunking feature uses machine learning models to better understand code structure and similarity. These dependencies are only required if you plan to use the `--strategy semantic` option for commits.
-
 ### Semantic Chunking Models
 
 CodeMap's semantic chunking feature uses embedding models to understand code similarity. You can configure which model to use in your `.codemap.yml` file:
