@@ -6,11 +6,10 @@ import logging
 import re
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from codemap.utils.git_utils import GitDiff
 
 logger = logging.getLogger(__name__)
@@ -43,6 +42,173 @@ class DiffSplitter:
             repo_root: Root directory of the Git repository
         """
         self.repo_root = repo_root
+        self._embeddings_cache: dict[str, list[float]] = {}
+
+        # Load semantic chunking configuration
+        self._config = self._load_semantic_config()
+
+    def _load_semantic_config(self) -> dict[str, Any]:  # noqa: C901
+        """Load semantic chunking configuration from .codemap.yml.
+
+        Returns:
+            Dictionary with semantic chunking settings
+        """
+        # Default configuration
+        config = {
+            "similarity_threshold": 0.7,
+            "embedding_model": "flax-sentence-embeddings/st-codesearch-distroberta-base",
+            "fallback_model": "all-MiniLM-L6-v2",
+            "languages": {
+                "extensions": ["py", "js", "ts", "java", "kt", "go", "c", "cpp", "cs", "rb", "php", "swift"],
+                "cache_embeddings": True,
+                "max_cache_size": 1000,
+            },
+        }
+
+        # Try to load from config file
+        config_file = self.repo_root / ".codemap.yml"
+        if config_file.exists():
+            try:
+                import yaml
+
+                with config_file.open("r") as f:
+                    yaml_config = yaml.safe_load(f)
+
+                if yaml_config and "commit" in yaml_config and "semantic" in yaml_config["commit"]:
+                    semantic_config = yaml_config["commit"]["semantic"]
+
+                    # Update configuration with values from file
+                    if "similarity_threshold" in semantic_config:
+                        config["similarity_threshold"] = semantic_config["similarity_threshold"]
+
+                    if "embedding_model" in semantic_config:
+                        config["embedding_model"] = semantic_config["embedding_model"]
+
+                    if "fallback_model" in semantic_config:
+                        config["fallback_model"] = semantic_config["fallback_model"]
+
+                    if "languages" in semantic_config:
+                        languages_config = semantic_config["languages"]
+
+                        if "extensions" in languages_config:
+                            config["languages"]["extensions"] = languages_config["extensions"]
+
+                        if "cache_embeddings" in languages_config:
+                            config["languages"]["cache_embeddings"] = languages_config["cache_embeddings"]
+
+                        if "max_cache_size" in languages_config:
+                            config["languages"]["max_cache_size"] = languages_config["max_cache_size"]
+
+            except (ImportError, yaml.YAMLError) as e:
+                logger.warning("Failed to load semantic config: %s", e)
+
+        logger.debug("Loaded semantic chunking config: %s", config)
+        return config
+
+    def _get_code_embedding(self, content: str) -> list[float] | None:  # noqa: C901
+        """Get embedding vector for code content.
+
+        This method could be implemented with various embedding models.
+        For lightweight local processing, models like:
+        - code-embedding models from SentenceTransformers
+        - MiniLM or CodeBERT based models
+
+        Args:
+            content: Code content to embed
+
+        Returns:
+            List of floats representing code embedding or None if unavailable
+        """
+        # Skip empty content
+        if not content or not content.strip():
+            return None
+
+        # If embedding is already cached, return it
+        if content in self._embeddings_cache:
+            return self._embeddings_cache[content]
+
+        # Generate embedding using sentence-transformers
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            # Initialize model (will be cached after first load)
+            # Using a code-optimized model or a general purpose one
+            model_name = self._config["embedding_model"]
+
+            # Create model instance (singleton pattern to avoid loading multiple times)
+            if not hasattr(self, "_embedding_model"):
+                try:
+                    self._embedding_model = SentenceTransformer(model_name)
+                    logger.info("Initialized embedding model: %s", model_name)
+                except Exception as e:  # pylint: disable=broad-except # noqa: BLE001
+                    # Fallback to a more common model if the code-specific one fails
+                    fallback_model = self._config["fallback_model"]
+                    logger.warning("Failed to load code model, falling back to %s: %s", fallback_model, e)
+                    self._embedding_model = SentenceTransformer(fallback_model)
+
+            # Generate embedding (returns numpy array)
+            embedding = self._embedding_model.encode(content, show_progress_bar=False).tolist()
+
+            # Cache the result if enabled
+            if self._config["languages"]["cache_embeddings"]:
+                # Manage cache size if needed
+                max_cache_size = self._config["languages"]["max_cache_size"]
+                if len(self._embeddings_cache) >= max_cache_size:
+                    # Simple approach: remove random item when cache is full
+                    # A more sophisticated approach could use LRU cache
+                    try:
+                        key_to_remove = next(iter(self._embeddings_cache))
+                        del self._embeddings_cache[key_to_remove]
+                    except (StopIteration, KeyError):
+                        pass
+
+                self._embeddings_cache[content] = embedding
+        except ImportError:
+            logger.warning("sentence-transformers not installed. Install with: pip install sentence-transformers")
+            return None
+        except Exception as e:  # pylint: disable=broad-except # noqa: BLE001
+            logger.warning("Failed to generate embedding: %s", e)
+            return None
+        else:
+            return embedding
+
+    def _calculate_semantic_similarity(self, content1: str, content2: str) -> float:
+        """Calculate semantic similarity between two code chunks.
+
+        Args:
+            content1: First code content
+            content2: Second code content
+
+        Returns:
+            Similarity score between 0 and 1
+        """
+        # Get embeddings
+        emb1 = self._get_code_embedding(content1)
+        emb2 = self._get_code_embedding(content2)
+
+        if not emb1 or not emb2:
+            return 0.0
+
+        # Calculate cosine similarity
+        # This is a simple implementation, could be replaced with a proper vector library
+        try:
+            import numpy as np
+
+            # Convert to numpy arrays
+            vec1 = np.array(emb1)
+            vec2 = np.array(emb2)
+            # Calculate cosine similarity
+            dot_product = np.dot(vec1, vec2)
+            norm1 = np.linalg.norm(vec1)
+            norm2 = np.linalg.norm(vec2)
+
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+
+            return dot_product / (norm1 * norm2)
+        except (ImportError, Exception) as e:  # pylint: disable=broad-except
+            logger.warning("Failed to calculate similarity: %s", e)
+            return 0.0
 
     def _split_by_file(self, diff: GitDiff) -> list[DiffChunk]:
         """Split a diff into chunks by file.
@@ -151,6 +317,213 @@ class DiffSplitter:
 
         return chunks
 
+    def _extract_code_from_diff(self, diff_content: str) -> tuple[str, str]:
+        """Extract actual code content from a diff.
+
+        Args:
+            diff_content: The raw diff content
+
+        Returns:
+            Tuple of (old_code, new_code) extracted from the diff
+        """
+        old_lines = []
+        new_lines = []
+
+        # Skip diff header lines
+        lines = diff_content.split("\n")
+        in_hunk = False
+        context_function = None
+
+        for line in lines:
+            # Check for hunk header
+            if line.startswith("@@"):
+                in_hunk = True
+                # Try to extract function context if available
+                context_match = re.search(r"@@ .+ @@ (.*)", line)
+                if context_match and context_match.group(1):
+                    context_function = context_match.group(1).strip()
+                    # Add function context to both old and new lines
+                    if context_function:
+                        old_lines.append(context_function)
+                        new_lines.append(context_function)
+                continue
+
+            if not in_hunk:
+                continue
+
+            # Extract code content
+            if line.startswith("-"):
+                old_lines.append(line[1:])
+            elif line.startswith("+"):
+                new_lines.append(line[1:])
+            else:
+                # Context lines appear in both old and new
+                old_lines.append(line)
+                new_lines.append(line)
+
+        return "\n".join(old_lines), "\n".join(new_lines)
+
+    def _semantic_hunk_splitting(  # noqa: C901
+        self,
+        file_path: str,
+        diff_content: str,
+    ) -> list[str]:
+        """Split a diff into more semantically meaningful chunks based on code structure.
+
+        This method attempts to identify logical code blocks within the diff
+        and split it at semantically meaningful boundaries.
+
+        Args:
+            file_path: Path to the file being diffed (used to determine language)
+            diff_content: The diff content to split
+
+        Returns:
+            List of split diff contents
+        """
+        # Get language based on file extension
+        ext = Path(file_path).suffix
+        language = ext.lstrip(".").lower() if ext else ""
+
+        # Extract old and new code from diff
+        _, new_code = self._extract_code_from_diff(diff_content)
+
+        # If no meaningful code to analyze, return the original diff
+        if not new_code.strip():
+            return [diff_content]
+
+        # Language-specific splitting based on syntactic boundaries
+        chunks = []
+
+        # Handle specific languages with more sophisticated splitting
+        if language in ("py", "python"):
+            # Split Python code at class/function definitions and logical blocks
+            pattern = (
+                r'(^class\s+\w+|^def\s+\w+|^if\s+__name__\s*==\s*[\'"]__main__[\'"]\s*:|'
+                r"^import\s+|^from\s+\w+\s+import)"
+            )
+            boundaries = [m.start() for m in re.finditer(pattern, new_code, re.MULTILINE)]
+
+            # Add start and end positions
+            boundaries = [0, *boundaries, len(new_code)]
+
+            # Create chunks based on boundaries
+            for i in range(len(boundaries) - 1):
+                start = boundaries[i]
+                end = boundaries[i + 1]
+                chunks.append(new_code[start:end])
+
+        elif language in ("js", "javascript", "ts", "typescript"):
+            # Split JS/TS at function declarations, class methods, etc.
+            pattern = (
+                r"(^function\s+\w+|^const\s+\w+\s*=\s*function|^class\s+\w+|"
+                r"^\s*\w+\s*\([^)]*\)\s*{|^import\s+|^export\s+)"
+            )
+            boundaries = [m.start() for m in re.finditer(pattern, new_code, re.MULTILINE)]
+
+            # Add start and end positions
+            boundaries = [0, *boundaries, len(new_code)]
+
+            # Create chunks based on boundaries
+            for i in range(len(boundaries) - 1):
+                start = boundaries[i]
+                end = boundaries[i + 1]
+                chunks.append(new_code[start:end])
+
+        elif language in ("java", "kt", "kotlin", "scala"):
+            # Split Java/Kotlin/Scala at class/method declarations
+            pattern = (
+                r"(^public\s+|^private\s+|^protected\s+|^class\s+\w+|"
+                r"^interface\s+\w+|^enum\s+\w+|^import\s+|^package\s+)"
+            )
+            boundaries = [m.start() for m in re.finditer(pattern, new_code, re.MULTILINE)]
+
+            # Add start and end positions
+            boundaries = [0, *boundaries, len(new_code)]
+
+            # Create chunks based on boundaries
+            for i in range(len(boundaries) - 1):
+                start = boundaries[i]
+                end = boundaries[i + 1]
+                chunks.append(new_code[start:end])
+
+        elif language in ("go"):
+            # Split Go code at function/type declarations
+            pattern = r"(^func\s+|^type\s+\w+|^import\s+|^package\s+\w+)"
+            boundaries = [m.start() for m in re.finditer(pattern, new_code, re.MULTILINE)]
+
+            # Add start and end positions
+            boundaries = [0, *boundaries, len(new_code)]
+
+            # Create chunks based on boundaries
+            for i in range(len(boundaries) - 1):
+                start = boundaries[i]
+                end = boundaries[i + 1]
+                chunks.append(new_code[start:end])
+
+        # If we couldn't split meaningfully, return the original
+        if not chunks:
+            return [diff_content]
+
+        return chunks
+
+    def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
+        """Enhanced semantic splitting that considers code structure.
+
+        Args:
+            diff: GitDiff object to split
+
+        Returns:
+            List of DiffChunk objects based on semantic grouping
+        """
+        # First split by file
+        file_chunks = self._split_by_file(diff)
+
+        if not file_chunks:
+            return []
+
+        enhanced_chunks = []
+
+        # Process each file chunk
+        for chunk in file_chunks:
+            if not chunk.files or not chunk.content:
+                continue
+
+            file_path = chunk.files[0]
+
+            # Apply semantic code chunking for suitable file types
+            ext = Path(file_path).suffix
+            language = ext.lstrip(".").lower() if ext else ""
+
+            # Only apply semantic chunking to recognized code files
+            code_extensions = set(self._config["languages"]["extensions"])
+
+            if language in code_extensions:
+                # Apply semantic code splitting
+                semantic_chunks = self._semantic_hunk_splitting(file_path, chunk.content)
+
+                # Create diff chunks from semantic chunks
+                if len(semantic_chunks) > 1:
+                    for i, content in enumerate(semantic_chunks):
+                        if content.strip():
+                            # For semantic chunks, we need to transform them back to diff format
+                            # This is important because the semantic chunking extracts actual code
+                            diff_content = chunk.content  # Use the original diff content
+                            enhanced_chunks.append(
+                                DiffChunk(
+                                    files=[file_path],
+                                    content=diff_content,
+                                    description=f"Semantic chunk {i + 1} of {file_path}",
+                                ),
+                            )
+                else:
+                    # If we couldn't split meaningfully, keep the original chunk
+                    enhanced_chunks.append(chunk)
+            else:
+                # For non-code files, keep the original chunk
+                enhanced_chunks.append(chunk)
+
+        return enhanced_chunks
+
     def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:
         """Split a diff into semantic chunks using code analysis.
 
@@ -160,6 +533,28 @@ class DiffSplitter:
         Returns:
             List of DiffChunk objects based on semantic grouping
         """
+        # Try enhanced splitting first for code files
+        enhanced_chunks = self._enhance_semantic_split(diff)
+
+        # If enhanced splitting worked, use its results
+        if enhanced_chunks:
+            # Group related files based on semantic analysis
+            processed_files = set()
+            semantic_chunks = []
+
+            # Process file chunks to create semantic groups
+            self._group_related_files(enhanced_chunks, processed_files, semantic_chunks)
+
+            # Process any remaining chunks
+            remaining_chunks = [c for c in enhanced_chunks if c.files[0] not in processed_files]
+
+            # Try to group remaining chunks by content similarity
+            if remaining_chunks:
+                self._group_by_content_similarity(remaining_chunks, semantic_chunks)
+
+            return semantic_chunks
+
+        # Fall back to the original implementation if enhanced splitting didn't yield results
         # Start with file-based splitting as a base
         file_chunks = self._split_by_file(diff)
 
@@ -175,9 +570,53 @@ class DiffSplitter:
 
         # Process any remaining files
         remaining_chunks = [c for c in file_chunks if c.files[0] not in processed_files]
-        semantic_chunks.extend(remaining_chunks)
+
+        # Try to group remaining chunks by content similarity
+        if remaining_chunks:
+            self._group_by_content_similarity(remaining_chunks, semantic_chunks)
 
         return semantic_chunks
+
+    def _group_by_content_similarity(
+        self,
+        remaining_chunks: list[DiffChunk],
+        semantic_chunks: list[DiffChunk],
+    ) -> None:
+        """Group remaining chunks by content similarity.
+
+        Args:
+            remaining_chunks: List of chunks not yet processed
+            semantic_chunks: List of semantic chunks to append to (modified in place)
+        """
+        processed_indices = set()
+        similarity_threshold = self._config["similarity_threshold"]  # Use configured threshold
+
+        # For each chunk, find similar chunks and group them
+        for i, chunk in enumerate(remaining_chunks):
+            if i in processed_indices:
+                continue
+
+            related_chunks = [chunk]
+            processed_indices.add(i)
+
+            # Find similar chunks
+            for j, other_chunk in enumerate(remaining_chunks):
+                if i == j or j in processed_indices:
+                    continue
+
+                # Calculate similarity between chunks
+                similarity = self._calculate_semantic_similarity(chunk.content, other_chunk.content)
+
+                if similarity >= similarity_threshold:
+                    related_chunks.append(other_chunk)
+                    processed_indices.add(j)
+
+            # Create a semantic chunk from related chunks
+            if len(related_chunks) > 1:  # Only create a group if there are multiple related chunks
+                self._create_semantic_chunk(related_chunks, semantic_chunks)
+            else:
+                # Add single chunks directly
+                semantic_chunks.append(related_chunks[0])
 
     def _are_files_related(self, file1: str, file2: str) -> bool:
         """Determine if two files are semantically related.
@@ -231,6 +670,9 @@ class DiffSplitter:
             # Web development pairs
             (r".*\.html$", r".*\.js$"),
             (r".*\.html$", r".*\.css$"),
+            # Python related files
+            (r".*\.py$", r".*_test\.py$"),
+            (r".*\.py$", r"test_.*\.py$"),
         ]
 
         for pattern1, pattern2 in related_patterns:
