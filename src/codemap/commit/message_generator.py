@@ -52,7 +52,7 @@ class MessageGenerator:
         self,
         repo_root: Path,
         prompt_template: str | None = None,
-        model: str = "gpt-3.5-turbo",
+        model: str = "gpt-4o-mini",
         provider: str | None = None,
         api_base: str | None = None,
     ) -> None:
@@ -94,7 +94,7 @@ class MessageGenerator:
                         llm_config = commit_config["llm"]
 
                         # Only override if not explicitly set in constructor
-                        if "model" in llm_config and self.model == "gpt-3.5-turbo":
+                        if "model" in llm_config and self.model == "gpt-4o-mini":
                             self.model = llm_config["model"]
 
                         if "provider" in llm_config and self.provider is None:
