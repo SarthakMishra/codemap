@@ -11,6 +11,7 @@ from codemap.utils.git_utils import (
     commit_only_files,
     get_staged_diff,
     get_unstaged_diff,
+    get_untracked_files,
     stage_files,
 )
 
@@ -39,8 +40,11 @@ class GitWrapper:
             staged = get_staged_diff()
             unstaged = get_unstaged_diff()
 
+            # Get untracked files
+            untracked_files = get_untracked_files()
+
             # Combine the diffs into a new GitDiff object
-            all_files = list(set(staged.files + unstaged.files))
+            all_files = list(set(staged.files + unstaged.files + untracked_files))
             combined_content = staged.content + unstaged.content
 
             return GitDiff(
