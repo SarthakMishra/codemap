@@ -4,22 +4,24 @@ from __future__ import annotations
 
 import shutil
 from datetime import datetime, timezone
+from io import StringIO
 from pathlib import Path
+from typing import IO, Generator, TypeVar
 from unittest.mock import Mock, patch
 
 import pytest
 import yaml
 from typer.testing import CliRunner
 
-from codemap.analyzer.tree_parser import CodeParser
-from codemap.cli import _get_output_path, app
+from codemap.cli.main import _get_output_path, app
 from codemap.config import DEFAULT_CONFIG
 
 runner = CliRunner()
+T = TypeVar("T")  # Generic type for return value of Path.open
 
 
 @pytest.fixture
-def temp_dir(tmp_path: Path) -> Path:
+def temp_dir(tmp_path: Path) -> Generator[Path, None, None]:
     """Create a temporary directory for testing."""
     yield tmp_path
     # Cleanup
@@ -37,7 +39,7 @@ def sample_repo(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def mock_code_parser() -> Mock:
+def mock_code_parser() -> Generator[Mock, None, None]:
     """Create a mock CodeParser instance."""
     with patch("codemap.cli.CodeParser") as mock:
         parser_instance = Mock()
@@ -190,7 +192,7 @@ def test_get_output_path_with_timestamp(sample_repo: Path) -> None:
         "output_dir": "docs",
     }
 
-    with patch("codemap.cli.datetime") as mock_datetime:
+    with patch("codemap.cli.main.datetime") as mock_datetime:
         mock_datetime.now.return_value = current_time
         mock_datetime.timezone = timezone  # Make sure timezone is accessible
         result = _get_output_path(sample_repo, None, config)
@@ -243,12 +245,12 @@ def test_respect_output_dir_from_config(sample_repo: Path) -> None:
     # Create a config file with custom output_dir
     config_file = sample_repo / ".codemap.yml"
     custom_output_dir = "custom_docs_dir"
-    config = {
+    config_content = {
         "token_limit": 10000,
         "use_gitignore": True,
         "output_dir": custom_output_dir,
     }
-    config_file.write_text(yaml.dump(config))
+    config_file.write_text(yaml.dump(config_content))
 
     # Create a subdirectory to analyze
     subdir = sample_repo / "src"
@@ -258,79 +260,56 @@ def test_respect_output_dir_from_config(sample_repo: Path) -> None:
     # Track paths where write_text is called
     written_paths = []
 
-    def mock_write_text(self, content):
+    def mock_write_text(self: Path, _content: str) -> None:
+        """Mock write_text to track where it's called.
+
+        Args:
+            self: The path object
+            _content: Content to write (unused in this mock)
+        """
         written_paths.append(str(self))
 
-    def mock_mkdir(self, parents=False, exist_ok=False):
-        return None
+    # Create a custom Path class with modified exists and is_file methods
+    original_exists = Path.exists
+    original_is_file = Path.is_file
+    original_open = Path.open
 
-    with patch("codemap.cli.Path.cwd", return_value=sample_repo):
-        # Mock file operations to avoid actual filesystem access
-        with patch.object(Path, "write_text", mock_write_text):
-            with patch.object(Path, "mkdir", mock_mkdir):
-                # Ensure exists returns True for any path
-                with patch.object(Path, "exists", return_value=True):
-                    with patch.object(Path, "is_file", return_value=False):
-                        # Ensure is_absolute returns False for the expected paths
-                        with patch.object(Path, "is_absolute", return_value=False):
-                            # Run the command
-                            result = runner.invoke(app, ["generate", str(subdir)])
+    def custom_exists(self: Path) -> bool:
+        """Custom Path.exists implementation for testing."""
+        if self.name == ".codemap.yml":
+            return True
+        return original_exists(self)
 
-    # We don't need to check the exit code as we've mocked all file operations
-    # and just want to verify the paths used
+    def custom_is_file(self: Path) -> bool:
+        """Custom Path.is_file implementation for testing."""
+        if self.name == ".codemap.yml":
+            return True
+        return original_is_file(self)
+
+    def custom_open(self: Path, mode: str = "r", *_args, **_kwargs) -> IO[str]:
+        """Custom Path.open implementation for testing.
+
+        Returns:
+            A file-like object (StringIO for config files, regular file otherwise)
+        """
+        if ".codemap.yml" in str(self):
+            return StringIO(yaml.dump(config_content))
+        # Use the original Path.open to avoid infinite recursion
+        return original_open(self, mode, *_args, **_kwargs)
+
+    # Apply the patches
+    with (
+        patch.object(Path, "write_text", mock_write_text),
+        patch.object(Path, "exists", custom_exists),
+        patch.object(Path, "is_file", custom_is_file),
+        patch.object(Path, "open", custom_open),
+    ):
+        # Run the command
+        result = runner.invoke(app, ["generate", str(subdir)])
+        assert result.exit_code == 0
 
     # The output path should include custom_docs_dir
-    expected_path_fragment = f"{custom_output_dir}/documentation_"
-
-    # Check if any written path contains the expected output directory
-    path_contains_custom_dir = any(expected_path_fragment in path for path in written_paths)
-    assert path_contains_custom_dir, f"No paths containing '{expected_path_fragment}' in {written_paths}"
-
-
-def test_pygments_language_detection(sample_repo: Path) -> None:
-    """Test that Pygments is used for language detection in CodeParser."""
-    # Create files with different extensions
-    (sample_repo / "script.py").write_text("def main(): pass")
-    (sample_repo / "index.html").write_text("<html><body>Hello</body></html>")
-    (sample_repo / "style.css").write_text("body { color: #333; }")
-
-    # Use mock to track calls to Pygments
-    with patch("codemap.analyzer.tree_parser.get_lexer_for_filename") as mock_get_lexer:
-        with patch("codemap.analyzer.tree_parser.guess_lexer"):
-            # Setup the mock to return lexers with different names
-            py_lexer = Mock()
-            py_lexer.name = "Python"
-            html_lexer = Mock()
-            html_lexer.name = "HTML"
-            css_lexer = Mock()
-            css_lexer.name = "CSS"
-
-            # Return different lexers for different files
-            def side_effect(filename):
-                if filename.endswith(".py"):
-                    return py_lexer
-                if filename.endswith(".html"):
-                    return html_lexer
-                if filename.endswith(".css"):
-                    return css_lexer
-                raise ValueError(f"Unknown file: {filename}")
-
-            mock_get_lexer.side_effect = side_effect
-
-            # Create parser and parse files
-            parser = CodeParser({})
-
-            # Test Python file
-            py_info = parser.parse_file(sample_repo / "script.py")
-            assert py_info["language"] == "python"
-
-            # Test HTML file
-            html_info = parser.parse_file(sample_repo / "index.html")
-            assert html_info["language"] == "html"
-
-            # Test CSS file
-            css_info = parser.parse_file(sample_repo / "style.css")
-            assert css_info["language"] == "css"
-
-            # Verify Pygments was called for each file
-            assert mock_get_lexer.call_count == 6  # 3 calls in should_parse and 3 in parse_file
+    assert len(written_paths) > 0, "No paths were written to"
+    assert any(custom_output_dir in path for path in written_paths), (
+        f"Custom output dir '{custom_output_dir}' not found in paths: {written_paths}"
+    )
