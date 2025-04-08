@@ -104,7 +104,7 @@ def mock_config_file() -> str:
         "commit": {
             "strategy": "hunk",
             "llm": {
-                "model": "gpt-3.5-turbo",
+                "model": "gpt-4o-mini",
                 "provider": "openai",
             },
             "convention": {
@@ -269,7 +269,7 @@ def test_message_generator_openai() -> None:
 
     # Set up mock environment
     with patch.dict(os.environ, {"OPENAI_API_KEY": "mock-key"}):
-        generator = MessageGenerator(repo_root, model="gpt-3.5-turbo", provider="openai")
+        generator = MessageGenerator(repo_root, model="gpt-4o-mini", provider="openai")
 
         # Create test data
         chunk_dict = {
