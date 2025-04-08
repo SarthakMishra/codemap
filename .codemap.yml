@@ -6,7 +6,7 @@ max_content_length: 0
 # Commit feature configuration
 commit:
   # Strategy for splitting diffs: file, hunk, semantic
-  strategy: file
+  strategy: semantic
   
   # LLM configuration
   llm:
