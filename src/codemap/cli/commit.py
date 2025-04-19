@@ -47,7 +47,6 @@ class CommitOptions:
     """Options for the commit command."""
 
     repo_path: Path
-    split_strategy: SplitStrategy
     generation_mode: GenerationMode = field(default=GenerationMode.SMART)
     model: str = field(default="gpt-4o-mini")
     provider: str | None = field(default=None)
@@ -554,7 +553,6 @@ class RunConfig:
     """Configuration options for running the commit command."""
 
     repo_path: Path | None = None
-    split_strategy: SplitStrategy = SplitStrategy.FILE
     force_simple: bool = False
     api_key: str | None = None
     model: str = "gpt-4o-mini"
@@ -588,15 +586,15 @@ def run(config: RunConfig = DEFAULT_RUN_CONFIG) -> int:
         console.print("No changes to commit")
         return 0
 
+    # Always use semantic strategy for better commit organization
     splitter = DiffSplitter(repo_path)
-    chunks = splitter.split_diff(diff, str(config.split_strategy))
+    chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
     if not chunks:
         console.print("No changes to commit (after filtering)")
         return 0
 
     options = CommitOptions(
         repo_path=repo_path,
-        split_strategy=config.split_strategy,
         generation_mode=GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART,
         model=config.model,
         provider=config.provider,

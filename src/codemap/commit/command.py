@@ -56,22 +56,33 @@ class CommitCommand:
         """
         try:
             changes = []
+            
+            # First stage all files (including untracked) to ensure we have a complete diff
+            # This makes it easier to analyze all changes together
+            try:
+                # Use git add . to stage everything
+                from codemap.utils.git_utils import run_git_command
+                run_git_command(["git", "add", "."])
+                logger.info("Staged all changes for analysis")
+            except GitError as e:
+                logger.warning("Failed to stage all changes: %s", e)
+                # Continue with the process even if staging fails
 
-            # First check staged changes
+            # Get the staged diff which should now include all changes
             staged = get_staged_diff()
             if staged.files:
                 changes.append(staged)
-
-            # Then check unstaged changes
+                
+            # We'll still check for any unstaged changes that might have been missed
             unstaged = get_unstaged_diff()
             if unstaged.files:
                 changes.append(unstaged)
-
-            # Check for untracked (new) files
+                
+            # Check for any untracked files that might have been missed by git add .
+            # This can happen if there are gitignore rules or other issues
             untracked = get_untracked_files()
             if untracked:
                 # Create a GitDiff object for untracked files
-                # Note: These won't have actual diff content since they're new
                 untracked_diff = GitDiff(
                     files=untracked,
                     content="",  # No content for untracked files
@@ -131,33 +142,35 @@ class CommitCommand:
             return True
 
         try:
+            # Make sure all files are staged first (in case any were missed or unstaged)
+            from codemap.utils.git_utils import run_git_command
+            run_git_command(["git", "add", "."])
+            
             # Unstage files not in the current chunk to ensure only chunk files are committed
             all_staged_files = get_staged_diff().files
             files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
             if files_to_unstage:
                 unstage_files(files_to_unstage)
 
-            # Stage files for the current chunk
+            # Make sure the chunk files are staged (should be redundant but ensures consistency)
             stage_files(chunk.files)
 
             # Create commit
             commit(result.message or chunk.description or "Update files")
             self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
 
-            # Re-stage the previously unstaged files if necessary
-            if files_to_unstage:
-                stage_files(files_to_unstage)
+            # Re-stage all remaining files for the next commit
+            # This ensures we don't lose track of any changes
+            run_git_command(["git", "add", "."])
+            
         except GitError as e:
             self.ui.show_error(f"Failed to commit changes: {e}")
             return False
         else:
             return True
 
-    def run(self, strategy: str = "file") -> bool:
+    def run(self) -> bool:
         """Run the commit command.
-
-        Args:
-            strategy: Diff splitting strategy to use
 
         Returns:
             True if successful, False otherwise
@@ -171,8 +184,8 @@ class CommitCommand:
 
             # Process each change group (staged, unstaged, untracked)
             for diff in changes:
-                # Split into chunks based on the strategy
-                chunks = self.splitter.split_diff(diff, strategy)
+                # Always use semantic strategy for better commit organization
+                chunks = self.splitter.split_diff(diff, "semantic")
                 if not chunks:
                     continue
 
