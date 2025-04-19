@@ -903,32 +903,18 @@ class DiffSplitter:
             ),
         )
 
-    def split_diff(self, diff: GitDiff, strategy: str | SplitStrategy = "file") -> list[DiffChunk]:
-        """Split a diff into logical chunks using the specified strategy.
+    def split_diff(self, diff: GitDiff, strategy: str | SplitStrategy = None) -> list[DiffChunk]:
+        """Split a diff into logical chunks using semantic strategy.
 
         Args:
             diff: GitDiff object to split
-            strategy: Splitting strategy ("file", "hunk", "semantic") or SplitStrategy enum
+            strategy: Ignored parameter kept for backward compatibility
 
         Returns:
             List of DiffChunk objects
-
-        Raises:
-            ValueError: If an invalid strategy is specified
         """
         if not diff.content:
             return []
 
-        # Convert strategy to string if it's an enum
-        strategy_str = strategy.value if isinstance(strategy, SplitStrategy) else strategy
-
-        # Use the string value to determine which method to call
-        if strategy_str == SplitStrategy.FILE.value:
-            return self._split_by_file(diff)
-        if strategy_str == SplitStrategy.HUNK.value:
-            return self._split_by_hunk(diff)
-        if strategy_str == SplitStrategy.SEMANTIC.value:
-            return self._split_semantic(diff)
-
-        msg = f"Invalid diff splitting strategy: {strategy}"
-        raise ValueError(msg)
+        # Always use semantic strategy
+        return self._split_semantic(diff)

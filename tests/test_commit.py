@@ -18,7 +18,7 @@ from codemap.cli.commit import (
     run,
     setup_message_generator,
 )
-from codemap.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
+from codemap.commit.diff_splitter import DiffChunk, DiffSplitter
 from codemap.commit.message_generator import LLMError, MessageGenerator
 from codemap.git import GitWrapper
 from codemap.utils.git_utils import GitDiff
@@ -117,8 +117,8 @@ def mock_config_file() -> str:
     return yaml.dump(config)
 
 
-def test_diff_splitter_file_strategy() -> None:
-    """Test the file-based splitting strategy."""
+def test_diff_splitter_semantic_only() -> None:
+    """Test that the diff splitter now only uses semantic strategy."""
     diff = GitDiff(
         files=["file1.py", "file2.py"],
         content="""diff --git a/file1.py b/file1.py
@@ -140,63 +140,23 @@ index 2345678..bcdefgh 100645
     repo_root = Path("/mock/repo")
     splitter = DiffSplitter(repo_root)
 
-    # Mock the _split_by_file method to avoid file system access
-    with patch.object(splitter, "_split_by_file") as mock_split:
+    # Mock the _split_semantic method to avoid file system access
+    with patch.object(splitter, "_split_semantic") as mock_split:
         expected_chunks = [
             DiffChunk(
-                files=["file1.py"],
-                content="diff content for file1.py",
+                files=["file1.py", "file2.py"],
+                content="diff content for semantic chunk",
             ),
         ]
         mock_split.return_value = expected_chunks
 
-        # Test the split_diff method with file strategy
-        result = splitter.split_diff(diff, strategy="file")
+        # Test the split_diff method (should use semantic strategy by default)
+        result = splitter.split_diff(diff)
         assert result == expected_chunks
         mock_split.assert_called_once_with(diff)
 
 
-def test_diff_splitter_hunk_strategy() -> None:
-    """Test the hunk-based splitting strategy."""
-    diff = GitDiff(
-        files=["file.py"],
-        content="""diff --git a/file.py b/file.py
-index 1234567..abcdefg 100644
---- a/file.py
-+++ b/file.py
-@@ -10,7 +10,7 @@ def function1():
-    return True
-@@ -20,5 +20,8 @@ def function2():
-    pass
-+
-+def function3():
-+    return "new"
-""",
-        is_staged=False,
-    )
-
-    # Using a mock repo_root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Mock the _split_by_hunk method to avoid file system access
-    with patch.object(splitter, "_split_by_hunk") as mock_split:
-        expected_chunks = [
-            DiffChunk(
-                files=["file.py"],
-                content="diff content for hunk 1",
-            ),
-            DiffChunk(
-                files=["file.py"],
-                content="diff content for hunk 2",
-            ),
-        ]
-        mock_split.return_value = expected_chunks
-
-        # Test the split_diff method with hunk strategy
-        result = splitter.split_diff(diff, strategy="hunk")
-        assert result == expected_chunks
-        mock_split.assert_called_once_with(diff)
+# This test is no longer needed since we only use semantic strategy now
 
 
 def test_diff_splitter_semantic_strategy() -> None:
@@ -227,8 +187,8 @@ def test_diff_splitter_semantic_strategy() -> None:
         ]
         mock_split.return_value = expected_chunks
 
-        # Test the split_diff method with semantic strategy
-        result = splitter.split_diff(diff, strategy="semantic")
+        # Test the split_diff method (now always uses semantic strategy)
+        result = splitter.split_diff(diff)
         assert result == expected_chunks
         mock_split.assert_called_once_with(diff)
 
@@ -400,7 +360,6 @@ def test_setup_message_generator() -> None:
     repo_path = Path("/mock/repo")
     options = CommitOptions(
         repo_path=repo_path,
-        split_strategy=SplitStrategy.FILE,
         generation_mode=GenerationMode.SMART,
         model="groq/llama-3-8b-8192",
         provider=None,  # Should be extracted from model
@@ -473,7 +432,6 @@ def test_dotenv_loading() -> None:
         # Create options
         options = CommitOptions(
             repo_path=Path("/mock/repo"),
-            split_strategy=SplitStrategy.FILE,
             model="gpt-4",
             provider="openai",
         )
@@ -553,14 +511,10 @@ def test_cli_command_execution() -> None:
             RunConfig(),
             # Custom provider and model
             RunConfig(provider="anthropic", model="claude-3-haiku-20240307"),
-            # File strategy
-            RunConfig(split_strategy=SplitStrategy.FILE),
-            # Hunk strategy
-            RunConfig(split_strategy=SplitStrategy.HUNK),
-            # Semantic strategy
-            RunConfig(split_strategy=SplitStrategy.SEMANTIC),
             # No commit (suggestion only)
             RunConfig(commit=False),
+            # Force simple mode
+            RunConfig(force_simple=True),
         ]
 
         # Instead of using app.callback which doesn't call run directly,
@@ -577,7 +531,6 @@ def test_run_command() -> None:
     """Test the full run command with real-like inputs."""
     # Set up config
     config = RunConfig(
-        split_strategy="hunk",  # Use string value instead of enum
         model="gpt-4",
         provider="openai",
     )
@@ -819,144 +772,16 @@ def test_azure_openai_configuration() -> None:
             assert message == "feat(api): azure integration"
 
 
-def test_split_by_file_implementation() -> None:
-    """Test the actual implementation of file-based splitting."""
-    diff = GitDiff(
-        files=["file1.py", "file2.py"],
-        content="""diff --git a/file1.py b/file1.py
-index 1234567..abcdefg 100644
---- a/file1.py
-+++ b/file1.py
-@@ -10,7 +10,7 @@ def existing_function():
-    return True
-diff --git a/file2.py b/file2.py
-index 2345678..bcdefgh 100645
---- a/file2.py
-+++ b/file2.py
-@@ -5,3 +5,6 @@ def old_function():
-    pass""",
-        is_staged=False,
-    )
-
-    # Using a mock repo_root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Test the actual implementation
-    chunks = splitter._split_by_file(diff)
-
-    # Verify chunks are created correctly
-    assert len(chunks) == 2
-    assert chunks[0].files == ["file1.py"]
-    assert "file1.py" in chunks[0].content
-    assert chunks[1].files == ["file2.py"]
-    assert "file2.py" in chunks[1].content
+# This test is no longer needed since we only use semantic strategy now
 
 
-def test_split_by_file_edge_cases() -> None:
-    """Test edge cases for file-based splitting."""
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Test empty diff
-    empty_diff = GitDiff(files=[], content="", is_staged=False)
-    assert splitter._split_by_file(empty_diff) == []
-
-    # Test diff with malformed content
-    malformed_diff = GitDiff(files=["bad.py"], content="This is not a valid diff format", is_staged=False)
-    assert splitter._split_by_file(malformed_diff) == []
-
-    # Test diff with empty file content
-    empty_file_diff = GitDiff(
-        files=["empty.py"],
-        content="diff --git a/empty.py b/empty.py\nindex 1234567..abcdefg 100645\n--- a/empty.py\n+++ b/empty.py\n",
-        is_staged=False,
-    )
-    chunks = splitter._split_by_file(empty_file_diff)
-    assert len(chunks) == 1  # The implementation creates a chunk even for empty content
-    assert chunks[0].files == ["empty.py"]
-    assert "empty.py" in chunks[0].content
+# This test is no longer needed since we only use semantic strategy now
 
 
-def test_split_by_hunk_implementation() -> None:
-    """Test the actual implementation of hunk-based splitting."""
-    diff = GitDiff(
-        files=["file.py"],
-        content="""diff --git a/file.py b/file.py
-index 1234567..abcdefg 100644
---- a/file.py
-+++ b/file.py
-@@ -10,7 +10,7 @@ def function1():
-    return True
-@@ -20,5 +20,8 @@ def function2():
-    pass
-+
-+def function3():
-+    return "new"
-""",
-        is_staged=False,
-    )
-
-    # Using a mock repo_root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Test the actual implementation
-    chunks = splitter._split_by_hunk(diff)
-
-    # Verify chunks are created correctly
-    assert len(chunks) == 2
-    assert chunks[0].files == ["file.py"]
-    assert "@@ -10,7 +10,7 @@" in chunks[0].content
-    assert chunks[1].files == ["file.py"]
-    assert "@@ -20,5 +20,8 @@" in chunks[1].content
+# This test is no longer needed since we only use semantic strategy now
 
 
-def test_split_by_hunk_edge_cases() -> None:
-    """Test edge cases for hunk-based splitting."""
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Test empty diff
-    empty_diff = GitDiff(files=[], content="", is_staged=False)
-    assert splitter._split_by_hunk(empty_diff) == []
-
-    # Test diff with no hunks
-    no_hunks_diff = GitDiff(
-        files=["no_hunks.py"],
-        content="diff --git a/no_hunks.py b/no_hunks.py\nindex 1234567..abcdefg 100645\n"
-        "--- a/no_hunks.py\n+++ b/no_hunks.py\n",
-        is_staged=False,
-    )
-    chunks = splitter._split_by_hunk(no_hunks_diff)
-    assert len(chunks) == 1  # The implementation creates a chunk even when no hunks are found
-    assert chunks[0].files == ["no_hunks.py"]
-    assert "no_hunks.py" in chunks[0].content
-
-    # Test diff with single file but multiple hunks
-    multi_hunk_diff = GitDiff(
-        files=["multi.py"],
-        content="""diff --git a/multi.py b/multi.py
-index 1234567..abcdefg 100645
---- a/multi.py
-+++ b/multi.py
-@@ -1,3 +1,4 @@ First hunk
-+New content
-@@ -10,3 +11,3 @@ Second hunk
--Old content
-+New content
-@@ -20,3 +21,5 @@ Third hunk
-+Even
-+More content
-""",
-        is_staged=False,
-    )
-    chunks = splitter._split_by_hunk(multi_hunk_diff)
-    assert len(chunks) == 3
-    assert all(chunk.files == ["multi.py"] for chunk in chunks)
-    assert "@@ -1,3 +1,4 @@" in chunks[0].content
-    assert "@@ -10,3 +11,3 @@" in chunks[1].content
-    assert "@@ -20,3 +21,5 @@" in chunks[2].content
+# This test is no longer needed since we only use semantic strategy now
 
 
 def test_are_files_related() -> None:
@@ -1145,17 +970,10 @@ index 3456789..cdefghi 100645
     repo_root = Path("/mock/repo")
     splitter = DiffSplitter(repo_root)
 
-    # Test file strategy
-    file_chunks = splitter.split_diff(diff, strategy=SplitStrategy.FILE)
-    assert len(file_chunks) == 3
-    assert all(len(chunk.files) == 1 for chunk in file_chunks)
-
-    # Test hunk strategy
-    hunk_chunks = splitter.split_diff(diff, strategy=SplitStrategy.HUNK)
-    assert len(hunk_chunks) >= 3  # At least one per file, more if multiple hunks
+    # We now only have semantic strategy, so we'll test it directly
 
     # Test semantic strategy
-    semantic_chunks = splitter.split_diff(diff, strategy=SplitStrategy.SEMANTIC)
+    semantic_chunks = splitter.split_diff(diff)
     assert len(semantic_chunks) >= 1  # At least one chunk
 
     # Check whether related files were grouped in semantic strategy
@@ -1166,11 +984,4 @@ index 3456789..cdefghi 100645
         assert any("file1.py" in chunk.files for chunk in semantic_chunks)
 
 
-def test_invalid_strategy() -> None:
-    """Test that invalid strategies raise ValueError."""
-    diff = GitDiff(files=["file.py"], content="content", is_staged=False)
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    with pytest.raises(ValueError, match="Invalid diff splitting strategy"):
-        splitter.split_diff(diff, strategy="invalid")
+# This test is no longer needed since we removed strategy options
