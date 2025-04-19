@@ -9,6 +9,11 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+# Constants to avoid magic numbers
+MIN_CHUNKS_FOR_CONSOLIDATION = 3
+MAX_CHUNKS_BEFORE_CONSOLIDATION = 5
+MIN_NAME_LENGTH_FOR_SIMILARITY = 3
+
 if TYPE_CHECKING:
     from codemap.utils.git_utils import GitDiff
 
@@ -527,7 +532,7 @@ class DiffSplitter:
 
         return enhanced_chunks
 
-    def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:
+    def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:  # noqa: C901
         """Split a diff into semantic chunks using code analysis.
 
         Args:
@@ -541,13 +546,13 @@ class DiffSplitter:
 
         if not file_chunks:
             return []
-            
+
         # Try enhanced splitting for code files
         enhanced_chunks = self._enhance_semantic_split(diff)
-        
+
         # Combine both approaches for better results
         all_chunks = enhanced_chunks if enhanced_chunks else file_chunks
-        
+
         # Group related files based on semantic analysis with a more aggressive approach
         processed_files = set()
         semantic_chunks = []
@@ -557,18 +562,18 @@ class DiffSplitter:
         for chunk in all_chunks:
             if not chunk.files:
                 continue
-                
+
             file_path = chunk.files[0]
             # Get directory path (or use root if file is in root)
             dir_path = file_path.rsplit("/", 1)[0] if "/" in file_path else "root"
-            
+
             if dir_path not in dir_groups:
                 dir_groups[dir_path] = []
-            
+
             dir_groups[dir_path].append(chunk)
-        
+
         # Process each directory group
-        for dir_path, chunks in dir_groups.items():
+        for chunks in dir_groups.values():
             if len(chunks) == 1:
                 # If only one file in directory, add it directly
                 semantic_chunks.append(chunks[0])
@@ -577,42 +582,43 @@ class DiffSplitter:
             else:
                 # For directories with multiple files, try to group them
                 dir_processed = set()
-                
+
                 # First try to group by related file patterns
                 self._group_related_files(chunks, dir_processed, semantic_chunks)
-                
+
                 # Then try to group remaining files by content similarity
                 remaining_chunks = [c for c in chunks if c.files[0] not in dir_processed]
                 if remaining_chunks:
                     # Use a lower similarity threshold for files in the same directory
                     self._group_by_content_similarity(
-                        remaining_chunks, 
-                        semantic_chunks, 
-                        similarity_threshold=0.5  # Lower threshold for same-directory files
+                        remaining_chunks,
+                        semantic_chunks,
+                        similarity_threshold=0.5,  # Lower threshold for same-directory files
                     )
-                
+
                 # Add all processed files to the global processed set
                 for file in dir_processed:
                     processed_files.add(file)
-        
+
         # Process any remaining files that weren't grouped by directory
         remaining_chunks = [c for c in all_chunks if c.files[0] not in processed_files]
-        
+
         # Try to group remaining chunks by content similarity
         if remaining_chunks:
             self._group_by_content_similarity(remaining_chunks, semantic_chunks)
-            
+
         # If we ended up with too many small chunks, try to consolidate them
-        if len(semantic_chunks) > 5 and any(len(chunk.files) == 1 for chunk in semantic_chunks):
+        has_single_file_chunks = any(len(chunk.files) == 1 for chunk in semantic_chunks)
+        if len(semantic_chunks) > MAX_CHUNKS_BEFORE_CONSOLIDATION and has_single_file_chunks:
             return self._consolidate_small_chunks(semantic_chunks)
-            
+
         return semantic_chunks
 
     def _group_by_content_similarity(
         self,
         remaining_chunks: list[DiffChunk],
         semantic_chunks: list[DiffChunk],
-        similarity_threshold: float = None,
+        similarity_threshold: float | None = None,
     ) -> None:
         """Group remaining chunks by content similarity.
 
@@ -651,41 +657,41 @@ class DiffSplitter:
             else:
                 # Add single chunks directly
                 semantic_chunks.append(related_chunks[0])
-                
+
     def _consolidate_small_chunks(self, chunks: list[DiffChunk]) -> list[DiffChunk]:
         """Consolidate small chunks into larger, more meaningful groups.
-        
+
         This helps prevent having too many small commits with single files.
-        
+
         Args:
             chunks: List of diff chunks to consolidate
-            
+
         Returns:
             Consolidated list of chunks
         """
-        # If we have fewer than 3 chunks, no need to consolidate
-        if len(chunks) < 3:
+        # If we have fewer than MIN_CHUNKS_FOR_CONSOLIDATION chunks, no need to consolidate
+        if len(chunks) < MIN_CHUNKS_FOR_CONSOLIDATION:
             return chunks
-            
+
         # Separate single-file chunks from multi-file chunks
         single_file_chunks = [c for c in chunks if len(c.files) == 1]
         multi_file_chunks = [c for c in chunks if len(c.files) > 1]
-        
+
         # If we don't have many single-file chunks, no need to consolidate
-        if len(single_file_chunks) < 3:
+        if len(single_file_chunks) < MIN_CHUNKS_FOR_CONSOLIDATION:
             return chunks
-            
+
         # Group single-file chunks by directory
         dir_groups = {}
         for chunk in single_file_chunks:
             file_path = chunk.files[0]
             dir_path = file_path.rsplit("/", 1)[0] if "/" in file_path else "root"
-            
+
             if dir_path not in dir_groups:
                 dir_groups[dir_path] = []
-                
+
             dir_groups[dir_path].append(chunk)
-            
+
         # Create consolidated chunks for each directory with multiple files
         consolidated_chunks = []
         for dir_path, dir_chunks in dir_groups.items():
@@ -693,28 +699,28 @@ class DiffSplitter:
                 # Combine all chunks in this directory
                 all_files = []
                 combined_content = []
-                
+
                 for c in dir_chunks:
                     all_files.extend(c.files)
                     combined_content.append(c.content)
-                    
+
                 consolidated_chunks.append(
                     DiffChunk(
                         files=all_files,
                         content="\n".join(combined_content),
-                        description=f"Changes in {dir_path} directory"
-                    )
+                        description=f"Changes in {dir_path} directory",
+                    ),
                 )
             else:
                 # Keep single chunks in directories with only one file
                 consolidated_chunks.extend(dir_chunks)
-                
+
         # Add back the multi-file chunks
         consolidated_chunks.extend(multi_file_chunks)
-        
+
         return consolidated_chunks
 
-    def _are_files_related(self, file1: str, file2: str) -> bool:
+    def _are_files_related(self, file1: str, file2: str) -> bool:  # noqa: PLR0911
         """Determine if two files are semantically related.
 
         Args:
@@ -729,26 +735,25 @@ class DiffSplitter:
         dir2 = file2.rsplit("/", 1)[0] if "/" in file2 else ""
         if dir1 and dir1 == dir2:
             return True
-            
+
         # 1.5. Files in closely related directories (parent/child)
-        if dir1 and dir2:
-            if dir1.startswith(dir2 + "/") or dir2.startswith(dir1 + "/"):
-                return True
+        if dir1 and dir2 and (dir1.startswith(dir2 + "/") or dir2.startswith(dir1 + "/")):
+            return True
 
         # 2. Test files and implementation files
         if (file1.startswith("tests/") and file2 in file1) or (file2.startswith("tests/") and file1 in file2):
             return True
-            
+
         # 2.5. More test file patterns
         file1_name = file1.rsplit("/", 1)[-1] if "/" in file1 else file1
         file2_name = file2.rsplit("/", 1)[-1] if "/" in file2 else file2
-        
+
         # Check for test_X.py and X.py patterns
         if file1_name.startswith("test_") and file1_name[5:] == file2_name:
             return True
         if file2_name.startswith("test_") and file2_name[5:] == file1_name:
             return True
-            
+
         # Check for X_test.py and X.py patterns
         if file1_name.endswith("_test.py") and file1_name[:-8] + ".py" == file2_name:
             return True
@@ -758,9 +763,9 @@ class DiffSplitter:
         # 3. Files with similar names (e.g., user.py and user_test.py)
         base1 = file1_name.rsplit(".", 1)[0] if "." in file1_name else file1_name
         base2 = file2_name.rsplit(".", 1)[0] if "." in file2_name else file2_name
-        
+
         # More aggressive name matching
-        if (base1 in base2 or base2 in base1) and min(len(base1), len(base2)) >= 3:
+        if (base1 in base2 or base2 in base1) and min(len(base1), len(base2)) >= MIN_NAME_LENGTH_FOR_SIMILARITY:
             return True
 
         # 4. Check for related file patterns
@@ -903,12 +908,12 @@ class DiffSplitter:
             ),
         )
 
-    def split_diff(self, diff: GitDiff, strategy: str | SplitStrategy = None) -> list[DiffChunk]:
+    def split_diff(self, diff: GitDiff, _strategy: str | SplitStrategy | None = None) -> list[DiffChunk]:
         """Split a diff into logical chunks using semantic strategy.
 
         Args:
             diff: GitDiff object to split
-            strategy: Ignored parameter kept for backward compatibility
+            _strategy: Ignored parameter kept for backward compatibility
 
         Returns:
             List of DiffChunk objects
