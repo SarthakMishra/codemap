@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING
 
+import questionary
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
@@ -71,27 +72,32 @@ class CommitUI:
         Returns:
             ChunkAction indicating what to do with the chunk
         """
-        choices = {
-            "a": ChunkAction.ACCEPT,
-            "e": ChunkAction.EDIT,
-            "s": ChunkAction.SKIP,
-            "x": ChunkAction.ABORT,
-        }
+        # Define options with their display text and corresponding action
+        options: list[tuple[str, ChunkAction]] = [
+            ("Accept - Commit changes with current message", ChunkAction.ACCEPT),
+            ("Edit - Edit commit message", ChunkAction.EDIT),
+            ("Skip - Skip these changes", ChunkAction.SKIP),
+            ("Exit - Abort the commit process", ChunkAction.ABORT),
+        ]
 
-        while True:
-            self.console.print("\n[bold yellow]What would you like to do?[/]")
-            self.console.print("  [a]ccept - Commit changes with current message")
-            self.console.print("  [e]dit   - Edit commit message")
-            self.console.print("  [s]kip   - Skip these changes")
-            self.console.print("  e[x]it   - Abort the commit process")
+        # Display the question using questionary
+        self.console.print("\n[bold yellow]What would you like to do?[/]")
+        result = questionary.select(
+            "",
+            choices=[option[0] for option in options],
+            default=options[0][0],  # Set "Accept" as default
+            qmark="",  # Remove the question mark
+            use_indicator=True,
+            use_arrow_keys=True,
+        ).ask()
 
-            choice = Prompt.ask(
-                "Choice",
-                choices=list(choices.keys()),
-                show_choices=False,
-            ).lower()
+        # Map the result back to the ChunkAction
+        for option, action in options:
+            if option == result:
+                return action
 
-            return choices[choice]
+        # Fallback (should never happen)
+        return ChunkAction.ABORT
 
     def _edit_message(self, current_message: str) -> str:
         """Get an edited commit message from the user.
