@@ -299,3 +299,19 @@ def get_untracked_files() -> list[str]:
     except GitError as e:
         msg = "Failed to get untracked files"
         raise GitError(msg) from e
+
+
+def unstage_files(files: list[str]) -> None:
+    """Unstage the specified files.
+
+    Args:
+        files: List of files to unstage
+
+    Raises:
+        GitError: If unstaging fails
+    """
+    try:
+        run_git_command(["git", "restore", "--staged", *files])
+    except GitError as e:
+        msg = f"Failed to unstage files: {', '.join(files)}"
+        raise GitError(msg) from e
