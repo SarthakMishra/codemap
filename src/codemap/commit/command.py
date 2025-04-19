@@ -14,6 +14,7 @@ from codemap.utils.git_utils import (
     get_unstaged_diff,
     get_untracked_files,
     stage_files,
+    unstage_files,
 )
 
 from .diff_splitter import DiffChunk, DiffSplitter
@@ -130,13 +131,22 @@ class CommitCommand:
             return True
 
         try:
-            # Stage files if needed
-            if not all(f in get_staged_diff().files for f in chunk.files):
-                stage_files(chunk.files)
+            # Unstage files not in the current chunk to ensure only chunk files are committed
+            all_staged_files = get_staged_diff().files
+            files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
+            if files_to_unstage:
+                unstage_files(files_to_unstage)
+
+            # Stage files for the current chunk
+            stage_files(chunk.files)
 
             # Create commit
             commit(result.message or chunk.description or "Update files")
             self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
+
+            # Re-stage the previously unstaged files if necessary
+            if files_to_unstage:
+                stage_files(files_to_unstage)
         except GitError as e:
             self.ui.show_error(f"Failed to commit changes: {e}")
             return False
@@ -159,9 +169,9 @@ class CommitCommand:
                 self.ui.show_error("No changes to commit")
                 return False
 
-            # Process each diff
+            # Process each change group (staged, unstaged, untracked)
             for diff in changes:
-                # Split into chunks
+                # Split into chunks based on the strategy
                 chunks = self.splitter.split_diff(diff, strategy)
                 if not chunks:
                     continue
