@@ -480,7 +480,7 @@ def commit(
             os.environ["OPENAI_API_KEY"] = api_key
 
         command = CommitCommand(path, model=model)
-        if not command.run(strategy):
+        if not command.run():
             # Use try/finally pattern instead of raise
             console.print("[red]Error: Command failed[/]")
             sys.exit(1)
