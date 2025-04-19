@@ -441,14 +441,6 @@ def commit(
             exists=True,
         ),
     ] = None,
-    strategy: Annotated[
-        str,
-        typer.Option(
-            "--strategy",
-            "-s",
-            help="Strategy for splitting changes",
-        ),
-    ] = "file",
     model: Annotated[
         str,
         typer.Option(
@@ -471,7 +463,7 @@ def commit(
     setup_logging(is_verbose=is_verbose is True)
 
     try:
-        from .commit import CommitCommand
+        from .git.commit.command import CommitCommand
 
         # Set API key in environment if provided
         if api_key:
