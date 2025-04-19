@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from codemap.commit.diff_splitter import DiffSplitter
-from codemap.utils.git_utils import GitDiff
+from codemap.git.commit.diff_splitter import DiffSplitter
+from codemap.git.utils.git_utils import GitDiff
 
 
 def test_extract_code_from_diff() -> None:

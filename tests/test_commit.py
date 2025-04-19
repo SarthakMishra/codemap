@@ -18,10 +18,10 @@ from codemap.cli.commit import (
     run,
     setup_message_generator,
 )
-from codemap.commit.diff_splitter import DiffChunk, DiffSplitter
-from codemap.commit.message_generator import LLMError, MessageGenerator
 from codemap.git import GitWrapper
-from codemap.utils.git_utils import GitDiff
+from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter
+from codemap.git.commit.message_generator import LLMError, MessageGenerator
+from codemap.git.utils.git_utils import GitDiff
 
 # Allow tests to access private members
 # ruff: noqa: SLF001
@@ -60,7 +60,7 @@ index 2345678..bcdefgh 100644
 @pytest.fixture
 def mock_diff_splitter() -> DiffSplitter:
     """Create a mock DiffSplitter."""
-    with patch("codemap.commit.diff_splitter.DiffSplitter") as mock:
+    with patch("codemap.git.commit.diff_splitter.DiffSplitter") as mock:
         splitter = Mock()
         splitter.split_diff.return_value = [
             DiffChunk(

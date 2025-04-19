@@ -7,9 +7,9 @@ import pytest
 
 def test_get_other_staged_files() -> None:
     """Test getting other staged files."""
-    from codemap.utils.git_utils import get_other_staged_files
+    from codemap.git.utils.git_utils import get_other_staged_files
 
-    with patch("codemap.utils.git_utils.run_git_command") as mock_run:
+    with patch("codemap.git.utils.git_utils.run_git_command") as mock_run:
         # Mock the git diff command to return a list of staged files
         mock_run.return_value = "file1.txt\nfile2.txt\nfile3.txt"
 
@@ -25,10 +25,10 @@ def test_get_other_staged_files() -> None:
 
 def test_stash_staged_changes() -> None:
     """Test stashing staged changes."""
-    from codemap.utils.git_utils import stash_staged_changes
+    from codemap.git.utils.git_utils import stash_staged_changes
 
-    with patch("codemap.utils.git_utils.get_other_staged_files") as mock_other, patch(
-        "codemap.utils.git_utils.run_git_command",
+    with patch("codemap.git.utils.git_utils.get_other_staged_files") as mock_other, patch(
+        "codemap.git.utils.git_utils.run_git_command",
     ) as mock_run:
         # Test when there are no other files (no stash needed)
         mock_other.return_value = []
@@ -47,9 +47,9 @@ def test_stash_staged_changes() -> None:
 
 def test_unstash_changes() -> None:
     """Test unstashing changes."""
-    from codemap.utils.git_utils import unstash_changes
+    from codemap.git.utils.git_utils import unstash_changes
 
-    with patch("codemap.utils.git_utils.run_git_command") as mock_run:
+    with patch("codemap.git.utils.git_utils.run_git_command") as mock_run:
         # Test when there is a stash
         mock_run.side_effect = [
             "stash@{0}: CodeMap: temporary stash for commit\nstash@{1}: Something else",  # stash list
@@ -71,10 +71,10 @@ def test_unstash_changes() -> None:
 
 def test_commit_only_files_with_hooks() -> None:
     """Test committing only specific files with hook handling."""
-    from codemap.utils.git_utils import GitError, commit_only_files
+    from codemap.git.utils.git_utils import GitError, commit_only_files
 
-    with patch("codemap.utils.git_utils.get_other_staged_files") as mock_other, patch(
-        "codemap.utils.git_utils.run_git_command",
+    with patch("codemap.git.utils.git_utils.get_other_staged_files") as mock_other, patch(
+        "codemap.git.utils.git_utils.run_git_command",
     ) as mock_run:
         # Setup mocks
         mock_other.return_value = []
@@ -111,9 +111,9 @@ def test_commit_only_files_with_hooks() -> None:
 
 def test_get_other_staged_files_error() -> None:
     """Test error handling in get_other_staged_files."""
-    from codemap.utils.git_utils import GitError, get_other_staged_files
+    from codemap.git.utils.git_utils import GitError, get_other_staged_files
 
-    with patch("codemap.utils.git_utils.run_git_command") as mock_run:
+    with patch("codemap.git.utils.git_utils.run_git_command") as mock_run:
         # Mock a git error
         mock_run.side_effect = GitError("Git command failed")
 
@@ -127,9 +127,9 @@ def test_get_other_staged_files_error() -> None:
 
 def test_get_untracked_files() -> None:
     """Test getting untracked files."""
-    from codemap.utils.git_utils import get_untracked_files
+    from codemap.git.utils.git_utils import get_untracked_files
 
-    with patch("codemap.utils.git_utils.run_git_command") as mock_run:
+    with patch("codemap.git.utils.git_utils.run_git_command") as mock_run:
         # Mock the git ls-files command to return a list of untracked files
         mock_run.return_value = "new_file1.txt\nnew_file2.txt\nnew_dir/new_file3.txt"
 
