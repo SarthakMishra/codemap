@@ -220,6 +220,9 @@ class DiffSplitter:
             List of DiffChunk objects, one per file
         """
         if not diff.content:
+            # Handle untracked files specifically
+            if not diff.is_staged and diff.files:
+                return [DiffChunk(files=[f], content="") for f in diff.files]
             return []
 
         # Split the diff content by file
