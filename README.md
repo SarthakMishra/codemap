@@ -41,21 +41,20 @@ codemap generate -v /path/to/your/project
 Create intelligent Git commits with AI-assisted message generation:
 
 ```bash
-# Basic usage (file-based strategy)
+# Basic usage
 codemap commit
-
-# With semantic strategy for code-aware chunking
-codemap commit --strategy semantic
 
 # Specify a different LLM model
 codemap commit --model gpt-4
 ```
 
-### Commit Strategies
+### Commit Strategy
 
-- **File Strategy** (`--strategy file`, default): One commit per changed file
-- **Hunk Strategy** (`--strategy hunk`): Splits by code hunks within files
-- **Semantic Strategy** (`--strategy semantic`): Groups related files using AI code understanding
+CodeMap uses a semantic commit strategy that intelligently groups related files together based on:
+- Directory structure
+- File relationships (e.g., test files with implementation files)
+- Code content similarity
+- Common file patterns (e.g., frontend components with their styles)
 
 ### LLM Provider Support
 
@@ -87,12 +86,11 @@ max_content_length: 5000
 
 # Commit feature configuration
 commit:
-  strategy: file
   llm:
     model: gpt-4o-mini
     provider: openai
   
-  # Semantic chunking settings (optional)
+  # Semantic chunking settings
   semantic:
     similarity_threshold: 0.7
     embedding_model: "flax-sentence-embeddings/st-codesearch-distroberta-base"

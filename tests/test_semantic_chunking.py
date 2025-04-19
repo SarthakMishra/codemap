@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from codemap.commit.diff_splitter import DiffSplitter, SplitStrategy
+from codemap.commit.diff_splitter import DiffSplitter
 from codemap.utils.git_utils import GitDiff
 
 
@@ -269,7 +269,7 @@ from ..models import User, Product
     splitter = DiffSplitter(repo_root)
 
     # Apply semantic strategy splitting
-    chunks = splitter.split_diff(diff, SplitStrategy.SEMANTIC)
+    chunks = splitter.split_diff(diff)
 
     # Verify semantic grouping results
     assert len(chunks) >= 2  # Should have grouped related changes
