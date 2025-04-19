@@ -16,6 +16,17 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from typing_extensions import TypeAlias
 
+# Load environment variables from .env files
+try:
+    from dotenv import load_dotenv
+
+    # Try to load from .env.local first, then fall back to .env
+    if Path(".env.local").exists():
+        load_dotenv(".env.local")
+    load_dotenv()  # Load from .env if available
+except ImportError:
+    pass  # dotenv not installed, skip loading
+
 from .analyzer.tree_parser import CodeParser
 from .config import DEFAULT_CONFIG
 from .generators.markdown_generator import MarkdownGenerator
