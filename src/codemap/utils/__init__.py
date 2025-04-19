@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from codemap.utils.git_utils import GitError, get_repo_root
+from codemap.git.utils.git_utils import GitError, get_repo_root
 
 
 def validate_repo_path(path: Path | None = None) -> Path | None:
