@@ -25,6 +25,9 @@ repos:
         entry: uv run pytest
         language: system
         pass_filenames: false
+        always_run: true
+        stages: [commit]
+        verbose: true
         types: [python]
 
   - repo: https://github.com/opensource-nepal/commitlint
