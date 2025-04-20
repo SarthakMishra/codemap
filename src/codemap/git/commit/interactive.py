@@ -5,8 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum, auto
-from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING
 
 import questionary
 from rich.console import Console
@@ -16,7 +15,10 @@ from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from codemap.git import GitWrapper
+
     from .diff_splitter import DiffChunk
     from .message_generator import MessageGenerator
 
@@ -25,16 +27,16 @@ console = Console()
 
 
 def process_all_chunks(
-    repo_path: Path,
-    chunks: List[DiffChunk],
-    generator: "MessageGenerator",
-    git: "GitWrapper",
+    _repo_path: Path,  # Unused parameter but kept for API compatibility
+    chunks: list[DiffChunk],
+    generator: MessageGenerator,
+    git: GitWrapper,
     interactive: bool = True,
 ) -> int:
     """Process all chunks interactively or automatically.
 
     Args:
-        repo_path: Repository path
+        _repo_path: Repository path
         chunks: List of diff chunks
         generator: Message generator to use
         git: Git wrapper
@@ -43,9 +45,9 @@ def process_all_chunks(
     Returns:
         Exit code (0 for success)
     """
-    from .diff_splitter import DiffChunk
-
-    for i, chunk in enumerate(chunks):
+    i = 0
+    while i < len(chunks):
+        chunk = chunks[i]
         if interactive:
             # Display chunk information
             console.print(f"\n[bold]Commit {i + 1} of {len(chunks)}[/bold]")
@@ -72,14 +74,16 @@ def process_all_chunks(
 
             if action == "commit":
                 _handle_commit_action(chunk, message, git)
+                i += 1
             elif action == "edit":
                 _handle_edit_action(chunk, message, git)
+                i += 1
             elif action == "regenerate":
-                # Just loop back for this chunk
-                i -= 1  # Decrement index to process this chunk again
+                # Stay on same index to regenerate
                 continue
             elif action == "skip":
                 console.print("[yellow]Skipped![/yellow]")
+                i += 1
             elif action == "exit":
                 console.print("[yellow]Exiting commit process[/yellow]")
                 return 0
@@ -87,6 +91,7 @@ def process_all_chunks(
             # Non-interactive mode: commit all chunks automatically
             message, _ = _generate_commit_message(chunk, generator)
             _handle_commit_action(chunk, message, git)
+            i += 1
 
     console.print("[green]✓[/green] All changes committed!")
     return 0
@@ -94,7 +99,7 @@ def process_all_chunks(
 
 def _generate_commit_message(
     chunk: DiffChunk,
-    generator: "MessageGenerator",
+    generator: MessageGenerator,
 ) -> tuple[str, bool]:
     """Generate a commit message for the given chunk.
 
@@ -107,7 +112,7 @@ def _generate_commit_message(
     """
     try:
         message, used_llm = generator.generate_message(chunk)
-    except Exception as e:
+    except (ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error generating message:[/red] {e!s}")
         message = generator.fallback_generation(chunk)
         used_llm = False
@@ -146,7 +151,7 @@ def _print_chunk_summary(chunk: DiffChunk, index: int) -> None:
         console.print("  [dim](New files - no diff content available)[/dim]")
 
 
-def _handle_commit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> None:
+def _handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
     """Handle the commit action.
 
     Args:
@@ -158,11 +163,11 @@ def _handle_commit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> 
         # Perform the commit
         git.commit_only_specified_files(chunk.files, message)
         console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
-def _handle_edit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> None:
+def _handle_edit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
     """Handle the edit action.
 
     Args:
@@ -179,7 +184,7 @@ def _handle_edit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> No
         # Perform the commit with the edited message
         git.commit_only_specified_files(chunk.files, new_message)
         console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 

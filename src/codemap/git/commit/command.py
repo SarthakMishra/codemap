@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from codemap.git.utils.git_utils import (
     GitDiff,
@@ -32,10 +32,10 @@ logger = logging.getLogger(__name__)
 def setup_message_generator(
     repo_path: Path,
     model: str = "gpt-4o-mini",
-    provider: Optional[str] = None,
-    api_base: Optional[str] = None,
-    api_key: Optional[str] = None,
-    prompt_template: Optional[str] = None,
+    provider: str | None = None,
+    api_base: str | None = None,
+    api_key: str | None = None,
+    prompt_template: str | None = None,
 ) -> MessageGenerator:
     """Set up a message generator with the provided options.
 
