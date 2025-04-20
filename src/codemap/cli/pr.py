@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated
 
 import questionary
 import typer
@@ -15,10 +18,9 @@ from rich.console import Console
 from rich.panel import Panel
 
 from codemap.git import GitWrapper
-from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
-from codemap.git.commit.interactive import process_all_chunks
-from codemap.git.commit.message_generator import MessageGenerator
 from codemap.git.commit.command import setup_message_generator
+from codemap.git.commit.diff_splitter import DiffSplitter, SplitStrategy
+from codemap.git.commit.interactive import process_all_chunks
 from codemap.git.utils.git_utils import GitError
 from codemap.git.utils.pr_utils import (
     PullRequest,
@@ -55,18 +57,18 @@ class PROptions:
     """Options for the PR command."""
 
     repo_path: Path
-    branch_name: Optional[str] = field(default=None)
-    base_branch: Optional[str] = field(default=None)
-    title: Optional[str] = field(default=None)
-    description: Optional[str] = field(default=None)
+    branch_name: str | None = field(default=None)
+    base_branch: str | None = field(default=None)
+    title: str | None = field(default=None)
+    description: str | None = field(default=None)
     commit_first: bool = field(default=True)
     force_push: bool = field(default=False)
-    pr_number: Optional[int] = field(default=None)
+    pr_number: int | None = field(default=None)
     interactive: bool = field(default=True)
     model: str = field(default="gpt-4o-mini")
-    provider: Optional[str] = field(default=None)
-    api_base: Optional[str] = field(default=None)
-    api_key: Optional[str] = field(default=None)
+    provider: str | None = field(default=None)
+    api_base: str | None = field(default=None)
+    api_key: str | None = field(default=None)
 
 
 @app.callback()
@@ -90,7 +92,7 @@ def _validate_branch_name(branch_name: str) -> bool:
     return True
 
 
-def _handle_branch_creation(options: PROptions) -> Optional[str]:
+def _handle_branch_creation(options: PROptions) -> str | None:
     """Handle branch creation or selection.
 
     Args:
@@ -120,14 +122,14 @@ def _handle_branch_creation(options: PROptions) -> Optional[str]:
         # Get uncommitted changes to suggest a branch name
         git = GitWrapper(options.repo_path)
         diff = git.get_uncommitted_changes()
-        
+
         # Generate a suggested branch name based on the changes
         suggested_name = ""
         if diff.files:
             # Use the diff splitter to get semantic chunks
             splitter = DiffSplitter(options.repo_path)
             chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
-            
+
             if chunks:
                 # Set up message generator for the first chunk
                 generator = setup_message_generator(
@@ -137,23 +139,23 @@ def _handle_branch_creation(options: PROptions) -> Optional[str]:
                     api_base=options.api_base,
                     api_key=options.api_key,
                 )
-                
+
                 # Generate a commit message for the first chunk
                 try:
                     message, _ = generator.generate_message(chunks[0])
                     # Extract the first line as the commit message
                     first_line = message.split("\n")[0] if "\n" in message else message
                     suggested_name = suggest_branch_name([first_line])
-                except Exception:
+                except (ValueError, RuntimeError, ConnectionError):
                     # Fallback to a simple branch name
                     suggested_name = suggest_branch_name([f"update-{chunks[0].files[0]}"])
-        
+
         # Ask for branch name
         branch_name = questionary.text(
             "Enter branch name:",
             default=suggested_name,
         ).ask()
-        
+
         if not branch_name or not _validate_branch_name(branch_name):
             return None
     else:
@@ -169,7 +171,7 @@ def _handle_branch_creation(options: PROptions) -> Optional[str]:
             ).ask()
             if not use_existing:
                 return None
-        
+
         # Checkout existing branch
         try:
             checkout_branch(branch_name)
@@ -237,10 +239,11 @@ def _handle_commits(options: PROptions) -> bool:
 
         # Process all chunks
         result = process_all_chunks(options.repo_path, chunks, generator, git, interactive=options.interactive)
-        return result == 0
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error committing changes: {e}[/red]")
         return False
+    else:
+        return result == 0
 
 
 def _handle_push(options: PROptions, branch_name: str) -> bool:
@@ -260,19 +263,21 @@ def _handle_push(options: PROptions, branch_name: str) -> bool:
             default=True,
         ).ask()
         if not push_changes:
-            return False
+            console.print("[yellow]Not pushing branch to remote.[/yellow]")
+            return True
 
     # Push branch
     try:
         push_branch(branch_name, force=options.force_push)
         console.print(f"[green]Pushed branch '{branch_name}' to remote.[/green]")
-        return True
     except GitError as e:
         console.print(f"[red]Error pushing branch: {e}[/red]")
         return False
+    else:
+        return True
 
 
-def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRequest]:
+def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | None:
     """Handle PR creation.
 
     Args:
@@ -296,9 +301,8 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
             if use_existing:
                 return _handle_pr_update(options, existing_pr)
             return None
-        else:
-            console.print(f"[yellow]PR #{existing_pr.number} already exists for branch '{branch_name}'.[/yellow]")
-            return existing_pr
+        console.print(f"[yellow]PR #{existing_pr.number} already exists for branch '{branch_name}'.[/yellow]")
+        return existing_pr
 
     # Get commit messages
     try:
@@ -321,14 +325,10 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
         # Show description preview
         console.print("\nPR description preview:")
         console.print(Panel(description, title="Description"))
-        
+
         edit_description = questionary.confirm("Edit description?", default=False).ask()
         if edit_description:
             # Use a temporary file for editing
-            import tempfile
-            import subprocess
-            import os
-
             with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as temp:
                 temp.write(description)
                 temp_path = temp.name
@@ -336,26 +336,27 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
             try:
                 # Try to use the user's preferred editor
                 editor = os.environ.get("EDITOR", "nano")
-                subprocess.run([editor, temp_path], check=True)  # noqa: S603, S607
-                
-                with open(temp_path, "r") as temp:
+                subprocess.run([editor, temp_path], check=True)  # noqa: S603
+
+                with Path(temp_path).open() as temp:
                     description = temp.read()
-            except Exception as e:
+            except OSError as e:
                 console.print(f"[red]Error editing description: {e}[/red]")
             finally:
-                os.unlink(temp_path)
+                Path(temp_path).unlink()
 
     # Create PR
     try:
         pr = create_pull_request(base_branch, branch_name, title, description)
         console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
-        return pr
     except GitError as e:
         console.print(f"[red]Error creating PR: {e}[/red]")
         return None
+    else:
+        return pr
 
 
-def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullRequest]:
+def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None:
     """Handle PR update.
 
     Args:
@@ -389,14 +390,10 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullReque
         # Show description preview
         console.print("\nPR description preview:")
         console.print(Panel(description, title="Description"))
-        
+
         edit_description = questionary.confirm("Edit description?", default=False).ask()
         if edit_description:
             # Use a temporary file for editing
-            import tempfile
-            import subprocess
-            import os
-
             with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as temp:
                 temp.write(description)
                 temp_path = temp.name
@@ -404,23 +401,24 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullReque
             try:
                 # Try to use the user's preferred editor
                 editor = os.environ.get("EDITOR", "nano")
-                subprocess.run([editor, temp_path], check=True)  # noqa: S603, S607
-                
-                with open(temp_path, "r") as temp:
+                subprocess.run([editor, temp_path], check=True)  # noqa: S603
+
+                with Path(temp_path).open() as temp:
                     description = temp.read()
-            except Exception as e:
+            except OSError as e:
                 console.print(f"[red]Error editing description: {e}[/red]")
             finally:
-                os.unlink(temp_path)
+                Path(temp_path).unlink()
 
     # Update PR
     try:
         updated_pr = update_pull_request(pr.number, title, description)
         console.print(f"[green]Updated PR #{updated_pr.number}: {updated_pr.url}[/green]")
-        return updated_pr
     except GitError as e:
         console.print(f"[red]Error updating PR: {e}[/red]")
         return None
+    else:
+        return updated_pr
 
 
 @app.command(help="Create a new pull request")
@@ -681,12 +679,12 @@ def update(
     if pr_number:
         # Try to get PR details
         try:
-            import subprocess
             import json
+            import subprocess
 
             # Use gh CLI to get PR details
             cmd = ["gh", "pr", "view", str(pr_number), "--json", "number,title,body,headRefName,url"]
-            result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603, S607
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
             if result.returncode == 0:
                 pr_data = json.loads(result.stdout)
                 pr = PullRequest(
@@ -701,7 +699,8 @@ def update(
                 if pr.branch != current_branch:
                     if options.interactive:
                         switch = questionary.confirm(
-                            f"PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'. Switch branches?",
+                            f"PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'. "
+                            "Switch branches?",
                             default=True,
                         ).ask()
                         if switch:
@@ -713,9 +712,12 @@ def update(
                                 console.print(f"[red]Error switching branches: {e}[/red]")
                                 return 1
                     else:
-                        console.print(f"[red]PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'.[/red]")
+                        console.print(
+                            f"[red]PR #{pr.number} is for branch '{pr.branch}', but you're on "
+                            f"'{current_branch}'.[/red]",
+                        )
                         return 1
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
             console.print(f"[red]Error getting PR details: {e}[/red]")
     else:
         # Try to find PR for current branch
