@@ -27,8 +27,6 @@ from codemap.git.utils.pr_utils import (
     checkout_branch,
     create_branch,
     create_pull_request,
-    generate_pr_description_from_commits,
-    generate_pr_title_from_commits,
     get_commit_messages,
     get_current_branch,
     get_default_branch,
@@ -37,7 +35,7 @@ from codemap.git.utils.pr_utils import (
     suggest_branch_name,
     update_pull_request,
 )
-from codemap.utils import validate_repo_path
+from codemap.utils import loading_spinner, validate_repo_path
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 app = typer.Typer(help="Generate and manage pull requests")
@@ -309,9 +307,32 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
         console.print(f"[red]Error getting commit messages: {e}[/red]")
         commits = []
 
-    # Generate PR title and description
-    title = options.title or generate_pr_title_from_commits(commits)
-    description = options.description or generate_pr_description_from_commits(commits)
+    # Generate PR title and description with AI if possible
+    try:
+        # Display a spinner while generating PR content
+        with loading_spinner("Generating PR content with AI..."):
+            from codemap.git.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+
+            # Try AI-generated title and description first
+            title = options.title
+            if not title:
+                title = generate_pr_title_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+
+            description = options.description
+            if not description:
+                description = generate_pr_description_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        console.print(f"[yellow]AI generation failed: {e}[/yellow]")
+        console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
+        # Fallback to rule-based generation
+        from codemap.git.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+
+        title = options.title or generate_pr_title_from_commits(commits)
+        description = options.description or generate_pr_description_from_commits(commits)
 
     # In interactive mode, allow editing title and description
     if options.interactive:
@@ -374,9 +395,32 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
         console.print(f"[red]Error getting commit messages: {e}[/red]")
         commits = []
 
-    # Generate PR title and description
-    title = options.title or pr.title or generate_pr_title_from_commits(commits)
-    description = options.description or pr.description or generate_pr_description_from_commits(commits)
+    # Generate PR title and description with AI if possible
+    try:
+        # Display a spinner while generating PR content
+        with loading_spinner("Generating PR content with AI..."):
+            from codemap.git.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+
+            # Try AI-generated title and description first
+            title = options.title or pr.title
+            if not title:
+                title = generate_pr_title_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+
+            description = options.description or pr.description
+            if not description:
+                description = generate_pr_description_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        console.print(f"[yellow]AI generation failed: {e}[/yellow]")
+        console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
+        # Fallback to rule-based generation
+        from codemap.git.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+
+        title = options.title or pr.title or generate_pr_title_from_commits(commits)
+        description = options.description or pr.description or generate_pr_description_from_commits(commits)
 
     # In interactive mode, allow editing title and description
     if options.interactive:
