@@ -52,7 +52,7 @@ class DiffSplitter:
         # Load semantic chunking configuration
         self._config = self._load_semantic_config()
 
-    def _load_semantic_config(self) -> dict[str, Any]:  # noqa: C901
+    def _load_semantic_config(self) -> dict[str, Any]:
         """Load semantic chunking configuration from .codemap.yml.
 
         Returns:
@@ -110,7 +110,7 @@ class DiffSplitter:
         logger.debug("Loaded semantic chunking config: %s", config)
         return config
 
-    def _get_code_embedding(self, content: str) -> list[float] | None:  # noqa: C901
+    def _get_code_embedding(self, content: str) -> list[float] | None:
         """Get embedding vector for code content.
 
         This method could be implemented with various embedding models.
@@ -371,7 +371,7 @@ class DiffSplitter:
 
         return "\n".join(old_lines), "\n".join(new_lines)
 
-    def _semantic_hunk_splitting(  # noqa: C901
+    def _semantic_hunk_splitting(
         self,
         file_path: str,
         diff_content: str,
@@ -532,7 +532,7 @@ class DiffSplitter:
 
         return enhanced_chunks
 
-    def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:  # noqa: C901
+    def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:
         """Split a diff into semantic chunks using code analysis.
 
         Args:
@@ -720,7 +720,7 @@ class DiffSplitter:
 
         return consolidated_chunks
 
-    def _are_files_related(self, file1: str, file2: str) -> bool:  # noqa: PLR0911
+    def _are_files_related(self, file1: str, file2: str) -> bool:
         """Determine if two files are semantically related.
 
         Args:

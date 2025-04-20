@@ -1,8 +1,8 @@
 """Git commit feature package for CodeMap."""
 
-from .command import CommitCommand
+from .command import CommitCommand, setup_message_generator
 from .diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
-from .interactive import ChunkAction, ChunkResult, CommitUI
+from .interactive import ChunkAction, ChunkResult, CommitUI, process_all_chunks
 from .message_generator import LLMError, MessageGenerator
 
 __all__ = [
@@ -15,4 +15,6 @@ __all__ = [
     "LLMError",
     "MessageGenerator",
     "SplitStrategy",
+    "process_all_chunks",
+    "setup_message_generator",
 ]
