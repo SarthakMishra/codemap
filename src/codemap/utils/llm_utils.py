@@ -199,3 +199,69 @@ def create_universal_generator(
         api_base=api_base,
         api_key=api_key,
     )
+
+
+def generate_text_with_llm(
+    prompt: str, model: str = "gpt-4o-mini", api_key: str | None = None, api_base: str | None = None
+) -> str:
+    """Generate text using an LLM.
+
+    Args:
+        prompt: The prompt to send to the LLM
+        model: The model to use
+        api_key: The API key to use
+        api_base: The API base URL to use
+
+    Returns:
+        The generated text
+
+    Raises:
+        RuntimeError: If the LLM call fails
+    """
+    import logging
+    import os
+
+    from litellm import completion
+
+    logger = logging.getLogger(__name__)
+
+    # Extract provider from model name if it includes a provider prefix
+    provider = None
+    if "/" in model:
+        parts = model.split("/")
+        # Minimum parts needed for provider/model format
+        min_parts = 2
+        if len(parts) >= min_parts:
+            provider = parts[0].lower()
+
+    # Use provided API key or get it from environment
+    if not api_key:
+        if provider:
+            # Try provider-specific environment variable
+            env_var_name = f"{provider.upper()}_API_KEY"
+            api_key = os.environ.get(env_var_name)
+
+        # Fallback to OpenAI
+        if not api_key:
+            api_key = os.environ.get("OPENAI_API_KEY")
+
+    # Configure messages for chat completion
+    messages = [{"role": "user", "content": prompt}]
+
+    try:
+        # Call LiteLLM for cross-platform compatibility
+        response = completion(
+            model=model,
+            messages=messages,
+            api_key=api_key,
+            api_base=api_base,
+            temperature=0.3,  # Conservative temperature for predictable outputs
+            max_tokens=1000,
+        )
+
+        # Extract text from response
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logger.exception("LLM error")
+        error_message = f"Failed to generate text with LLM: {e}"
+        raise RuntimeError(error_message) from e
