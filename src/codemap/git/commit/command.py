@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+import os
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 from codemap.git.utils.git_utils import (
     GitDiff,
@@ -25,6 +27,78 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def setup_message_generator(
+    repo_path: Path,
+    model: str = "gpt-4o-mini",
+    provider: Optional[str] = None,
+    api_base: Optional[str] = None,
+    api_key: Optional[str] = None,
+    prompt_template: Optional[str] = None,
+) -> MessageGenerator:
+    """Set up a message generator with the provided options.
+
+    Args:
+        repo_path: Repository path
+        model: LLM model to use
+        provider: LLM provider (e.g., openai, anthropic)
+        api_base: Custom API base URL
+        api_key: API key for the provider
+        prompt_template: Custom prompt template
+
+    Returns:
+        Configured message generator
+    """
+    # Try to load .env file if it exists
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    # Extract provider from model if not explicitly provided
+    if not provider and "/" in model:
+        provider, _ = model.split("/", 1)
+
+    # Set up API key if provided, otherwise try to get from environment
+    if api_key and provider:
+        _set_provider_api_key(provider, api_key)
+
+    # Create and return the message generator
+    return MessageGenerator(
+        repo_path,
+        prompt_template=prompt_template,
+        model=model,
+        provider=provider,
+        api_base=api_base,
+    )
+
+
+def _set_provider_api_key(provider: str, api_key: str) -> None:
+    """Set the API key in the environment for the given provider.
+
+    Args:
+        provider: Provider name
+        api_key: API key to set
+    """
+    provider_env_vars = {
+        "openai": "OPENAI_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "azure": "AZURE_API_KEY",
+        "groq": "GROQ_API_KEY",
+        "mistral": "MISTRAL_API_KEY",
+        "together": "TOGETHER_API_KEY",
+        "cohere": "COHERE_API_KEY",
+    }
+
+    # Get environment variable name for this provider
+    env_var = provider_env_vars.get(provider)
+    if env_var:
+        os.environ[env_var] = api_key
+    else:
+        # Default to OpenAI
+        os.environ["OPENAI_API_KEY"] = api_key
 
 
 class CommitCommand:

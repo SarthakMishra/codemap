@@ -16,6 +16,10 @@ app = typer.Typer(
     help="CodeMap - Generate optimized markdown documentation from your codebase.",
 )
 
+# Create a PR command group for testing
+pr_app = typer.Typer(help="Generate and manage pull requests")
+app.add_typer(pr_app, name="pr")
+
 # Setup logging and console
 console = Console()
 logger = logging.getLogger(__name__)

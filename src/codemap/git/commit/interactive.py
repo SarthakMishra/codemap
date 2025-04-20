@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, List, Optional
 
 import questionary
 from rich.console import Console
@@ -15,10 +16,171 @@ from rich.prompt import Confirm, Prompt
 from rich.syntax import Syntax
 
 if TYPE_CHECKING:
+    from codemap.git import GitWrapper
     from .diff_splitter import DiffChunk
+    from .message_generator import MessageGenerator
 
 logger = logging.getLogger(__name__)
 console = Console()
+
+
+def process_all_chunks(
+    repo_path: Path,
+    chunks: List[DiffChunk],
+    generator: "MessageGenerator",
+    git: "GitWrapper",
+    interactive: bool = True,
+) -> int:
+    """Process all chunks interactively or automatically.
+
+    Args:
+        repo_path: Repository path
+        chunks: List of diff chunks
+        generator: Message generator to use
+        git: Git wrapper
+        interactive: Whether to process chunks interactively
+
+    Returns:
+        Exit code (0 for success)
+    """
+    from .diff_splitter import DiffChunk
+
+    for i, chunk in enumerate(chunks):
+        if interactive:
+            # Display chunk information
+            console.print(f"\n[bold]Commit {i + 1} of {len(chunks)}[/bold]")
+            _print_chunk_summary(chunk, i)
+
+            # Generate commit message
+            message, used_llm = _generate_commit_message(chunk, generator)
+
+            # Display proposed message
+            tag = "[blue]AI[/blue]" if used_llm else "[yellow]Simple[/yellow]"
+            console.print(f"\nProposed message ({tag}):")
+            console.print(f"[green]{message}[/green]")
+
+            # Ask user what to do
+            choices = [
+                {"value": "commit", "name": "Commit with this message"},
+                {"value": "edit", "name": "Edit message and commit"},
+                {"value": "regenerate", "name": "Regenerate message"},
+                {"value": "skip", "name": "Skip this chunk"},
+                {"value": "exit", "name": "Exit without committing"},
+            ]
+
+            action = questionary.select("What would you like to do?", choices=choices).ask()
+
+            if action == "commit":
+                _handle_commit_action(chunk, message, git)
+            elif action == "edit":
+                _handle_edit_action(chunk, message, git)
+            elif action == "regenerate":
+                # Just loop back for this chunk
+                i -= 1  # Decrement index to process this chunk again
+                continue
+            elif action == "skip":
+                console.print("[yellow]Skipped![/yellow]")
+            elif action == "exit":
+                console.print("[yellow]Exiting commit process[/yellow]")
+                return 0
+        else:
+            # Non-interactive mode: commit all chunks automatically
+            message, _ = _generate_commit_message(chunk, generator)
+            _handle_commit_action(chunk, message, git)
+
+    console.print("[green]✓[/green] All changes committed!")
+    return 0
+
+
+def _generate_commit_message(
+    chunk: DiffChunk,
+    generator: "MessageGenerator",
+) -> tuple[str, bool]:
+    """Generate a commit message for the given chunk.
+
+    Args:
+        chunk: Diff chunk to generate message for
+        generator: Message generator to use
+
+    Returns:
+        Tuple of (message, whether LLM was used)
+    """
+    try:
+        message, used_llm = generator.generate_message(chunk)
+    except Exception as e:
+        console.print(f"[red]Error generating message:[/red] {e!s}")
+        message = generator.fallback_generation(chunk)
+        used_llm = False
+
+    return message, used_llm
+
+
+def _print_chunk_summary(chunk: DiffChunk, index: int) -> None:
+    """Print a summary of a diff chunk.
+
+    Args:
+        chunk: The diff chunk to print
+        index: Index of the chunk
+    """
+    console.print(f"Chunk {index + 1}:")
+    console.print(f"  Files: {', '.join(chunk.files)}")
+
+    # Calculate changes
+    added = len([line for line in chunk.content.splitlines() if line.startswith("+") and not line.startswith("+++")])
+    removed = len([line for line in chunk.content.splitlines() if line.startswith("-") and not line.startswith("---")])
+
+    # Check if this is likely an untracked file chunk (no diff content)
+    if not chunk.content and chunk.files:
+        console.print("  [blue]New untracked files[/blue]")
+    else:
+        console.print(f"  Changes: {added} added, {removed} removed")
+
+    # Preview of the diff
+    if chunk.content:
+        max_preview_length = 300
+        preview = (
+            chunk.content[:max_preview_length] + "..." if len(chunk.content) > max_preview_length else chunk.content
+        )
+        console.print(f"  [dim]{preview}[/dim]")
+    else:
+        console.print("  [dim](New files - no diff content available)[/dim]")
+
+
+def _handle_commit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> None:
+    """Handle the commit action.
+
+    Args:
+        chunk: Diff chunk to commit
+        message: Commit message
+        git: Git wrapper
+    """
+    try:
+        # Perform the commit
+        git.commit_only_specified_files(chunk.files, message)
+        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e!s}")
+
+
+def _handle_edit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> None:
+    """Handle the edit action.
+
+    Args:
+        chunk: Diff chunk to commit
+        message: Default commit message
+        git: Git wrapper
+    """
+    # Let user edit the message
+    new_message = questionary.text("Edit commit message:", default=message).ask()
+    if not new_message:
+        return
+
+    try:
+        # Perform the commit with the edited message
+        git.commit_only_specified_files(chunk.files, new_message)
+        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] {e!s}")
 
 
 class ChunkAction(Enum):
