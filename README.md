@@ -2,7 +2,9 @@
 
 ⚠️ **DEVELOPMENT STATUS**: CodeMap is currently in active development. Use with caution in production environments.
 
-CodeMap is a CLI tool that generates optimized markdown documentation from your Python codebase. It analyzes source code, creates repository maps, and produces markdown files that can be used as context for LLMs.
+## Overview
+
+CodeMap is a powerful CLI tool that generates optimized markdown documentation from your Python codebase. It intelligently analyzes your source code, creates comprehensive repository maps, and produces well-structured markdown files that can be used as context for Large Language Models (LLMs) or as standalone documentation.
 
 ## Features
 
@@ -71,11 +73,13 @@ codemap commit --model anthropic/claude-3-sonnet-20240229
 codemap commit --model groq/meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
-API keys should be provided via environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+### Environment Variables
+
+API keys should be provided via environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`). See the [.env.example](./.env.example) file for all supported environment variables.
 
 ## Configuration
 
-Create a `.codemap.yml` file in your project root:
+Create a [`.codemap.yml`](./.codemap.yml) file in your project root:
 
 ```yaml
 # Documentation settings
@@ -123,4 +127,4 @@ CodeMap relies on these excellent open-source libraries:
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License - see the [LICENSE](./LICENSE) file for details.
