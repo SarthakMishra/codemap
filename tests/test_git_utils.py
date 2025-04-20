@@ -1,10 +1,11 @@
 """Tests for the Git utilities."""
 
-from unittest.mock import patch, MagicMock
+from __future__ import annotations
+
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-import os.path
-from pathlib import Path
 
 
 def test_get_other_staged_files() -> None:
@@ -161,20 +162,18 @@ def test_get_untracked_files() -> None:
 
 def test_stage_files_with_deleted_files() -> None:
     """Test staging files that include deleted files."""
-    from codemap.git.utils.git_utils import GitError, stage_files
-    import os.path
-    from pathlib import Path
+    from codemap.git.utils.git_utils import stage_files
 
     # Create a simpler approach using module-level variables to track calls
     git_command_calls = []
 
-    def mock_run_git_command(args, **kwargs):
+    def mock_run_git_command(args: list[str], **_kwargs) -> str:
         git_command_calls.append(args)
         if args[0:2] == ["git", "ls-files"]:
             return "file1.txt\ndeleted_file.txt\n"
         return ""
 
-    def mock_path_exists(path):
+    def mock_path_exists(path: str) -> bool:
         # Return True for file1.txt, False for others
         return str(path) == "file1.txt"
 
@@ -185,7 +184,7 @@ def test_stage_files_with_deleted_files() -> None:
         # Setup Path mock to return different exists values
         path_instances = {}
 
-        def get_mock_path(file_path):
+        def get_mock_path(file_path: str) -> MagicMock:
             if file_path not in path_instances:
                 mock_instance = MagicMock()
                 mock_instance.exists.return_value = file_path == "file1.txt"
@@ -211,11 +210,13 @@ def test_stage_files_with_deleted_files() -> None:
 
         # Test case 2: untracked deleted files
         git_command_calls.clear()
-        # Modify the mock to return different tracked files
-        mock_run_git_command_case2 = lambda args, **kwargs: (
-            git_command_calls.append(args),
-            "file1.txt\n" if args[0:2] == ["git", "ls-files"] else "",
-        )[1]
+
+        # Define a function instead of lambda
+        def mock_run_git_command_case2(args: list[str], **_kwargs) -> str:
+            git_command_calls.append(args)
+            if args[0:2] == ["git", "ls-files"]:
+                return "file1.txt\n"
+            return ""
 
         with patch("codemap.git.utils.git_utils.run_git_command", side_effect=mock_run_git_command_case2):
             stage_files(["file1.txt", "untracked.txt"])
