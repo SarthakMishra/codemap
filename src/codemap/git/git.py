@@ -130,4 +130,4 @@ class GitWrapper:
         Raises:
             GitError: If commit fails
         """
-        return commit_only_files(files, message, ignore_hooks)
+        return commit_only_files(files, message, ignore_hooks=ignore_hooks)
