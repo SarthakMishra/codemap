@@ -311,7 +311,7 @@ def _process_directory(
 
 
 @app.command()
-def generate(  # noqa: PLR0915
+def generate(
     path: PathArg = Path(),
     output: OutputOpt = None,
     config: ConfigOpt = None,
