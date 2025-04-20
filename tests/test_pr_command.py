@@ -29,8 +29,10 @@ def mock_git_utils() -> Generator[dict[str, Any], None, None]:
     ) as mock_update_pull_request, patch("codemap.cli.pr.validate_repo_path") as mock_validate_repo_path, patch(
         "codemap.cli.pr.GitWrapper",
     ) as mock_git_wrapper, patch("codemap.cli.pr.DiffSplitter") as mock_diff_splitter, patch(
-        "codemap.cli.pr.setup_message_generator",
-    ) as mock_setup_message_generator, patch("codemap.cli.pr.process_all_chunks") as mock_process_all_chunks, patch(
+        "codemap.cli.pr.create_universal_generator",
+    ) as mock_create_universal_generator, patch("codemap.cli.pr.generate_message") as mock_generate_message, patch(
+        "codemap.cli.pr.process_all_chunks",
+    ) as mock_process_all_chunks, patch(
         "questionary.confirm",
     ) as mock_confirm, patch("questionary.text") as mock_text, patch("questionary.select") as mock_select:
         # Set up mock returns
@@ -56,7 +58,8 @@ def mock_git_utils() -> Generator[dict[str, Any], None, None]:
         # Mock message generator
         mock_generator = MagicMock()
         mock_generator.generate_message.return_value = ("feat: Add new feature", True)
-        mock_setup_message_generator.return_value = mock_generator
+        mock_create_universal_generator.return_value = mock_generator
+        mock_generate_message.return_value = ("feat: Add new feature", True)
 
         # Mock process_all_chunks
         mock_process_all_chunks.return_value = 0
@@ -95,7 +98,8 @@ def mock_git_utils() -> Generator[dict[str, Any], None, None]:
             "validate_repo_path": mock_validate_repo_path,
             "git_wrapper": mock_git_wrapper,
             "diff_splitter": mock_diff_splitter,
-            "setup_message_generator": mock_setup_message_generator,
+            "create_universal_generator": mock_create_universal_generator,
+            "generate_message": mock_generate_message,
             "process_all_chunks": mock_process_all_chunks,
             "confirm": mock_confirm,
             "text": mock_text,

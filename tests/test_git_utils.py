@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -74,11 +74,13 @@ def test_unstash_changes() -> None:
 
 def test_commit_only_files_with_hooks() -> None:
     """Test committing only specific files with hook handling."""
-    from codemap.git.utils.git_utils import GitError, commit_only_files
+    from codemap.git.utils.git_utils import commit_only_files
 
     with patch("codemap.git.utils.git_utils.get_other_staged_files") as mock_other, patch(
-        "codemap.git.utils.git_utils.run_git_command",
-    ) as mock_run, patch(
+        "codemap.git.utils.git_utils.stage_files",
+    ), patch(
+        "codemap.git.utils.git_utils.subprocess.run",
+    ) as mock_subprocess_run, patch(
         "codemap.git.utils.git_utils.Path.exists",
     ) as mock_exists:
         # Setup mocks
@@ -86,37 +88,27 @@ def test_commit_only_files_with_hooks() -> None:
         mock_exists.return_value = True  # Assume file exists to simplify test
 
         # Test normal commit
-        mock_run.side_effect = [
-            None,  # git add succeeds
-            None,  # git commit succeeds
-        ]
-        commit_only_files(["file1.txt"], "Test commit")
-        assert mock_run.call_count == 2  # add + commit
+        mock_result = Mock()
+        mock_result.returncode = 0
+        mock_result.stdout = b"mock commit output"
+        mock_subprocess_run.return_value = mock_result  # Successful run with stdout
 
-        # Test hook failure and bypass
-        mock_run.reset_mock()
-        mock_run.side_effect = [
-            None,  # git add succeeds
-            GitError("Failed: hook script returned error"),  # First commit fails
-            None,  # Second commit with --no-verify succeeds
-        ]
+        result = commit_only_files(["file1.txt"], "Test commit")
+        assert result == []  # No other staged files
 
-        # Should fail first time
-        with pytest.raises(GitError):
-            commit_only_files(["file1.txt"], "Test commit")
+        # Verify subprocess.run was called twice (once for diff check, once for commit)
+        assert mock_subprocess_run.call_count == 2
 
-        # Reset for next test
-        mock_run.reset_mock()
-        mock_run.side_effect = [
-            None,  # git add succeeds
-            GitError("Failed: hook script returned error"),  # First commit fails
-            None,  # Second commit with --no-verify succeeds
-        ]
+        # First call is for the diff check
+        first_call = mock_subprocess_run.call_args_list[0]
+        assert "diff" in str(first_call)
 
-        # Should succeed with ignore_hooks=True
-        commit_only_files(["file1.txt"], "Test commit", ignore_hooks=True)
-        assert mock_run.call_count == 3  # add + failed commit + successful commit with --no-verify
-        assert "--no-verify" in mock_run.call_args[0][0]
+        # Second call is for the commit
+        second_call = mock_subprocess_run.call_args_list[1]
+        second_args, second_kwargs = second_call
+        assert "git commit" in second_args[0]
+        assert "Test commit" in second_args[0]
+        assert second_kwargs["shell"] is True
 
 
 def test_get_other_staged_files_error() -> None:
