@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import TYPE_CHECKING, Any, TypedDict
 
 if TYPE_CHECKING:
@@ -15,18 +16,27 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Constants to avoid magic numbers
+MIN_DESCRIPTION_LENGTH = 10
+MIN_SCOPE_LENGTH = 10
+
 # Default prompt template for commit message generation
 DEFAULT_PROMPT_TEMPLATE = """
 You are a helpful assistant that generates conventional commit messages based on code changes.
 Given a Git diff, please generate a concise and descriptive commit message following these conventions:
 
 1. Use the format: <type>(<scope>): <description>
-2. Types include: feat, fix, docs, style, refactor, perf, test, build, ci, chore
-3. Scope is optional and should be the specific component/module affected
-4. Description should be concise (50 chars max) and use imperative present tense
-5. Don't include breaking changes indicator or body in your answer
+2. Types include: {convention[types]}
+3. Scope must be short, concise, and represent the specific component affected
+   (avoid long paths like src/codemap/git/commit)
+4. Total message MUST be under 72 characters including type, scope and description
+5. Description should use imperative present tense (e.g., "add", "fix", "update", not "added", "fixed", "updated")
+6. Your response must ONLY contain the commit message with no other text, explanation, or formatting
 
-Analyze the following diff and respond with ONLY the commit message without any additional text or explanation:
+Here are some notes about the files changed:
+{files}
+
+Analyze the following diff and respond with ONLY the commit message:
 
 {diff}
 """
@@ -197,7 +207,7 @@ class MessageGenerator:
         convention = {
             "types": ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore"],
             "scopes": [],
-            "max_length": 50,
+            "max_length": 72,  # Conventional commit standard
         }
 
         # Try to load from config file
@@ -332,6 +342,72 @@ class MessageGenerator:
             msg = f"LLM API call failed: {e!s}"
             raise LLMError(msg) from e
 
+    def _format_message(self, message: str) -> str:
+        """Format and clean the generated commit message.
+
+        Args:
+            message: Raw message from LLM
+
+        Returns:
+            Cleaned and formatted commit message
+        """
+        # Strip any backticks, quotes, or other markdown formatting
+        message = message.strip()
+        message = message.replace("```", "").replace("`", "")
+
+        # Remove any "Response:" or similar prefixes
+        prefixes_to_remove = ["commit message:", "message:", "response:"]
+        for prefix in prefixes_to_remove:
+            if message.lower().startswith(prefix):
+                message = message[len(prefix) :].strip()
+
+        # Simplify scopes that are too verbose - match <type>(scope): and simplify long scopes
+        scope_pattern = r"^([a-z]+)\(([^)]+)\):"
+        match = re.match(scope_pattern, message)
+        if match:
+            commit_type = match.group(1)
+            scope = match.group(2)
+
+            # Reconstruct with scope
+            description = message[match.end() :].strip()
+            message = f"{commit_type}({scope}): {description}"
+
+        # Enforce character limit (72 chars is conventional commit standard)
+        convention = self._get_commit_convention()
+        max_length = convention.get("max_length", 72)
+
+        if len(message) > max_length:
+            # Try to truncate intelligently - keep type and scope intact
+            scope_match = re.match(scope_pattern, message)
+            if scope_match:
+                commit_type = scope_match.group(1)
+                scope = scope_match.group(2)
+                prefix = f"{commit_type}({scope}): "
+
+                # Calculate how much room we have for description
+                avail_len = max_length - len(prefix)
+                if avail_len > MIN_DESCRIPTION_LENGTH:  # At least have a minimal description
+                    description = message[scope_match.end() :].strip()
+                    truncated_desc = description[: avail_len - 3] + "..."
+                    message = f"{prefix}{truncated_desc}"
+                # If scope is too long, try with a shorter scope
+                elif len(scope) > MIN_SCOPE_LENGTH:
+                    scope = scope[:8]
+                    prefix = f"{commit_type}({scope}): "
+                    avail_len = max_length - len(prefix)
+                    description = message[scope_match.end() :].strip()
+                    truncated_desc = description[: avail_len - 3] + "..."
+                    message = f"{prefix}{truncated_desc}"
+                else:
+                    # Last resort: just truncate
+                    message = message[: max_length - 3] + "..."
+            else:
+                # No scope found, just truncate
+                message = message[: max_length - 3] + "..."
+
+        # Handle potential line breaks and replace with spaces
+        return " ".join(message.splitlines())
+
     def fallback_generation(self, chunk: DiffChunkDict) -> str:
         """Generate a simple commit message without using an LLM.
 
@@ -372,39 +448,57 @@ class MessageGenerator:
         """Generate a commit message for the given diff chunk.
 
         Args:
-            chunk: Diff chunk to generate message for, can be a DiffChunk or dict
+            chunk: DiffChunk to generate message for
 
         Returns:
-            Tuple of (message, whether LLM was used)
+            Tuple of (generated message, whether LLM was used)
+
+        Raises:
+            LLMError: If something goes wrong during message generation
         """
-        # Convert DiffChunk to dictionary if needed
-        chunk_dict = (
-            chunk
-            if isinstance(chunk, dict)
-            else {
-                "files": chunk.files,
-                "content": chunk.content,
-                "description": getattr(chunk, "description", None),
-            }
-        )
+        # Convert DiffChunk to dict if needed
+        if not isinstance(chunk, dict):
+            # Import here to avoid circular imports
+            from .diff_splitter import DiffChunk
 
-        try:
-            # Prepare the prompt with the diff content
-            prompt = self._prepare_prompt(chunk_dict)
+            if isinstance(chunk, DiffChunk):
+                chunk_dict: DiffChunkDict = {
+                    "files": chunk.files,
+                    "content": chunk.content,
+                }
+                if hasattr(chunk, "description") and chunk.description:
+                    chunk_dict["description"] = chunk.description
+                chunk = chunk_dict
 
-            # Get model identifier with provider prefix if needed
-            model, api_base = self._get_model_with_provider()
+        # Try to get description from chunk
+        if chunk.get("description"):
+            return chunk["description"], True
 
-            # Generate message using LLM
-            message = self._call_llm_api(prompt)
-        except LLMError as e:
-            # Log the error but don't fail
-            logger.warning("LLM message generation failed: %s", str(e))
-            logger.info("Falling back to simple message generation")
-
-            # Use fallback generation
-            message = self.fallback_generation(chunk_dict)
+        # Check if this is an empty diff
+        if not chunk.get("content", "").strip():
+            message = self.fallback_generation(chunk)
             return message, False
-        else:
-            # Return with flag indicating LLM was used
-            return message, True
+
+        # Try to generate a message using LLM
+        try:
+            # Import here to avoid circular imports
+            from .interactive import loading_spinner
+
+            # Prepare the prompt
+            prompt = self._prepare_prompt(chunk)
+
+            # Generate and validate the message
+            with loading_spinner("Generating commit message..."):
+                message = self._call_llm_api(prompt)
+
+            # Return the formatted message
+            return self._format_message(message), True
+        except LLMError:
+            # If LLM generation fails, use fallback
+            logger.warning("LLM generation failed, using fallback")
+            message = self.fallback_generation(chunk)
+            return message, False
+        except (OSError, ValueError, RuntimeError) as e:
+            logger.warning("LLM generation failed: %s", e)
+            error_msg = "Failed to generate commit message"
+            raise LLMError(error_msg) from e

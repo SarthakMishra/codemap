@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Generator, Self
 
 import questionary
 from rich.console import Console
@@ -24,6 +26,52 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 console = Console()
+
+
+# Singleton class to track spinner state
+class SpinnerState:
+    """Singleton class to track spinner state."""
+
+    _instance = None
+    is_active = False
+
+    def __new__(cls) -> Self:
+        """Create or return the singleton instance.
+
+        Returns:
+            The singleton instance of SpinnerState
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+
+@contextmanager
+def loading_spinner(message: str) -> Generator[None, None, None]:
+    """Show a loading spinner while an operation is in progress.
+
+    Args:
+        message: Message to display alongside the spinner
+    """
+    # In test environments, don't display a spinner
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
+        yield
+        return
+
+    # Check if a spinner is already active
+    spinner_state = SpinnerState()
+    if spinner_state.is_active:
+        # If there's already an active spinner, don't create a new one
+        yield
+        return
+
+    # Only use spinner in interactive environments
+    try:
+        spinner_state.is_active = True
+        with console.status(message, spinner="dots"):
+            yield
+    finally:
+        spinner_state.is_active = False
 
 
 def process_all_chunks(

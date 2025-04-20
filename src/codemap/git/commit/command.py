@@ -20,7 +20,7 @@ from codemap.git.utils.git_utils import (
 )
 
 from .diff_splitter import DiffChunk, DiffSplitter
-from .interactive import ChunkAction, CommitUI
+from .interactive import ChunkAction, CommitUI, loading_spinner
 from .message_generator import LLMError, MessageGenerator
 
 if TYPE_CHECKING:
@@ -53,6 +53,7 @@ def setup_message_generator(
     # Try to load .env file if it exists
     try:
         from dotenv import load_dotenv
+
         load_dotenv()
     except ImportError:
         pass
@@ -172,24 +173,28 @@ class CommitCommand:
             return changes
 
     def _generate_commit_message(self, chunk: DiffChunk) -> None:
-        """Generate a commit message for a chunk.
+        """Generate a commit message for the chunk.
 
         Args:
             chunk: DiffChunk to generate message for
+
+        Raises:
+            RuntimeError: If message generation fails
         """
         try:
-            message, used_llm = self.message_generator.generate_message(chunk)
-            chunk.description = message
-
-            if used_llm:
+            with loading_spinner("Generating commit message..."):
+                message, _ = self.message_generator.generate_message(chunk)
+                chunk.description = message
                 logger.info("Generated commit message using LLM: %s", message)
-            else:
-                logger.info("Generated commit message using fallback: %s", message)
-        except (ValueError, LLMError) as e:
-            # If specific errors fail, use a very simple message
-            files_str = ", ".join(chunk.files)
-            chunk.description = f"chore: update {files_str}"
-            logger.warning("Message generation failed: %s", str(e))
+        except LLMError:
+            # If LLM generation fails, try fallback
+            with loading_spinner("Falling back to simple message generation..."):
+                message = self.message_generator.fallback_generation(chunk)
+                chunk.description = message
+                logger.info("Generated simple commit message: %s", message)
+        except (ValueError, RuntimeError) as e:
+            msg = f"Failed to generate commit message: {e}"
+            raise RuntimeError(msg) from e
 
     def _process_chunk(self, chunk: DiffChunk) -> bool:
         """Process a single chunk.
@@ -203,6 +208,9 @@ class CommitCommand:
         Raises:
             RuntimeError: If Git operations fail
         """
+        # Import here to avoid circular imports
+        from .interactive import loading_spinner
+
         # Generate commit message
         self._generate_commit_message(chunk)
 
@@ -220,24 +228,27 @@ class CommitCommand:
             # Make sure all files are staged first (in case any were missed or unstaged)
             from codemap.git.utils.git_utils import run_git_command
 
-            run_git_command(["git", "add", "."])
+            with loading_spinner("Staging files..."):
+                run_git_command(["git", "add", "."])
 
-            # Unstage files not in the current chunk to ensure only chunk files are committed
-            all_staged_files = get_staged_diff().files
-            files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
-            if files_to_unstage:
-                unstage_files(files_to_unstage)
+                # Unstage files not in the current chunk to ensure only chunk files are committed
+                all_staged_files = get_staged_diff().files
+                files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
+                if files_to_unstage:
+                    unstage_files(files_to_unstage)
 
-            # Make sure the chunk files are staged (should be redundant but ensures consistency)
-            stage_files(chunk.files)
+                # Make sure the chunk files are staged (should be redundant but ensures consistency)
+                stage_files(chunk.files)
 
             # Create commit
-            commit(result.message or chunk.description or "Update files")
+            with loading_spinner("Creating commit..."):
+                commit(result.message or chunk.description or "Update files")
             self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
 
             # Re-stage all remaining files for the next commit
             # This ensures we don't lose track of any changes
-            run_git_command(["git", "add", "."])
+            with loading_spinner("Re-staging remaining changes..."):
+                run_git_command(["git", "add", "."])
 
         except GitError as e:
             self.ui.show_error(f"Failed to commit changes: {e}")
@@ -251,9 +262,14 @@ class CommitCommand:
         Returns:
             True if successful, False otherwise
         """
+        # Import here to avoid circular imports
+        from .interactive import loading_spinner
+
         try:
             # Get all changes
-            changes = self._get_changes()
+            with loading_spinner("Analyzing repository changes..."):
+                changes = self._get_changes()
+
             if not changes:
                 self.ui.show_error("No changes to commit")
                 return False
@@ -261,7 +277,8 @@ class CommitCommand:
             # Process each change group (staged, unstaged, untracked)
             for diff in changes:
                 # Always use semantic strategy for better commit organization
-                chunks = self.splitter.split_diff(diff, "semantic")
+                with loading_spinner("Organizing changes semantically..."):
+                    chunks = self.splitter.split_diff(diff, "semantic")
                 if not chunks:
                     continue
 
