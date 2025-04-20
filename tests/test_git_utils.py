@@ -96,19 +96,15 @@ def test_commit_only_files_with_hooks() -> None:
         result = commit_only_files(["file1.txt"], "Test commit")
         assert result == []  # No other staged files
 
-        # Verify subprocess.run was called twice (once for diff check, once for commit)
-        assert mock_subprocess_run.call_count == 2
+        # Verify subprocess.run was called once for the commit
+        assert mock_subprocess_run.call_count == 1
 
-        # First call is for the diff check
-        first_call = mock_subprocess_run.call_args_list[0]
-        assert "diff" in str(first_call)
-
-        # Second call is for the commit
-        second_call = mock_subprocess_run.call_args_list[1]
-        second_args, second_kwargs = second_call
-        assert "git commit" in second_args[0]
-        assert "Test commit" in second_args[0]
-        assert second_kwargs["shell"] is True
+        # The call is for the commit
+        commit_call = mock_subprocess_run.call_args_list[0]
+        commit_args, commit_kwargs = commit_call
+        assert "git commit" in commit_args[0]
+        assert "Test commit" in commit_args[0]
+        assert commit_kwargs["shell"] is True
 
 
 def test_get_other_staged_files_error() -> None:
