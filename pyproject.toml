@@ -24,7 +24,9 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "commitlint>=1.3.0",
     "isort>=6.0.1",
+    "pre-commit>=4.2.0",
     "pylint>=3.3.6",
     "pytest>=8.3.5",
     "ruff>=0.11.6",
@@ -72,6 +74,7 @@ ignore = [
     "PLR0912",  # too many branches
     "PLR0913",  # too many arguments in function definition
     "TRY300",  # Consider moving this statement to an `else` block
+    "COM812",  # Use a constant for the message in a raise statement
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -88,4 +91,4 @@ max-branches = 12
 max-statements = 50
 
 [tool.ruff.lint.pydocstyle]
-convention = "google" 
+convention = "google"

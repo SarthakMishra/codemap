@@ -22,6 +22,27 @@ pipx install git+https://github.com/SarthakMishra/codemap.git
 pipx upgrade codemap
 ```
 
+## Development Setup
+
+### Pre-commit Hooks
+
+This project uses pre-commit hooks to ensure code quality. To set up pre-commit:
+
+```bash
+uv run pre-commit install
+```
+
+The pre-commit hooks will:
+- Run linting checks with Ruff
+- Format your code with Ruff
+- Run pytest to ensure tests pass
+- Perform common file checks (trailing whitespace, YAML validation, etc.)
+
+To manually run all pre-commit hooks:
+```bash
+uv run pre-commit run --all-files
+```
+
 ## Basic Usage
 
 Generate documentation for your project:
@@ -187,7 +208,7 @@ commit:
   llm:
     model: gpt-4o-mini
     provider: openai
-  
+
   # Semantic chunking settings
   semantic:
     similarity_threshold: 0.7
