@@ -18,18 +18,6 @@ repos:
         pass_filenames: false
         types: [python]
 
-  - repo: local
-    hooks:
-      - id: pytest
-        name: pytest
-        entry: uv run pytest
-        language: system
-        pass_filenames: false
-        always_run: true
-        stages: [commit]
-        verbose: true
-        types: [python]
-
   - repo: https://github.com/opensource-nepal/commitlint
     rev: v1.2.0
     hooks:
