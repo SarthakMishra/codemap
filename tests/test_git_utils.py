@@ -1,8 +1,10 @@
 """Tests for the Git utilities."""
 
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 import pytest
+import os.path
+from pathlib import Path
 
 
 def test_get_other_staged_files() -> None:
@@ -75,11 +77,18 @@ def test_commit_only_files_with_hooks() -> None:
 
     with patch("codemap.git.utils.git_utils.get_other_staged_files") as mock_other, patch(
         "codemap.git.utils.git_utils.run_git_command",
-    ) as mock_run:
+    ) as mock_run, patch(
+        "codemap.git.utils.git_utils.Path.exists",
+    ) as mock_exists:
         # Setup mocks
         mock_other.return_value = []
+        mock_exists.return_value = True  # Assume file exists to simplify test
 
         # Test normal commit
+        mock_run.side_effect = [
+            None,  # git add succeeds
+            None,  # git commit succeeds
+        ]
         commit_only_files(["file1.txt"], "Test commit")
         assert mock_run.call_count == 2  # add + commit
 
@@ -148,3 +157,78 @@ def test_get_untracked_files() -> None:
         assert "ls-files" in args
         assert "--others" in args
         assert "--exclude-standard" in args
+
+
+def test_stage_files_with_deleted_files() -> None:
+    """Test staging files that include deleted files."""
+    from codemap.git.utils.git_utils import GitError, stage_files
+    import os.path
+    from pathlib import Path
+
+    # Create a simpler approach using module-level variables to track calls
+    git_command_calls = []
+
+    def mock_run_git_command(args, **kwargs):
+        git_command_calls.append(args)
+        if args[0:2] == ["git", "ls-files"]:
+            return "file1.txt\ndeleted_file.txt\n"
+        return ""
+
+    def mock_path_exists(path):
+        # Return True for file1.txt, False for others
+        return str(path) == "file1.txt"
+
+    # Apply our patches
+    with patch("codemap.git.utils.git_utils.run_git_command", side_effect=mock_run_git_command), patch.object(
+        Path, "exists", return_value=False
+    ), patch("codemap.git.utils.git_utils.Path") as mock_path:
+        # Setup Path mock to return different exists values
+        path_instances = {}
+
+        def get_mock_path(file_path):
+            if file_path not in path_instances:
+                mock_instance = MagicMock()
+                mock_instance.exists.return_value = file_path == "file1.txt"
+                path_instances[file_path] = mock_instance
+            return path_instances[file_path]
+
+        mock_path.side_effect = get_mock_path
+
+        # Clear call history
+        git_command_calls.clear()
+
+        # Test case 1: Existing and tracked deleted files
+        stage_files(["file1.txt", "deleted_file.txt"])
+
+        # Expect these calls:
+        # 1. git add file1.txt (for existing file)
+        # 2. git ls-files (to check tracked files)
+        # 3. git rm deleted_file.txt (for deleted file that's tracked)
+        assert len(git_command_calls) == 3
+        assert git_command_calls[0] == ["git", "add", "file1.txt"]
+        assert git_command_calls[1] == ["git", "ls-files"]
+        assert git_command_calls[2] == ["git", "rm", "deleted_file.txt"]
+
+        # Test case 2: untracked deleted files
+        git_command_calls.clear()
+        # Modify the mock to return different tracked files
+        mock_run_git_command_case2 = lambda args, **kwargs: (
+            git_command_calls.append(args),
+            "file1.txt\n" if args[0:2] == ["git", "ls-files"] else "",
+        )[1]
+
+        with patch("codemap.git.utils.git_utils.run_git_command", side_effect=mock_run_git_command_case2):
+            stage_files(["file1.txt", "untracked.txt"])
+
+            # Should have 2 calls: git add for file1.txt, git ls-files
+            # (no git rm for untracked)
+            assert len(git_command_calls) == 2
+            assert git_command_calls[0] == ["git", "add", "file1.txt"]
+            assert git_command_calls[1] == ["git", "ls-files"]
+
+        # Test case 3: empty file list
+        git_command_calls.clear()
+        stage_files([])
+
+        # Should have no calls
+        assert len(git_command_calls) == 0
