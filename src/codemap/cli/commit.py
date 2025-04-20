@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Iterator
 
 import questionary
 import typer
 from rich.console import Console
 from rich.padding import Padding
+from rich.spinner import Spinner
 
 try:
     from dotenv import load_dotenv
@@ -21,7 +24,29 @@ except ImportError:
 from codemap.git import GitWrapper
 from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
 from codemap.git.commit.message_generator import LLMError, MessageGenerator
-from codemap.utils import validate_repo_path
+
+# Try to import from utils, but fallback to defining locally if needed
+try:
+    from codemap.utils import loading_spinner, validate_repo_path
+except ImportError:
+    # Define loading_spinner locally as fallback
+    @contextlib.contextmanager
+    def loading_spinner(message: str = "Processing...") -> Iterator[None]:
+        """Display a loading spinner while executing a task.
+
+        Args:
+            message: Message to display alongside the spinner
+
+        Yields:
+            None
+        """
+        console = Console()
+        spinner = Spinner("dots", text=message)
+        with console.status(spinner):
+            yield
+
+    # Also import validate_repo_path
+    from codemap.utils import validate_repo_path
 
 app = typer.Typer(help="Generate and apply conventional commits from Git diffs")
 console = Console()
@@ -560,6 +585,7 @@ class RunConfig:
     api_base: str | None = None
     commit: bool = True
     prompt_template: str | None = None
+    staged_only: bool = False  # Only process staged changes
 
 
 DEFAULT_RUN_CONFIG = RunConfig()
@@ -567,35 +593,33 @@ DEFAULT_RUN_CONFIG = RunConfig()
 
 @app.command(help="Generate and apply conventional commits from Git diffs")
 def run(config: RunConfig = DEFAULT_RUN_CONFIG) -> int:
-    """Run the commit command with the provided configuration.
+    """Run the commit command.
 
     Args:
-        config: Configuration options for the commit command.
+        config: Configuration options
 
     Returns:
-        Exit code (0 for success, non-zero for errors).
+        Exit code
     """
-    repo_path = validate_repo_path(config.repo_path)
-    if not repo_path:
-        console.print("[red]Error:[/red] Not a valid Git repository")
+    # Validate the repository path
+    try:
+        repo_path = validate_repo_path(config.repo_path)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e!s}")
         return 1
 
-    git = GitWrapper(repo_path)
-    diff = git.get_uncommitted_changes()
-    if not diff:
-        console.print("No changes to commit")
-        return 0
+    # Show welcome message
+    console.print(
+        Padding("[bold]CodeMap Conventional Commit Generator[/]", (1, 0, 0, 0)),
+    )
 
-    # Always use semantic strategy for better commit organization
-    splitter = DiffSplitter(repo_path)
-    chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
-    if not chunks:
-        console.print("No changes to commit (after filtering)")
-        return 0
+    # Determine generation mode
+    mode = GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART
 
+    # Configure options
     options = CommitOptions(
         repo_path=repo_path,
-        generation_mode=GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART,
+        generation_mode=mode,
         model=config.model,
         provider=config.provider,
         api_base=config.api_base,
@@ -604,12 +628,51 @@ def run(config: RunConfig = DEFAULT_RUN_CONFIG) -> int:
         api_key=config.api_key,
     )
 
-    generator = setup_message_generator(options)
+    try:
+        # Initialize Git wrapper
+        git = GitWrapper(repo_path)
 
-    if config.commit:
+        # Check if there are any changes
+        with loading_spinner("Checking for changes..."):
+            has_changes = git.has_changes()
+
+        if not has_changes:
+            console.print("[yellow]No changes to commit[/yellow]")
+            return 0
+
+        # Set up message generator
+        with loading_spinner("Setting up message generator..."):
+            generator = setup_message_generator(options)
+
+        # Get staged and unstaged changes
+        with loading_spinner("Analyzing repository changes..."):
+            # Get changes from Git
+            splitter = DiffSplitter(repo_path)
+            chunks = []
+
+            # Process staged changes
+            staged_diff = git.get_staged_diff()
+            if staged_diff.files:
+                staged_chunks = splitter.split_diff(staged_diff, SplitStrategy.SEMANTIC)
+                chunks.extend(staged_chunks)
+
+            # Process unstaged changes
+            if not chunks or not config.staged_only:
+                unstaged_diff = git.get_unstaged_diff()
+                if unstaged_diff.files:
+                    unstaged_chunks = splitter.split_diff(unstaged_diff, SplitStrategy.SEMANTIC)
+                    chunks.extend(unstaged_chunks)
+
+        # Check if there are any chunks
+        if not chunks:
+            console.print("[yellow]No changes to commit[/yellow]")
+            return 0
+
+        # Process chunks
         return process_all_chunks(options, chunks, generator, git)
-    display_suggested_messages(options, chunks, generator)
-    return 0
+    except (ValueError, RuntimeError, TypeError) as e:
+        console.print(f"[red]Error:[/red] {e!s}")
+        return 1
 
 
 if __name__ == "__main__":
