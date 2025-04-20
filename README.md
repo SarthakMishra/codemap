@@ -181,16 +181,19 @@ CodeMap supports multiple LLM providers through LiteLLM:
 
 ```bash
 # Using OpenAI (default)
-codemap commit --model gpt-4.0-mini
+codemap commit --model openai/gpt-4o-mini
 
 # Using Anthropic
 codemap commit --model anthropic/claude-3-sonnet-20240229
 
 # Using Groq (recommended for speed)
-codemap commit --model groq/meta-llama/llama-4-scout-17b-16e-instruct
+codemap commit --model groq/llama-3.1-8b-instant
+
+# Using OpenRouter
+codemap commit --model openrouter/meta-llama/llama-3-8b-instruct
 ```
 
-API keys should be provided via environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`).
+API keys should be provided via environment variables (e.g., `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`).
 
 ## Configuration
 
