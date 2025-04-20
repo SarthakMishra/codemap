@@ -130,14 +130,54 @@ def get_unstaged_diff() -> GitDiff:
 def stage_files(files: list[str]) -> None:
     """Stage the specified files.
 
+    This function intelligently handles both existing and deleted files:
+    - For existing files, it uses `git add`
+    - For files that no longer exist, it uses `git rm`
+
+    This prevents errors when trying to stage files that have been deleted
+    but not yet tracked in git.
+
     Args:
         files: List of files to stage
 
     Raises:
         GitError: If staging fails
     """
+    if not files:
+        return
+
     try:
-        run_git_command(["git", "add", *files])
+        # Separate files into existing and non-existing
+        existing_files = []
+        deleted_files = []
+        for file in files:
+            if Path(file).exists():
+                existing_files.append(file)
+            else:
+                deleted_files.append(file)
+
+        # Stage existing files if any
+        if existing_files:
+            run_git_command(["git", "add", *existing_files])
+
+        # Handle deleted files if any
+        if deleted_files:
+            # Get list of tracked files
+            tracked_files_output = run_git_command(["git", "ls-files"])
+            tracked_files = set(tracked_files_output.splitlines())
+
+            # Separate deleted files into tracked and untracked
+            tracked_deleted = [f for f in deleted_files if f in tracked_files]
+            untracked_deleted = [f for f in deleted_files if f not in tracked_files]
+
+            # Log warning for untracked deleted files
+            for file in untracked_deleted:
+                logger.warning("Skipping untracked deleted file: %s", file)
+
+            # Remove tracked deleted files
+            if tracked_deleted:
+                run_git_command(["git", "rm", *tracked_deleted])
+
     except GitError as e:
         msg = f"Failed to stage files: {', '.join(files)}"
         raise GitError(msg) from e
@@ -249,8 +289,8 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
         # Check for other staged files
         other_staged = get_other_staged_files(files)
 
-        # Stage the files
-        run_git_command(["git", "add", *files])
+        # Stage the files (our modified stage_files function will handle deleted files)
+        stage_files(files)
 
         # Commit only the specified files by using pathspec
         commit_cmd = ["git", "commit", "-m", message, "--", *files]
