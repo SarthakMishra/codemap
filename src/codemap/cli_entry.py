@@ -583,6 +583,7 @@ def pr_create(
         # Set API key in environment if provided
         if api_key:
             import os
+
             os.environ["OPENAI_API_KEY"] = api_key
 
         exit_code = pr_create_cmd(
@@ -695,6 +696,7 @@ def pr_update(
         # Set API key in environment if provided
         if api_key:
             import os
+
             os.environ["OPENAI_API_KEY"] = api_key
 
         exit_code = pr_update_cmd(
