@@ -24,25 +24,6 @@ pipx upgrade codemap
 
 ## Development Setup
 
-### Pre-commit Hooks
-
-This project uses pre-commit hooks to ensure code quality. To set up pre-commit:
-
-```bash
-uv run pre-commit install
-```
-
-The pre-commit hooks will:
-- Run linting checks with Ruff
-- Format your code with Ruff
-- Run pytest to ensure tests pass
-- Perform common file checks (trailing whitespace, YAML validation, etc.)
-
-To manually run all pre-commit hooks:
-```bash
-uv run pre-commit run --all-files
-```
-
 ## Basic Usage
 
 Generate documentation for your project:
@@ -69,6 +50,14 @@ codemap commit
 # Specify a different LLM model
 codemap commit --model gpt-4
 ```
+### Git Hooks Compatibility
+
+⚠️ **Warning**: By default, CodeMap commits use the `--no-verify` flag to bypass Git hooks, including pre-commit hooks. This is to prevent issues with hook failures that might interfere with the commit workflow. If you want to enable Git hooks, you can:
+
+1. Set `use_git_hooks: true` in your `.codemap.yml` configuration
+2. Use the `--use-hooks` flag with the commit command: `codemap commit --use-hooks`
+
+Note that using Git hooks with CodeMap might lead to unexpected behavior, especially if your hooks modify files during the commit process.
 
 ### Commit Strategy
 
