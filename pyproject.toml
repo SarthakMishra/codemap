@@ -67,6 +67,11 @@ ignore = [
     "D212",  # multi-line-summary-first-line
     "FBT001",  # Boolean positional arg in function definition (required for typer)
     "FBT002",  # Boolean default value in function definition (required for typer)
+    "C901",  # function too complex
+    "PLR0911",  # too many return statements
+    "PLR0912",  # too many branches
+    "PLR0913",  # too many arguments in function definition
+    "TRY300",  # Consider moving this statement to an `else` block
 ]
 
 [tool.ruff.lint.per-file-ignores]
