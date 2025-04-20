@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.panel import Panel
 
 from codemap.git import GitWrapper
-from codemap.git.commit.command import setup_message_generator
 from codemap.git.commit.diff_splitter import DiffSplitter, SplitStrategy
 from codemap.git.commit.interactive import process_all_chunks
 from codemap.git.utils.git_utils import GitError
@@ -39,6 +38,7 @@ from codemap.git.utils.pr_utils import (
     update_pull_request,
 )
 from codemap.utils import validate_repo_path
+from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 app = typer.Typer(help="Generate and manage pull requests")
 console = Console()
@@ -132,17 +132,16 @@ def _handle_branch_creation(options: PROptions) -> str | None:
 
             if chunks:
                 # Set up message generator for the first chunk
-                generator = setup_message_generator(
-                    options.repo_path,
+                generator = create_universal_generator(
+                    repo_path=options.repo_path,
                     model=options.model,
-                    provider=options.provider,
-                    api_base=options.api_base,
                     api_key=options.api_key,
+                    api_base=options.api_base,
                 )
 
                 # Generate a commit message for the first chunk
                 try:
-                    message, _ = generator.generate_message(chunks[0])
+                    message, _ = generate_message(chunks[0], generator)
                     # Extract the first line as the commit message
                     first_line = message.split("\n")[0] if "\n" in message else message
                     suggested_name = suggest_branch_name([first_line])
@@ -229,12 +228,11 @@ def _handle_commits(options: PROptions) -> bool:
             return True
 
         # Set up message generator
-        generator = setup_message_generator(
-            options.repo_path,
+        generator = create_universal_generator(
+            repo_path=options.repo_path,
             model=options.model,
-            provider=options.provider,
-            api_base=options.api_base,
             api_key=options.api_key,
+            api_base=options.api_base,
         )
 
         # Process all chunks
