@@ -9,25 +9,25 @@ description = "CLI tool for generating optimized markdown documentation from cod
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "litellm>=1.65.4.post1",
-    "numpy>=1.26.4",
+    "litellm>=1.67.0",
+    "numpy>=2.2.5",
     "pygments>=2.19.1",
     "python-dotenv>=1.1.0",
     "pyyaml>=6.0.2",
     "questionary>=2.1.0",
     "requests>=2.32.3",
-    "rich>=13.9.4",
-    "typer>=0.15.1",
-    "typing-extensions>=4.9.0",
-    "sentence-transformers>=2.7.0",
+    "rich>=14.0.0",
+    "typer>=0.15.2",
+    "typing-extensions>=4.13.2",
+    "sentence-transformers>=4.1.0",
 ]
 
 [dependency-groups]
 dev = [
-    "isort>=5.13.2",
-    "pylint>=2.17.7",
-    "pytest>=7.4.4",
-    "ruff>=0.9.6",
+    "isort>=6.0.1",
+    "pylint>=3.3.6",
+    "pytest>=8.3.5",
+    "ruff>=0.11.6",
 ]
 
 [tool.pyright]
