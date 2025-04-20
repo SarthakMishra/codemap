@@ -418,7 +418,6 @@ def _perform_commit(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
     console.print("[yellow]Trying fallback commit method...[/yellow]")
 
     try:
-
         # Check if git is available in the path
         git_path = shutil.which("git")
         if not git_path:
