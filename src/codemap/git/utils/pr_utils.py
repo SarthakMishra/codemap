@@ -179,17 +179,78 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
     if not commits:
         return "Update branch"
 
-    # Use the first commit message as the PR title
-    title = commits[0]
+    for prefix in ["feat", "fix", "docs"]:
+        for commit in commits:
+            if commit.startswith(prefix):
+                # Strip the prefix and use as title
+                title = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commit)
+                # Capitalize first letter
+                return title[0].upper() + title[1:]
 
-    # Remove any conventional commit prefixes (e.g., "feat: ", "fix: ")
-    title = re.sub(r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?:\s*", "", title)
+    # Fallback to first commit
+    title = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commits[0])
+    return title[0].upper() + title[1:]
 
-    # Capitalize the first letter
-    if title:
-        title = title[0].upper() + title[1:]
 
-    return title
+def generate_pr_title_with_llm(
+    commits: list[str],
+    model: str = "gpt-4o-mini",
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> str:
+    """Generate a PR title using an LLM.
+
+    Args:
+        commits: List of commit messages
+        model: LLM model to use
+        api_key: API key for LLM provider
+        api_base: Custom API base URL
+
+    Returns:
+        Generated PR title
+    """
+    import logging
+
+    from codemap.utils.llm_utils import generate_text_with_llm
+
+    logger = logging.getLogger(__name__)
+
+    if not commits:
+        return "Update branch"
+
+    try:
+        # Format commit messages
+        commit_list = "\n".join([f"- {commit}" for commit in commits])
+
+        # Prepare prompt
+        prompt = """Based on the following commits, generate a clear, concise PR title that captures the
+essence of the changes.
+        Follow these guidelines:
+        - Focus on the most important change
+        - If there are multiple related changes, summarize them
+        - Keep it under 80 characters
+        - Start with a capital letter
+        - Don't use a period at the end
+        - Use present tense (e.g., "Add feature" not "Added feature")
+
+        Commits:
+        """
+
+        prompt += commit_list + "\n\n        PR Title:"
+
+        # Call LLM with repo_path used for context
+        title = generate_text_with_llm(prompt, model, api_key, api_base)
+
+        # Clean up the title
+        title = title.strip()
+        if title.endswith("."):
+            title = title[:-1]
+
+        return title
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        logger.warning("Failed to generate PR title with LLM: %s", str(e))
+        # Fallback to rule-based approach
+        return generate_pr_title_from_commits(commits)
 
 
 def generate_pr_description_from_commits(commits: list[str]) -> str:
@@ -254,6 +315,64 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
         description += "\n"
 
     return description
+
+
+def generate_pr_description_with_llm(
+    commits: list[str],
+    model: str = "gpt-4o-mini",
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> str:
+    """Generate a PR description using an LLM.
+
+    Args:
+        commits: List of commit messages
+        model: LLM model to use
+        api_key: API key for LLM provider
+        api_base: Custom API base URL
+
+    Returns:
+        Generated PR description
+    """
+    import logging
+
+    from codemap.utils.llm_utils import generate_text_with_llm
+
+    logger = logging.getLogger(__name__)
+
+    if not commits:
+        return "No changes"
+
+    try:
+        # Format commit messages
+        commit_list = "\n".join([f"- {commit}" for commit in commits])
+
+        # Prepare prompt
+        prompt = f"""Based on the following commits, generate a comprehensive PR description in Markdown.
+        Follow these guidelines:
+        - Organize changes by type (features, fixes, documentation, etc.)
+        - Provide context for the changes where possible
+        - Use bullet points for clarity
+        - Include any important implementation details
+        - Add testing instructions if relevant
+
+        Commits:
+        {commit_list}
+
+        PR Description:"""
+
+        # Call LLM with repo_path used for context
+        description = generate_text_with_llm(prompt, model, api_key, api_base)
+
+        # Ensure it's properly formatted
+        if not description.startswith("#"):
+            description = f"## Changes\n\n{description}"
+
+        return description
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        logger.warning("Failed to generate PR description with LLM: %s", str(e))
+        # Fallback to rule-based approach
+        return generate_pr_description_from_commits(commits)
 
 
 def create_pull_request(base_branch: str, head_branch: str, title: str, description: str) -> PullRequest:

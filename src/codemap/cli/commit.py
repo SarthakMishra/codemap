@@ -2,16 +2,21 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import shutil
+import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import TYPE_CHECKING, Iterator
 
 import questionary
 import typer
 from rich.console import Console
 from rich.padding import Padding
+from rich.spinner import Spinner
 
 try:
     from dotenv import load_dotenv
@@ -20,8 +25,38 @@ except ImportError:
 
 from codemap.git import GitWrapper
 from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
-from codemap.git.commit.message_generator import LLMError, MessageGenerator
-from codemap.utils import validate_repo_path
+from codemap.git.commit.message_generator import LLMError
+from codemap.git.utils.git_utils import GitError
+from codemap.utils.llm_utils import create_universal_generator, generate_message
+
+# Truncate to maximum of 10 lines
+MAX_PREVIEW_LINES = 10
+
+if TYPE_CHECKING:
+    from codemap.git.commit.message_generator import MessageGenerator
+
+# Try to import from utils, but fallback to defining locally if needed
+try:
+    from codemap.utils import loading_spinner, validate_repo_path
+except ImportError:
+    # Define loading_spinner locally as fallback
+    @contextlib.contextmanager
+    def loading_spinner(message: str = "Processing...") -> Iterator[None]:
+        """Display a loading spinner while executing a task.
+
+        Args:
+            message: Message to display alongside the spinner
+
+        Yields:
+            None
+        """
+        console = Console()
+        spinner = Spinner("dots", text=message)
+        with console.status(spinner):
+            yield
+
+    # Also import validate_repo_path
+    from codemap.utils import validate_repo_path
 
 app = typer.Typer(help="Generate and apply conventional commits from Git diffs")
 console = Console()
@@ -48,8 +83,7 @@ class CommitOptions:
 
     repo_path: Path
     generation_mode: GenerationMode = field(default=GenerationMode.SMART)
-    model: str = field(default="gpt-4o-mini")
-    provider: str | None = field(default=None)
+    model: str = field(default="openai/gpt-4o-mini")
     api_base: str | None = field(default=None)
     commit: bool = field(default=True)
     prompt_template: str | None = field(default=None)
@@ -96,14 +130,18 @@ def _extract_provider_from_model(model: str) -> str | None:
     """Extract provider from model name if possible.
 
     Args:
-        model: Model identifier like "provider/model_name"
+        model: Model identifier like "provider/model_name" or "provider/org/model_name"
 
     Returns:
         Provider name or None if not in expected format
     """
+    # Handle explicit provider prefixes (get first part before slash)
     if "/" in model:
-        provider, _ = model.split("/", 1)
-        return provider
+        provider = model.split("/")[0]  # Take first part regardless of number of slashes
+        return provider.lower()  # Normalize to lowercase
+
+    # For models without provider prefix, return None
+    # LiteLLM will handle these appropriately
     return None
 
 
@@ -124,6 +162,7 @@ def _get_api_key_for_provider(provider: str) -> str | None:
         "mistral": "MISTRAL_API_KEY",
         "together": "TOGETHER_API_KEY",
         "cohere": "COHERE_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
     }
 
     # Get environment variable name for this provider
@@ -134,12 +173,8 @@ def _get_api_key_for_provider(provider: str) -> str | None:
     # Try to get key from environment
     api_key = os.environ.get(env_var)
 
-    # Special case for groq
-    if not api_key and provider == "groq":
-        api_key = os.environ.get("GROQ_API_KEY")
-
-    # Fallback to OpenAI
-    if not api_key:
+    # Fallback to OpenAI if requested
+    if not api_key and provider != "openai":
         api_key = os.environ.get("OPENAI_API_KEY")
 
     return api_key
@@ -154,58 +189,14 @@ def setup_message_generator(options: CommitOptions) -> MessageGenerator:
     Returns:
         Configured message generator
     """
-    # Try to load .env file if it exists
-    if load_dotenv:
-        load_dotenv()
-
-    # Load custom prompt template if provided
-    custom_prompt = _load_prompt_template(options.prompt_template)
-
-    # Extract provider from model if not explicitly provided
-    if not options.provider:
-        options.provider = _extract_provider_from_model(options.model)
-
-    # Set up API key if provided, otherwise try to get from environment
-    api_key = options.api_key
-    if not api_key and options.provider:
-        api_key = _get_api_key_for_provider(options.provider)
-
-    # Set up environment variables for API keys if provided
-    if api_key and options.provider:
-        set_provider_api_key(options.provider, api_key)
-
-    # Create and return the message generator
-    return MessageGenerator(
-        options.repo_path,
-        prompt_template=custom_prompt,
+    # Use the universal generator for simplified setup
+    return create_universal_generator(
+        repo_path=options.repo_path,
         model=options.model,
-        provider=options.provider,
+        api_key=options.api_key,
         api_base=options.api_base,
+        prompt_template=_load_prompt_template(options.prompt_template),
     )
-
-
-def set_provider_api_key(provider: str | None, api_key: str) -> None:
-    """Set the API key in the environment for the given provider.
-
-    Args:
-        provider: Provider name (or None for default)
-        api_key: API key to set
-    """
-    if provider == "anthropic":
-        os.environ["ANTHROPIC_API_KEY"] = api_key
-    elif provider == "cohere":
-        os.environ["COHERE_API_KEY"] = api_key
-    elif provider == "azure":
-        os.environ["AZURE_API_KEY"] = api_key
-    elif provider == "groq":
-        os.environ["GROQ_API_KEY"] = api_key
-    elif provider == "mistral":
-        os.environ["MISTRAL_API_KEY"] = api_key
-    elif provider == "together":
-        os.environ["TOGETHER_API_KEY"] = api_key
-    else:
-        # Default to OpenAI
-        os.environ["OPENAI_API_KEY"] = api_key
 
 
 def generate_commit_message(
@@ -223,18 +214,17 @@ def generate_commit_message(
     Returns:
         Tuple of (message, whether LLM was used)
     """
-    if mode == GenerationMode.SIMPLE:
-        message = generator.fallback_generation(chunk)
-        used_llm = False
-    else:
-        try:
-            message, used_llm = generator.generate_message(chunk)
-        except LLMError as e:
-            console.print(f"[red]Error generating message:[/red] {e!s}")
-            message = generator.fallback_generation(chunk)
-            used_llm = False
+    # Use the universal generate_message function
+    use_simple_mode = mode == GenerationMode.SIMPLE
 
-    return message, used_llm
+    try:
+        message, used_llm = generate_message(chunk, generator, use_simple_mode)
+        return message, used_llm
+    except (ValueError, RuntimeError, LLMError) as e:
+        console.print(f"[red]Error generating message:[/red] {e}")
+        # Still try to generate a fallback message
+        message = generator.fallback_generation(chunk)
+        return message, False
 
 
 def print_chunk_summary(chunk: DiffChunk, index: int) -> None:
@@ -259,10 +249,12 @@ def print_chunk_summary(chunk: DiffChunk, index: int) -> None:
 
     # Preview of the diff
     if chunk.content:
-        max_preview_length = 300
-        preview = (
-            chunk.content[:max_preview_length] + "..." if len(chunk.content) > max_preview_length else chunk.content
-        )
+        content_lines = chunk.content.splitlines()
+        if len(content_lines) > MAX_PREVIEW_LINES:
+            remaining_lines = len(content_lines) - MAX_PREVIEW_LINES
+            preview = "\n".join(content_lines[:MAX_PREVIEW_LINES]) + f"\n... ({remaining_lines} more lines)"
+        else:
+            preview = chunk.content
         console.print(Padding(f"  [dim]{preview}[/dim]", (0, 0, 1, 2)))
     else:
         console.print(Padding("  [dim](New files - no diff content available)[/dim]", (0, 0, 1, 2)))
@@ -351,9 +343,40 @@ def _perform_commit(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
         message: Commit message
         git: Git wrapper
     """
+    # Filter out any invalid filenames that might have made it this far
+    valid_files = []
+    for file in chunk.files:
+        # Skip files that look like patterns or templates
+        if any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'):
+            console.print(f"[yellow]Warning:[/yellow] Skipping invalid filename: {file}")
+            continue
+        valid_files.append(file)
+
+    if not valid_files:
+        console.print("[yellow]Warning:[/yellow] No valid files to commit after filtering")
+        return
+
+    # Update chunk files with only valid ones
+    chunk.files = valid_files
+
+    # Display the files being committed
+    console.print(f"[blue]Committing files:[/blue] {', '.join(chunk.files)}")
+
+    # First, explicitly stage the files to ensure they're properly added to the index
+    try:
+        from codemap.git.utils.git_utils import stage_files
+
+        console.print("[blue]Staging files...[/blue]")
+        stage_files(chunk.files)
+        console.print("[green]Files staged successfully[/green]")
+    except (GitError, OSError, ValueError) as e:
+        console.print(f"[red]Error staging files:[/red] {e!s}")
+        console.print("[yellow]Attempting to continue with commit...[/yellow]")
+
     try:
         git.commit_only_specified_files(chunk.files, message)
         console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
+        return  # Success, we're done!
     except (OSError, ValueError, RuntimeError) as e:
         # Check if this might be a git hook error
         if "hook" in str(e).lower():
@@ -364,12 +387,89 @@ def _perform_commit(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
                 # Call with ignore_hooks=True
                 from codemap.git.utils.git_utils import commit_only_files
 
-                commit_only_files(chunk.files, message, ignore_hooks=True)
-                console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s) (hooks bypassed)")
+                try:
+                    # Try again with ignore_hooks=True
+                    commit_only_files(chunk.files, message, ignore_hooks=True)
+                    console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s) (hooks bypassed)")
+                    return  # Success, we're done!
+                except (GitError, OSError, ValueError, RuntimeError) as commit_e:
+                    console.print(f"[red]Error:[/red] Failed to commit with hooks bypassed: {commit_e!s}")
+                    # Continue to fallback method
             else:
                 console.print("[yellow]Commit cancelled due to hook failure[/yellow]")
+                return  # User cancelled, we're done
         else:
             console.print(f"[red]Error:[/red] {e!s}")
+
+            # Check if changes aren't staged
+            if "no changes added to commit" in str(e).lower():
+                console.print(
+                    "[yellow]Hint:[/yellow] The files might not be properly staged. "
+                    "Try staging them manually with 'git add'."
+                )
+            # Check if changes aren't ready
+            elif "your index contains uncommitted changes" in str(e).lower():
+                console.print("[yellow]Hint:[/yellow] There might be uncommitted changes. Try 'git status' to check.")
+            # Provide a general hint
+            else:
+                console.print("[yellow]Hint:[/yellow] Check 'git status' to see the current state of your repository.")
+
+    # If we've reached here, the above methods failed. Try a fallback approach using direct shell commands
+    console.print("[yellow]Trying fallback commit method...[/yellow]")
+
+    try:
+        # Check if git is available in the path
+        git_path = shutil.which("git")
+        if not git_path:
+            console.print("[red]Error:[/red] Git executable not found in PATH")
+            return
+
+        # Validate files and collect errors before processing
+        staging_errors = []
+        valid_files = []
+
+        # First validate all files outside any try-except
+        for file in chunk.files:
+            if Path(file).exists() or Path(file).is_symlink():
+                valid_files.append(file)
+            else:
+                staging_errors.append(f"File not found: {file}")
+
+        # Now process all valid files in a single try-except
+        if valid_files:
+            try:
+                for file in valid_files:
+                    subprocess.run([git_path, "add", file], check=True, capture_output=True)  # noqa: S603
+            except subprocess.CalledProcessError as e:
+                staging_errors.append(f"Error staging files: {e.stderr.decode('utf-8')}")
+
+        # Report any staging errors
+        if staging_errors:
+            for error in staging_errors:
+                console.print(f"[red]{error}[/red]")
+
+        # Now try to commit
+        try:
+            result = subprocess.run([git_path, "commit", "-m", message], check=True, capture_output=True, text=True)  # noqa: S603
+            console.print("[green]✓[/green] Commit successful (fallback method)")
+            console.print(result.stdout)
+            return  # Success
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Fallback commit failed:[/red] {e.stderr}")
+
+            # Last attempt - try with --no-verify
+            if questionary.confirm("Would you like to try one last time with --no-verify?").ask():
+                try:
+                    result = subprocess.run(  # noqa: S603
+                        [git_path, "commit", "-m", message, "--no-verify"], check=True, capture_output=True, text=True
+                    )
+                    console.print("[green]✓[/green] Commit successful (fallback method with --no-verify)")
+                    console.print(result.stdout)
+                except subprocess.CalledProcessError as e:
+                    console.print(f"[red]Final commit attempt failed:[/red] {e.stderr}")
+    except (OSError, ValueError, subprocess.SubprocessError) as e:
+        console.print(f"[red]Fallback commit method failed:[/red] {e!s}")
+        console.print("[yellow]Please try committing manually using 'git add' and 'git commit'[/yellow]")
 
 
 def handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
@@ -555,11 +655,11 @@ class RunConfig:
     repo_path: Path | None = None
     force_simple: bool = False
     api_key: str | None = None
-    model: str = "gpt-4o-mini"
-    provider: str | None = None
+    model: str = "openai/gpt-4o-mini"
     api_base: str | None = None
     commit: bool = True
     prompt_template: str | None = None
+    staged_only: bool = False  # Only process staged changes
 
 
 DEFAULT_RUN_CONFIG = RunConfig()
@@ -567,49 +667,85 @@ DEFAULT_RUN_CONFIG = RunConfig()
 
 @app.command(help="Generate and apply conventional commits from Git diffs")
 def run(config: RunConfig = DEFAULT_RUN_CONFIG) -> int:
-    """Run the commit command with the provided configuration.
+    """Run the commit command.
 
     Args:
-        config: Configuration options for the commit command.
+        config: Configuration options
 
     Returns:
-        Exit code (0 for success, non-zero for errors).
+        Exit code
     """
-    repo_path = validate_repo_path(config.repo_path)
-    if not repo_path:
-        console.print("[red]Error:[/red] Not a valid Git repository")
+    # Validate the repository path
+    try:
+        repo_path = validate_repo_path(config.repo_path)
+    except ValueError as e:
+        console.print(f"[red]Error:[/red] {e!s}")
         return 1
 
-    git = GitWrapper(repo_path)
-    diff = git.get_uncommitted_changes()
-    if not diff:
-        console.print("No changes to commit")
-        return 0
+    # Show welcome message
+    console.print(
+        Padding("[bold]CodeMap Conventional Commit Generator[/]", (1, 0, 0, 0)),
+    )
 
-    # Always use semantic strategy for better commit organization
-    splitter = DiffSplitter(repo_path)
-    chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
-    if not chunks:
-        console.print("No changes to commit (after filtering)")
-        return 0
+    # Determine generation mode
+    mode = GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART
 
+    # Configure options
     options = CommitOptions(
         repo_path=repo_path,
-        generation_mode=GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART,
+        generation_mode=mode,
         model=config.model,
-        provider=config.provider,
         api_base=config.api_base,
         commit=config.commit,
         prompt_template=config.prompt_template,
         api_key=config.api_key,
     )
 
-    generator = setup_message_generator(options)
+    try:
+        # Initialize Git wrapper
+        git = GitWrapper(repo_path)
 
-    if config.commit:
+        # Check if there are any changes
+        with loading_spinner("Checking for changes..."):
+            has_changes = git.has_changes()
+
+        if not has_changes:
+            console.print("[yellow]No changes to commit[/yellow]")
+            return 0
+
+        # Set up message generator
+        with loading_spinner("Setting up message generator..."):
+            generator = setup_message_generator(options)
+
+        # Get staged and unstaged changes
+        with loading_spinner("Analyzing repository changes..."):
+            # Get changes from Git
+            splitter = DiffSplitter(repo_path)
+            chunks = []
+
+            # Process staged changes
+            staged_diff = git.get_staged_diff()
+            if staged_diff.files:
+                staged_chunks = splitter.split_diff(staged_diff, SplitStrategy.SEMANTIC)
+                chunks.extend(staged_chunks)
+
+            # Process unstaged changes
+            if not chunks or not config.staged_only:
+                unstaged_diff = git.get_unstaged_diff()
+                if unstaged_diff.files:
+                    unstaged_chunks = splitter.split_diff(unstaged_diff, SplitStrategy.SEMANTIC)
+                    chunks.extend(unstaged_chunks)
+
+        # Check if there are any chunks
+        if not chunks:
+            console.print("[yellow]No changes to commit[/yellow]")
+            return 0
+
+        # Process chunks
         return process_all_chunks(options, chunks, generator, git)
-    display_suggested_messages(options, chunks, generator)
-    return 0
+    except (ValueError, RuntimeError, TypeError) as e:
+        console.print(f"[red]Error:[/red] {e!s}")
+        return 1
 
 
 if __name__ == "__main__":

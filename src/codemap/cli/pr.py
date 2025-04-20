@@ -18,7 +18,6 @@ from rich.console import Console
 from rich.panel import Panel
 
 from codemap.git import GitWrapper
-from codemap.git.commit.command import setup_message_generator
 from codemap.git.commit.diff_splitter import DiffSplitter, SplitStrategy
 from codemap.git.commit.interactive import process_all_chunks
 from codemap.git.utils.git_utils import GitError
@@ -28,8 +27,6 @@ from codemap.git.utils.pr_utils import (
     checkout_branch,
     create_branch,
     create_pull_request,
-    generate_pr_description_from_commits,
-    generate_pr_title_from_commits,
     get_commit_messages,
     get_current_branch,
     get_default_branch,
@@ -38,7 +35,8 @@ from codemap.git.utils.pr_utils import (
     suggest_branch_name,
     update_pull_request,
 )
-from codemap.utils import validate_repo_path
+from codemap.utils import loading_spinner, validate_repo_path
+from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 app = typer.Typer(help="Generate and manage pull requests")
 console = Console()
@@ -65,7 +63,7 @@ class PROptions:
     force_push: bool = field(default=False)
     pr_number: int | None = field(default=None)
     interactive: bool = field(default=True)
-    model: str = field(default="gpt-4o-mini")
+    model: str | None = field(default=None)
     provider: str | None = field(default=None)
     api_base: str | None = field(default=None)
     api_key: str | None = field(default=None)
@@ -132,17 +130,16 @@ def _handle_branch_creation(options: PROptions) -> str | None:
 
             if chunks:
                 # Set up message generator for the first chunk
-                generator = setup_message_generator(
-                    options.repo_path,
+                generator = create_universal_generator(
+                    repo_path=options.repo_path,
                     model=options.model,
-                    provider=options.provider,
-                    api_base=options.api_base,
                     api_key=options.api_key,
+                    api_base=options.api_base,
                 )
 
                 # Generate a commit message for the first chunk
                 try:
-                    message, _ = generator.generate_message(chunks[0])
+                    message, _ = generate_message(chunks[0], generator)
                     # Extract the first line as the commit message
                     first_line = message.split("\n")[0] if "\n" in message else message
                     suggested_name = suggest_branch_name([first_line])
@@ -229,12 +226,11 @@ def _handle_commits(options: PROptions) -> bool:
             return True
 
         # Set up message generator
-        generator = setup_message_generator(
-            options.repo_path,
+        generator = create_universal_generator(
+            repo_path=options.repo_path,
             model=options.model,
-            provider=options.provider,
-            api_base=options.api_base,
             api_key=options.api_key,
+            api_base=options.api_base,
         )
 
         # Process all chunks
@@ -311,9 +307,32 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
         console.print(f"[red]Error getting commit messages: {e}[/red]")
         commits = []
 
-    # Generate PR title and description
-    title = options.title or generate_pr_title_from_commits(commits)
-    description = options.description or generate_pr_description_from_commits(commits)
+    # Generate PR title and description with AI if possible
+    try:
+        # Display a spinner while generating PR content
+        with loading_spinner("Generating PR content with AI..."):
+            from codemap.git.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+
+            # Try AI-generated title and description first
+            title = options.title
+            if not title:
+                title = generate_pr_title_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+
+            description = options.description
+            if not description:
+                description = generate_pr_description_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        console.print(f"[yellow]AI generation failed: {e}[/yellow]")
+        console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
+        # Fallback to rule-based generation
+        from codemap.git.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+
+        title = options.title or generate_pr_title_from_commits(commits)
+        description = options.description or generate_pr_description_from_commits(commits)
 
     # In interactive mode, allow editing title and description
     if options.interactive:
@@ -376,9 +395,32 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
         console.print(f"[red]Error getting commit messages: {e}[/red]")
         commits = []
 
-    # Generate PR title and description
-    title = options.title or pr.title or generate_pr_title_from_commits(commits)
-    description = options.description or pr.description or generate_pr_description_from_commits(commits)
+    # Generate PR title and description with AI if possible
+    try:
+        # Display a spinner while generating PR content
+        with loading_spinner("Generating PR content with AI..."):
+            from codemap.git.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+
+            # Try AI-generated title and description first
+            title = options.title or pr.title
+            if not title:
+                title = generate_pr_title_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+
+            description = options.description or pr.description
+            if not description:
+                description = generate_pr_description_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        console.print(f"[yellow]AI generation failed: {e}[/yellow]")
+        console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
+        # Fallback to rule-based generation
+        from codemap.git.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+
+        title = options.title or pr.title or generate_pr_title_from_commits(commits)
+        description = options.description or pr.description or generate_pr_description_from_commits(commits)
 
     # In interactive mode, allow editing title and description
     if options.interactive:
@@ -419,6 +461,63 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
         return None
     else:
         return updated_pr
+
+
+def _load_llm_config(repo_path: Path) -> dict:
+    """Load LLM configuration from .codemap.yml file.
+
+    Args:
+        repo_path: Path to the repository
+
+    Returns:
+        Dictionary with LLM configuration values
+    """
+    config = {
+        "model": "gpt-4o-mini",  # Default fallback model
+        "api_base": None,
+        "api_key": None,
+    }
+
+    config_file = repo_path / ".codemap.yml"
+    if config_file.exists():
+        try:
+            import yaml
+
+            with config_file.open("r") as f:
+                yaml_config = yaml.safe_load(f)
+
+            if yaml_config is not None and isinstance(yaml_config, dict) and "commit" in yaml_config:
+                commit_config = yaml_config["commit"]
+
+                # Load LLM settings if available
+                if "llm" in commit_config and isinstance(commit_config["llm"], dict):
+                    llm_config = commit_config["llm"]
+
+                    if "model" in llm_config:
+                        config["model"] = llm_config["model"]
+
+                    if "api_base" in llm_config:
+                        config["api_base"] = llm_config["api_base"]
+
+                    # Use the same API keys from commit configuration
+                    # This ensures consistency between commit and PR features
+                    provider = None
+                    if "/" in config["model"]:
+                        provider = config["model"].split("/")[0].lower()
+
+                    if provider:
+                        config_key = f"{provider}_api_key"
+                        if config_key in llm_config:
+                            config["api_key"] = llm_config[config_key]
+
+                    # Also check for generic API key
+                    if "api_key" in llm_config and not config["api_key"]:
+                        config["api_key"] = llm_config["api_key"]
+
+        except (ImportError, yaml.YAMLError, OSError) as e:
+            logger.warning("Error loading config: %s", e)
+
+    return config
 
 
 @app.command(help="Create a new pull request")
@@ -487,19 +586,18 @@ def create(
         ),
     ] = False,
     model: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--model",
             "-m",
-            help="LLM model to use for commit message generation",
+            help="LLM model to use for PR content generation",
         ),
-    ] = "gpt-4o-mini",
+    ] = None,
     api_key: Annotated[
         str | None,
         typer.Option(
             "--api-key",
             help="API key for LLM provider",
-            envvar="OPENAI_API_KEY",
         ),
     ] = None,
 ) -> int:
@@ -514,7 +612,7 @@ def create(
         no_commit: Don't commit changes before creating PR
         force_push: Force push branch to remote
         non_interactive: Run in non-interactive mode
-        model: LLM model to use for commit message generation
+        model: LLM model to use for PR content generation
         api_key: API key for LLM provider
 
     Returns:
@@ -524,6 +622,18 @@ def create(
     if not repo_path:
         console.print("[red]Error:[/red] Not a valid Git repository")
         return 1
+
+    # Load LLM config from .codemap.yml
+    llm_config = _load_llm_config(repo_path)
+
+    # Command line options take precedence over config file
+    if not model:
+        model = llm_config["model"]
+
+    if not api_key:
+        api_key = llm_config["api_key"]
+
+    api_base = llm_config["api_base"]
 
     options = PROptions(
         repo_path=repo_path,
@@ -536,6 +646,7 @@ def create(
         interactive=not non_interactive,
         model=model,
         api_key=api_key,
+        api_base=api_base,
     )
 
     # Handle branch creation or selection
@@ -622,19 +733,18 @@ def update(
         ),
     ] = False,
     model: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--model",
             "-m",
-            help="LLM model to use for commit message generation",
+            help="LLM model to use for PR content generation",
         ),
-    ] = "gpt-4o-mini",
+    ] = None,
     api_key: Annotated[
         str | None,
         typer.Option(
             "--api-key",
             help="API key for LLM provider",
-            envvar="OPENAI_API_KEY",
         ),
     ] = None,
 ) -> int:
@@ -648,7 +758,7 @@ def update(
         no_commit: Don't commit changes before updating PR
         force_push: Force push branch to remote
         non_interactive: Run in non-interactive mode
-        model: LLM model to use for commit message generation
+        model: LLM model to use for PR content generation
         api_key: API key for LLM provider
 
     Returns:
@@ -658,6 +768,18 @@ def update(
     if not repo_path:
         console.print("[red]Error:[/red] Not a valid Git repository")
         return 1
+
+    # Load LLM config from .codemap.yml
+    llm_config = _load_llm_config(repo_path)
+
+    # Command line options take precedence over config file
+    if not model:
+        model = llm_config["model"]
+
+    if not api_key:
+        api_key = llm_config["api_key"]
+
+    api_base = llm_config["api_base"]
 
     options = PROptions(
         repo_path=repo_path,
@@ -669,6 +791,7 @@ def update(
         interactive=not non_interactive,
         model=model,
         api_key=api_key,
+        api_base=api_base,
     )
 
     # Get current branch

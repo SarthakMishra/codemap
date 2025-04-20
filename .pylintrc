@@ -50,4 +50,4 @@ disable=
 [REPORTS]
 output-format=colorized
 reports=no
-score=no 
+score=no
