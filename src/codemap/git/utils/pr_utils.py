@@ -6,8 +6,6 @@ import logging
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Optional
 
 from codemap.git.utils.git_utils import GitError, run_git_command
 
@@ -21,8 +19,8 @@ class PullRequest:
     branch: str
     title: str
     description: str
-    url: Optional[str] = None
-    number: Optional[int] = None
+    url: str | None = None
+    number: int | None = None
 
 
 def get_current_branch() -> str:
@@ -66,7 +64,7 @@ def get_default_branch() -> str:
 
         # Last resort, use the current branch
         return get_current_branch()
-    except GitError as e:
+    except GitError:
         msg = "Failed to determine default branch, using 'main'"
         logger.warning(msg)
         return "main"
@@ -122,7 +120,6 @@ def branch_exists(branch_name: str, include_remote: bool = True) -> bool:
         if include_remote:
             remote_branches = run_git_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"]).strip()
             return bool(remote_branches)
-
         return False
     except GitError:
         return False
@@ -148,7 +145,7 @@ def push_branch(branch_name: str, force: bool = False) -> None:
         raise GitError(msg) from e
 
 
-def get_commit_messages(base_branch: str, head_branch: str) -> List[str]:
+def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
     """Get commit messages between two branches.
 
     Args:
@@ -170,7 +167,7 @@ def get_commit_messages(base_branch: str, head_branch: str) -> List[str]:
         raise GitError(msg) from e
 
 
-def generate_pr_title_from_commits(commits: List[str]) -> str:
+def generate_pr_title_from_commits(commits: list[str]) -> str:
     """Generate a PR title from commit messages.
 
     Args:
@@ -195,7 +192,7 @@ def generate_pr_title_from_commits(commits: List[str]) -> str:
     return title
 
 
-def generate_pr_description_from_commits(commits: List[str]) -> str:
+def generate_pr_description_from_commits(commits: list[str]) -> str:
     """Generate a PR description from commit messages.
 
     Args:
@@ -297,7 +294,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
             description,
         ]
 
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603, S607
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
         output = result.stdout.strip()
 
         # Extract PR URL and number
@@ -358,11 +355,11 @@ def update_pull_request(pr_number: int, title: str, description: str) -> PullReq
             description,
         ]
 
-        subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603, S607
+        subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
 
         # Get PR URL
         url_cmd = ["gh", "pr", "view", str(pr_number), "--json", "url", "--jq", ".url"]
-        result = subprocess.run(url_cmd, check=True, capture_output=True, text=True)  # noqa: S603, S607
+        result = subprocess.run(url_cmd, check=True, capture_output=True, text=True)  # noqa: S603
         pr_url = result.stdout.strip()
 
         return PullRequest(
@@ -377,7 +374,7 @@ def update_pull_request(pr_number: int, title: str, description: str) -> PullReq
         raise GitError(msg) from e
 
 
-def get_existing_pr(branch_name: str) -> Optional[PullRequest]:
+def get_existing_pr(branch_name: str) -> PullRequest | None:
     """Get an existing PR for a branch.
 
     Args:
@@ -406,7 +403,7 @@ def get_existing_pr(branch_name: str) -> Optional[PullRequest]:
             ".[0]",
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603, S607
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
         if result.returncode != 0 or not result.stdout.strip():
             return None
 
@@ -428,7 +425,7 @@ def get_existing_pr(branch_name: str) -> Optional[PullRequest]:
         return None
 
 
-def suggest_branch_name(commits: List[str]) -> str:
+def suggest_branch_name(commits: list[str]) -> str:
     """Suggest a branch name based on commit messages.
 
     Args:
@@ -438,51 +435,51 @@ def suggest_branch_name(commits: List[str]) -> str:
         Suggested branch name
     """
     if not commits:
+        # If no commits, use a timestamp
         return f"update-{get_timestamp()}"
 
-    # Use the first commit message to generate a branch name
+    # Use the first commit as the basis for the branch name
     first_commit = commits[0]
 
     # Extract the type and scope if it's a conventional commit
-    match = re.match(r"^(feat|fix|docs|refactor|style|perf|test|build|ci|chore|revert)(?:\(([^)]+)\))?:\s*(.+)$", first_commit)
-    
+    pattern = (
+        r"^(feat|fix|docs|refactor|style|perf|test|build|ci|chore|revert)"
+        r"(?:\(([^)]+)\))?:\s*(.+)$"
+    )
+    match = re.match(pattern, first_commit)
+
     if match:
         commit_type, scope, subject = match.groups()
-        if scope:
-            branch_prefix = f"{commit_type}-{scope}"
-        else:
-            branch_prefix = commit_type
+        branch_prefix = f"{commit_type}-{scope}" if scope else commit_type
     else:
         # Not a conventional commit, use a generic prefix
         branch_prefix = "update"
 
     # Extract a few words from the subject for the branch name
-    if match:
-        subject = match.group(3)
-    else:
-        subject = first_commit
+    subject = match.group(3) if match else first_commit
 
     # Clean up the subject and take first few words
-    words = re.sub(r"[^\w\s-]", "", subject.lower()).split()[:3]
-    branch_suffix = "-".join(words)
+    subject = re.sub(r"[^\w\s-]", "", subject).lower()
+    subject = re.sub(r"\s+", "-", subject)
+    words = subject.split("-")
+    short_subject = "-".join(words[:3])  # Take up to 3 words
 
-    # Combine prefix and suffix
-    branch_name = f"{branch_prefix}-{branch_suffix}"
+    # Build the branch name
+    branch_name = f"{branch_prefix}-{short_subject}"
 
-    # Ensure the branch name is valid
-    branch_name = re.sub(r"[^\w-]", "-", branch_name)
-    branch_name = re.sub(r"-+", "-", branch_name)  # Replace multiple hyphens with a single one
-    branch_name = branch_name.strip("-")
+    # Ensure the branch name meets git's requirements
+    branch_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", branch_name)
+    branch_name = re.sub(r"-+", "-", branch_name)  # Replace multiple dashes with a single one
 
-    return branch_name
+    return branch_name.strip("-")
 
 
 def get_timestamp() -> str:
-    """Get a timestamp string for branch names.
+    """Get a timestamp for branch naming.
 
     Returns:
-        Timestamp string in format YYYYMMDD-HHMMSS
+        Timestamp string in format YYYYmmdd-HHMMSS
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+    return datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")

@@ -1,5 +1,7 @@
 """Git utilities for CodeMap."""
 
+from contextlib import suppress
+
 from .git_utils import (
     GitDiff,
     GitError,
@@ -12,7 +14,8 @@ from .git_utils import (
     unstage_files,
 )
 
-try:
+# PR utils might not be available in all environments
+with suppress(ImportError):
     from .pr_utils import (
         PullRequest,
         branch_exists,
@@ -29,9 +32,6 @@ try:
         suggest_branch_name,
         update_pull_request,
     )
-except ImportError:
-    # PR utils might not be available in all environments
-    pass
 
 __all__ = [
     "GitDiff",
