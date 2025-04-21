@@ -6,7 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from codemap.git.utils.git_utils import (
+from codemap.utils.git_utils import (
     GitDiff,
     GitError,
     commit_only_files,

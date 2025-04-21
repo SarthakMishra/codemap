@@ -18,7 +18,7 @@ DEFAULT_SIMILARITY_THRESHOLD = 0.8
 DIRECTORY_SIMILARITY_THRESHOLD = 0.5
 
 if TYPE_CHECKING:
-    from codemap.git.utils.git_utils import GitDiff
+    from codemap.utils.git_utils import GitDiff
 
 logger = logging.getLogger(__name__)
 
