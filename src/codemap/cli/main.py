@@ -19,23 +19,24 @@ app = typer.Typer(
 # Create a PR command group for testing
 pr_app = typer.Typer(help="Generate and manage pull requests")
 
+
 @pr_app.command(name="create")
 def pr_create(
     branch: str = typer.Option(None, "--branch", help="Branch name for the PR"),
-    non_interactive: bool = typer.Option(False, "--non-interactive", help="Run in non-interactive mode"),
+    non_interactive: bool = typer.Option(False, "--non-interactive", help="Run in non-interactive mode"),  # noqa: FBT003
 ) -> None:
     """Create a new pull request."""
     # This is just a stub for testing
-    pass
+
 
 @pr_app.command(name="update")
 def pr_update(
     pr_number: int = typer.Argument(None, help="PR number to update"),
-    non_interactive: bool = typer.Option(False, "--non-interactive", help="Run in non-interactive mode"),
+    non_interactive: bool = typer.Option(False, "--non-interactive", help="Run in non-interactive mode"),  # noqa: FBT003
 ) -> None:
     """Update an existing pull request."""
     # This is just a stub for testing
-    pass
+
 
 app.add_typer(pr_app, name="pr")
 
