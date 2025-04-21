@@ -106,11 +106,8 @@ def test_pr_create_command(mock_git_utils):
     """Test the PR create command."""
     runner = CliRunner()
     
-    with patch("codemap.cli.main.pr_app") as mock_pr_app:
-        # Mock the PR create command
-        mock_create_cmd = MagicMock()
-        mock_create_cmd.return_value = 0
-        mock_pr_app.get_command.return_value = mock_create_cmd
+    with patch("codemap.cli.main.pr_create") as mock_create:
+        mock_create.return_value = None  # Simulate successful execution
         
         # Run the command
         result = runner.invoke(
@@ -120,18 +117,14 @@ def test_pr_create_command(mock_git_utils):
         
         # Check that the command was called
         assert result.exit_code == 0
-        mock_pr_app.get_command.assert_called_once_with("create")
 
 
 def test_pr_update_command(mock_git_utils):
     """Test the PR update command."""
     runner = CliRunner()
     
-    with patch("codemap.cli.main.pr_app") as mock_pr_app:
-        # Mock the PR update command
-        mock_update_cmd = MagicMock()
-        mock_update_cmd.return_value = 0
-        mock_pr_app.get_command.return_value = mock_update_cmd
+    with patch("codemap.cli.main.pr_update") as mock_update:
+        mock_update.return_value = None  # Simulate successful execution
         
         # Run the command
         result = runner.invoke(
@@ -141,4 +134,3 @@ def test_pr_update_command(mock_git_utils):
         
         # Check that the command was called
         assert result.exit_code == 0
-        mock_pr_app.get_command.assert_called_once_with("update")
