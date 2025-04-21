@@ -1,7 +1,8 @@
-"""CLI package for CodeMap."""
+"""Command-line interface package for CodeMap."""
 
-# Only export what we need directly from the module
-from .commit import app as commit_app
-from .pr import app as pr_app
+from .commit_cmd import commit_command
+from .generate_cmd import generate_command
+from .init_cmd import init_command
+from .pr_cmd import pr_command
 
-__all__ = ["commit_app", "pr_app"]
+__all__ = ["commit_command", "generate_command", "init_command", "pr_command"]
