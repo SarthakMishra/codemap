@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import codemap.cli_app
+from codemap.utils.git_utils import GitDiff
 from codemap.utils.pr_utils import PullRequest
 
 app = codemap.cli_app.app
@@ -28,8 +29,10 @@ def mock_git_utils() -> dict[str, Any]:
     ) as mock_create_pull_request, patch("codemap.cli.pr.get_existing_pr") as mock_get_existing_pr, patch(
         "codemap.cli.pr.update_pull_request"
     ) as mock_update_pull_request, patch("codemap.cli.pr.validate_repo_path") as mock_validate_repo_path, patch(
-        "codemap.cli.pr.GitWrapper"
-    ) as mock_git_wrapper, patch("codemap.cli.pr.DiffSplitter") as mock_diff_splitter, patch(
+        "codemap.cli.pr.get_staged_diff"
+    ) as mock_get_staged_diff, patch("codemap.cli.pr.get_unstaged_diff") as mock_get_unstaged_diff, patch(
+        "codemap.cli.pr.get_untracked_files"
+    ) as mock_get_untracked_files, patch("codemap.cli.pr.DiffSplitter") as mock_diff_splitter, patch(
         "codemap.cli.pr.setup_message_generator"
     ) as mock_create_universal_generator, patch("codemap.cli.pr.process_all_chunks") as mock_process_all_chunks, patch(
         "questionary.confirm"
@@ -40,12 +43,22 @@ def mock_git_utils() -> dict[str, Any]:
         mock_branch_exists.return_value = False
         mock_validate_repo_path.return_value = Path("/fake/repo")
 
-        # Mock GitWrapper
-        mock_git = MagicMock()
-        mock_diff = MagicMock()
-        mock_diff.files = ["file1.py", "file2.py"]
-        mock_git.get_uncommitted_changes.return_value = mock_diff
-        mock_git_wrapper.return_value = mock_git
+        # Mock git utilities
+        mock_staged_diff = GitDiff(
+            files=["file1.py"],
+            content="diff content for file1.py",
+            is_staged=True,
+        )
+        mock_get_staged_diff.return_value = mock_staged_diff
+
+        mock_unstaged_diff = GitDiff(
+            files=["file2.py"],
+            content="diff content for file2.py",
+            is_staged=False,
+        )
+        mock_get_unstaged_diff.return_value = mock_unstaged_diff
+
+        mock_get_untracked_files.return_value = ["file3.py"]
 
         # Mock DiffSplitter
         mock_splitter = MagicMock()
@@ -94,7 +107,9 @@ def mock_git_utils() -> dict[str, Any]:
             "get_existing_pr": mock_get_existing_pr,
             "update_pull_request": mock_update_pull_request,
             "validate_repo_path": mock_validate_repo_path,
-            "git_wrapper": mock_git_wrapper,
+            "get_staged_diff": mock_get_staged_diff,
+            "get_unstaged_diff": mock_get_unstaged_diff,
+            "get_untracked_files": mock_get_untracked_files,
             "diff_splitter": mock_diff_splitter,
             "create_universal_generator": mock_create_universal_generator,
             "process_all_chunks": mock_process_all_chunks,

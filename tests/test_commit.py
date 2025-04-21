@@ -16,7 +16,6 @@ from codemap.cli.commit import (
     RunConfig,
     process_chunk_interactively,
 )
-from codemap.git import GitWrapper
 from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.commit.message_generator import LLMError, MessageGenerator
 from codemap.utils.git_utils import GitDiff
@@ -78,22 +77,41 @@ def mock_diff_splitter() -> DiffSplitter:
 
 
 @pytest.fixture
-def mock_git_wrapper() -> GitWrapper:
-    """Create a mock GitWrapper."""
-    with patch("codemap.git.GitWrapper") as mock:
-        wrapper = Mock()
-        wrapper.get_uncommitted_changes.return_value = """diff --git a/file1.py b/file1.py
-index 1234567..abcdefg 100644
---- a/file1.py
-+++ b/file1.py
-@@ -10,7 +10,7 @@ def existing_function():
-     return True
+def mock_git_utils() -> Mock:
+    """Create a mock for git utilities."""
+    with patch("codemap.utils.git_utils.get_staged_diff") as mock_staged, patch(
+        "codemap.utils.git_utils.get_unstaged_diff"
+    ) as mock_unstaged, patch("codemap.utils.git_utils.get_untracked_files") as mock_untracked, patch(
+        "codemap.utils.git_utils.commit_only_files"
+    ) as mock_commit:
+        # Mock the staged diff
+        staged_diff = GitDiff(
+            files=["file1.py"],
+            content="diff content for file1.py",
+            is_staged=True,
+        )
+        mock_staged.return_value = staged_diff
 
- def new_function():
--    return False
-+    return True"""
-        mock.return_value = wrapper
-        yield mock.return_value
+        # Mock the unstaged diff
+        unstaged_diff = GitDiff(
+            files=["file2.py"],
+            content="diff content for file2.py",
+            is_staged=False,
+        )
+        mock_unstaged.return_value = unstaged_diff
+
+        # Mock untracked files
+        mock_untracked.return_value = ["file3.py"]
+
+        # Mock commit
+        mock_commit.return_value = []
+
+        yield {
+            "get_staged_diff": mock_staged,
+            "get_unstaged_diff": mock_unstaged,
+            "get_untracked_files": mock_untracked,
+            "commit_only_files": mock_commit,
+        }
 
 
 @pytest.fixture
@@ -468,7 +486,6 @@ def test_interactive_chunk_processing() -> None:
     )
 
     # Mock dependencies
-    mock_git = Mock(spec=GitWrapper)
     mock_generator = Mock(spec=MessageGenerator)
     mock_generator.generate_message.return_value = ("feat: add new feature", True)
 
@@ -477,7 +494,6 @@ def test_interactive_chunk_processing() -> None:
     context.index = 0
     context.total = 1
     context.generator = mock_generator
-    context.git = mock_git
     context.mode = GenerationMode.SMART
 
     # Mock questionary for user input
@@ -503,7 +519,9 @@ def test_cli_command_execution() -> None:
     # Mock dependencies
     with (
         patch("codemap.cli.commit.validate_repo_path", return_value=Path("/mock/repo")),
-        patch("codemap.cli.commit.GitWrapper") as mock_git_cls,
+        patch("codemap.cli.commit.get_staged_diff") as mock_staged_diff,
+        patch("codemap.cli.commit.get_unstaged_diff") as mock_unstaged_diff,
+        patch("codemap.cli.commit.get_untracked_files") as mock_untracked,
         patch("codemap.cli.commit.DiffSplitter") as mock_splitter_cls,
         patch("codemap.cli.commit.setup_message_generator"),
         patch("codemap.cli.commit.process_all_chunks"),
@@ -511,8 +529,9 @@ def test_cli_command_execution() -> None:
         patch("codemap.cli.commit.run") as mock_run,  # Add mock for the run function
     ):
         # Configure mocks
-        mock_git = mock_git_cls.return_value
-        mock_git.get_uncommitted_changes.return_value = "diff content"
+        mock_staged_diff.return_value = GitDiff(files=["file1.py"], content="diff for file1", is_staged=True)
+        mock_unstaged_diff.return_value = GitDiff(files=["file2.py"], content="diff for file2", is_staged=False)
+        mock_untracked.return_value = ["file3.py"]
 
         mock_splitter = mock_splitter_cls.return_value
         mock_splitter.split_diff.return_value = [Mock(spec=DiffChunk)]
