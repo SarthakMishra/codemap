@@ -179,13 +179,16 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
     if not commits:
         return "Update branch"
 
-    for prefix in ["feat", "fix", "docs"]:
+    # Define mapping from commit prefixes to PR title prefixes
+    prefix_mapping = {"feat": "Feature:", "fix": "Fix:", "docs": "Docs:", "refactor": "Refactor:", "perf": "Optimize:"}
+
+    for prefix, title_prefix in prefix_mapping.items():
         for commit in commits:
             if commit.startswith(prefix):
                 # Strip the prefix and use as title
                 title = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commit)
-                # Capitalize first letter
-                return title[0].upper() + title[1:]
+                # Capitalize first letter and add PR type prefix
+                return f"{title_prefix} {title[0].upper() + title[1:]}"
 
     # Fallback to first commit
     title = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commits[0])
@@ -232,6 +235,8 @@ essence of the changes.
         - Start with a capital letter
         - Don't use a period at the end
         - Use present tense (e.g., "Add feature" not "Added feature")
+        - Be descriptive and specific (e.g., "Fix memory leak in data processing" not just "Fix bug")
+        - Include the type of change if clear (Feature, Fix, Refactor, etc.)
 
         Commits:
         """
@@ -269,6 +274,8 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
     features = []
     fixes = []
     docs = []
+    refactors = []
+    optimizations = []
     other = []
 
     for commit in commits:
@@ -278,12 +285,31 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
             fixes.append(commit)
         elif commit.startswith("docs"):
             docs.append(commit)
+        elif commit.startswith("refactor"):
+            refactors.append(commit)
+        elif commit.startswith("perf"):
+            optimizations.append(commit)
         else:
             other.append(commit)
 
-    # Build description
-    description = "## Changes\n\n"
+    # Determine PR type checkboxes
+    has_refactor = bool(refactors)
+    has_feature = bool(features)
+    has_bug_fix = bool(fixes)
+    has_optimization = bool(optimizations)
+    has_docs_update = bool(docs)
 
+    # Build description
+    description = "## What type of PR is this? (check all applicable)\n\n"
+    description += f"- [{' ' if not has_refactor else 'x'}] Refactor\n"
+    description += f"- [{' ' if not has_feature else 'x'}] Feature\n"
+    description += f"- [{' ' if not has_bug_fix else 'x'}] Bug Fix\n"
+    description += f"- [{' ' if not has_optimization else 'x'}] Optimization\n"
+    description += f"- [{' ' if not has_docs_update else 'x'}] Documentation Update\n\n"
+
+    description += "## Description\n\n"
+
+    # Add categorized changes to description
     if features:
         description += "### Features\n\n"
         for feat in features:
@@ -306,13 +332,38 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
             description += f"- {clean_msg}\n"
         description += "\n"
 
+    if refactors:
+        description += "### Refactors\n\n"
+        for refactor in refactors:
+            clean_msg = re.sub(r"^refactor(\([^)]+\))?:\s*", "", refactor)
+            description += f"- {clean_msg}\n"
+        description += "\n"
+
+    if optimizations:
+        description += "### Optimizations\n\n"
+        for perf in optimizations:
+            clean_msg = re.sub(r"^perf(\([^)]+\))?:\s*", "", perf)
+            description += f"- {clean_msg}\n"
+        description += "\n"
+
     if other:
         description += "### Other\n\n"
         for msg in other:
             # Try to clean up conventional commit prefixes
-            clean_msg = re.sub(r"^(refactor|style|perf|test|build|ci|chore|revert)(\([^)]+\))?:\s*", "", msg)
+            clean_msg = re.sub(r"^(style|test|build|ci|chore|revert)(\([^)]+\))?:\s*", "", msg)
             description += f"- {clean_msg}\n"
         description += "\n"
+
+    description += "## Related Tickets & Documents\n\n"
+    description += "- Related Issue #\n"
+    description += "- Closes #\n\n"
+
+    description += "## Added/updated tests?\n\n"
+    description += "- [ ] Yes\n"
+    description += (
+        "- [ ] No, and this is why: _please replace this line with details on why tests have not been included_\n"
+    )
+    description += "- [ ] I need help with writing tests\n"
 
     return description
 
@@ -348,13 +399,34 @@ def generate_pr_description_with_llm(
         commit_list = "\n".join([f"- {commit}" for commit in commits])
 
         # Prepare prompt
-        prompt = f"""Based on the following commits, generate a comprehensive PR description in Markdown.
-        Follow these guidelines:
-        - Organize changes by type (features, fixes, documentation, etc.)
-        - Provide context for the changes where possible
+        prompt = f"""Based on the following commits, generate a comprehensive PR description following this template:
+
+        ## What type of PR is this? (check all applicable)
+
+        - [ ] Refactor
+        - [ ] Feature
+        - [ ] Bug Fix
+        - [ ] Optimization
+        - [ ] Documentation Update
+
+        ## Description
+        [Fill this section with a detailed description of the changes]
+
+        ## Related Tickets & Documents
+        - Related Issue #
+        - Closes #
+
+        ## Added/updated tests?
+        - [ ] Yes
+        - [ ] No, and this is why: [explanation]
+        - [ ] I need help with writing tests
+
+        Consider the following guidelines:
+        - Check the appropriate PR type boxes based on the commit messages
+        - Provide a clear, detailed description of the changes
+        - Include any relevant issue numbers that this PR relates to or closes
+        - Indicate if tests were added, and if not, explain why
         - Use bullet points for clarity
-        - Include any important implementation details
-        - Add testing instructions if relevant
 
         Commits:
         {commit_list}
@@ -362,13 +434,7 @@ def generate_pr_description_with_llm(
         PR Description:"""
 
         # Call LLM with repo_path used for context
-        description = generate_text_with_llm(prompt, model, api_key, api_base)
-
-        # Ensure it's properly formatted
-        if not description.startswith("#"):
-            description = f"## Changes\n\n{description}"
-
-        return description
+        return generate_text_with_llm(prompt, model, api_key, api_base)
     except (ValueError, RuntimeError, ConnectionError) as e:
         logger.warning("Failed to generate PR description with LLM: %s", str(e))
         # Fallback to rule-based approach
