@@ -5,8 +5,6 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
-import shutil
-import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -23,10 +21,20 @@ try:
 except ImportError:
     load_dotenv = None
 
-from codemap.git import GitWrapper
-from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
+from codemap.git import (
+    DiffChunk,
+    DiffSplitter,
+    SplitStrategy,
+)
 from codemap.git.commit.message_generator import LLMError
-from codemap.utils.git_utils import GitError
+from codemap.utils.git_utils import (
+    GitError,
+    commit_only_files,
+    get_other_staged_files,
+    get_staged_diff,
+    get_unstaged_diff,
+    get_untracked_files,
+)
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 # Truncate to maximum of 10 lines
@@ -88,16 +96,6 @@ class CommitOptions:
     commit: bool = field(default=True)
     prompt_template: str | None = field(default=None)
     api_key: str | None = field(default=None)
-
-
-class ChunkAction(str, Enum):
-    """Actions that can be taken on a diff chunk."""
-
-    COMMIT = "commit"
-    EDIT = "edit"
-    REGENERATE = "regenerate"
-    SKIP = "skip"
-    EXIT = "exit"
 
 
 @app.callback()
@@ -269,8 +267,6 @@ def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bo
     Returns:
         Tuple of (other_staged, other_untracked, has_warnings)
     """
-    from codemap.utils.git_utils import get_other_staged_files, get_untracked_files
-
     other_staged = get_other_staged_files(chunk_files)
 
     # For untracked files, check if they are already included in the chunk
@@ -335,196 +331,48 @@ def _handle_other_files(chunk: DiffChunk, other_staged: list[str], other_untrack
     return True
 
 
-def _perform_commit(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
-    """Perform the actual commit operation.
-
-    Args:
-        chunk: Chunk to commit
-        message: Commit message
-        git: Git wrapper
-    """
-    # Filter out any invalid filenames that might have made it this far
-    valid_files = []
-    for file in chunk.files:
-        # Skip files that look like patterns or templates
-        if any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'):
-            console.print(f"[yellow]Warning:[/yellow] Skipping invalid filename: {file}")
-            continue
-        valid_files.append(file)
-
-    if not valid_files:
-        console.print("[yellow]Warning:[/yellow] No valid files to commit after filtering")
-        return
-
-    # Update chunk files with only valid ones
-    chunk.files = valid_files
-
-    # Display the files being committed
-    console.print(f"[blue]Committing files:[/blue] {', '.join(chunk.files)}")
-
-    # First, explicitly stage the files to ensure they're properly added to the index
-    try:
-        from codemap.utils.git_utils import stage_files
-
-        console.print("[blue]Staging files...[/blue]")
-        stage_files(chunk.files)
-        console.print("[green]Files staged successfully[/green]")
-    except (GitError, OSError, ValueError) as e:
-        console.print(f"[red]Error staging files:[/red] {e!s}")
-        console.print("[yellow]Attempting to continue with commit...[/yellow]")
-
-    try:
-        git.commit_only_specified_files(chunk.files, message)
-        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-        return  # Success, we're done!
-    except (OSError, ValueError, RuntimeError) as e:
-        # Check if this might be a git hook error
-        if "hook" in str(e).lower():
-            console.print(f"[yellow]Warning:[/yellow] Git hook failed: {e!s}")
-
-            # Ask if user wants to bypass hooks
-            if questionary.confirm("Would you like to try again bypassing git hooks?").ask():
-                # Call with ignore_hooks=True
-                from codemap.utils.git_utils import commit_only_files
-
-                try:
-                    # Try again with ignore_hooks=True
-                    commit_only_files(chunk.files, message, ignore_hooks=True)
-                    console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s) (hooks bypassed)")
-                    return  # Success, we're done!
-                except (GitError, OSError, ValueError, RuntimeError) as commit_e:
-                    console.print(f"[red]Error:[/red] Failed to commit with hooks bypassed: {commit_e!s}")
-                    # Continue to fallback method
-            else:
-                console.print("[yellow]Commit cancelled due to hook failure[/yellow]")
-                return  # User cancelled, we're done
-        else:
-            console.print(f"[red]Error:[/red] {e!s}")
-
-            # Check if changes aren't staged
-            if "no changes added to commit" in str(e).lower():
-                console.print(
-                    "[yellow]Hint:[/yellow] The files might not be properly staged. "
-                    "Try staging them manually with 'git add'."
-                )
-            # Check if changes aren't ready
-            elif "your index contains uncommitted changes" in str(e).lower():
-                console.print("[yellow]Hint:[/yellow] There might be uncommitted changes. Try 'git status' to check.")
-            # Provide a general hint
-            else:
-                console.print("[yellow]Hint:[/yellow] Check 'git status' to see the current state of your repository.")
-
-    # If we've reached here, the above methods failed. Try a fallback approach using direct shell commands
-    console.print("[yellow]Trying fallback commit method...[/yellow]")
-
-    try:
-        # Check if git is available in the path
-        git_path = shutil.which("git")
-        if not git_path:
-            console.print("[red]Error:[/red] Git executable not found in PATH")
-            return
-
-        # Validate files and collect errors before processing
-        staging_errors = []
-        valid_files = []
-
-        # First validate all files outside any try-except
-        for file in chunk.files:
-            if Path(file).exists() or Path(file).is_symlink():
-                valid_files.append(file)
-            else:
-                staging_errors.append(f"File not found: {file}")
-
-        # Now process all valid files in a single try-except
-        if valid_files:
-            try:
-                for file in valid_files:
-                    subprocess.run([git_path, "add", file], check=True, capture_output=True)  # noqa: S603
-            except subprocess.CalledProcessError as e:
-                staging_errors.append(f"Error staging files: {e.stderr.decode('utf-8')}")
-
-        # Report any staging errors
-        if staging_errors:
-            for error in staging_errors:
-                console.print(f"[red]{error}[/red]")
-
-        # Now try to commit
-        try:
-            result = subprocess.run([git_path, "commit", "-m", message], check=True, capture_output=True, text=True)  # noqa: S603
-            console.print("[green]✓[/green] Commit successful (fallback method)")
-            console.print(result.stdout)
-            return  # Success
-        except subprocess.CalledProcessError as e:
-            console.print(f"[red]Fallback commit failed:[/red] {e.stderr}")
-
-            # Last attempt - try with --no-verify
-            if questionary.confirm("Would you like to try one last time with --no-verify?").ask():
-                try:
-                    result = subprocess.run(  # noqa: S603
-                        [git_path, "commit", "-m", message, "--no-verify"], check=True, capture_output=True, text=True
-                    )
-                    console.print("[green]✓[/green] Commit successful (fallback method with --no-verify)")
-                    console.print(result.stdout)
-                except subprocess.CalledProcessError as e:
-                    console.print(f"[red]Final commit attempt failed:[/red] {e.stderr}")
-    except (OSError, ValueError, subprocess.SubprocessError) as e:
-        console.print(f"[red]Fallback commit method failed:[/red] {e!s}")
-        console.print("[yellow]Please try committing manually using 'git add' and 'git commit'[/yellow]")
-
-
-def handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
-    """Handle the commit action.
+def _perform_commit(chunk: DiffChunk, message: str) -> None:
+    """Perform the actual commit.
 
     Args:
         chunk: Diff chunk to commit
         message: Commit message
-        git: Git wrapper
     """
     try:
-        # Check for other files
-        from codemap.utils.git_utils import GitError
-
-        other_staged, other_untracked, has_warnings = _check_other_files(chunk.files)
-
-        # If we have warnings, handle them
-        if has_warnings and not _handle_other_files(chunk, other_staged, other_untracked):
-            return
-
-        # Perform the commit
-        _perform_commit(chunk, message, git)
-
-    except (OSError, ValueError, RuntimeError, GitError) as e:
+        # Commit only the files in this chunk
+        commit_only_files(chunk.files, message)
+        console.print(f"[green]✓[/green] Committed {len(chunk.files)} files")
+    except GitError as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
-def handle_edit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
-    """Handle the edit action.
+def handle_commit_action(chunk: DiffChunk, message: str) -> None:
+    """Handle commit action.
 
     Args:
         chunk: Diff chunk to commit
-        message: Default commit message
-        git: Git wrapper
+        message: Commit message
     """
-    # Let user edit the message
-    new_message = questionary.text("Edit commit message:", default=message).ask()
-    if not new_message:
-        return
+    console.print("Committing changes...")
+    _perform_commit(chunk, message)
 
-    try:
-        # Check for other files
-        from codemap.utils.git_utils import GitError
 
-        other_staged, other_untracked, has_warnings = _check_other_files(chunk.files)
+def handle_edit_action(chunk: DiffChunk, message: str) -> None:
+    """Handle edit action.
 
-        # If we have warnings, handle them
-        if has_warnings and not _handle_other_files(chunk, other_staged, other_untracked):
-            return
+    Args:
+        chunk: Diff chunk to edit and commit
+        message: Initial commit message to edit
+    """
+    # Ask for a new commit message
+    edited_message = questionary.text(
+        "Edit commit message:",
+        default=message,
+        validate=lambda text: bool(text.strip()) or "Commit message cannot be empty",
+    ).unsafe_ask()
 
-        # Perform the commit with the edited message
-        _perform_commit(chunk, new_message, git)
-
-    except (OSError, ValueError, RuntimeError, GitError) as e:
-        console.print(f"[red]Error:[/red] {e!s}")
+    if edited_message:
+        _perform_commit(chunk, edited_message)
 
 
 @dataclass
@@ -535,7 +383,6 @@ class ChunkContext:
     index: int
     total: int
     generator: MessageGenerator
-    git: GitWrapper
     mode: GenerationMode
 
 
@@ -561,20 +408,20 @@ def process_chunk_interactively(context: ChunkContext) -> str:
 
     # Ask user what to do
     choices = [
-        {"value": ChunkAction.COMMIT, "name": "Commit with this message"},
-        {"value": ChunkAction.EDIT, "name": "Edit message and commit"},
-        {"value": ChunkAction.REGENERATE, "name": "Regenerate message"},
-        {"value": ChunkAction.SKIP, "name": "Skip this chunk"},
-        {"value": ChunkAction.EXIT, "name": "Exit without committing"},
+        {"value": "commit", "name": "Commit with this message"},
+        {"value": "edit", "name": "Edit message and commit"},
+        {"value": "regenerate", "name": "Regenerate message"},
+        {"value": "skip", "name": "Skip this chunk"},
+        {"value": "exit", "name": "Exit without committing"},
     ]
 
     action = questionary.select("What would you like to do?", choices=choices).ask()
 
-    if action == ChunkAction.COMMIT:
-        handle_commit_action(context.chunk, message, context.git)
-    elif action == ChunkAction.EDIT:
-        handle_edit_action(context.chunk, message, context.git)
-    elif action == ChunkAction.REGENERATE:
+    if action == "commit":
+        handle_commit_action(context.chunk, message)
+    elif action == "edit":
+        handle_edit_action(context.chunk, message)
+    elif action == "regenerate":
         # Just loop back for this chunk with smart generation
         return process_chunk_interactively(
             ChunkContext(
@@ -582,13 +429,12 @@ def process_chunk_interactively(context: ChunkContext) -> str:
                 index=context.index,
                 total=context.total,
                 generator=context.generator,
-                git=context.git,
                 mode=GenerationMode.SMART,
             ),
         )
-    elif action == ChunkAction.SKIP:
+    elif action == "skip":
         console.print("[yellow]Skipped![/yellow]")
-    elif action == ChunkAction.EXIT:
+    elif action == "exit":
         console.print("[yellow]Exiting commit process[/yellow]")
         return "exit"
 
@@ -618,7 +464,6 @@ def process_all_chunks(
     options: CommitOptions,
     chunks: list[DiffChunk],
     generator: MessageGenerator,
-    git: GitWrapper,
 ) -> int:
     """Process all chunks interactively.
 
@@ -626,7 +471,6 @@ def process_all_chunks(
         options: Commit options
         chunks: List of diff chunks
         generator: Message generator to use
-        git: Git wrapper
 
     Returns:
         Exit code (0 for success)
@@ -637,7 +481,6 @@ def process_all_chunks(
             index=i,
             total=len(chunks),
             generator=generator,
-            git=git,
             mode=options.generation_mode,
         )
 
@@ -730,12 +573,15 @@ def run(
     )
 
     try:
-        # Initialize Git wrapper
-        git = GitWrapper(repo_path)
-
         # Check if there are any changes
         with loading_spinner("Checking for changes..."):
-            has_changes = git.has_changes()
+            try:
+                staged = get_staged_diff()
+                unstaged = get_unstaged_diff()
+                untracked = get_untracked_files()
+                has_changes = bool(staged.files or unstaged.files or untracked)
+            except GitError:
+                has_changes = False
 
         if not has_changes:
             console.print("[yellow]No changes to commit[/yellow]")
@@ -752,14 +598,14 @@ def run(
             chunks = []
 
             # Process staged changes
-            staged_diff = git.get_staged_diff()
+            staged_diff = get_staged_diff()
             if staged_diff.files:
                 staged_chunks = splitter.split_diff(staged_diff, SplitStrategy.SEMANTIC)
                 chunks.extend(staged_chunks)
 
             # Process unstaged changes
             if not chunks or not config.staged_only:
-                unstaged_diff = git.get_unstaged_diff()
+                unstaged_diff = get_unstaged_diff()
                 if unstaged_diff.files:
                     unstaged_chunks = splitter.split_diff(unstaged_diff, SplitStrategy.SEMANTIC)
                     chunks.extend(unstaged_chunks)
@@ -770,7 +616,7 @@ def run(
             return 0
 
         # Process chunks
-        return process_all_chunks(options, chunks, generator, git)
+        return process_all_chunks(options, chunks, generator)
     except (ValueError, RuntimeError, TypeError) as e:
         console.print(f"[red]Error:[/red] {e!s}")
         return 1

@@ -17,11 +17,16 @@ import typer
 from rich.console import Console
 from rich.panel import Panel
 
-from codemap.git import GitWrapper
-from codemap.git.commit.diff_splitter import DiffSplitter, SplitStrategy
+from codemap.git import DiffSplitter, SplitStrategy
 from codemap.git.commit.interactive import process_all_chunks
 from codemap.utils import loading_spinner, validate_repo_path
-from codemap.utils.git_utils import GitError
+from codemap.utils.git_utils import (
+    GitDiff,
+    GitError,
+    get_staged_diff,
+    get_unstaged_diff,
+    get_untracked_files,
+)
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 from codemap.utils.pr_utils import (
     PullRequest,
@@ -118,8 +123,24 @@ def _handle_branch_creation(options: PROptions) -> str | None:
             return None
     elif options.interactive:
         # Get uncommitted changes to suggest a branch name
-        git = GitWrapper(options.repo_path)
-        diff = git.get_uncommitted_changes()
+        try:
+            # Get all changes
+            staged = get_staged_diff()
+            unstaged = get_unstaged_diff()
+            untracked_files = get_untracked_files()
+
+            # Combine into a single diff
+            all_files = list(set(staged.files + unstaged.files + untracked_files))
+            combined_content = staged.content + unstaged.content
+
+            diff = GitDiff(
+                files=all_files,
+                content=combined_content,
+                is_staged=False,  # Mixed staged/unstaged
+            )
+        except GitError:
+            # Return an empty diff in case of error
+            diff = GitDiff(files=[], content="", is_staged=False)
 
         # Generate a suggested branch name based on the changes
         suggested_name = ""
@@ -201,8 +222,25 @@ def _handle_commits(options: PROptions) -> bool:
         return True
 
     # Check if there are uncommitted changes
-    git = GitWrapper(options.repo_path)
-    diff = git.get_uncommitted_changes()
+    try:
+        # Get all changes
+        staged = get_staged_diff()
+        unstaged = get_unstaged_diff()
+        untracked_files = get_untracked_files()
+
+        # Combine into a single diff
+        all_files = list(set(staged.files + unstaged.files + untracked_files))
+        combined_content = staged.content + unstaged.content
+
+        diff = GitDiff(
+            files=all_files,
+            content=combined_content,
+            is_staged=False,  # Mixed staged/unstaged
+        )
+    except GitError:
+        # Return an empty diff in case of error
+        diff = GitDiff(files=[], content="", is_staged=False)
+
     if not diff.files:
         console.print("[yellow]No uncommitted changes to commit.[/yellow]")
         return True
@@ -234,7 +272,7 @@ def _handle_commits(options: PROptions) -> bool:
         )
 
         # Process all chunks
-        result = process_all_chunks(options.repo_path, chunks, generator, git, interactive=options.interactive)
+        result = process_all_chunks(options.repo_path, chunks, generator, interactive=options.interactive)
     except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error committing changes: {e}[/red]")
         return False
