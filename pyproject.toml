@@ -75,6 +75,7 @@ ignore = [
     "PLR0915",  # too many statements
     "TRY300",  # Consider moving this statement to an `else` block
     "COM812",  # Use a constant for the message in a raise statement
+    "TC001",  # Move application import into a type-checking block
 ]
 
 [tool.ruff.lint.per-file-ignores]

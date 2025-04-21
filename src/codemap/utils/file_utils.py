@@ -1,18 +1,33 @@
-"""Main CLI module for CodeMap (legacy entry point)."""
+"""Utility functions for file operations in CodeMap."""
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
-import typer
+logger = logging.getLogger(__name__)
 
-# Create a new app instance for backward compatibility
-app = typer.Typer(
-    help="CodeMap - Generate optimized markdown documentation from your codebase.",
-)
 
-def _get_output_path(repo_root: Path, output_path: Path | None, config: dict) -> Path:
+def count_tokens(file_path: Path) -> int:
+    """Rough estimation of tokens in a file.
+
+    Args:
+        file_path: Path to the file to count tokens in.
+
+    Returns:
+        Estimated number of tokens in the file.
+    """
+    try:
+        with file_path.open(encoding="utf-8") as f:
+            content = f.read()
+            # Simple tokenization by whitespace
+            return len(content.split())
+    except (OSError, UnicodeDecodeError):
+        return 0
+
+
+def get_output_path(repo_root: Path, output_path: Path | None, config: dict) -> Path:
     """Get the output path for documentation.
 
     Args:
@@ -42,11 +57,3 @@ def _get_output_path(repo_root: Path, output_path: Path | None, config: dict) ->
     filename = f"documentation_{timestamp}.md"
 
     return output_dir_path / filename
-
-# Add PR command group
-from .pr import app as pr_app  # noqa: E402
-
-app.add_typer(pr_app, name="pr")
-
-# This module is kept for backward compatibility
-# All functionality has been moved to codemap.cli_app

@@ -10,6 +10,8 @@ from typing import Iterator
 from rich.console import Console
 from rich.spinner import Spinner
 
+from codemap.utils.cli_utils import console, create_spinner_progress, ensure_directory_exists, setup_logging
+from codemap.utils.file_utils import count_tokens, get_output_path
 from codemap.utils.git_utils import GitError, get_repo_root
 
 
@@ -52,7 +54,13 @@ def loading_spinner(message: str = "Processing...") -> Iterator[None]:
 # Export commonly used utilities
 __all__ = [
     "GitError",
+    "console",
+    "count_tokens",
+    "create_spinner_progress",
+    "ensure_directory_exists",
+    "get_output_path",
     "get_repo_root",
     "loading_spinner",
+    "setup_logging",
     "validate_repo_path",
 ]

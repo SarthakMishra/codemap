@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING, Annotated, Iterator
 
 import questionary
 import typer
@@ -27,6 +28,7 @@ from codemap.git import (
     SplitStrategy,
 )
 from codemap.git.commit.message_generator import LLMError
+from codemap.utils.cli_utils import console, setup_logging
 from codemap.utils.git_utils import (
     GitError,
     commit_only_files,
@@ -37,11 +39,13 @@ from codemap.utils.git_utils import (
 )
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 
-# Truncate to maximum of 10 lines
-MAX_PREVIEW_LINES = 10
+from .cli_types import VerboseFlag
 
 if TYPE_CHECKING:
     from codemap.git.commit.message_generator import MessageGenerator
+
+# Truncate to maximum of 10 lines
+MAX_PREVIEW_LINES = 10
 
 # Try to import from utils, but fallback to defining locally if needed
 try:
@@ -66,8 +70,6 @@ except ImportError:
     # Also import validate_repo_path
     from codemap.utils import validate_repo_path
 
-app = typer.Typer(help="Generate and apply conventional commits from Git diffs")
-console = Console()
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env files
@@ -96,11 +98,6 @@ class CommitOptions:
     commit: bool = field(default=True)
     prompt_template: str | None = field(default=None)
     api_key: str | None = field(default=None)
-
-
-@app.callback()
-def callback() -> None:
-    """Generate conventional commit messages."""
 
 
 def _load_prompt_template(template_path: str | None) -> str | None:
@@ -508,44 +505,15 @@ class RunConfig:
 DEFAULT_RUN_CONFIG = RunConfig()
 
 
-@app.command(help="Generate and apply conventional commits from Git diffs")
-def run(
-    repo_path: Path | None = None,
-    force_simple: bool = False,
-    api_key: str | None = None,
-    model: str = "openai/gpt-4o-mini",
-    api_base: str | None = None,
-    commit: bool = True,
-    prompt_template: str | None = None,
-    staged_only: bool = False,
-) -> int:
-    """Run the commit command.
+def _run_commit_command(config: RunConfig) -> int:
+    """Run the commit command logic.
 
     Args:
-        repo_path: Path to the Git repository
-        force_simple: Force using simple message generation mode
-        api_key: API key for the LLM provider
-        model: Model to use for generation
-        api_base: Custom API base URL
-        commit: Whether to commit changes automatically
-        prompt_template: Custom prompt template file
-        staged_only: Only process staged changes
+        config: Run configuration
 
     Returns:
         Exit code
     """
-    # Create a RunConfig object from the parameters
-    config = RunConfig(
-        repo_path=repo_path,
-        force_simple=force_simple,
-        api_key=api_key,
-        model=model,
-        api_base=api_base,
-        commit=commit,
-        prompt_template=prompt_template,
-        staged_only=staged_only,
-    )
-
     # Validate the repository path
     try:
         repo_path = validate_repo_path(config.repo_path)
@@ -622,5 +590,83 @@ def run(
         return 1
 
 
-if __name__ == "__main__":
-    app()
+def commit_command(
+    path: Annotated[
+        Path | None,
+        typer.Argument(
+            help="Path to repository or file to commit",
+            exists=True,
+        ),
+    ] = None,
+    model: Annotated[
+        str,
+        typer.Option(
+            "--model",
+            "-m",
+            help="LLM model to use for message generation",
+        ),
+    ] = "openai/gpt-4o-mini",
+    api_key: Annotated[
+        str | None,
+        typer.Option(
+            "--api-key",
+            help="OpenAI API key (or set OPENAI_API_KEY env var)",
+            envvar="OPENAI_API_KEY",
+        ),
+    ] = None,
+    api_base: Annotated[
+        str | None,
+        typer.Option(
+            "--api-base",
+            help="Custom API base URL for the LLM provider",
+        ),
+    ] = None,
+    force_simple: Annotated[
+        bool,
+        typer.Option(
+            "--simple",
+            "-s",
+            help="Use simple message generation (no LLM)",
+        ),
+    ] = False,
+    prompt_template: Annotated[
+        str | None,
+        typer.Option(
+            "--template",
+            "-t",
+            help="Path to custom prompt template file",
+        ),
+    ] = None,
+    staged_only: Annotated[
+        bool,
+        typer.Option(
+            "--staged-only",
+            help="Only process staged changes",
+        ),
+    ] = False,
+    is_verbose: VerboseFlag = False,
+) -> None:
+    """Generate and apply conventional commits from changes in a Git repository."""
+    setup_logging(is_verbose=is_verbose)
+
+    try:
+        # Create run configuration
+        config = RunConfig(
+            repo_path=path,
+            force_simple=force_simple,
+            api_key=api_key,
+            model=model,
+            api_base=api_base,
+            prompt_template=prompt_template,
+            staged_only=staged_only,
+        )
+
+        # Run commit command
+        exit_code = _run_commit_command(config)
+        if exit_code != 0:
+            sys.exit(exit_code)
+
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/]")
+        logger.debug("Error running commit command", exc_info=True)
+        raise typer.Exit(1) from e

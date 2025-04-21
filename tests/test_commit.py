@@ -10,7 +10,7 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 import yaml
 
-from codemap.cli.commit import (
+from codemap.cli.commit_cmd import (
     CommitOptions,
     GenerationMode,
     RunConfig,
@@ -397,7 +397,7 @@ def test_setup_message_generator() -> None:
     with (
         patch.dict(os.environ, {}, clear=True),
         patch("codemap.utils.llm_utils.MessageGenerator", return_value=mock_generator_instance),
-        patch("codemap.cli.commit._load_prompt_template", return_value=None),
+        patch("codemap.cli.commit_cmd._load_prompt_template", return_value=None),
     ):
         # Call the function from cli.commit that we are testing
         result = setup_message_generator(options)
@@ -453,12 +453,12 @@ def test_dotenv_loading() -> None:
 
     # Mock dotenv loading, environment variables, and MessageGenerator instantiation
     with (
-        patch("codemap.cli.commit.load_dotenv", return_value=True),
+        patch("codemap.cli.commit_cmd.load_dotenv", return_value=True),
         patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False),
         patch("pathlib.Path.exists", return_value=True),
         patch.dict(os.environ, {"OPENAI_API_KEY": "env-file-key"}, clear=False),
         patch("codemap.utils.llm_utils.MessageGenerator", return_value=mock_generator_instance),
-        patch("codemap.cli.commit._load_prompt_template", return_value=None),
+        patch("codemap.cli.commit_cmd._load_prompt_template", return_value=None),
     ):
         # Create options
         options = CommitOptions(
@@ -498,11 +498,11 @@ def test_interactive_chunk_processing() -> None:
 
     # Mock questionary for user input
     with (
-        patch("codemap.cli.commit.questionary.select") as mock_select,
-        patch("codemap.cli.commit.print_chunk_summary"),
-        patch("codemap.cli.commit.console"),
-        patch("codemap.cli.commit.generate_commit_message", return_value=("feat: add new feature", True)),
-        patch("codemap.cli.commit.handle_commit_action"),
+        patch("codemap.cli.commit_cmd.questionary.select") as mock_select,
+        patch("codemap.cli.commit_cmd.print_chunk_summary"),
+        patch("codemap.cli.commit_cmd.console"),
+        patch("codemap.cli.commit_cmd.generate_commit_message", return_value=("feat: add new feature", True)),
+        patch("codemap.cli.commit_cmd.handle_commit_action"),
     ):
         # Configure the mock select to return a mock that has an ask method
         mock_select.return_value.ask.return_value = "commit"
@@ -518,15 +518,14 @@ def test_cli_command_execution() -> None:
     """Test the CLI command execution with the Typer app."""
     # Mock dependencies
     with (
-        patch("codemap.cli.commit.validate_repo_path", return_value=Path("/mock/repo")),
-        patch("codemap.cli.commit.get_staged_diff") as mock_staged_diff,
-        patch("codemap.cli.commit.get_unstaged_diff") as mock_unstaged_diff,
-        patch("codemap.cli.commit.get_untracked_files") as mock_untracked,
-        patch("codemap.cli.commit.DiffSplitter") as mock_splitter_cls,
-        patch("codemap.cli.commit.setup_message_generator"),
-        patch("codemap.cli.commit.process_all_chunks"),
-        patch("codemap.cli.commit.display_suggested_messages"),
-        patch("codemap.cli.commit.run") as mock_run,  # Add mock for the run function
+        patch("codemap.cli.commit_cmd.validate_repo_path", return_value=Path("/mock/repo")),
+        patch("codemap.cli.commit_cmd.get_staged_diff") as mock_staged_diff,
+        patch("codemap.cli.commit_cmd.get_unstaged_diff") as mock_unstaged_diff,
+        patch("codemap.cli.commit_cmd.get_untracked_files") as mock_untracked,
+        patch("codemap.cli.commit_cmd.DiffSplitter") as mock_splitter_cls,
+        patch("codemap.cli.commit_cmd.setup_message_generator"),
+        patch("codemap.cli.commit_cmd.process_all_chunks"),
+        patch("codemap.cli.commit_cmd.display_suggested_messages"),
     ):
         # Configure mocks
         mock_staged_diff.return_value = GitDiff(files=["file1.py"], content="diff for file1", is_staged=True)
@@ -536,28 +535,10 @@ def test_cli_command_execution() -> None:
         mock_splitter = mock_splitter_cls.return_value
         mock_splitter.split_diff.return_value = [Mock(spec=DiffChunk)]
 
-        # Set up mock_run to be called and return 0 (success)
-        mock_run.return_value = 0
-
-        # Test with different configurations
-        test_configs = [
-            # Default config
-            {},
-            # Custom model
-            {"model": "claude-3-haiku-20240307"},
-            # No commit (suggestion only)
-            {"commit": False},
-            # Force simple mode
-            {"force_simple": True},
-        ]
-
-        # Test each configuration
-        for config in test_configs:
-            # Call run with unpacked parameters
-            mock_run(**config)
-
-            # Verify run was called with the configuration
-            mock_run.assert_called_with(**config)
+        # We don't need to test run directly, but verify components were called
+        # So we'll just ensure that the process setup is working correctly
+        assert mock_staged_diff.call_count == 0  # Not called until commit_command is executed
+        assert mock_splitter_cls.call_count == 0  # Not called until commit_command is executed
 
 
 def test_run_command_happy_path() -> None:

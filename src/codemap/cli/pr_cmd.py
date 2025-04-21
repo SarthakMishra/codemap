@@ -14,12 +14,12 @@ from typing import Annotated
 
 import questionary
 import typer
-from rich.console import Console
 from rich.panel import Panel
 
 from codemap.git import DiffSplitter, SplitStrategy
 from codemap.git.commit.interactive import process_all_chunks
 from codemap.utils import loading_spinner, validate_repo_path
+from codemap.utils.cli_utils import console, setup_logging
 from codemap.utils.git_utils import (
     GitDiff,
     GitError,
@@ -34,6 +34,10 @@ from codemap.utils.pr_utils import (
     checkout_branch,
     create_branch,
     create_pull_request,
+    generate_pr_description_from_commits,
+    generate_pr_description_with_llm,
+    generate_pr_title_from_commits,
+    generate_pr_title_with_llm,
     get_commit_messages,
     get_current_branch,
     get_default_branch,
@@ -43,8 +47,8 @@ from codemap.utils.pr_utils import (
     update_pull_request,
 )
 
-app = typer.Typer(help="Generate and manage pull requests")
-console = Console()
+from .cli_types import PathArg, VerboseFlag
+
 logger = logging.getLogger(__name__)
 
 
@@ -69,14 +73,22 @@ class PROptions:
     pr_number: int | None = field(default=None)
     interactive: bool = field(default=True)
     model: str | None = field(default=None)
-    provider: str | None = field(default=None)
     api_base: str | None = field(default=None)
     api_key: str | None = field(default=None)
 
 
-@app.callback()
-def callback() -> None:
-    """Generate and manage pull requests."""
+def _exit_with_error(message: str, exit_code: int = 1, exception: Exception | None = None) -> None:
+    """Exit with an error message.
+
+    Args:
+        message: Error message to display
+        exit_code: Exit code to use
+        exception: Exception that caused the error
+    """
+    console.print(message)
+    if exception is None:
+        raise typer.Exit(exit_code)
+    raise typer.Exit(exit_code) from exception
 
 
 def _validate_branch_name(branch_name: str) -> bool:
@@ -164,8 +176,9 @@ def _handle_branch_creation(options: PROptions) -> str | None:
                     # Extract the first line as the commit message
                     first_line = message.split("\n")[0] if "\n" in message else message
                     suggested_name = suggest_branch_name([first_line])
-                except (ValueError, RuntimeError, ConnectionError):
+                except (ValueError, RuntimeError, ConnectionError) as e:
                     # Fallback to a simple branch name
+                    logger.warning("Error generating branch name: %s", e)
                     suggested_name = suggest_branch_name([f"update-{chunks[0].files[0]}"])
 
         # Ask for branch name
@@ -272,7 +285,7 @@ def _handle_commits(options: PROptions) -> bool:
         )
 
         # Process all chunks
-        result = process_all_chunks(options.repo_path, chunks, generator, interactive=options.interactive)
+        result = process_all_chunks(chunks, generator, interactive=options.interactive)
     except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error committing changes: {e}[/red]")
         return False
@@ -349,8 +362,6 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
     try:
         # Display a spinner while generating PR content
         with loading_spinner("Generating PR content with AI..."):
-            from codemap.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
-
             # Try AI-generated title and description first
             title = options.title
             if not title:
@@ -367,8 +378,6 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
         console.print(f"[yellow]AI generation failed: {e}[/yellow]")
         console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
         # Fallback to rule-based generation
-        from codemap.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
-
         title = options.title or generate_pr_title_from_commits(commits)
         description = options.description or generate_pr_description_from_commits(commits)
 
@@ -437,8 +446,6 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
     try:
         # Display a spinner while generating PR content
         with loading_spinner("Generating PR content with AI..."):
-            from codemap.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
-
             # Try AI-generated title and description first
             title = options.title or pr.title
             if not title:
@@ -455,8 +462,6 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
         console.print(f"[yellow]AI generation failed: {e}[/yellow]")
         console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
         # Fallback to rule-based generation
-        from codemap.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
-
         title = options.title or pr.title or generate_pr_title_from_commits(commits)
         description = options.description or pr.description or generate_pr_description_from_commits(commits)
 
@@ -511,7 +516,7 @@ def _load_llm_config(repo_path: Path) -> dict:
         Dictionary with LLM configuration values
     """
     config = {
-        "model": "gpt-4o-mini",  # Default fallback model
+        "model": "openai/gpt-4o-mini",  # Default fallback model
         "api_base": None,
         "api_key": None,
     }
@@ -558,343 +563,166 @@ def _load_llm_config(repo_path: Path) -> dict:
     return config
 
 
-@app.command(help="Create a new pull request")
-def create(
-    path: Annotated[
-        Path | None,
-        typer.Argument(
-            help="Path to repository",
-            exists=True,
-        ),
-    ] = None,
-    branch_name: Annotated[
-        str | None,
-        typer.Option(
-            "--branch",
-            "-b",
-            help="Branch name to use (will be created if it doesn't exist)",
-        ),
-    ] = None,
+def pr_command(
+    path: PathArg = Path(),
+    action: Annotated[PRAction, typer.Argument(help="Action to perform: create or update")] = PRAction.CREATE,
+    branch_name: Annotated[str | None, typer.Option("--branch", "-b", help="Target branch name")] = None,
     base_branch: Annotated[
         str | None,
-        typer.Option(
-            "--base",
-            help="Base branch for the PR (default: main or master)",
-        ),
+        typer.Option("--base", help="Base branch for the PR (defaults to repo default)"),
     ] = None,
-    title: Annotated[
-        str | None,
-        typer.Option(
-            "--title",
-            "-t",
-            help="PR title (generated from commits if not provided)",
-        ),
-    ] = None,
+    title: Annotated[str | None, typer.Option("--title", "-t", help="Pull request title")] = None,
     description: Annotated[
         str | None,
-        typer.Option(
-            "--description",
-            "-d",
-            help="PR description (generated from commits if not provided)",
-        ),
+        typer.Option("--desc", "-d", help="Pull request description (file path or text)"),
     ] = None,
     no_commit: Annotated[
         bool,
-        typer.Option(
-            "--no-commit",
-            help="Don't commit changes before creating PR",
-        ),
+        typer.Option("--no-commit", help="Skip the commit process before creating PR"),
     ] = False,
-    force_push: Annotated[
-        bool,
-        typer.Option(
-            "--force-push",
-            "-f",
-            help="Force push branch to remote",
-        ),
-    ] = False,
-    non_interactive: Annotated[
-        bool,
-        typer.Option(
-            "--non-interactive",
-            help="Run in non-interactive mode",
-        ),
-    ] = False,
-    model: Annotated[
-        str | None,
-        typer.Option(
-            "--model",
-            "-m",
-            help="LLM model to use for PR content generation",
-        ),
-    ] = None,
-    api_key: Annotated[
-        str | None,
-        typer.Option(
-            "--api-key",
-            help="API key for LLM provider",
-        ),
-    ] = None,
-) -> int:
-    """Create a new pull request.
-
-    Args:
-        path: Path to repository
-        branch_name: Branch name to use
-        base_branch: Base branch for the PR
-        title: PR title
-        description: PR description
-        no_commit: Don't commit changes before creating PR
-        force_push: Force push branch to remote
-        non_interactive: Run in non-interactive mode
-        model: LLM model to use for PR content generation
-        api_key: API key for LLM provider
-
-    Returns:
-        Exit code (0 for success, non-zero for errors)
-    """
-    repo_path = validate_repo_path(path)
-    if not repo_path:
-        console.print("[red]Error:[/red] Not a valid Git repository")
-        return 1
-
-    # Load LLM config from .codemap.yml
-    llm_config = _load_llm_config(repo_path)
-
-    # Command line options take precedence over config file
-    if not model:
-        model = llm_config["model"]
-
-    if not api_key:
-        api_key = llm_config["api_key"]
-
-    api_base = llm_config["api_base"]
-
-    options = PROptions(
-        repo_path=repo_path,
-        branch_name=branch_name,
-        base_branch=base_branch,
-        title=title,
-        description=description,
-        commit_first=not no_commit,
-        force_push=force_push,
-        interactive=not non_interactive,
-        model=model,
-        api_key=api_key,
-        api_base=api_base,
-    )
-
-    # Handle branch creation or selection
-    branch = _handle_branch_creation(options)
-    if not branch:
-        console.print("[red]Branch creation/selection cancelled.[/red]")
-        return 1
-
-    # Handle commits if needed
-    if options.commit_first and not _handle_commits(options):
-        console.print("[red]Commit process failed or was cancelled.[/red]")
-        return 1
-
-    # Handle push
-    if not _handle_push(options, branch):
-        console.print("[red]Push failed or was cancelled.[/red]")
-        return 1
-
-    # Handle PR creation
-    pr = _handle_pr_creation(options, branch)
-    if not pr:
-        console.print("[red]PR creation failed or was cancelled.[/red]")
-        return 1
-
-    return 0
-
-
-@app.command(help="Update an existing pull request")
-def update(
+    force_push: Annotated[bool, typer.Option("--force-push", "-f", help="Force push the branch")] = False,
     pr_number: Annotated[
         int | None,
-        typer.Argument(
-            help="PR number to update (if not provided, will try to find PR for current branch)",
-        ),
+        typer.Option("--pr", help="PR number to update (required for update action)"),
     ] = None,
-    path: Annotated[
-        Path | None,
-        typer.Option(
-            "--path",
-            "-p",
-            help="Path to repository",
-            exists=True,
-        ),
-    ] = None,
-    title: Annotated[
-        str | None,
-        typer.Option(
-            "--title",
-            "-t",
-            help="New PR title",
-        ),
-    ] = None,
-    description: Annotated[
-        str | None,
-        typer.Option(
-            "--description",
-            "-d",
-            help="New PR description",
-        ),
-    ] = None,
-    no_commit: Annotated[
-        bool,
-        typer.Option(
-            "--no-commit",
-            help="Don't commit changes before updating PR",
-        ),
-    ] = False,
-    force_push: Annotated[
-        bool,
-        typer.Option(
-            "--force-push",
-            "-f",
-            help="Force push branch to remote",
-        ),
-    ] = False,
-    non_interactive: Annotated[
-        bool,
-        typer.Option(
-            "--non-interactive",
-            help="Run in non-interactive mode",
-        ),
-    ] = False,
+    non_interactive: Annotated[bool, typer.Option("--non-interactive", help="Run in non-interactive mode")] = False,
     model: Annotated[
         str | None,
-        typer.Option(
-            "--model",
-            "-m",
-            help="LLM model to use for PR content generation",
-        ),
+        typer.Option("--model", "-m", help="LLM model for content generation"),
     ] = None,
-    api_key: Annotated[
-        str | None,
-        typer.Option(
-            "--api-key",
-            help="API key for LLM provider",
-        ),
-    ] = None,
-) -> int:
-    """Update an existing pull request.
+    api_base: Annotated[str | None, typer.Option("--api-base", help="API base URL for LLM")] = None,
+    api_key: Annotated[str | None, typer.Option("--api-key", help="API key for LLM")] = None,
+    is_verbose: VerboseFlag = False,
+) -> None:
+    """Generate and manage pull requests.
 
-    Args:
-        pr_number: PR number to update
-        path: Path to repository
-        title: New PR title
-        description: New PR description
-        no_commit: Don't commit changes before updating PR
-        force_push: Force push branch to remote
-        non_interactive: Run in non-interactive mode
-        model: LLM model to use for PR content generation
-        api_key: API key for LLM provider
-
-    Returns:
-        Exit code (0 for success, non-zero for errors)
+    Creates or updates pull requests with AI-generated content.
+    Handles branch creation, commits, and pushing changes.
     """
-    repo_path = validate_repo_path(path)
-    if not repo_path:
-        console.print("[red]Error:[/red] Not a valid Git repository")
-        return 1
+    setup_logging(is_verbose=is_verbose)
+    logger.info("Starting PR command with action: %s", action)
 
-    # Load LLM config from .codemap.yml
-    llm_config = _load_llm_config(repo_path)
+    try:
+        repo_path = validate_repo_path(path)
+        if not repo_path:
+            _exit_with_error("[red]Error:[/red] Not a valid Git repository")
 
-    # Command line options take precedence over config file
-    if not model:
-        model = llm_config["model"]
+        # Load LLM config from .codemap.yml
+        llm_config = _load_llm_config(repo_path)
 
-    if not api_key:
-        api_key = llm_config["api_key"]
+        # Command line options take precedence over config file
+        if not model:
+            model = llm_config["model"]
 
-    api_base = llm_config["api_base"]
+        if not api_key:
+            api_key = llm_config["api_key"]
 
-    options = PROptions(
-        repo_path=repo_path,
-        title=title,
-        description=description,
-        commit_first=not no_commit,
-        force_push=force_push,
-        pr_number=pr_number,
-        interactive=not non_interactive,
-        model=model,
-        api_key=api_key,
-        api_base=api_base,
-    )
+        api_base = api_base or llm_config["api_base"]
 
-    # Get current branch
-    current_branch = get_current_branch()
+        options = PROptions(
+            repo_path=repo_path,
+            branch_name=branch_name,
+            base_branch=base_branch,
+            title=title,
+            description=description,
+            commit_first=not no_commit,
+            force_push=force_push,
+            pr_number=pr_number,
+            interactive=not non_interactive,
+            model=model,
+            api_key=api_key,
+            api_base=api_base,
+        )
 
-    # Find PR if number not provided
-    pr = None
-    if pr_number:
-        # Try to get PR details
-        try:
-            import json
-            import subprocess
+        if action == PRAction.CREATE:
+            # Handle branch creation or selection
+            branch = _handle_branch_creation(options)
+            if not branch:
+                _exit_with_error("[red]Branch creation/selection cancelled.[/red]")
 
-            # Use gh CLI to get PR details
-            cmd = ["gh", "pr", "view", str(pr_number), "--json", "number,title,body,headRefName,url"]
-            result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
-            if result.returncode == 0:
-                pr_data = json.loads(result.stdout)
-                pr = PullRequest(
-                    branch=pr_data.get("headRefName", current_branch),
-                    title=pr_data.get("title", ""),
-                    description=pr_data.get("body", ""),
-                    url=pr_data.get("url", ""),
-                    number=pr_data.get("number"),
-                )
+            # Handle commits if needed
+            if options.commit_first and not _handle_commits(options):
+                _exit_with_error("[red]Commit process failed or was cancelled.[/red]")
 
-                # Check if we need to switch branches
-                if pr.branch != current_branch:
-                    if options.interactive:
-                        switch = questionary.confirm(
-                            f"PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'. "
-                            "Switch branches?",
-                            default=True,
-                        ).ask()
-                        if switch:
-                            try:
-                                checkout_branch(pr.branch)
-                                console.print(f"[green]Switched to branch: {pr.branch}[/green]")
-                                current_branch = pr.branch
-                            except GitError as e:
-                                console.print(f"[red]Error switching branches: {e}[/red]")
-                                return 1
-                    else:
-                        console.print(
-                            f"[red]PR #{pr.number} is for branch '{pr.branch}', but you're on "
-                            f"'{current_branch}'.[/red]",
+            # Handle push
+            if not _handle_push(options, branch):
+                _exit_with_error("[red]Push failed or was cancelled.[/red]")
+
+            # Handle PR creation
+            pr = _handle_pr_creation(options, branch)
+            if not pr:
+                _exit_with_error("[red]PR creation failed or was cancelled.[/red]")
+
+        elif action == PRAction.UPDATE:
+            current_branch = get_current_branch()
+
+            # Find PR if number not provided
+            pr = None
+            if pr_number:
+                # Try to get PR details
+                try:
+                    import json
+
+                    # Use gh CLI to get PR details
+                    cmd = ["gh", "pr", "view", str(pr_number), "--json", "number,title,body,headRefName,url"]
+                    result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
+                    if result.returncode == 0:
+                        pr_data = json.loads(result.stdout)
+                        pr = PullRequest(
+                            branch=pr_data.get("headRefName", current_branch),
+                            title=pr_data.get("title", ""),
+                            description=pr_data.get("body", ""),
+                            url=pr_data.get("url", ""),
+                            number=pr_data.get("number"),
                         )
-                        return 1
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
-            console.print(f"[red]Error getting PR details: {e}[/red]")
-    else:
-        # Try to find PR for current branch
-        pr = get_existing_pr(current_branch)
-        if not pr:
-            console.print(f"[red]No PR found for branch '{current_branch}'.[/red]")
-            return 1
 
-    # Handle commits if needed
-    if options.commit_first and not _handle_commits(options):
-        console.print("[red]Commit process failed or was cancelled.[/red]")
-        return 1
+                        # Check if we need to switch branches
+                        if pr.branch != current_branch:
+                            if options.interactive:
+                                switch = questionary.confirm(
+                                    f"PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'. "
+                                    "Switch branches?",
+                                    default=True,
+                                ).ask()
+                                if switch:
+                                    try:
+                                        checkout_branch(pr.branch)
+                                        console.print(f"[green]Switched to branch: {pr.branch}[/green]")
+                                        current_branch = pr.branch
+                                    except GitError as e:
+                                        error_msg = f"[red]Error switching branches: {e}[/red]"
+                                        _exit_with_error(error_msg, exception=e)
+                            else:
+                                _exit_with_error(
+                                    f"[red]PR #{pr.number} is for branch '{pr.branch}', but you're on "
+                                    f"'{current_branch}'.[/red]",
+                                )
+                except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
+                    error_msg = f"[red]Error getting PR details: {e}[/red]"
+                    _exit_with_error(error_msg, exception=e)
+            else:
+                # Try to find PR for current branch
+                pr = get_existing_pr(current_branch)
+                if not pr:
+                    _exit_with_error(f"[red]No PR found for branch '{current_branch}'.[/red]")
 
-    # Handle push
-    if not _handle_push(options, current_branch):
-        console.print("[red]Push failed or was cancelled.[/red]")
-        return 1
+            # Handle commits if needed
+            if options.commit_first and not _handle_commits(options):
+                _exit_with_error("[red]Commit process failed or was cancelled.[/red]")
 
-    # Handle PR update
-    updated_pr = _handle_pr_update(options, pr)
-    if not updated_pr:
-        console.print("[red]PR update failed or was cancelled.[/red]")
-        return 1
+            # Handle push
+            if not _handle_push(options, current_branch):
+                _exit_with_error("[red]Push failed or was cancelled.[/red]")
 
-    return 0
+            # Handle PR update
+            updated_pr = _handle_pr_update(options, pr)
+            if not updated_pr:
+                _exit_with_error("[red]PR update failed or was cancelled.[/red]")
+
+    except GitError as e:
+        error_msg = f"[red]Git error: {e}[/red]"
+        _exit_with_error(error_msg, exception=e)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        logger.exception("Error in PR command")
+        _exit_with_error("", exception=e)
