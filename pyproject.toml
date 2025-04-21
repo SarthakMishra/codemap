@@ -26,15 +26,48 @@ dependencies = [
 dev = [
     "isort>=6.0.1",
     "pylint>=3.3.6",
+    "pyright>=1.1.399",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "ruff>=0.11.6",
 ]
 
 [tool.pyright]
-disableOrganizeImports = true
-ignore = ["*"]
-typeCheckingMode = "off"
+# Define included and excluded directories
+include = ["src"]
+exclude = [
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "vendor"
+]
+# Basic type checking mode - more lenient than strict
+typeCheckingMode = "standard"
+# Analyze unannotated functions
+analyzeUnannotatedFunctions = true
+# Configuration to enable good type checking but not be too strict
+reportMissingImports = "error"
+reportMissingTypeStubs = "warning"
+reportUnusedImport = "warning"
+reportUnusedVariable = "warning"
+reportGeneralTypeIssues = "error"
+# Useful for catching common errors
+reportOptionalSubscript = "error"
+reportOptionalMemberAccess = "error"
+reportOptionalCall = "error"
+# Enable Python 3.12 features
+pythonVersion = "3.12"
+# Use library code for types when type stubs are missing
+useLibraryCodeForTypes = true
+# Virtual environment configuration
+venvPath = "."
+venv = ".venv"
+# Extra paths to search for imported modules
+extraPaths = ["src"]
 
 [project.scripts]
 codemap = "codemap.cli_app:main"
