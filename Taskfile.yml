@@ -71,6 +71,7 @@ tasks:
     cmds:
       - task: lint:ruff
       - task: lint:pylint
+      - task: lint:pyright
 
   lint:ruff:
     desc: Run ruff linter
@@ -95,6 +96,24 @@ tasks:
     deps: [venv-check]
     cmds:
       - 'uv run pylint {{.SRC_DIR}}'
+
+  lint:pyright:
+    desc: Run pyright type checker
+    deps: [venv-check]
+    cmds:
+      - 'uv run pyright {{.SRC_DIR}}'
+
+  lint:pyright:verbose:
+    desc: Run pyright with verbose output
+    deps: [venv-check]
+    cmds:
+      - 'uv run pyright --verbose {{.SRC_DIR}}'
+
+  lint:pyright:stats:
+    desc: Run pyright and show stats
+    deps: [venv-check]
+    cmds:
+      - 'uv run pyright --stats {{.SRC_DIR}}'
 
   test:
     desc: Run all tests
