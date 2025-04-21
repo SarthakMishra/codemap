@@ -15,6 +15,17 @@ from codemap.git.commit.message_generator import DiffChunkDict, LLMError, Messag
 console = Console()
 logger = logging.getLogger(__name__)
 
+# Configure LiteLLM and HTTP-related loggers more aggressively
+# Since verbose mode is controlled via the setup_logging function,
+# we'll set these to ERROR to ensure they don't appear in normal INFO level
+logging.getLogger("litellm").setLevel(logging.WARNING)
+
+# Also silence HTTP-related logs more aggressively
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("urllib3").setLevel(logging.WARNING)
+logging.getLogger("requests").setLevel(logging.WARNING)
+
 
 @runtime_checkable
 class DiffChunkLike(Protocol):
