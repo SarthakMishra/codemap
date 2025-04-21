@@ -10,7 +10,7 @@ from typing import Iterator
 from rich.console import Console
 from rich.spinner import Spinner
 
-from codemap.git.utils.git_utils import GitError, get_repo_root
+from codemap.utils.git_utils import GitError, get_repo_root
 
 
 def validate_repo_path(path: Path | None = None) -> Path | None:
@@ -49,4 +49,10 @@ def loading_spinner(message: str = "Processing...") -> Iterator[None]:
         yield
 
 
-__all__ = ["loading_spinner", "validate_repo_path"]
+# Export commonly used utilities
+__all__ = [
+    "GitError",
+    "get_repo_root",
+    "loading_spinner",
+    "validate_repo_path",
+]
