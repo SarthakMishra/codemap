@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import logging
-import os
-from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import TYPE_CHECKING, Generator, Self
+from typing import TYPE_CHECKING, Union, cast
 
 import questionary
 from rich.console import Console
@@ -16,7 +14,8 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 if TYPE_CHECKING:
-    from .diff_splitter import DiffChunk
+    from .diff_splitter import DiffChunk as DiffSplitterChunk
+    from .message_generator import DiffChunk as MessageGeneratorDiffChunk
     from .message_generator import MessageGenerator
 
 # Import the universal message generator function
@@ -27,7 +26,9 @@ except ImportError:
     generate_message = None
 
 # Import LLMError for exception handling
-from codemap.git.commit.message_generator import LLMError
+# Import MessageGeneratorDiffChunk only for runtime use
+from codemap.git.commit.message_generator import DiffChunk as MessageGeneratorDiffChunk
+from codemap.git.commit.message_generator import DiffChunkDict, LLMError
 from codemap.utils.git_utils import GitError, commit_only_files
 
 logger = logging.getLogger(__name__)
@@ -38,54 +39,8 @@ MAX_PREVIEW_LENGTH = 200
 MAX_PREVIEW_LINES = 10
 
 
-# Singleton class to track spinner state
-class SpinnerState:
-    """Singleton class to track spinner state."""
-
-    _instance = None
-    is_active = False
-
-    def __new__(cls) -> Self:
-        """Create or return the singleton instance.
-
-        Returns:
-            The singleton instance of SpinnerState
-        """
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
-
-@contextmanager
-def loading_spinner(message: str) -> Generator[None, None, None]:
-    """Show a loading spinner while an operation is in progress.
-
-    Args:
-        message: Message to display alongside the spinner
-    """
-    # In test environments, don't display a spinner
-    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
-        yield
-        return
-
-    # Check if a spinner is already active
-    spinner_state = SpinnerState()
-    if spinner_state.is_active:
-        # If there's already an active spinner, don't create a new one
-        yield
-        return
-
-    # Only use spinner in interactive environments
-    try:
-        spinner_state.is_active = True
-        with console.status(message, spinner="dots"):
-            yield
-    finally:
-        spinner_state.is_active = False
-
-
 def process_all_chunks(
-    chunks: list[DiffChunk],
+    chunks: list[DiffSplitterChunk | MessageGeneratorDiffChunk],
     generator: MessageGenerator,
     interactive: bool = True,
 ) -> int:
@@ -152,7 +107,7 @@ def process_all_chunks(
 
 
 def _generate_commit_message(
-    chunk: DiffChunk,
+    chunk: DiffSplitterChunk | MessageGeneratorDiffChunk,
     generator: MessageGenerator,
 ) -> tuple[str, bool]:
     """Generate a commit message for the given chunk.
@@ -175,16 +130,22 @@ def _generate_commit_message(
 
     # Legacy approach as fallback
     try:
-        message, used_llm = generator.generate_message(chunk)
+        # Cast chunk to the type expected by generator.generate_message
+        message, used_llm = generator.generate_message(cast("Union[DiffChunkDict, MessageGeneratorDiffChunk]", chunk))
     except (ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error generating message:[/red] {e!s}")
-        message = generator.fallback_generation(chunk)
+        # Convert to DiffChunkDict before calling fallback_generation
+        chunk_dict = DiffChunkDict(
+            files=chunk.files,
+            content=chunk.content,
+        )
+        message = generator.fallback_generation(chunk_dict)
         used_llm = False
 
     return message, used_llm
 
 
-def _print_chunk_summary(chunk: DiffChunk, index: int) -> None:
+def _print_chunk_summary(chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, index: int) -> None:
     """Print a summary of a diff chunk.
 
     Args:
@@ -218,7 +179,7 @@ def _print_chunk_summary(chunk: DiffChunk, index: int) -> None:
         console.print("  [dim](New files - no diff content available)[/dim]")
 
 
-def _handle_commit_action(chunk: DiffChunk, message: str) -> None:
+def _handle_commit_action(chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, message: str) -> None:
     """Handle commit action for a chunk.
 
     Args:
@@ -232,7 +193,7 @@ def _handle_commit_action(chunk: DiffChunk, message: str) -> None:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
-def _handle_edit_action(chunk: DiffChunk, message: str) -> None:
+def _handle_edit_action(chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, message: str) -> None:
     """Handle edit action for a chunk.
 
     Args:
@@ -271,13 +232,11 @@ class CommitUI:
         """Initialize the commit UI."""
         self.console = Console()
 
-    def _display_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> None:
+    def _display_chunk(self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk) -> None:
         """Display a diff chunk to the user.
 
         Args:
             chunk: DiffChunk to display
-            index: The 0-based index of the current chunk
-            total_chunks: The total number of chunks
         """
         # Show affected files
         self.console.print("\n[bold blue]Files changed:[/]")
@@ -285,7 +244,6 @@ class CommitUI:
             self.console.print(f"  • {file}")
 
         # Display changes
-        console.print("\n[bold blue]Changes:[/bold blue]")
         panel_content = chunk.content
         if not panel_content.strip():
             panel_content = "[dim]No content diff available (e.g., new file or mode change)[/dim]"
@@ -296,30 +254,36 @@ class CommitUI:
             remaining_lines = len(content_lines) - MAX_PREVIEW_LINES
             panel_content = "\n".join(content_lines[:MAX_PREVIEW_LINES]) + f"\n... ({remaining_lines} more lines)"
 
-        # Log the content right before creating the Panel
-        logger.warning(
-            "Content before Panel: %s",
+        # Create a panel for the changes with better styling
+        changes_panel = Panel(
             panel_content,
-        )
-
-        panel = Panel(
-            panel_content,
-            title=f"Chunk {index + 1} of {total_chunks} ({len(chunk.files)} file{'s' if len(chunk.files) > 1 else ''})",
+            title=f"[bold cyan]Changes ({len(chunk.files)} file{'s' if len(chunk.files) > 1 else ''})[/]",
             border_style="cyan",
             expand=False,
+            padding=(1, 2),
         )
-        console.print(panel)
+        console.print(changes_panel)
 
         # Display generated message if available
         if chunk.description:
             if getattr(chunk, "is_llm_generated", False):
-                self.console.print("\n[bold blue]LLM-Generated commit message:[/]")
-                self.console.print(Panel(Markdown(chunk.description)))
-            else:
-                self.console.print("\n[bold yellow]Auto-generated commit message:[/]")
-                self.console.print(
-                    Panel(Markdown(f"{chunk.description} [dim](fallback message - LLM generation failed)[/dim]"))
+                message_panel = Panel(
+                    Markdown(chunk.description),
+                    title="[bold blue]LLM-Generated Commit Message[/]",
+                    border_style="blue",
+                    expand=False,
+                    padding=(1, 2),
                 )
+                self.console.print(message_panel)
+            else:
+                message_panel = Panel(
+                    Markdown(f"{chunk.description} [dim](fallback message - LLM generation failed)[/dim]"),
+                    title="[bold yellow]Auto-generated Commit Message[/]",
+                    border_style="yellow",
+                    expand=False,
+                    padding=(1, 2),
+                )
+                self.console.print(message_panel)
 
     def _get_user_action(self) -> ChunkAction:
         """Get the user's desired action for the current chunk.
@@ -368,18 +332,16 @@ class CommitUI:
         self.console.print("[dim]Press Enter to keep current message[/]")
         return Prompt.ask("Message", default=current_message)
 
-    def process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> ChunkResult:
+    def process_chunk(self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk) -> ChunkResult:
         """Process a single diff chunk interactively.
 
         Args:
             chunk: DiffChunk to process
-            index: The 0-based index of the current chunk
-            total_chunks: The total number of chunks
 
         Returns:
             ChunkResult with the user's action and any modified message
         """
-        self._display_chunk(chunk, index, total_chunks)
+        self._display_chunk(chunk)
         action = self._get_user_action()
 
         if action == ChunkAction.EDIT:

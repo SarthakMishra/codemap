@@ -10,6 +10,8 @@ from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 # Constants for configuration
 MIN_CHUNKS_FOR_CONSOLIDATION = 1
 MAX_CHUNKS_BEFORE_CONSOLIDATION = 10
@@ -51,13 +53,13 @@ class DiffSplitter:
     _sentence_transformers_available = None
     _model_available = None
 
-    def __init__(self, repo_root: Path) -> None:
+    def __init__(self, repo_root: Path | None) -> None:
         """Initialize the diff splitter.
 
         Args:
             repo_root: Root directory of the Git repository
         """
-        self.repo_root = repo_root
+        self.repo_root = repo_root or Path()
         self.code_extensions = {
             "py",
             "js",
@@ -89,25 +91,28 @@ class DiffSplitter:
         if DiffSplitter._sentence_transformers_available and DiffSplitter._model_available is None:
             DiffSplitter._model_available = self._check_model_availability()
 
-    def _check_sentence_transformers_availability(self) -> bool:
+    @classmethod
+    def _check_sentence_transformers_availability(cls) -> bool:
         """Check if sentence-transformers package is available.
 
         Returns:
             True if sentence-transformers is available, False otherwise
         """
         try:
-            import sentence_transformers  # noqa: F401
+            # This is needed for the import check, but don't flag as unused
+            import sentence_transformers  # type: ignore  # noqa: F401, PGH003
 
-            logger.info("sentence-transformers is available")
+            logger.info("\nsentence-transformers is available")
             return True
         except ImportError:
             logger.warning(
-                "sentence-transformers not installed. Semantic similarity features will be limited. "
+                "\nsentence-transformers not installed. Semantic similarity features will be limited. "
                 "Install with: pip install sentence-transformers numpy"
             )
             return False
 
-    def _check_model_availability(self, model_name: str = MODEL_NAME) -> bool:
+    @classmethod
+    def _check_model_availability(cls, model_name: str = MODEL_NAME) -> bool:
         """Check if the embedding model is available.
 
         Args:
@@ -120,12 +125,39 @@ class DiffSplitter:
             return False
 
         try:
+            import io
+            import sys
+
             from sentence_transformers import SentenceTransformer
 
             # Create model instance if not already created
             if DiffSplitter._embedding_model is None:
-                DiffSplitter._embedding_model = SentenceTransformer(model_name)
-                logger.info("Initialized embedding model: %s", model_name)
+                # Temporarily redirect stdout to capture and improve the loading bar output
+                original_stdout = sys.stdout
+                try:
+                    # Create a custom output capture that will reformat the loading bar output
+                    capture_out = io.StringIO()
+                    sys.stdout = capture_out
+
+                    # Log the model loading start
+                    logger.info("Loading embedding model: %s", model_name)
+
+                    # Load the model (this will trigger the loading bar output)
+                    DiffSplitter._embedding_model = SentenceTransformer(model_name)
+
+                    # Process captured output and print with better formatting
+                    output = capture_out.getvalue()
+                    if output and "Loading checkpoint shards" in output:
+                        # Print with cleaner formatting that's more consistent with the rest of the UI
+                        logger.info("Initialized embedding model: %s", model_name)
+                    # If there's other output, print it normally
+                    elif output.strip():
+                        original_stdout.write(output)
+                finally:
+                    # Restore original stdout
+                    sys.stdout = original_stdout
+
+                return True
             return True
         except (ImportError, ValueError, RuntimeError) as e:
             logger.warning("Failed to load embedding model %s: %s", model_name, str(e))
@@ -221,6 +253,11 @@ class DiffSplitter:
 
         # Model should already be loaded at this point
         try:
+            # Check if embedding model exists before calling encode
+            if DiffSplitter._embedding_model is None:
+                logger.warning("Embedding model is None, cannot generate embedding")
+                return None
+
             # Generate embedding (returns numpy array)
             return DiffSplitter._embedding_model.encode(content, show_progress_bar=False).tolist()
         except Exception:
@@ -993,3 +1030,42 @@ class DiffSplitter:
             return self._split_by_hunk(diff)
         # SEMANTIC
         return self._split_semantic(diff)
+
+    @classmethod
+    def encode_chunks(cls, chunks: list[str]) -> dict[str, np.ndarray]:
+        """Encode text chunks into embeddings.
+
+        Args:
+            chunks: List of text chunks
+
+        Returns:
+            Dict with keys 'embeddings' containing numpy array of embeddings
+        """
+        # Ensure the model is initialized
+        cls._sentence_transformers_available = (
+            cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
+        )
+        if cls._sentence_transformers_available:
+            cls._model_available = cls._model_available or cls._check_model_availability(model_name=MODEL_NAME)
+
+        if not cls._model_available:
+            logger.warning("Embedding model not available, returning empty embeddings")
+            return {"embeddings": np.array([])}
+
+        if not chunks:
+            return {"embeddings": np.array([])}
+
+        # At this point we know model is initialized and available
+        if cls._embedding_model is None:
+            logger.warning("Embedding model is None but was marked as available, reinitializing")
+            cls._model_available = cls._check_model_availability(model_name=MODEL_NAME)
+            if not cls._model_available:
+                return {"embeddings": np.array([])}
+
+        # Use runtime check instead of assert
+        if cls._embedding_model is None:
+            logger.error("Embedding model is None but should be initialized at this point")
+            return {"embeddings": np.array([])}
+
+        embeddings = cls._embedding_model.encode(chunks)
+        return {"embeddings": embeddings}

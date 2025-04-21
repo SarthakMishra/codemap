@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from codemap.utils.cli_utils import loading_spinner
 from codemap.utils.git_utils import (
     GitDiff,
     GitError,
@@ -23,8 +24,8 @@ from codemap.utils.llm_utils import (
 )
 
 from .diff_splitter import DiffChunk, DiffSplitter
-from .interactive import ChunkAction, ChunkResult, CommitUI, loading_spinner
-from .message_generator import LLMError, MessageGenerator
+from .interactive import ChunkAction, ChunkResult, CommitUI
+from .message_generator import DiffChunkDict, LLMError, MessageGenerator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -141,7 +142,11 @@ class CommitCommand:
             logger.exception("LLM message generation failed")
             logger.warning("COMMAND: LLM error: %s", str(e))
             with loading_spinner("Falling back to simple message generation..."):
-                message = self.message_generator.fallback_generation(chunk)
+                # Convert DiffChunk to DiffChunkDict before passing to fallback_generation
+                chunk_dict = DiffChunkDict(
+                    files=chunk.files, content=chunk.content, description=getattr(chunk, "description", None)
+                )
+                message = self.message_generator.fallback_generation(chunk_dict)
                 chunk.description = message
                 # Mark as not LLM-generated
                 chunk.is_llm_generated = False
@@ -174,16 +179,13 @@ class CommitCommand:
             getattr(chunk, "description", "<None>"),
         )
 
-        # Import here to avoid circular imports
-        from .interactive import loading_spinner
-
         while True:  # Loop to handle regeneration
             # Generate commit message
             self._generate_commit_message(chunk)
 
             # Get user action
             # Explicitly use the CommitUI.process_chunk method to help type checking
-            result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
+            result: ChunkResult = self.ui.process_chunk(chunk)
 
             if result.action == ChunkAction.ABORT:
                 return not self.ui.confirm_abort()
@@ -256,9 +258,6 @@ class CommitCommand:
         Returns:
             True if successful, False otherwise
         """
-        # Import here to avoid circular imports
-        from .interactive import loading_spinner
-
         try:
             # Get all changes
             with loading_spinner("Analyzing repository changes..."):
