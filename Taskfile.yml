@@ -78,13 +78,13 @@ tasks:
     cmds:
       - 'uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}}'
 
-  lint:ruff-fix:
+  lint:fix:
     desc: Run ruff linter with auto-fix
     deps: [venv-check]
     cmds:
       - 'uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}'
 
-  lint:ruff-fix-unsafe:
+  lint:fix-unsafe:
     desc: Run ruff linter with unsafe auto-fixes
     deps: [venv-check]
     cmds:
