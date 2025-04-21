@@ -10,7 +10,7 @@ import pytest
 from typer.testing import CliRunner
 
 from codemap.cli.main import app
-from codemap.git.utils.pr_utils import PullRequest
+from codemap.utils.pr_utils import PullRequest
 
 
 @pytest.fixture

@@ -19,7 +19,7 @@ from codemap.cli.commit import (
 from codemap.git import GitWrapper
 from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.commit.message_generator import LLMError, MessageGenerator
-from codemap.git.utils.git_utils import GitDiff
+from codemap.utils.git_utils import GitDiff
 from codemap.utils.llm_utils import setup_message_generator
 
 # Allow tests to access private members
