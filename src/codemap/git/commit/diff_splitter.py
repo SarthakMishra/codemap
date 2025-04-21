@@ -16,6 +16,7 @@ MAX_CHUNKS_BEFORE_CONSOLIDATION = 10
 MIN_NAME_LENGTH_FOR_SIMILARITY = 3
 DEFAULT_SIMILARITY_THRESHOLD = 0.8
 DIRECTORY_SIMILARITY_THRESHOLD = 0.5
+MODEL_NAME = "Qodo/Qodo-Embed-1-1.5B"
 
 if TYPE_CHECKING:
     from codemap.utils.git_utils import GitDiff
@@ -46,6 +47,9 @@ class DiffSplitter:
 
     # Class-level cache for the embedding model
     _embedding_model = None
+    # Track availability of sentence-transformers and the model
+    _sentence_transformers_available = None
+    _model_available = None
 
     def __init__(self, repo_root: Path) -> None:
         """Initialize the diff splitter.
@@ -77,6 +81,55 @@ class DiffSplitter:
 
         # Initialize related file patterns
         self._related_file_patterns = self._initialize_related_file_patterns()
+
+        # Check sentence-transformers and model availability once at initialization
+        if DiffSplitter._sentence_transformers_available is None:
+            DiffSplitter._sentence_transformers_available = self._check_sentence_transformers_availability()
+
+        if DiffSplitter._sentence_transformers_available and DiffSplitter._model_available is None:
+            DiffSplitter._model_available = self._check_model_availability()
+
+    def _check_sentence_transformers_availability(self) -> bool:
+        """Check if sentence-transformers package is available.
+
+        Returns:
+            True if sentence-transformers is available, False otherwise
+        """
+        try:
+            import sentence_transformers  # noqa: F401
+
+            logger.info("sentence-transformers is available")
+            return True
+        except ImportError:
+            logger.warning(
+                "sentence-transformers not installed. Semantic similarity features will be limited. "
+                "Install with: pip install sentence-transformers numpy"
+            )
+            return False
+
+    def _check_model_availability(self, model_name: str = MODEL_NAME) -> bool:
+        """Check if the embedding model is available.
+
+        Args:
+            model_name: Name of the model to check
+
+        Returns:
+            True if model is available, False otherwise
+        """
+        if not DiffSplitter._sentence_transformers_available:
+            return False
+
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            # Create model instance if not already created
+            if DiffSplitter._embedding_model is None:
+                DiffSplitter._embedding_model = SentenceTransformer(model_name)
+                logger.info("Initialized embedding model: %s", model_name)
+            return True
+        except (ImportError, ValueError, RuntimeError) as e:
+            logger.warning("Failed to load embedding model %s: %s", model_name, str(e))
+            return False
 
     def _initialize_related_file_patterns(self) -> list[tuple[re.Pattern, re.Pattern]]:
         """Initialize and compile regex patterns for related files.
@@ -162,27 +215,14 @@ class DiffSplitter:
         if not content or not content.strip():
             return None
 
-        try:
-            from sentence_transformers import SentenceTransformer
-        except ImportError:
-            logger.warning(
-                "sentence-transformers or numpy not installed. Install with: pip install sentence-transformers numpy"
-            )
+        # Use cached availability checks
+        if not DiffSplitter._sentence_transformers_available or not DiffSplitter._model_available:
             return None
 
-        # Generate embedding using sentence-transformers
+        # Model should already be loaded at this point
         try:
-            # Initialize model with fixed model name (singleton pattern)
-            model_name = "sentence-transformers/multi-qa-MiniLM-L6-dot-v1"
-
-            # Create model instance if not already created
-            if DiffSplitter._embedding_model is None:
-                DiffSplitter._embedding_model = SentenceTransformer(model_name)
-                logger.info("Initialized embedding model: %s", model_name)
-
             # Generate embedding (returns numpy array)
             return DiffSplitter._embedding_model.encode(content, show_progress_bar=False).tolist()
-
         except Exception:
             logger.exception("Failed to generate embedding")
             return None
@@ -544,6 +584,13 @@ class DiffSplitter:
             similarity_threshold: Optional custom threshold to override default
         """
         if not chunks:
+            return
+
+        # Check if sentence-transformers and model are available
+        if not DiffSplitter._sentence_transformers_available or not DiffSplitter._model_available:
+            logger.info("Skipping semantic similarity grouping - embedding model not available")
+            # Add chunks individually since we can't calculate similarity
+            result_chunks.extend(chunks)
             return
 
         processed_indices = set()
