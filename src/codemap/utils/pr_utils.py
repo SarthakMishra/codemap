@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from codemap.utils.git_utils import GitError, run_git_command
 
@@ -197,7 +199,7 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
 
 def generate_pr_title_with_llm(
     commits: list[str],
-    model: str = "gpt-4o-mini",
+    model: str | None = "gpt-4o-mini",
     api_key: str | None = None,
     api_base: str | None = None,
 ) -> str:
@@ -217,6 +219,9 @@ def generate_pr_title_with_llm(
     from codemap.utils.llm_utils import generate_text_with_llm
 
     logger = logging.getLogger(__name__)
+
+    # Ensure model is never None
+    actual_model = model or "gpt-4o-mini"
 
     if not commits:
         return "Update branch"
@@ -244,7 +249,7 @@ essence of the changes.
         prompt += commit_list + "\n\n        PR Title:"
 
         # Call LLM with repo_path used for context
-        title = generate_text_with_llm(prompt, model, api_key, api_base)
+        title = generate_text_with_llm(prompt, actual_model, api_key, api_base)
 
         # Clean up the title
         title = title.strip()
@@ -370,7 +375,7 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
 
 def generate_pr_description_with_llm(
     commits: list[str],
-    model: str = "gpt-4o-mini",
+    model: str | None = "gpt-4o-mini",
     api_key: str | None = None,
     api_base: str | None = None,
 ) -> str:
@@ -390,6 +395,9 @@ def generate_pr_description_with_llm(
     from codemap.utils.llm_utils import generate_text_with_llm
 
     logger = logging.getLogger(__name__)
+
+    # Ensure model is never None
+    actual_model = model or "gpt-4o-mini"
 
     if not commits:
         return "No changes"
@@ -434,7 +442,7 @@ def generate_pr_description_with_llm(
         PR Description:"""
 
         # Call LLM with repo_path used for context
-        return generate_text_with_llm(prompt, model, api_key, api_base)
+        return generate_text_with_llm(prompt, actual_model, api_key, api_base)
     except (ValueError, RuntimeError, ConnectionError) as e:
         logger.warning("Failed to generate PR description with LLM: %s", str(e))
         # Fallback to rule-based approach
@@ -503,7 +511,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
         raise GitError(msg) from e
 
 
-def update_pull_request(pr_number: int, title: str, description: str) -> PullRequest:
+def update_pull_request(pr_number: int | None, title: str, description: str) -> PullRequest:
     """Update an existing pull request.
 
     Args:
@@ -517,6 +525,10 @@ def update_pull_request(pr_number: int, title: str, description: str) -> PullReq
     Raises:
         GitError: If PR update fails
     """
+    if pr_number is None:
+        msg = "PR number cannot be None"
+        raise GitError(msg)
+
     try:
         # Check if gh CLI is installed
         try:
@@ -593,8 +605,6 @@ def get_existing_pr(branch_name: str) -> PullRequest | None:
             return None
 
         # Parse JSON output
-        import json
-
         pr_data = json.loads(result.stdout)
         if not pr_data:
             return None
@@ -665,6 +675,4 @@ def get_timestamp() -> str:
     Returns:
         Timestamp string in format YYYYmmdd-HHMMSS
     """
-    from datetime import datetime, timezone
-
     return datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")

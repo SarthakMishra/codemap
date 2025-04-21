@@ -10,7 +10,7 @@ from typing import Protocol, TypeVar, runtime_checkable
 from rich.console import Console
 
 # Import the MessageGenerator class - avoid circular imports
-from codemap.git.commit.message_generator import LLMError, MessageGenerator
+from codemap.git.commit.message_generator import DiffChunkDict, LLMError, MessageGenerator
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -80,7 +80,18 @@ def setup_message_generator(
     # Extract provider from model if possible (for error reporting only)
     provider = None
     if "/" in model:
-        provider = model.split("/")[0].lower()
+        parts = model.split("/")
+        provider = parts[0].lower()
+        # Special case for models like "groq/meta-llama/llama-4..."
+        if provider == "groq":
+            # We already have the correct provider
+            pass
+        elif provider in ["anthropic", "azure", "cohere", "mistral", "together", "openrouter", "openai"]:
+            # These are standard providers
+            pass
+        else:
+            # Default to openai if provider not recognized
+            provider = "openai"
 
     # Create the message generator
     # MessageGenerator will use its own _get_api_keys method to find keys
@@ -123,7 +134,7 @@ def setup_message_generator(
 
 
 def generate_message(
-    chunk: ChunkT,
+    chunk: DiffChunkLike,
     message_generator: MessageGenerator,
     use_simple_mode: bool = False,
 ) -> tuple[str, bool]:
@@ -139,18 +150,33 @@ def generate_message(
     Returns:
         Tuple of (message, whether LLM was used)
     """
+    # Create a safe dictionary representation of chunk for fallback
     try:
+        # Use getattr with default values to safely extract attributes from DiffChunkLike
+        chunk_dict = DiffChunkDict(
+            files=getattr(chunk, "files", []),
+            content=getattr(chunk, "content", ""),
+            description=getattr(chunk, "description", None),
+        )
+
         if use_simple_mode:
             # Use fallback generation without LLM
-            message = message_generator.fallback_generation(chunk)
+            message = message_generator.fallback_generation(chunk_dict)
             return message, False
-        # Try LLM-based generation first
-        message, used_llm = message_generator.generate_message(chunk)
+
+        # Try LLM-based generation first - using converted dict instead of original chunk
+        message, used_llm = message_generator.generate_message(chunk_dict)
         return message, used_llm
     except LLMError as e:
         # If LLM generation fails, log and use fallback
         logger.warning("LLM message generation failed: %s", str(e))
-        message = message_generator.fallback_generation(chunk)
+        # Create a safe dictionary representation of chunk for fallback
+        chunk_dict = DiffChunkDict(
+            files=getattr(chunk, "files", []),
+            content=getattr(chunk, "content", ""),
+            description=getattr(chunk, "description", None),
+        )
+        message = message_generator.fallback_generation(chunk_dict)
         return message, False
     except (ValueError, RuntimeError):
         # For other errors, log and re-raise
@@ -159,8 +185,8 @@ def generate_message(
 
 
 def create_universal_generator(
-    repo_path: Path,
-    model: str = "openai/gpt-4o-mini",
+    repo_path: Path | None,
+    model: str | None = "openai/gpt-4o-mini",
     api_key: str | None = None,
     api_base: str | None = None,
     prompt_template: str | None = None,
@@ -182,6 +208,10 @@ def create_universal_generator(
     Returns:
         Configured MessageGenerator
     """
+    # Ensure repo_path and model are not None
+    actual_repo_path = repo_path if repo_path is not None else Path()
+    actual_model = model or "openai/gpt-4o-mini"
+
     # Try to load .env file if it exists
     try:
         from dotenv import load_dotenv
@@ -192,8 +222,8 @@ def create_universal_generator(
 
     # Create the generator using the centralized function
     return setup_message_generator(
-        repo_path=repo_path,
-        model=model,
+        repo_path=actual_repo_path,
+        model=actual_model,
         prompt_template=prompt_template,
         prompt_template_path=prompt_template_path,
         api_base=api_base,
@@ -202,7 +232,7 @@ def create_universal_generator(
 
 
 def generate_text_with_llm(
-    prompt: str, model: str = "gpt-4o-mini", api_key: str | None = None, api_base: str | None = None
+    prompt: str, model: str | None = "gpt-4o-mini", api_key: str | None = None, api_base: str | None = None
 ) -> str:
     """Generate text using an LLM.
 
@@ -225,10 +255,13 @@ def generate_text_with_llm(
 
     logger = logging.getLogger(__name__)
 
+    # Ensure model is never None
+    actual_model = model or "gpt-4o-mini"
+
     # Extract provider from model name if it includes a provider prefix
     provider = None
-    if "/" in model:
-        parts = model.split("/")
+    if "/" in actual_model:
+        parts = actual_model.split("/")
         # Minimum parts needed for provider/model format
         min_parts = 2
         if len(parts) >= min_parts:
@@ -251,7 +284,7 @@ def generate_text_with_llm(
     try:
         # Call LiteLLM for cross-platform compatibility
         response = completion(
-            model=model,
+            model=actual_model,
             messages=messages,
             api_key=api_key,
             api_base=api_base,
@@ -259,9 +292,59 @@ def generate_text_with_llm(
             max_tokens=1000,
         )
 
-        # Extract text from response
-        return response.choices[0].message.content.strip()
+        # Extract text using a robust method that works with different response structures
+        return extract_content_from_response(response)
     except Exception as e:
         logger.exception("LLM error")
         error_message = f"Failed to generate text with LLM: {e}"
         raise RuntimeError(error_message) from e
+
+
+def extract_content_from_response(response: object) -> str:
+    """Extract content from a LiteLLM response object.
+
+    This function handles different response formats that might be returned by LiteLLM,
+    which wraps responses from various LLM providers.
+
+    Args:
+        response: The response object from LiteLLM
+
+    Returns:
+        The extracted text content
+    """
+    # Try different methods to extract content
+    try:
+        # Method 1: Standard OpenAI format - attribute access
+        if hasattr(response, "choices") and response.choices:  # type: ignore[attr-defined]
+            choice = response.choices[0]  # type: ignore[attr-defined]
+            if hasattr(choice, "message") and hasattr(choice.message, "content"):  # type: ignore[attr-defined]
+                content = choice.message.content  # type: ignore[attr-defined]
+                if content is not None:
+                    return content.strip()
+
+        # Method 2: Dictionary-like access (for non-object responses)
+        if isinstance(response, dict) and response.get("choices"):
+            choice = response["choices"][0]
+            # Check for message-style response (chat completion)
+            if "message" in choice and "content" in choice["message"]:
+                content = choice["message"]["content"]
+                if content is not None:
+                    return content.strip()
+            # Check for text-style response (text completion)
+            elif "text" in choice:
+                content = choice["text"]
+                if content is not None:
+                    return content.strip()
+
+        # Method 3: Handle direct string responses (some models might return raw text)
+        if isinstance(response, str):
+            return response.strip()
+
+        # Method 4: If all else fails, convert the entire response to string
+        return str(response)
+    except (AttributeError, KeyError, IndexError, TypeError) as e:
+        # If we encounter any errors during extraction, log and use string representation
+        import logging
+
+        logging.getLogger(__name__).warning("Error extracting content: %s. Using string representation.", e)
+        return str(response)
