@@ -26,7 +26,7 @@ except ImportError:
 from codemap.git import GitWrapper
 from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
 from codemap.git.commit.message_generator import LLMError
-from codemap.git.utils.git_utils import GitError
+from codemap.utils.git_utils import GitError
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 # Truncate to maximum of 10 lines
@@ -269,7 +269,7 @@ def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bo
     Returns:
         Tuple of (other_staged, other_untracked, has_warnings)
     """
-    from codemap.git.utils.git_utils import get_other_staged_files, get_untracked_files
+    from codemap.utils.git_utils import get_other_staged_files, get_untracked_files
 
     other_staged = get_other_staged_files(chunk_files)
 
@@ -364,7 +364,7 @@ def _perform_commit(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
 
     # First, explicitly stage the files to ensure they're properly added to the index
     try:
-        from codemap.git.utils.git_utils import stage_files
+        from codemap.utils.git_utils import stage_files
 
         console.print("[blue]Staging files...[/blue]")
         stage_files(chunk.files)
@@ -385,7 +385,7 @@ def _perform_commit(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
             # Ask if user wants to bypass hooks
             if questionary.confirm("Would you like to try again bypassing git hooks?").ask():
                 # Call with ignore_hooks=True
-                from codemap.git.utils.git_utils import commit_only_files
+                from codemap.utils.git_utils import commit_only_files
 
                 try:
                     # Try again with ignore_hooks=True
@@ -482,7 +482,7 @@ def handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> Non
     """
     try:
         # Check for other files
-        from codemap.git.utils.git_utils import GitError
+        from codemap.utils.git_utils import GitError
 
         other_staged, other_untracked, has_warnings = _check_other_files(chunk.files)
 
@@ -512,7 +512,7 @@ def handle_edit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
 
     try:
         # Check for other files
-        from codemap.git.utils.git_utils import GitError
+        from codemap.utils.git_utils import GitError
 
         other_staged, other_untracked, has_warnings = _check_other_files(chunk.files)
 

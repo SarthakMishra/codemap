@@ -20,8 +20,10 @@ from rich.panel import Panel
 from codemap.git import GitWrapper
 from codemap.git.commit.diff_splitter import DiffSplitter, SplitStrategy
 from codemap.git.commit.interactive import process_all_chunks
-from codemap.git.utils.git_utils import GitError
-from codemap.git.utils.pr_utils import (
+from codemap.utils import loading_spinner, validate_repo_path
+from codemap.utils.git_utils import GitError
+from codemap.utils.llm_utils import create_universal_generator, generate_message
+from codemap.utils.pr_utils import (
     PullRequest,
     branch_exists,
     checkout_branch,
@@ -35,8 +37,6 @@ from codemap.git.utils.pr_utils import (
     suggest_branch_name,
     update_pull_request,
 )
-from codemap.utils import loading_spinner, validate_repo_path
-from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 app = typer.Typer(help="Generate and manage pull requests")
 console = Console()
@@ -311,7 +311,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
     try:
         # Display a spinner while generating PR content
         with loading_spinner("Generating PR content with AI..."):
-            from codemap.git.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+            from codemap.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
 
             # Try AI-generated title and description first
             title = options.title
@@ -329,7 +329,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
         console.print(f"[yellow]AI generation failed: {e}[/yellow]")
         console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
         # Fallback to rule-based generation
-        from codemap.git.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+        from codemap.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
 
         title = options.title or generate_pr_title_from_commits(commits)
         description = options.description or generate_pr_description_from_commits(commits)
@@ -399,7 +399,7 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
     try:
         # Display a spinner while generating PR content
         with loading_spinner("Generating PR content with AI..."):
-            from codemap.git.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+            from codemap.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
 
             # Try AI-generated title and description first
             title = options.title or pr.title
@@ -417,7 +417,7 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
         console.print(f"[yellow]AI generation failed: {e}[/yellow]")
         console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
         # Fallback to rule-based generation
-        from codemap.git.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+        from codemap.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
 
         title = options.title or pr.title or generate_pr_title_from_commits(commits)
         description = options.description or pr.description or generate_pr_description_from_commits(commits)
