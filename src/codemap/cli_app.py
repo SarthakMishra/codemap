@@ -80,7 +80,7 @@ MaxContentLengthOpt: TypeAlias = Annotated[
     ),
 ]
 TreeFlag: TypeAlias = Annotated[
-    bool | None,
+    bool,
     typer.Option(
         "--tree",
         "-t",
@@ -88,7 +88,7 @@ TreeFlag: TypeAlias = Annotated[
     ),
 ]
 VerboseFlag: TypeAlias = Annotated[
-    bool | None,
+    bool,
     typer.Option(
         "--verbose",
         "-v",
@@ -96,7 +96,7 @@ VerboseFlag: TypeAlias = Annotated[
     ),
 ]
 ForceFlag: TypeAlias = Annotated[
-    bool | None,
+    bool,
     typer.Option(
         "--force",
         "-f",
@@ -215,11 +215,11 @@ def _process_file(
 @app.command()
 def init(
     path: PathArg = Path(),
-    force_flag: ForceFlag = None,
-    is_verbose: VerboseFlag = None,
+    force_flag: ForceFlag = False,
+    is_verbose: VerboseFlag = False,
 ) -> None:
     """Initialize a new CodeMap project in the specified directory."""
-    setup_logging(is_verbose=bool(is_verbose))
+    setup_logging(is_verbose=is_verbose)
     try:
         repo_root = path.resolve()
         config_file = repo_root / ".codemap.yml"
@@ -317,11 +317,11 @@ def generate(
     config: ConfigOpt = None,
     map_tokens: MapTokensOpt = None,
     max_content_length: MaxContentLengthOpt = None,
-    tree: TreeFlag = None,
-    is_verbose: VerboseFlag = None,
+    tree: TreeFlag = False,
+    is_verbose: VerboseFlag = False,
 ) -> None:
-    """Generate documentation for the specified path."""
-    setup_logging(is_verbose=bool(is_verbose))
+    """Generate documentation for the specified codebase."""
+    setup_logging(is_verbose=is_verbose)
     try:
         target_path = path.resolve()
 
@@ -457,10 +457,10 @@ def commit(
             envvar="OPENAI_API_KEY",
         ),
     ] = None,
-    is_verbose: VerboseFlag = None,
+    is_verbose: VerboseFlag = False,
 ) -> None:
     """Generate and apply conventional commits from changes in a Git repository."""
-    setup_logging(is_verbose=is_verbose is True)
+    setup_logging(is_verbose=is_verbose)
 
     try:
         from .git.commit.command import CommitCommand
@@ -492,12 +492,6 @@ from .cli.pr import app as pr_app  # noqa: E402
 
 # Add the PR command group to the main app
 app.add_typer(pr_app, name="pr")
-
-# Import and add the commit command group
-from .cli.commit import app as commit_app  # noqa: E402
-
-# Add the commit command group to the main app
-app.add_typer(commit_app, name="commit")
 
 
 def main() -> int:
