@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -10,16 +11,19 @@ import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import questionary
 import typer
+import yaml
 from rich.panel import Panel
 
 from codemap.git import DiffSplitter, SplitStrategy
+from codemap.git.commit.diff_splitter import DiffChunk as DiffSplitterChunk
 from codemap.git.commit.interactive import process_all_chunks
-from codemap.utils import loading_spinner, validate_repo_path
-from codemap.utils.cli_utils import console, setup_logging
+from codemap.git.commit.message_generator import DiffChunk as MessageGeneratorDiffChunk
+from codemap.utils import validate_repo_path
+from codemap.utils.cli_utils import console, loading_spinner, setup_logging
 from codemap.utils.git_utils import (
     GitDiff,
     GitError,
@@ -63,7 +67,7 @@ class PRAction(str, Enum):
 class PROptions:
     """Options for the PR command."""
 
-    repo_path: Path
+    repo_path: Path | None
     branch_name: str | None = field(default=None)
     base_branch: str | None = field(default=None)
     title: str | None = field(default=None)
@@ -285,7 +289,11 @@ def _handle_commits(options: PROptions) -> bool:
         )
 
         # Process all chunks
-        result = process_all_chunks(chunks, generator, interactive=options.interactive)
+        result = process_all_chunks(
+            cast("list[DiffSplitterChunk | MessageGeneratorDiffChunk]", chunks),
+            generator,
+            interactive=options.interactive,
+        )
     except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error committing changes: {e}[/red]")
         return False
@@ -293,7 +301,7 @@ def _handle_commits(options: PROptions) -> bool:
         return result == 0
 
 
-def _handle_push(options: PROptions, branch_name: str) -> bool:
+def _handle_push(options: PROptions, branch_name: str | None) -> bool:
     """Handle pushing changes to remote.
 
     Args:
@@ -303,6 +311,11 @@ def _handle_push(options: PROptions, branch_name: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
+    # Ensure branch_name is not None
+    if branch_name is None:
+        console.print("[red]Branch name cannot be None.[/red]")
+        return False
+
     # Ask if user wants to push changes
     if options.interactive:
         push_changes = questionary.confirm(
@@ -324,7 +337,7 @@ def _handle_push(options: PROptions, branch_name: str) -> bool:
         return True
 
 
-def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | None:
+def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequest | None:
     """Handle PR creation.
 
     Args:
@@ -334,6 +347,11 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
     Returns:
         Created PR or None if cancelled
     """
+    # Ensure branch_name is not None
+    if branch_name is None:
+        console.print("[red]Branch name cannot be None.[/red]")
+        return None
+
     # Set base branch
     base_branch = options.base_branch or get_default_branch()
 
@@ -422,7 +440,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | N
         return pr
 
 
-def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None:
+def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest | None:
     """Handle PR update.
 
     Args:
@@ -432,6 +450,11 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
     Returns:
         Updated PR or None if cancelled
     """
+    # Ensure PR is not None
+    if pr is None:
+        console.print("[red]PR cannot be None.[/red]")
+        return None
+
     # Get base branch
     base_branch = options.base_branch or get_default_branch()
 
@@ -506,7 +529,7 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None
         return updated_pr
 
 
-def _load_llm_config(repo_path: Path) -> dict:
+def _load_llm_config(repo_path: Path | None) -> dict:
     """Load LLM configuration from .codemap.yml file.
 
     Args:
@@ -521,11 +544,13 @@ def _load_llm_config(repo_path: Path) -> dict:
         "api_key": None,
     }
 
+    # Ensure repo_path is not None
+    if repo_path is None:
+        return config
+
     config_file = repo_path / ".codemap.yml"
     if config_file.exists():
         try:
-            import yaml
-
             with config_file.open("r") as f:
                 yaml_config = yaml.safe_load(f)
 
@@ -661,8 +686,6 @@ def pr_command(
             if pr_number:
                 # Try to get PR details
                 try:
-                    import json
-
                     # Use gh CLI to get PR details
                     cmd = ["gh", "pr", "view", str(pr_number), "--json", "number,title,body,headRefName,url"]
                     result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603

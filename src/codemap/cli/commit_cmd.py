@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import os
 import sys
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Iterator
+from typing import TYPE_CHECKING, Annotated
 
 import questionary
 import typer
-from rich.console import Console
+from rich.markdown import Markdown
 from rich.padding import Padding
-from rich.spinner import Spinner
+from rich.panel import Panel
 
 try:
     from dotenv import load_dotenv
@@ -28,7 +27,8 @@ from codemap.git import (
     SplitStrategy,
 )
 from codemap.git.commit.message_generator import LLMError
-from codemap.utils.cli_utils import console, setup_logging
+from codemap.utils import validate_repo_path
+from codemap.utils.cli_utils import console, loading_spinner, setup_logging
 from codemap.utils.git_utils import (
     GitError,
     commit_only_files,
@@ -47,37 +47,20 @@ if TYPE_CHECKING:
 # Truncate to maximum of 10 lines
 MAX_PREVIEW_LINES = 10
 
-# Try to import from utils, but fallback to defining locally if needed
-try:
-    from codemap.utils import loading_spinner, validate_repo_path
-except ImportError:
-    # Define loading_spinner locally as fallback
-    @contextlib.contextmanager
-    def loading_spinner(message: str = "Processing...") -> Iterator[None]:
-        """Display a loading spinner while executing a task.
-
-        Args:
-            message: Message to display alongside the spinner
-
-        Yields:
-            None
-        """
-        console = Console()
-        spinner = Spinner("dots", text=message)
-        with console.status(spinner):
-            yield
-
-    # Also import validate_repo_path
-    from codemap.utils import validate_repo_path
-
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env files
 if load_dotenv:
     # Try to load from .env.local first, then fall back to .env
-    if Path(".env.local").exists():
-        load_dotenv(".env.local")
-    load_dotenv()  # Load from .env if available
+    env_local = Path(".env.local")
+    if env_local.exists():
+        load_dotenv(dotenv_path=env_local)
+        logger.debug("Loaded environment variables from %s", env_local)
+    else:
+        env_file = Path(".env")
+        if env_file.exists():
+            load_dotenv(dotenv_path=env_file)
+            logger.debug("Loaded environment variables from %s", env_file)
 
 
 class GenerationMode(str, Enum):
@@ -218,41 +201,64 @@ def generate_commit_message(
     except (ValueError, RuntimeError, LLMError) as e:
         console.print(f"[red]Error generating message:[/red] {e}")
         # Still try to generate a fallback message
-        message = generator.fallback_generation(chunk)
+        from codemap.git.commit.message_generator import DiffChunkDict
+
+        # Convert DiffChunk to DiffChunkDict
+        chunk_dict = DiffChunkDict(files=chunk.files, content=chunk.content, description=chunk.description)
+        message = generator.fallback_generation(chunk_dict)
         return message, False
 
 
 def print_chunk_summary(chunk: DiffChunk, index: int) -> None:
-    """Print a summary of a diff chunk.
+    """Print a summary of the chunk.
 
     Args:
-        chunk: The diff chunk to print
-        index: Index of the chunk
+        chunk: DiffChunk to summarize
+        index: Index of the chunk (1-based for display)
     """
-    console.print(f"Chunk {index + 1}:")
-    console.print(f"  Files: {', '.join(chunk.files)}")
+    # Print header
+    console.print(f"\nCommit {index + 1} of {index + 1}")
 
-    # Calculate changes
+    # Print chunk information in a panel
+
+    # Create a content string with the files and changes
+    content = "**Files:** " + ", ".join(chunk.files) + "\n"
+
+    # Calculate line counts from the diff content
     added = len([line for line in chunk.content.splitlines() if line.startswith("+") and not line.startswith("+++")])
     removed = len([line for line in chunk.content.splitlines() if line.startswith("-") and not line.startswith("---")])
 
-    # Check if this is likely an untracked file chunk (no diff content)
-    if not chunk.content and chunk.files:
-        console.print("  [blue]New untracked files[/blue]")
-    else:
-        console.print(f"  Changes: {added} added, {removed} removed")
+    # Add line counts
+    content += "**Changes:** "
+    if added > 0:
+        content += f"{added} added"
+    if removed > 0:
+        if added > 0:
+            content += ", "
+        content += f"{removed} removed"
+    content += "\n"
 
-    # Preview of the diff
+    # Add a preview of the diff content
     if chunk.content:
         content_lines = chunk.content.splitlines()
         if len(content_lines) > MAX_PREVIEW_LINES:
-            remaining_lines = len(content_lines) - MAX_PREVIEW_LINES
-            preview = "\n".join(content_lines[:MAX_PREVIEW_LINES]) + f"\n... ({remaining_lines} more lines)"
+            content += (
+                "\n```diff\n"
+                + "\n".join(content_lines[:MAX_PREVIEW_LINES])
+                + f"\n... ({len(content_lines) - MAX_PREVIEW_LINES} more lines)\n```"
+            )
         else:
-            preview = chunk.content
-        console.print(Padding(f"  [dim]{preview}[/dim]", (0, 0, 1, 2)))
-    else:
-        console.print(Padding("  [dim](New files - no diff content available)[/dim]", (0, 0, 1, 2)))
+            content += "\n```diff\n" + chunk.content + "\n```"
+
+    # Create the panel with the content
+    panel = Panel(
+        Markdown(content),
+        title=f"Chunk {index + 1}",
+        border_style="blue",
+        expand=False,
+        padding=(1, 2),
+    )
+    console.print(panel)
 
 
 def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bool]:
@@ -517,6 +523,9 @@ def _run_commit_command(config: RunConfig) -> int:
     # Validate the repository path
     try:
         repo_path = validate_repo_path(config.repo_path)
+        if repo_path is None:
+            console.print("[red]Error:[/red] Repository path is None")
+            return 1
     except ValueError as e:
         console.print(f"[red]Error:[/red] {e!s}")
         return 1
@@ -531,7 +540,7 @@ def _run_commit_command(config: RunConfig) -> int:
 
     # Configure options
     options = CommitOptions(
-        repo_path=repo_path,
+        repo_path=repo_path,  # Now guaranteed to be a Path, not None
         generation_mode=mode,
         model=config.model,
         api_base=config.api_base,
@@ -562,7 +571,7 @@ def _run_commit_command(config: RunConfig) -> int:
         # Get staged and unstaged changes
         with loading_spinner("Analyzing repository changes..."):
             # Get changes from Git
-            splitter = DiffSplitter(repo_path)
+            splitter = DiffSplitter(repo_path)  # Now guaranteed to be a Path, not None
             chunks = []
 
             # Process staged changes
