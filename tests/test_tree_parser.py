@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import mock_open, patch
 
 import pytest
 from pygments.lexers import get_lexer_for_filename
@@ -81,12 +81,52 @@ def test_init_with_config() -> None:
     assert parser.config == config
 
 
-def test_load_gitignore(tmp_path: Path, temp_gitignore: Path) -> None:
+def test_load_gitignore(tmp_path: Path) -> None:
     """Test loading patterns from .gitignore file."""
+    # Create a temporary .gitignore file in the tmp_path
+    gitignore_path = tmp_path / ".gitignore"
+    gitignore_content = """
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+"""
+    gitignore_path.write_text(gitignore_content)
+
     # Change to the directory with the .gitignore file
     old_cwd = Path.cwd()
     os.chdir(tmp_path)
-    
+
     try:
         parser = CodeParser({"use_gitignore": True})
         # Check that patterns were loaded
@@ -103,7 +143,7 @@ def test_matches_pattern_simple(parser: CodeParser) -> None:
     # Test simple filename pattern
     assert parser.matches_pattern(Path("test.py"), "*.py")
     assert not parser.matches_pattern(Path("test.txt"), "*.py")
-    
+
     # Test directory pattern
     assert parser.matches_pattern(Path("venv/lib/test.py"), "venv")
     assert parser.matches_pattern(Path("project/venv/test.py"), "venv")
@@ -115,14 +155,14 @@ def test_matches_pattern_dot_files(parser: CodeParser) -> None:
     assert parser.matches_pattern(Path(".venv/lib/test.py"), ".venv")
     assert parser.matches_pattern(Path("project/.venv/test.py"), ".venv")
     assert parser.matches_pattern(Path(".gitignore"), ".gitignore")
-    
+
     # Test directory patterns ending with /
     assert parser.matches_pattern(Path("node_modules/package/file.js"), "node_modules/")
     assert parser.matches_pattern(Path("src/node_modules/file.js"), "node_modules/")
-    
+
     # Test .dot pattern matching against name without dot
     assert parser.matches_pattern(Path("venv/lib/test.py"), ".venv")
-    
+
     # Test .dot pattern matching against filename
     assert parser.matches_pattern(Path("src/config/.env"), ".env")
     # Test .dot pattern matching against path
@@ -157,10 +197,10 @@ def test_should_parse_with_gitignore(parser_with_gitignore: CodeParser) -> None:
     with patch.object(parser_with_gitignore, "_matches_pattern") as mock_matches:
         # Set up the mock to return True for a specific pattern
         mock_matches.return_value = True
-        
+
         # The file should not be parsed if it matches a gitignore pattern
         assert not parser_with_gitignore.should_parse(Path("ignored_file.py"))
-        
+
         # Verify the mock was called with the correct arguments
         mock_matches.assert_called()
 
@@ -170,7 +210,7 @@ def test_should_parse_lexer_not_found(parser: CodeParser) -> None:
     # Mock get_lexer_for_filename to raise ClassNotFound
     with patch("codemap.analyzer.tree_parser.get_lexer_for_filename") as mock_get_lexer:
         mock_get_lexer.side_effect = ClassNotFound("No lexer found")
-        
+
         # The file should not be parsed if no lexer is found
         assert not parser.should_parse(Path("unknown_extension.xyz"))
 
@@ -180,7 +220,7 @@ def test_should_parse_valid_file(parser: CodeParser) -> None:
     # Mock get_lexer_for_filename to return a valid lexer
     with patch("codemap.analyzer.tree_parser.get_lexer_for_filename") as mock_get_lexer:
         mock_get_lexer.return_value = get_lexer_for_filename("test.py")
-        
+
         # The file should be parsed if it has a valid extension and is not excluded
         assert parser.should_parse(Path("src/module.py"))
 
@@ -195,21 +235,21 @@ import sys
 class TestClass:
     def __init__(self):
         self.value = 42
-        
+
     def test_method(self):
         return self.value
-        
+
 class AnotherClass:
     pass
 """
-    
+
     # Create a test Python file
     test_file = tmp_path / "test.py"
     test_file.write_text(python_content)
-    
+
     # Parse the file
     file_info = parser.parse_file(test_file)
-    
+
     # Check the parsed information
     assert file_info["language"] == "python"
     assert file_info["content"] == python_content
@@ -230,14 +270,14 @@ class TestClass {
     }
 }
 """
-    
+
     # Create a test JavaScript file
     test_file = tmp_path / "test.js"
     test_file.write_text(js_content)
-    
+
     # Parse the file
     file_info = parser.parse_file(test_file)
-    
+
     # Check the parsed information
     assert file_info["language"] == "javascript"
     assert file_info["content"] == js_content
@@ -258,23 +298,23 @@ def test_parse_file_unknown_extension(parser: CodeParser, tmp_path: Path) -> Non
 </body>
 </html>
 """
-    
+
     # Create a file with unknown extension but HTML content
     test_file = tmp_path / "test.unknown"
     test_file.write_text(html_content)
-    
-    # Mock should_parse to return True to force parsing
-    with patch.object(parser, "should_parse", return_value=True):
-        # Mock get_lexer_for_filename to raise ClassNotFound
-        with patch("codemap.analyzer.tree_parser.get_lexer_for_filename") as mock_get_lexer:
-            mock_get_lexer.side_effect = ClassNotFound("No lexer found")
-            
-            # Parse the file
-            file_info = parser.parse_file(test_file)
-            
-            # Check that the language was guessed from content
-            assert file_info["language"] == "html"
-            assert file_info["content"] == html_content
+
+    # Mock should_parse to return True to force parsing and mock get_lexer_for_filename
+    with patch.object(parser, "should_parse", return_value=True), patch(
+        "codemap.analyzer.tree_parser.get_lexer_for_filename"
+    ) as mock_get_lexer:
+        mock_get_lexer.side_effect = ClassNotFound("No lexer found")
+
+        # Parse the file
+        file_info = parser.parse_file(test_file)
+
+        # Check that the language was guessed from content
+        assert file_info["language"] == "html"
+        assert file_info["content"] == html_content
 
 
 def test_parse_file_unguessable_content(parser: CodeParser, tmp_path: Path) -> None:
@@ -282,59 +322,52 @@ def test_parse_file_unguessable_content(parser: CodeParser, tmp_path: Path) -> N
     # Create a file with ambiguous content that can't be easily guessed
     test_file = tmp_path / "test.unknown"
     test_file.write_text("This is just plain text with no specific format.")
-    
+
     # Mock should_parse to return True to force parsing
-    with patch.object(parser, "should_parse", return_value=True):
-        # Mock get_lexer_for_filename to raise ClassNotFound
-        with patch("codemap.analyzer.tree_parser.get_lexer_for_filename") as mock_get_lexer:
-            mock_get_lexer.side_effect = ClassNotFound("No lexer found")
-            
-            # Mock guess_lexer to also raise ClassNotFound
-            with patch("codemap.analyzer.tree_parser.guess_lexer") as mock_guess_lexer:
-                mock_guess_lexer.side_effect = ClassNotFound("No lexer found")
-                
-                # Parse the file
-                file_info = parser.parse_file(test_file)
-                
-                # Check that the language remains unknown
-                assert file_info["language"] == "unknown"
-                assert file_info["content"] == "This is just plain text with no specific format."
+    with patch.object(parser, "should_parse", return_value=True), patch(
+        "codemap.analyzer.tree_parser.get_lexer_for_filename"
+    ) as mock_get_lexer, patch("codemap.analyzer.tree_parser.guess_lexer") as mock_guess_lexer:
+        mock_get_lexer.side_effect = ClassNotFound("No lexer found")
+        mock_guess_lexer.side_effect = ClassNotFound("No lexer found")
+
+        # Parse the file
+        file_info = parser.parse_file(test_file)
+
+        # Check that the language remains unknown
+        assert file_info["language"] == "unknown"
+        assert file_info["content"] == "This is just plain text with no specific format."
 
 
 def test_parse_file_unicode_error(parser: CodeParser) -> None:
     """Test parsing a file with Unicode decode error."""
-    # We need to patch should_parse first to avoid the error in that method
-    with patch.object(parser, "should_parse", return_value=True):
-        # Then patch the file open operation
-        with patch("builtins.open", mock_open()) as mock_file:
-            mock_file.side_effect = UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte")
-            
-            # Parse the file
-            file_info = parser.parse_file(Path("test.py"))
-            
-            # Check that default values are returned
-            assert file_info["language"] == "unknown"
-            assert file_info["content"] == ""
-            assert file_info["imports"] == []
-            assert file_info["classes"] == []
+    # Patch both should_parse and file open operation
+    with patch.object(parser, "should_parse", return_value=True), patch("builtins.open", mock_open()) as mock_file:
+        mock_file.side_effect = UnicodeDecodeError("utf-8", b"\x80", 0, 1, "invalid start byte")
+
+        # Parse the file
+        file_info = parser.parse_file(Path("test.py"))
+
+        # Check that default values are returned
+        assert file_info["language"] == "unknown"
+        assert file_info["content"] == ""
+        assert file_info["imports"] == []
+        assert file_info["classes"] == []
 
 
 def test_parse_file_os_error(parser: CodeParser) -> None:
     """Test parsing a file with OS error."""
-    # We need to patch should_parse first to avoid the error in that method
-    with patch.object(parser, "should_parse", return_value=True):
-        # Then patch the file open operation
-        with patch("builtins.open", mock_open()) as mock_file:
-            mock_file.side_effect = OSError("Permission denied")
-            
-            # Parse the file
-            file_info = parser.parse_file(Path("test.py"))
-            
-            # Check that default values are returned
-            assert file_info["language"] == "unknown"
-            assert file_info["content"] == ""
-            assert file_info["imports"] == []
-            assert file_info["classes"] == []
+    # Patch both should_parse and file open operation
+    with patch.object(parser, "should_parse", return_value=True), patch("builtins.open", mock_open()) as mock_file:
+        mock_file.side_effect = OSError("Permission denied")
+
+        # Parse the file
+        file_info = parser.parse_file(Path("test.py"))
+
+        # Check that default values are returned
+        assert file_info["language"] == "unknown"
+        assert file_info["content"] == ""
+        assert file_info["imports"] == []
+        assert file_info["classes"] == []
 
 
 def test_parse_file_should_not_parse(parser: CodeParser) -> None:
@@ -343,7 +376,7 @@ def test_parse_file_should_not_parse(parser: CodeParser) -> None:
     with patch.object(parser, "should_parse", return_value=False):
         # Parse the file
         file_info = parser.parse_file(Path("__pycache__/module.py"))
-        
+
         # Check that default values are returned
         assert file_info["language"] == "unknown"
         assert file_info["content"] == ""
