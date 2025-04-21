@@ -9,7 +9,6 @@ from .commit import (
     DiffSplitter,
     SplitStrategy,
 )
-from .git import GitWrapper
 
 __all__ = [
     "ChunkAction",
@@ -18,6 +17,5 @@ __all__ = [
     "CommitUI",
     "DiffChunk",
     "DiffSplitter",
-    "GitWrapper",
     "SplitStrategy",
 ]
