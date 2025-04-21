@@ -9,7 +9,7 @@ description = "CLI tool for generating optimized markdown documentation from cod
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "litellm>=1.67.0",
+    "litellm>=1.71.0",
     "numpy>=2.2.5",
     "pygments>=2.19.1",
     "python-dotenv>=1.1.0",
