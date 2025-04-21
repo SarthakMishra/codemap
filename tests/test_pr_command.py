@@ -18,25 +18,27 @@ app = codemap.cli_app.app
 @pytest.fixture
 def mock_git_utils() -> dict[str, Any]:
     """Mock git utilities."""
-    with patch("codemap.cli.pr.get_current_branch") as mock_get_current_branch, patch(
-        "codemap.cli.pr.get_default_branch"
-    ) as mock_get_default_branch, patch("codemap.cli.pr.branch_exists") as mock_branch_exists, patch(
-        "codemap.cli.pr.create_branch"
-    ) as mock_create_branch, patch("codemap.cli.pr.checkout_branch") as mock_checkout_branch, patch(
-        "codemap.cli.pr.push_branch"
-    ) as mock_push_branch, patch("codemap.cli.pr.get_commit_messages") as mock_get_commit_messages, patch(
-        "codemap.cli.pr.create_pull_request"
-    ) as mock_create_pull_request, patch("codemap.cli.pr.get_existing_pr") as mock_get_existing_pr, patch(
-        "codemap.cli.pr.update_pull_request"
-    ) as mock_update_pull_request, patch("codemap.cli.pr.validate_repo_path") as mock_validate_repo_path, patch(
-        "codemap.cli.pr.get_staged_diff"
-    ) as mock_get_staged_diff, patch("codemap.cli.pr.get_unstaged_diff") as mock_get_unstaged_diff, patch(
-        "codemap.cli.pr.get_untracked_files"
-    ) as mock_get_untracked_files, patch("codemap.cli.pr.DiffSplitter") as mock_diff_splitter, patch(
-        "codemap.cli.pr.setup_message_generator"
-    ) as mock_create_universal_generator, patch("codemap.cli.pr.process_all_chunks") as mock_process_all_chunks, patch(
-        "questionary.confirm"
-    ) as mock_confirm, patch("questionary.text") as mock_text, patch("questionary.select") as mock_select:
+    with patch("codemap.cli.pr_cmd.get_current_branch") as mock_get_current_branch, patch(
+        "codemap.cli.pr_cmd.get_default_branch"
+    ) as mock_get_default_branch, patch("codemap.cli.pr_cmd.branch_exists") as mock_branch_exists, patch(
+        "codemap.cli.pr_cmd.create_branch"
+    ) as mock_create_branch, patch("codemap.cli.pr_cmd.checkout_branch") as mock_checkout_branch, patch(
+        "codemap.cli.pr_cmd.push_branch"
+    ) as mock_push_branch, patch("codemap.cli.pr_cmd.get_commit_messages") as mock_get_commit_messages, patch(
+        "codemap.cli.pr_cmd.create_pull_request"
+    ) as mock_create_pull_request, patch("codemap.cli.pr_cmd.get_existing_pr") as mock_get_existing_pr, patch(
+        "codemap.cli.pr_cmd.update_pull_request"
+    ) as mock_update_pull_request, patch("codemap.cli.pr_cmd.validate_repo_path") as mock_validate_repo_path, patch(
+        "codemap.cli.pr_cmd.get_staged_diff"
+    ) as mock_get_staged_diff, patch("codemap.cli.pr_cmd.get_unstaged_diff") as mock_get_unstaged_diff, patch(
+        "codemap.cli.pr_cmd.get_untracked_files"
+    ) as mock_get_untracked_files, patch("codemap.cli.pr_cmd.DiffSplitter") as mock_diff_splitter, patch(
+        "codemap.cli.pr_cmd.setup_message_generator"
+    ) as mock_create_universal_generator, patch(
+        "codemap.cli.pr_cmd.process_all_chunks"
+    ) as mock_process_all_chunks, patch("questionary.confirm") as mock_confirm, patch(
+        "questionary.text"
+    ) as mock_text, patch("questionary.select") as mock_select:
         # Set up mock returns
         mock_get_current_branch.return_value = "feature-branch"
         mock_get_default_branch.return_value = "main"
