@@ -321,29 +321,91 @@ def test_embedding_similarity() -> None:
     except ImportError:
         pytest.skip("sentence-transformers not installed")
 
+    # Save original class-level availability flags
+    # pylint: disable=protected-access
+    original_st_available = DiffSplitter._sentence_transformers_available  # noqa: SLF001
+    original_model_available = DiffSplitter._model_available  # noqa: SLF001
+
     # Initialize diff splitter with a mock repo root
     repo_root = Path("/mock/repo")
     splitter = DiffSplitter(repo_root)
 
-    # Test code samples with different semantics
-    code1 = """
-    def calculate_total(items):
-        return sum(item.price for item in items)
-    """
+    try:
+        # Test code samples with different semantics
+        code1 = """
+        def calculate_total(items):
+            return sum(item.price for item in items)
+        """
 
-    code2 = """
-    def compute_sum(products):
-        return sum(product.price for product in products)
-    """
+        code2 = """
+        def compute_sum(products):
+            return sum(product.price for product in products)
+        """
 
-    code3 = """
-    def get_user_info(user_id):
-        return User.objects.get(id=user_id)
-    """
+        code3 = """
+        def get_user_info(user_id):
+            return User.objects.get(id=user_id)
+        """
 
-    # Calculate similarities
-    sim1_2 = splitter._calculate_semantic_similarity(code1, code2)  # pylint: disable=protected-access # noqa: SLF001
-    sim1_3 = splitter._calculate_semantic_similarity(code1, code3)  # pylint: disable=protected-access # noqa: SLF001
+        # Calculate similarities
+        sim1_2 = splitter._calculate_semantic_similarity(code1, code2)  # pylint: disable=protected-access # noqa: SLF001
+        sim1_3 = splitter._calculate_semantic_similarity(code1, code3)  # pylint: disable=protected-access # noqa: SLF001
 
-    # Functions doing similar things should have higher similarity
-    assert sim1_2 > sim1_3
+        # Functions doing similar things should have higher similarity
+        assert sim1_2 > sim1_3
+    finally:
+        # Restore original class-level availability flags
+        # pylint: disable=protected-access
+        DiffSplitter._sentence_transformers_available = original_st_available  # noqa: SLF001
+        DiffSplitter._model_available = original_model_available  # noqa: SLF001
+
+
+def test_sentence_transformers_availability() -> None:
+    """Test the sentence-transformers availability check functions."""
+    # Save original class-level availability flags
+    # pylint: disable=protected-access
+    original_st_available = DiffSplitter._sentence_transformers_available  # noqa: SLF001
+    original_model_available = DiffSplitter._model_available  # noqa: SLF001
+
+    try:
+        # Reset class variables to force availability check
+        # pylint: disable=protected-access
+        DiffSplitter._sentence_transformers_available = None  # noqa: SLF001
+        DiffSplitter._model_available = None  # noqa: SLF001
+
+        # Try to initialize a new splitter which will trigger availability check
+        repo_root = Path("/mock/repo")
+        splitter = DiffSplitter(repo_root)
+
+        # Check if sentence-transformers is available in this environment
+        try:
+            import sentence_transformers  # noqa: F401
+
+            # If we reach here, the package is installed
+            # pylint: disable=protected-access
+            assert DiffSplitter._sentence_transformers_available is True  # noqa: SLF001
+            # Model availability depends on network and other factors, so we don't assert it
+        except ImportError:
+            # Package is not installed
+            # pylint: disable=protected-access
+            assert DiffSplitter._sentence_transformers_available is False  # noqa: SLF001
+            assert DiffSplitter._model_available is None  # noqa: SLF001
+
+        # Test embedding with known flags
+        # pylint: disable=protected-access
+        DiffSplitter._sentence_transformers_available = False  # noqa: SLF001
+        result = splitter._get_code_embedding("test code")  # noqa: SLF001
+        assert result is None
+
+        # Test with both flags true but no actual model (mocked environment)
+        # pylint: disable=protected-access
+        DiffSplitter._sentence_transformers_available = True  # noqa: SLF001
+        DiffSplitter._model_available = False  # noqa: SLF001
+        result = splitter._get_code_embedding("test code")  # noqa: SLF001
+        assert result is None
+
+    finally:
+        # Restore original class-level availability flags
+        # pylint: disable=protected-access
+        DiffSplitter._sentence_transformers_available = original_st_available  # noqa: SLF001
+        DiffSplitter._model_available = original_model_available  # noqa: SLF001
