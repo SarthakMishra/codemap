@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 def test_main_module() -> None:
     """Test the __main__ module."""
-    with patch("codemap.cli_entry.app") as mock_app:
+    with patch("codemap.cli_app.app") as mock_app:
         # Use runpy to run the module as __main__
         runpy.run_module("codemap.__main__", run_name="__main__")
 
@@ -16,7 +16,7 @@ def test_main_module() -> None:
 
 def test_main_import() -> None:
     """Test importing the __main__ module."""
-    with patch("codemap.cli_entry.app") as mock_app:
+    with patch("codemap.cli_app.app") as mock_app:
         # Import the module normally (should not call app)
 
         # Verify app was not called

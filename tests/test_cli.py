@@ -13,7 +13,11 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from codemap.cli.main import _get_output_path, app
+import codemap.cli_app
+from codemap.cli.main import _get_output_path
+
+app = codemap.cli_app.app
+from datetime import datetime, timezone
 from codemap.config import DEFAULT_CONFIG
 
 runner = CliRunner()
