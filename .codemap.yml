@@ -1,7 +1,7 @@
-token_limit: 0
+token_limit: 20000
 use_gitignore: true
 output_dir: documentation
-max_content_length: 0
+max_content_length: 5000
 
 # Commit feature configuration
 commit:
