@@ -1,13 +1,13 @@
-token_limit: 20000
+token_limit: 10000
 use_gitignore: true
 output_dir: documentation
-max_content_length: 5000
+max_content_length: 2000
 
 # Commit feature configuration
 commit:
   # LLM configuration
   llm:
-    model: groq/llama-3.1-8b-instant
+    model: groq/meta-llama/llama-4-scout-17b-16e-instruct
     # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
 
   # Commit convention settings
