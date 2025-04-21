@@ -130,16 +130,97 @@ def get_unstaged_diff() -> GitDiff:
 def stage_files(files: list[str]) -> None:
     """Stage the specified files.
 
+    This function intelligently handles both existing and deleted files:
+    - For existing files, it uses `git add`
+    - For files that no longer exist, it uses `git rm`
+
+    This prevents errors when trying to stage files that have been deleted
+    but not yet tracked in git.
+
     Args:
         files: List of files to stage
 
     Raises:
         GitError: If staging fails
     """
+    if not files:
+        logger.warning("No files provided to stage_files")
+        return
+
     try:
-        run_git_command(["git", "add", *files])
+        # Filter out invalid filenames that contain special characters or patterns
+        # that would cause git commands to fail
+        valid_files = []
+        for file in files:
+            # Check if the filename looks like a template or pattern rather than a real file
+            if any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'):
+                logger.warning("Skipping invalid filename: %s", file)
+                continue
+            valid_files.append(file)
+
+        if not valid_files:
+            logger.warning("No valid files to stage after filtering")
+            return
+
+        # Check if files exist in the filesystem
+        for file in valid_files:
+            exists = Path(file).exists()
+            logger.debug("File %s exists in filesystem: %s", file, exists)
+
+        # Separate files into existing and non-existing
+        existing_files = []
+        deleted_files = []
+        for file in valid_files:
+            if Path(file).exists():
+                existing_files.append(file)
+            else:
+                deleted_files.append(file)
+
+        logger.info("Existing files to stage: %s", ", ".join(existing_files) if existing_files else "None")
+        logger.info("Deleted files to handle: %s", ", ".join(deleted_files) if deleted_files else "None")
+
+        # Stage existing files if any
+        if existing_files:
+            try:
+                logger.info("Running: git add %s", " ".join(existing_files))
+                run_git_command(["git", "add", *existing_files])
+                logger.info("Successfully staged existing files")
+            except GitError:
+                logger.exception("Error staging existing files")
+                raise
+
+        # Handle deleted files if any
+        if deleted_files:
+            # Get list of tracked files
+            try:
+                tracked_files_output = run_git_command(["git", "ls-files"])
+                tracked_files = set(tracked_files_output.splitlines())
+                logger.debug("Got %d tracked files from git ls-files", len(tracked_files))
+            except GitError:
+                logger.exception("Error getting tracked files")
+                raise
+
+            # Separate deleted files into tracked and untracked
+            tracked_deleted = [f for f in deleted_files if f in tracked_files]
+            untracked_deleted = [f for f in deleted_files if f not in tracked_files]
+
+            # Log warning for untracked deleted files
+            for file in untracked_deleted:
+                logger.warning("Skipping untracked deleted file: %s", file)
+
+            # Remove tracked deleted files
+            if tracked_deleted:
+                try:
+                    logger.info("Running: git rm %s", " ".join(tracked_deleted))
+                    run_git_command(["git", "rm", *tracked_deleted])
+                    logger.info("Successfully removed tracked deleted files")
+                except GitError:
+                    logger.exception("Error removing tracked deleted files")
+                    raise
+
     except GitError as e:
         msg = f"Failed to stage files: {', '.join(files)}"
+        logger.exception("%s", msg)
         raise GitError(msg) from e
 
 
@@ -153,9 +234,25 @@ def commit(message: str) -> None:
         GitError: If commit fails
     """
     try:
-        run_git_command(["git", "commit", "-m", message])
-    except GitError as e:
-        msg = "Failed to create commit"
+        # For commit messages, we need to ensure they're properly quoted
+        # Use a shell command directly to ensure proper quoting
+        import shlex
+
+        quoted_message = shlex.quote(message)
+        shell_command = f"git commit -m {quoted_message}"
+
+        # Using shell=True is necessary for proper handling of quoted commit messages
+        # Security is maintained by using shlex.quote to escape user input
+        subprocess.run(  # noqa: S602
+            shell_command,
+            cwd=None,  # Use current dir
+            capture_output=True,
+            text=True,
+            check=True,
+            shell=True,  # Using shell=True for this operation
+        )
+    except subprocess.CalledProcessError as e:
+        msg = f"Failed to create commit: {e.stderr}"
         raise GitError(msg) from e
 
 
@@ -227,7 +324,7 @@ def unstash_changes() -> None:
         raise GitError(msg) from e
 
 
-def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False) -> None:
+def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False) -> list[str]:
     """Create a commit with only the specified files.
 
     This ensures that we don't inadvertently commit other staged files.
@@ -239,32 +336,89 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
         message: Commit message
         ignore_hooks: Whether to ignore git hooks on failure
 
+    Returns:
+        List of other staged files that weren't part of this commit
+
     Raises:
         GitError: If commit fails
     """
     other_staged = []
     did_stash = False
 
+    # Log the files we're trying to commit
+    logger.info("Attempting to commit files: %s", ", ".join(files))
+
+    # Filter out invalid filenames
+    valid_files = []
+    for file in files:
+        # Check if the filename looks like a template or pattern rather than a real file
+        if any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'):
+            logger.warning("Skipping invalid filename for commit: %s", file)
+            continue
+        valid_files.append(file)
+
+    if not valid_files:
+        logger.warning("No valid files to commit after filtering")
+        msg = "No valid files to commit"
+        raise GitError(msg)
+
+    logger.info("Valid files to commit: %s", ", ".join(valid_files))
+
     try:
         # Check for other staged files
-        other_staged = get_other_staged_files(files)
+        other_staged = get_other_staged_files(valid_files)
+        logger.info(
+            "Other staged files not part of this commit: %s", ", ".join(other_staged) if other_staged else "None"
+        )
 
-        # Stage the files
-        run_git_command(["git", "add", *files])
+        # Stage the files (our modified stage_files function will handle deleted files)
+        logger.info("Staging files: %s", ", ".join(valid_files))
+        stage_files(valid_files)
 
-        # Commit only the specified files by using pathspec
-        commit_cmd = ["git", "commit", "-m", message, "--", *files]
+        # For commit messages, we need to ensure they're properly quoted
+        # Use a shell command directly to ensure proper quoting
+        import shlex
+
+        quoted_message = shlex.quote(message)
+
+        # Create command with files specified as pathspec
+        file_args = " ".join(shlex.quote(f) for f in valid_files)
+        shell_command = f"git commit -m {quoted_message} -- {file_args}"
+        logger.info("Executing commit command: %s", shell_command)
+
         try:
-            run_git_command(commit_cmd)
-        except GitError as e:
+            # Using shell=True is necessary for proper handling of quoted commit messages
+            # Security is maintained by using shlex.quote to escape user input
+            subprocess.run(  # noqa: S602
+                shell_command,
+                cwd=None,  # Use current dir
+                capture_output=True,
+                text=True,
+                check=True,
+                shell=True,  # Using shell=True for this operation
+            )
+            logger.info("Commit successful")
+        except subprocess.CalledProcessError as e:
+            logger.exception("Commit failed: %s", e.stderr)
             # Check if failure might be due to git hooks
-            if "hook" in str(e).lower() and ignore_hooks:
-                # Try again with --no-verify to bypass hooks
-                run_git_command([*commit_cmd, "--no-verify"])
+            if "hook" in str(e.stderr).lower() and ignore_hooks:
+                logger.info("Attempting commit with --no-verify to bypass hooks")
+                # Try again with --no-verify
+                no_verify_cmd = f"{shell_command} --no-verify"
+                # Using shell=True is necessary for --no-verify flag
+                subprocess.run(  # noqa: S602
+                    no_verify_cmd,
+                    cwd=None,
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                    shell=True,
+                )
+                logger.info("Commit with --no-verify successful")
             else:
                 raise
 
-    except GitError as e:
+    except (subprocess.CalledProcessError, GitError) as e:
         if did_stash:
             with contextlib.suppress(GitError):
                 unstash_changes()
@@ -272,6 +426,8 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
         msg = f"Failed to commit files: {', '.join(files)}"
         if "hook" in str(e).lower():
             msg += " (git hook failed - check your hook scripts)"
+        logger.exception(msg)
+        logger.exception("Error details")
         raise GitError(msg) from e
     finally:
         if did_stash:

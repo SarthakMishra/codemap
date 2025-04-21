@@ -6,10 +6,8 @@ import logging
 import re
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
-from typing import List, Optional
 
-from codemap.git.utils.git_utils import GitError, run_git_command
+from codemap.utils.git_utils import GitError, run_git_command
 
 logger = logging.getLogger(__name__)
 
@@ -21,8 +19,8 @@ class PullRequest:
     branch: str
     title: str
     description: str
-    url: Optional[str] = None
-    number: Optional[int] = None
+    url: str | None = None
+    number: int | None = None
 
 
 def get_current_branch() -> str:
@@ -66,7 +64,7 @@ def get_default_branch() -> str:
 
         # Last resort, use the current branch
         return get_current_branch()
-    except GitError as e:
+    except GitError:
         msg = "Failed to determine default branch, using 'main'"
         logger.warning(msg)
         return "main"
@@ -122,7 +120,6 @@ def branch_exists(branch_name: str, include_remote: bool = True) -> bool:
         if include_remote:
             remote_branches = run_git_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"]).strip()
             return bool(remote_branches)
-
         return False
     except GitError:
         return False
@@ -148,7 +145,7 @@ def push_branch(branch_name: str, force: bool = False) -> None:
         raise GitError(msg) from e
 
 
-def get_commit_messages(base_branch: str, head_branch: str) -> List[str]:
+def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
     """Get commit messages between two branches.
 
     Args:
@@ -170,7 +167,7 @@ def get_commit_messages(base_branch: str, head_branch: str) -> List[str]:
         raise GitError(msg) from e
 
 
-def generate_pr_title_from_commits(commits: List[str]) -> str:
+def generate_pr_title_from_commits(commits: list[str]) -> str:
     """Generate a PR title from commit messages.
 
     Args:
@@ -182,20 +179,86 @@ def generate_pr_title_from_commits(commits: List[str]) -> str:
     if not commits:
         return "Update branch"
 
-    # Use the first commit message as the PR title
-    title = commits[0]
+    # Define mapping from commit prefixes to PR title prefixes
+    prefix_mapping = {"feat": "Feature:", "fix": "Fix:", "docs": "Docs:", "refactor": "Refactor:", "perf": "Optimize:"}
 
-    # Remove any conventional commit prefixes (e.g., "feat: ", "fix: ")
-    title = re.sub(r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)(\([^)]+\))?:\s*", "", title)
+    for prefix, title_prefix in prefix_mapping.items():
+        for commit in commits:
+            if commit.startswith(prefix):
+                # Strip the prefix and use as title
+                title = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commit)
+                # Capitalize first letter and add PR type prefix
+                return f"{title_prefix} {title[0].upper() + title[1:]}"
 
-    # Capitalize the first letter
-    if title:
-        title = title[0].upper() + title[1:]
-
-    return title
+    # Fallback to first commit
+    title = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commits[0])
+    return title[0].upper() + title[1:]
 
 
-def generate_pr_description_from_commits(commits: List[str]) -> str:
+def generate_pr_title_with_llm(
+    commits: list[str],
+    model: str = "gpt-4o-mini",
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> str:
+    """Generate a PR title using an LLM.
+
+    Args:
+        commits: List of commit messages
+        model: LLM model to use
+        api_key: API key for LLM provider
+        api_base: Custom API base URL
+
+    Returns:
+        Generated PR title
+    """
+    import logging
+
+    from codemap.utils.llm_utils import generate_text_with_llm
+
+    logger = logging.getLogger(__name__)
+
+    if not commits:
+        return "Update branch"
+
+    try:
+        # Format commit messages
+        commit_list = "\n".join([f"- {commit}" for commit in commits])
+
+        # Prepare prompt
+        prompt = """Based on the following commits, generate a clear, concise PR title that captures the
+essence of the changes.
+        Follow these guidelines:
+        - Focus on the most important change
+        - If there are multiple related changes, summarize them
+        - Keep it under 80 characters
+        - Start with a capital letter
+        - Don't use a period at the end
+        - Use present tense (e.g., "Add feature" not "Added feature")
+        - Be descriptive and specific (e.g., "Fix memory leak in data processing" not just "Fix bug")
+        - Include the type of change if clear (Feature, Fix, Refactor, etc.)
+
+        Commits:
+        """
+
+        prompt += commit_list + "\n\n        PR Title:"
+
+        # Call LLM with repo_path used for context
+        title = generate_text_with_llm(prompt, model, api_key, api_base)
+
+        # Clean up the title
+        title = title.strip()
+        if title.endswith("."):
+            title = title[:-1]
+
+        return title
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        logger.warning("Failed to generate PR title with LLM: %s", str(e))
+        # Fallback to rule-based approach
+        return generate_pr_title_from_commits(commits)
+
+
+def generate_pr_description_from_commits(commits: list[str]) -> str:
     """Generate a PR description from commit messages.
 
     Args:
@@ -211,6 +274,8 @@ def generate_pr_description_from_commits(commits: List[str]) -> str:
     features = []
     fixes = []
     docs = []
+    refactors = []
+    optimizations = []
     other = []
 
     for commit in commits:
@@ -220,12 +285,31 @@ def generate_pr_description_from_commits(commits: List[str]) -> str:
             fixes.append(commit)
         elif commit.startswith("docs"):
             docs.append(commit)
+        elif commit.startswith("refactor"):
+            refactors.append(commit)
+        elif commit.startswith("perf"):
+            optimizations.append(commit)
         else:
             other.append(commit)
 
-    # Build description
-    description = "## Changes\n\n"
+    # Determine PR type checkboxes
+    has_refactor = bool(refactors)
+    has_feature = bool(features)
+    has_bug_fix = bool(fixes)
+    has_optimization = bool(optimizations)
+    has_docs_update = bool(docs)
 
+    # Build description
+    description = "## What type of PR is this? (check all applicable)\n\n"
+    description += f"- [{' ' if not has_refactor else 'x'}] Refactor\n"
+    description += f"- [{' ' if not has_feature else 'x'}] Feature\n"
+    description += f"- [{' ' if not has_bug_fix else 'x'}] Bug Fix\n"
+    description += f"- [{' ' if not has_optimization else 'x'}] Optimization\n"
+    description += f"- [{' ' if not has_docs_update else 'x'}] Documentation Update\n\n"
+
+    description += "## Description\n\n"
+
+    # Add categorized changes to description
     if features:
         description += "### Features\n\n"
         for feat in features:
@@ -248,15 +332,113 @@ def generate_pr_description_from_commits(commits: List[str]) -> str:
             description += f"- {clean_msg}\n"
         description += "\n"
 
+    if refactors:
+        description += "### Refactors\n\n"
+        for refactor in refactors:
+            clean_msg = re.sub(r"^refactor(\([^)]+\))?:\s*", "", refactor)
+            description += f"- {clean_msg}\n"
+        description += "\n"
+
+    if optimizations:
+        description += "### Optimizations\n\n"
+        for perf in optimizations:
+            clean_msg = re.sub(r"^perf(\([^)]+\))?:\s*", "", perf)
+            description += f"- {clean_msg}\n"
+        description += "\n"
+
     if other:
         description += "### Other\n\n"
         for msg in other:
             # Try to clean up conventional commit prefixes
-            clean_msg = re.sub(r"^(refactor|style|perf|test|build|ci|chore|revert)(\([^)]+\))?:\s*", "", msg)
+            clean_msg = re.sub(r"^(style|test|build|ci|chore|revert)(\([^)]+\))?:\s*", "", msg)
             description += f"- {clean_msg}\n"
         description += "\n"
 
+    description += "## Related Tickets & Documents\n\n"
+    description += "- Related Issue #\n"
+    description += "- Closes #\n\n"
+
+    description += "## Added/updated tests?\n\n"
+    description += "- [ ] Yes\n"
+    description += (
+        "- [ ] No, and this is why: _please replace this line with details on why tests have not been included_\n"
+    )
+    description += "- [ ] I need help with writing tests\n"
+
     return description
+
+
+def generate_pr_description_with_llm(
+    commits: list[str],
+    model: str = "gpt-4o-mini",
+    api_key: str | None = None,
+    api_base: str | None = None,
+) -> str:
+    """Generate a PR description using an LLM.
+
+    Args:
+        commits: List of commit messages
+        model: LLM model to use
+        api_key: API key for LLM provider
+        api_base: Custom API base URL
+
+    Returns:
+        Generated PR description
+    """
+    import logging
+
+    from codemap.utils.llm_utils import generate_text_with_llm
+
+    logger = logging.getLogger(__name__)
+
+    if not commits:
+        return "No changes"
+
+    try:
+        # Format commit messages
+        commit_list = "\n".join([f"- {commit}" for commit in commits])
+
+        # Prepare prompt
+        prompt = f"""Based on the following commits, generate a comprehensive PR description following this template:
+
+        ## What type of PR is this? (check all applicable)
+
+        - [ ] Refactor
+        - [ ] Feature
+        - [ ] Bug Fix
+        - [ ] Optimization
+        - [ ] Documentation Update
+
+        ## Description
+        [Fill this section with a detailed description of the changes]
+
+        ## Related Tickets & Documents
+        - Related Issue #
+        - Closes #
+
+        ## Added/updated tests?
+        - [ ] Yes
+        - [ ] No, and this is why: [explanation]
+        - [ ] I need help with writing tests
+
+        Consider the following guidelines:
+        - Check the appropriate PR type boxes based on the commit messages
+        - Provide a clear, detailed description of the changes
+        - Include any relevant issue numbers that this PR relates to or closes
+        - Indicate if tests were added, and if not, explain why
+        - Use bullet points for clarity
+
+        Commits:
+        {commit_list}
+
+        PR Description:"""
+
+        # Call LLM with repo_path used for context
+        return generate_text_with_llm(prompt, model, api_key, api_base)
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        logger.warning("Failed to generate PR description with LLM: %s", str(e))
+        # Fallback to rule-based approach
+        return generate_pr_description_from_commits(commits)
 
 
 def create_pull_request(base_branch: str, head_branch: str, title: str, description: str) -> PullRequest:
@@ -297,7 +479,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
             description,
         ]
 
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603, S607
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
         output = result.stdout.strip()
 
         # Extract PR URL and number
@@ -358,11 +540,11 @@ def update_pull_request(pr_number: int, title: str, description: str) -> PullReq
             description,
         ]
 
-        subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603, S607
+        subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
 
         # Get PR URL
         url_cmd = ["gh", "pr", "view", str(pr_number), "--json", "url", "--jq", ".url"]
-        result = subprocess.run(url_cmd, check=True, capture_output=True, text=True)  # noqa: S603, S607
+        result = subprocess.run(url_cmd, check=True, capture_output=True, text=True)  # noqa: S603
         pr_url = result.stdout.strip()
 
         return PullRequest(
@@ -377,7 +559,7 @@ def update_pull_request(pr_number: int, title: str, description: str) -> PullReq
         raise GitError(msg) from e
 
 
-def get_existing_pr(branch_name: str) -> Optional[PullRequest]:
+def get_existing_pr(branch_name: str) -> PullRequest | None:
     """Get an existing PR for a branch.
 
     Args:
@@ -406,7 +588,7 @@ def get_existing_pr(branch_name: str) -> Optional[PullRequest]:
             ".[0]",
         ]
 
-        result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603, S607
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
         if result.returncode != 0 or not result.stdout.strip():
             return None
 
@@ -428,7 +610,7 @@ def get_existing_pr(branch_name: str) -> Optional[PullRequest]:
         return None
 
 
-def suggest_branch_name(commits: List[str]) -> str:
+def suggest_branch_name(commits: list[str]) -> str:
     """Suggest a branch name based on commit messages.
 
     Args:
@@ -438,51 +620,51 @@ def suggest_branch_name(commits: List[str]) -> str:
         Suggested branch name
     """
     if not commits:
+        # If no commits, use a timestamp
         return f"update-{get_timestamp()}"
 
-    # Use the first commit message to generate a branch name
+    # Use the first commit as the basis for the branch name
     first_commit = commits[0]
 
     # Extract the type and scope if it's a conventional commit
-    match = re.match(r"^(feat|fix|docs|refactor|style|perf|test|build|ci|chore|revert)(?:\(([^)]+)\))?:\s*(.+)$", first_commit)
-    
+    pattern = (
+        r"^(feat|fix|docs|refactor|style|perf|test|build|ci|chore|revert)"
+        r"(?:\(([^)]+)\))?:\s*(.+)$"
+    )
+    match = re.match(pattern, first_commit)
+
     if match:
         commit_type, scope, subject = match.groups()
-        if scope:
-            branch_prefix = f"{commit_type}-{scope}"
-        else:
-            branch_prefix = commit_type
+        branch_prefix = f"{commit_type}-{scope}" if scope else commit_type
     else:
         # Not a conventional commit, use a generic prefix
         branch_prefix = "update"
 
     # Extract a few words from the subject for the branch name
-    if match:
-        subject = match.group(3)
-    else:
-        subject = first_commit
+    subject = match.group(3) if match else first_commit
 
     # Clean up the subject and take first few words
-    words = re.sub(r"[^\w\s-]", "", subject.lower()).split()[:3]
-    branch_suffix = "-".join(words)
+    subject = re.sub(r"[^\w\s-]", "", subject).lower()
+    subject = re.sub(r"\s+", "-", subject)
+    words = subject.split("-")
+    short_subject = "-".join(words[:3])  # Take up to 3 words
 
-    # Combine prefix and suffix
-    branch_name = f"{branch_prefix}-{branch_suffix}"
+    # Build the branch name
+    branch_name = f"{branch_prefix}-{short_subject}"
 
-    # Ensure the branch name is valid
-    branch_name = re.sub(r"[^\w-]", "-", branch_name)
-    branch_name = re.sub(r"-+", "-", branch_name)  # Replace multiple hyphens with a single one
-    branch_name = branch_name.strip("-")
+    # Ensure the branch name meets git's requirements
+    branch_name = re.sub(r"[^a-zA-Z0-9_.-]", "-", branch_name)
+    branch_name = re.sub(r"-+", "-", branch_name)  # Replace multiple dashes with a single one
 
-    return branch_name
+    return branch_name.strip("-")
 
 
 def get_timestamp() -> str:
-    """Get a timestamp string for branch names.
+    """Get a timestamp for branch naming.
 
     Returns:
-        Timestamp string in format YYYYMMDD-HHMMSS
+        Timestamp string in format YYYYmmdd-HHMMSS
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
 
-    return datetime.now().strftime("%Y%m%d-%H%M%S")
+    return datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")

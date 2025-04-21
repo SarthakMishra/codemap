@@ -15,8 +15,7 @@ DEFAULT_CONFIG = {
         "strategy": "file",
         # LLM configuration
         "llm": {
-            "model": "gpt-4o-mini",
-            "provider": "openai",
+            "model": "openai/gpt-4o-mini",
             "api_base": None,
         },
         # Commit convention settings
@@ -35,37 +34,6 @@ DEFAULT_CONFIG = {
             ],
             "scopes": [],
             "max_length": 72,
-        },
-        # Semantic chunking configuration
-        "semantic": {
-            # Threshold for semantic similarity (0.0-1.0)
-            "similarity_threshold": 0.7,
-            # Embedding model for code similarity
-            "embedding_model": "flax-sentence-embeddings/st-codesearch-distroberta-base",
-            # Fallback model if primary model fails to load
-            "fallback_model": "all-MiniLM-L6-v2",
-            # Language-specific settings
-            "languages": {
-                # Recognized code files for semantic parsing
-                "extensions": [
-                    "py",  # Python
-                    "js",  # JavaScript
-                    "ts",  # TypeScript
-                    "java",  # Java
-                    "kt",  # Kotlin
-                    "go",  # Go
-                    "c",  # C
-                    "cpp",  # C++
-                    "cs",  # C#
-                    "rb",  # Ruby
-                    "php",  # PHP
-                    "swift",  # Swift
-                ],
-                # Cache embeddings to improve performance on subsequent runs
-                "cache_embeddings": True,
-                # Maximum size of embedding cache
-                "max_cache_size": 1000,
-            },
         },
     },
 }

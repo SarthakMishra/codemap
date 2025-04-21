@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from codemap.git.utils.git_utils import (
+from codemap.utils.git_utils import (
     GitDiff,
     GitError,
     commit,
@@ -29,6 +29,37 @@ class GitWrapper:
             repo_path: Path to the Git repository
         """
         self.repo_path = repo_path
+
+    def has_changes(self) -> bool:
+        """Check if the repository has any changes (staged, unstaged, or untracked).
+
+        Returns:
+            True if there are any changes, False otherwise
+        """
+        try:
+            staged = get_staged_diff()
+            unstaged = get_unstaged_diff()
+            untracked = get_untracked_files()
+
+            return bool(staged.files or unstaged.files or untracked)
+        except GitError:
+            return False
+
+    def get_staged_diff(self) -> GitDiff:
+        """Get the diff of staged changes.
+
+        Returns:
+            GitDiff object containing staged changes
+        """
+        return get_staged_diff()
+
+    def get_unstaged_diff(self) -> GitDiff:
+        """Get the diff of unstaged changes.
+
+        Returns:
+            GitDiff object containing unstaged changes
+        """
+        return get_unstaged_diff()
 
     def get_uncommitted_changes(self) -> GitDiff:
         """Get all uncommitted changes (both staged and unstaged).
@@ -99,4 +130,4 @@ class GitWrapper:
         Raises:
             GitError: If commit fails
         """
-        return commit_only_files(files, message, ignore_hooks)
+        return commit_only_files(files, message, ignore_hooks=ignore_hooks)

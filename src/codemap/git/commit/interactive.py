@@ -3,38 +3,101 @@
 from __future__ import annotations
 
 import logging
+import os
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum, auto
-from pathlib import Path
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Generator, Self
 
 import questionary
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
-from rich.syntax import Syntax
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from codemap.git import GitWrapper
+
     from .diff_splitter import DiffChunk
     from .message_generator import MessageGenerator
+
+# Import the universal message generator function
+try:
+    from codemap.utils.llm_utils import generate_message
+except ImportError:
+    # Fallback if not available
+    generate_message = None
+
+# Import LLMError for exception handling
+from codemap.git.commit.message_generator import LLMError
 
 logger = logging.getLogger(__name__)
 console = Console()
 
+# Constants
+MAX_PREVIEW_LENGTH = 200
+MAX_PREVIEW_LINES = 10
+
+
+# Singleton class to track spinner state
+class SpinnerState:
+    """Singleton class to track spinner state."""
+
+    _instance = None
+    is_active = False
+
+    def __new__(cls) -> Self:
+        """Create or return the singleton instance.
+
+        Returns:
+            The singleton instance of SpinnerState
+        """
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+
+@contextmanager
+def loading_spinner(message: str) -> Generator[None, None, None]:
+    """Show a loading spinner while an operation is in progress.
+
+    Args:
+        message: Message to display alongside the spinner
+    """
+    # In test environments, don't display a spinner
+    if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
+        yield
+        return
+
+    # Check if a spinner is already active
+    spinner_state = SpinnerState()
+    if spinner_state.is_active:
+        # If there's already an active spinner, don't create a new one
+        yield
+        return
+
+    # Only use spinner in interactive environments
+    try:
+        spinner_state.is_active = True
+        with console.status(message, spinner="dots"):
+            yield
+    finally:
+        spinner_state.is_active = False
+
 
 def process_all_chunks(
-    repo_path: Path,
-    chunks: List[DiffChunk],
-    generator: "MessageGenerator",
-    git: "GitWrapper",
+    _repo_path: Path,  # Unused parameter but kept for API compatibility
+    chunks: list[DiffChunk],
+    generator: MessageGenerator,
+    git: GitWrapper,
     interactive: bool = True,
 ) -> int:
     """Process all chunks interactively or automatically.
 
     Args:
-        repo_path: Repository path
+        _repo_path: Repository path
         chunks: List of diff chunks
         generator: Message generator to use
         git: Git wrapper
@@ -43,9 +106,9 @@ def process_all_chunks(
     Returns:
         Exit code (0 for success)
     """
-    from .diff_splitter import DiffChunk
-
-    for i, chunk in enumerate(chunks):
+    i = 0
+    while i < len(chunks):
+        chunk = chunks[i]
         if interactive:
             # Display chunk information
             console.print(f"\n[bold]Commit {i + 1} of {len(chunks)}[/bold]")
@@ -72,14 +135,16 @@ def process_all_chunks(
 
             if action == "commit":
                 _handle_commit_action(chunk, message, git)
+                i += 1
             elif action == "edit":
                 _handle_edit_action(chunk, message, git)
+                i += 1
             elif action == "regenerate":
-                # Just loop back for this chunk
-                i -= 1  # Decrement index to process this chunk again
+                # Stay on same index to regenerate
                 continue
             elif action == "skip":
                 console.print("[yellow]Skipped![/yellow]")
+                i += 1
             elif action == "exit":
                 console.print("[yellow]Exiting commit process[/yellow]")
                 return 0
@@ -87,6 +152,7 @@ def process_all_chunks(
             # Non-interactive mode: commit all chunks automatically
             message, _ = _generate_commit_message(chunk, generator)
             _handle_commit_action(chunk, message, git)
+            i += 1
 
     console.print("[green]✓[/green] All changes committed!")
     return 0
@@ -94,7 +160,7 @@ def process_all_chunks(
 
 def _generate_commit_message(
     chunk: DiffChunk,
-    generator: "MessageGenerator",
+    generator: MessageGenerator,
 ) -> tuple[str, bool]:
     """Generate a commit message for the given chunk.
 
@@ -105,9 +171,19 @@ def _generate_commit_message(
     Returns:
         Tuple of (message, whether LLM was used)
     """
+    # Use the universal generate_message function if available
+    if generate_message:
+        try:
+            message, used_llm = generate_message(chunk, generator)
+            return message, used_llm
+        except (ValueError, RuntimeError, ConnectionError, LLMError) as e:
+            console.print(f"[red]Error using universal message generator:[/red] {e!s}")
+            # Fall through to legacy approach as fallback
+
+    # Legacy approach as fallback
     try:
         message, used_llm = generator.generate_message(chunk)
-    except Exception as e:
+    except (ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error generating message:[/red] {e!s}")
         message = generator.fallback_generation(chunk)
         used_llm = False
@@ -137,16 +213,19 @@ def _print_chunk_summary(chunk: DiffChunk, index: int) -> None:
 
     # Preview of the diff
     if chunk.content:
-        max_preview_length = 300
-        preview = (
-            chunk.content[:max_preview_length] + "..." if len(chunk.content) > max_preview_length else chunk.content
-        )
+        # Truncate to maximum of MAX_PREVIEW_LINES lines
+        content_lines = chunk.content.splitlines()
+        if len(content_lines) > MAX_PREVIEW_LINES:
+            remaining_lines = len(content_lines) - MAX_PREVIEW_LINES
+            preview = "\n".join(content_lines[:MAX_PREVIEW_LINES]) + f"\n... ({remaining_lines} more lines)"
+        else:
+            preview = chunk.content
         console.print(f"  [dim]{preview}[/dim]")
     else:
         console.print("  [dim](New files - no diff content available)[/dim]")
 
 
-def _handle_commit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> None:
+def _handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
     """Handle the commit action.
 
     Args:
@@ -158,11 +237,11 @@ def _handle_commit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> 
         # Perform the commit
         git.commit_only_specified_files(chunk.files, message)
         console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
-def _handle_edit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> None:
+def _handle_edit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
     """Handle the edit action.
 
     Args:
@@ -179,7 +258,7 @@ def _handle_edit_action(chunk: DiffChunk, message: str, git: "GitWrapper") -> No
         # Perform the commit with the edited message
         git.commit_only_specified_files(chunk.files, new_message)
         console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except Exception as e:
+    except (ValueError, RuntimeError) as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
@@ -190,6 +269,7 @@ class ChunkAction(Enum):
     EDIT = auto()
     SKIP = auto()
     ABORT = auto()
+    REGENERATE = auto()
 
 
 @dataclass
@@ -207,26 +287,55 @@ class CommitUI:
         """Initialize the commit UI."""
         self.console = Console()
 
-    def _display_chunk(self, chunk: DiffChunk) -> None:
+    def _display_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> None:
         """Display a diff chunk to the user.
 
         Args:
             chunk: DiffChunk to display
+            index: The 0-based index of the current chunk
+            total_chunks: The total number of chunks
         """
         # Show affected files
         self.console.print("\n[bold blue]Files changed:[/]")
         for file in chunk.files:
             self.console.print(f"  • {file}")
 
-        # Show the diff
-        self.console.print("\n[bold blue]Changes:[/]")
-        syntax = Syntax(chunk.content, "diff", theme="monokai", line_numbers=True)
-        self.console.print(Panel(syntax))
+        # Display changes
+        console.print("\n[bold blue]Changes:[/bold blue]")
+        panel_content = chunk.content
+        if not panel_content.strip():
+            panel_content = "[dim]No content diff available (e.g., new file or mode change)[/dim]"
 
-        # Show generated message if available
+        # Truncate to maximum of MAX_PREVIEW_LINES lines
+        content_lines = panel_content.splitlines()
+        if len(content_lines) > MAX_PREVIEW_LINES:
+            remaining_lines = len(content_lines) - MAX_PREVIEW_LINES
+            panel_content = "\n".join(content_lines[:MAX_PREVIEW_LINES]) + f"\n... ({remaining_lines} more lines)"
+
+        # Log the content right before creating the Panel
+        logger.warning(
+            "Content before Panel: %s",
+            panel_content,
+        )
+
+        panel = Panel(
+            panel_content,
+            title=f"Chunk {index + 1} of {total_chunks} ({len(chunk.files)} file{'s' if len(chunk.files) > 1 else ''})",
+            border_style="cyan",
+            expand=False,
+        )
+        console.print(panel)
+
+        # Display generated message if available
         if chunk.description:
-            self.console.print("\n[bold blue]Generated commit message:[/]")
-            self.console.print(Panel(Markdown(chunk.description)))
+            if getattr(chunk, "is_llm_generated", False):
+                self.console.print("\n[bold blue]LLM-Generated commit message:[/]")
+                self.console.print(Panel(Markdown(chunk.description)))
+            else:
+                self.console.print("\n[bold yellow]Auto-generated commit message:[/]")
+                self.console.print(
+                    Panel(Markdown(f"{chunk.description} [dim](fallback message - LLM generation failed)[/dim]"))
+                )
 
     def _get_user_action(self) -> ChunkAction:
         """Get the user's desired action for the current chunk.
@@ -240,6 +349,7 @@ class CommitUI:
             ("Edit - Edit commit message", ChunkAction.EDIT),
             ("Skip - Skip these changes", ChunkAction.SKIP),
             ("Exit - Abort the commit process", ChunkAction.ABORT),
+            ("Regenerate - Regenerate the message", ChunkAction.REGENERATE),
         ]
 
         # Display the question using questionary
@@ -274,16 +384,18 @@ class CommitUI:
         self.console.print("[dim]Press Enter to keep current message[/]")
         return Prompt.ask("Message", default=current_message)
 
-    def process_chunk(self, chunk: DiffChunk) -> ChunkResult:
+    def process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> ChunkResult:
         """Process a single diff chunk interactively.
 
         Args:
             chunk: DiffChunk to process
+            index: The 0-based index of the current chunk
+            total_chunks: The total number of chunks
 
         Returns:
             ChunkResult with the user's action and any modified message
         """
-        self._display_chunk(chunk)
+        self._display_chunk(chunk, index, total_chunks)
         action = self._get_user_action()
 
         if action == ChunkAction.EDIT:
@@ -303,6 +415,19 @@ class CommitUI:
         """
         return Confirm.ask(
             "\n[bold red]Are you sure you want to abort?[/]",
+            default=False,
+        )
+
+    def confirm_bypass_hooks(self) -> bool:
+        """Ask the user to confirm bypassing git hooks.
+
+        Returns:
+            True if the user confirms, False otherwise
+        """
+        self.console.print("\n[bold yellow]Git hooks failed.[/]")
+        self.console.print("[yellow]This may be due to linting or other pre-commit checks.[/]")
+        return Confirm.ask(
+            "\n[bold yellow]Do you want to bypass git hooks and commit anyway?[/]",
             default=False,
         )
 

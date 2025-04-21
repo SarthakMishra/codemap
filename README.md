@@ -12,6 +12,7 @@ CodeMap is a powerful CLI tool that generates optimized markdown documentation f
 - 📝 Rich markdown output with code structure
 - 🌳 Repository structure visualization
 - 🔄 Smart Git commit assistance with AI-generated messages
+- 🔃 AI-powered PR creation and management
 
 ## Installation
 
@@ -22,6 +23,8 @@ pipx install git+https://github.com/SarthakMishra/codemap.git
 # Upgrade
 pipx upgrade codemap
 ```
+
+## Development Setup
 
 ## Basic Usage
 
@@ -49,6 +52,14 @@ codemap commit
 # Specify a different LLM model
 codemap commit --model gpt-4
 ```
+### Git Hooks Compatibility
+
+⚠️ **Warning**: By default, CodeMap commits use the `--no-verify` flag to bypass Git hooks, including pre-commit hooks. This is to prevent issues with hook failures that might interfere with the commit workflow. If you want to enable Git hooks, you can:
+
+1. Set `use_git_hooks: true` in your `.codemap.yml` configuration
+2. Use the `--use-hooks` flag with the commit command: `codemap commit --use-hooks`
+
+Note that using Git hooks with CodeMap might lead to unexpected behavior, especially if your hooks modify files during the commit process.
 
 ### Commit Strategy
 
@@ -58,19 +69,119 @@ CodeMap uses a semantic commit strategy that intelligently groups related files 
 - Code content similarity
 - Common file patterns (e.g., frontend components with their styles)
 
-### LLM Provider Support
+## PR Command Feature
+
+The `codemap pr` command helps you create and manage pull requests with ease. It integrates with the existing `codemap commit` command to provide a seamless workflow from code changes to pull request creation.
+
+### PR Command Features
+
+- Create a new branch by analyzing your changes
+- Commit all changes using the pre-existing commit tools
+- Push changes to origin
+- Generate a PR with appropriate messages by analyzing commits
+- Update existing PRs with new commits
+- Interactive workflow with helpful prompts
+
+### PR Command Requirements
+
+- Git repository with a remote named `origin`
+- GitHub CLI (`gh`) installed for PR creation and management
+- Valid GitHub authentication for the `gh` CLI
+
+### Creating a PR
+
+```bash
+codemap pr create [PATH] [OPTIONS]
+```
+
+**Arguments:**
+- `PATH`: Path to the repository (defaults to current directory)
+
+**Options:**
+- `--branch`, `-b`: Branch name to use (will be created if it doesn't exist)
+- `--base`: Base branch for the PR (default: main or master)
+- `--title`, `-t`: PR title (generated from commits if not provided)
+- `--description`, `-d`: PR description (generated from commits if not provided)
+- `--no-commit`: Don't commit changes before creating PR
+- `--force-push`, `-f`: Force push branch to remote
+- `--non-interactive`: Run in non-interactive mode
+- `--model`, `-m`: LLM model to use for commit message generation
+- `--api-key`: API key for LLM provider
+
+### Updating a PR
+
+```bash
+codemap pr update [PR_NUMBER] [OPTIONS]
+```
+
+**Arguments:**
+- `PR_NUMBER`: PR number to update (if not provided, will try to find PR for current branch)
+
+**Options:**
+- `--path`, `-p`: Path to repository
+- `--title`, `-t`: New PR title
+- `--description`, `-d`: New PR description
+- `--no-commit`: Don't commit changes before updating PR
+- `--force-push`, `-f`: Force push branch to remote
+- `--non-interactive`: Run in non-interactive mode
+- `--model`, `-m`: LLM model to use for commit message generation
+- `--api-key`: API key for LLM provider
+
+### PR Examples
+
+```bash
+# Interactive mode (recommended)
+codemap pr create
+
+# Specify a branch name
+codemap pr create --branch feature-branch
+
+# Create PR with custom title and description
+codemap pr create --title "My Feature" --description "This PR adds a new feature"
+
+# Create PR without committing changes
+codemap pr create --no-commit
+
+# Update PR by number
+codemap pr update 123
+
+# Update PR for current branch
+codemap pr update
+
+# Update PR with new title
+codemap pr update --title "Updated Feature"
+```
+
+### PR Workflow
+
+The typical workflow with the `codemap pr` command is:
+
+1. Make changes to your code
+2. Run `codemap pr create`
+3. Follow the interactive prompts to:
+   - Create or select a branch
+   - Commit your changes
+   - Push to remote
+   - Create a PR with generated title and description
+4. Make additional changes
+5. Run `codemap pr update` to add new commits and update the PR
+
+## LLM Provider Support
 
 CodeMap supports multiple LLM providers through LiteLLM:
 
 ```bash
 # Using OpenAI (default)
-codemap commit --model gpt-4.0-mini
+codemap commit --model openai/gpt-4o-mini
 
 # Using Anthropic
 codemap commit --model anthropic/claude-3-sonnet-20240229
 
 # Using Groq (recommended for speed)
-codemap commit --model groq/meta-llama/llama-4-scout-17b-16e-instruct
+codemap commit --model groq/llama-3.1-8b-instant
+
+# Using OpenRouter
+codemap commit --model openrouter/meta-llama/llama-3-8b-instruct
 ```
 
 ### Environment Variables
@@ -93,7 +204,7 @@ commit:
   llm:
     model: gpt-4o-mini
     provider: openai
-  
+
   # Semantic chunking settings
   semantic:
     similarity_threshold: 0.7

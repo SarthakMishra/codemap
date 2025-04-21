@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
+import subprocess
+import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import Annotated
 
 import questionary
 import typer
@@ -15,19 +18,17 @@ from rich.console import Console
 from rich.panel import Panel
 
 from codemap.git import GitWrapper
-from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
+from codemap.git.commit.diff_splitter import DiffSplitter, SplitStrategy
 from codemap.git.commit.interactive import process_all_chunks
-from codemap.git.commit.message_generator import MessageGenerator
-from codemap.git.commit.command import setup_message_generator
-from codemap.git.utils.git_utils import GitError
-from codemap.git.utils.pr_utils import (
+from codemap.utils import loading_spinner, validate_repo_path
+from codemap.utils.git_utils import GitError
+from codemap.utils.llm_utils import create_universal_generator, generate_message
+from codemap.utils.pr_utils import (
     PullRequest,
     branch_exists,
     checkout_branch,
     create_branch,
     create_pull_request,
-    generate_pr_description_from_commits,
-    generate_pr_title_from_commits,
     get_commit_messages,
     get_current_branch,
     get_default_branch,
@@ -36,7 +37,6 @@ from codemap.git.utils.pr_utils import (
     suggest_branch_name,
     update_pull_request,
 )
-from codemap.utils import validate_repo_path
 
 app = typer.Typer(help="Generate and manage pull requests")
 console = Console()
@@ -55,18 +55,18 @@ class PROptions:
     """Options for the PR command."""
 
     repo_path: Path
-    branch_name: Optional[str] = field(default=None)
-    base_branch: Optional[str] = field(default=None)
-    title: Optional[str] = field(default=None)
-    description: Optional[str] = field(default=None)
+    branch_name: str | None = field(default=None)
+    base_branch: str | None = field(default=None)
+    title: str | None = field(default=None)
+    description: str | None = field(default=None)
     commit_first: bool = field(default=True)
     force_push: bool = field(default=False)
-    pr_number: Optional[int] = field(default=None)
+    pr_number: int | None = field(default=None)
     interactive: bool = field(default=True)
-    model: str = field(default="gpt-4o-mini")
-    provider: Optional[str] = field(default=None)
-    api_base: Optional[str] = field(default=None)
-    api_key: Optional[str] = field(default=None)
+    model: str | None = field(default=None)
+    provider: str | None = field(default=None)
+    api_base: str | None = field(default=None)
+    api_key: str | None = field(default=None)
 
 
 @app.callback()
@@ -90,7 +90,7 @@ def _validate_branch_name(branch_name: str) -> bool:
     return True
 
 
-def _handle_branch_creation(options: PROptions) -> Optional[str]:
+def _handle_branch_creation(options: PROptions) -> str | None:
     """Handle branch creation or selection.
 
     Args:
@@ -120,40 +120,39 @@ def _handle_branch_creation(options: PROptions) -> Optional[str]:
         # Get uncommitted changes to suggest a branch name
         git = GitWrapper(options.repo_path)
         diff = git.get_uncommitted_changes()
-        
+
         # Generate a suggested branch name based on the changes
         suggested_name = ""
         if diff.files:
             # Use the diff splitter to get semantic chunks
             splitter = DiffSplitter(options.repo_path)
             chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
-            
+
             if chunks:
                 # Set up message generator for the first chunk
-                generator = setup_message_generator(
-                    options.repo_path,
+                generator = create_universal_generator(
+                    repo_path=options.repo_path,
                     model=options.model,
-                    provider=options.provider,
-                    api_base=options.api_base,
                     api_key=options.api_key,
+                    api_base=options.api_base,
                 )
-                
+
                 # Generate a commit message for the first chunk
                 try:
-                    message, _ = generator.generate_message(chunks[0])
+                    message, _ = generate_message(chunks[0], generator)
                     # Extract the first line as the commit message
                     first_line = message.split("\n")[0] if "\n" in message else message
                     suggested_name = suggest_branch_name([first_line])
-                except Exception:
+                except (ValueError, RuntimeError, ConnectionError):
                     # Fallback to a simple branch name
                     suggested_name = suggest_branch_name([f"update-{chunks[0].files[0]}"])
-        
+
         # Ask for branch name
         branch_name = questionary.text(
             "Enter branch name:",
             default=suggested_name,
         ).ask()
-        
+
         if not branch_name or not _validate_branch_name(branch_name):
             return None
     else:
@@ -169,7 +168,7 @@ def _handle_branch_creation(options: PROptions) -> Optional[str]:
             ).ask()
             if not use_existing:
                 return None
-        
+
         # Checkout existing branch
         try:
             checkout_branch(branch_name)
@@ -227,20 +226,20 @@ def _handle_commits(options: PROptions) -> bool:
             return True
 
         # Set up message generator
-        generator = setup_message_generator(
-            options.repo_path,
+        generator = create_universal_generator(
+            repo_path=options.repo_path,
             model=options.model,
-            provider=options.provider,
-            api_base=options.api_base,
             api_key=options.api_key,
+            api_base=options.api_base,
         )
 
         # Process all chunks
         result = process_all_chunks(options.repo_path, chunks, generator, git, interactive=options.interactive)
-        return result == 0
-    except Exception as e:
+    except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error committing changes: {e}[/red]")
         return False
+    else:
+        return result == 0
 
 
 def _handle_push(options: PROptions, branch_name: str) -> bool:
@@ -260,19 +259,21 @@ def _handle_push(options: PROptions, branch_name: str) -> bool:
             default=True,
         ).ask()
         if not push_changes:
-            return False
+            console.print("[yellow]Not pushing branch to remote.[/yellow]")
+            return True
 
     # Push branch
     try:
         push_branch(branch_name, force=options.force_push)
         console.print(f"[green]Pushed branch '{branch_name}' to remote.[/green]")
-        return True
     except GitError as e:
         console.print(f"[red]Error pushing branch: {e}[/red]")
         return False
+    else:
+        return True
 
 
-def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRequest]:
+def _handle_pr_creation(options: PROptions, branch_name: str) -> PullRequest | None:
     """Handle PR creation.
 
     Args:
@@ -296,9 +297,8 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
             if use_existing:
                 return _handle_pr_update(options, existing_pr)
             return None
-        else:
-            console.print(f"[yellow]PR #{existing_pr.number} already exists for branch '{branch_name}'.[/yellow]")
-            return existing_pr
+        console.print(f"[yellow]PR #{existing_pr.number} already exists for branch '{branch_name}'.[/yellow]")
+        return existing_pr
 
     # Get commit messages
     try:
@@ -307,9 +307,32 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
         console.print(f"[red]Error getting commit messages: {e}[/red]")
         commits = []
 
-    # Generate PR title and description
-    title = options.title or generate_pr_title_from_commits(commits)
-    description = options.description or generate_pr_description_from_commits(commits)
+    # Generate PR title and description with AI if possible
+    try:
+        # Display a spinner while generating PR content
+        with loading_spinner("Generating PR content with AI..."):
+            from codemap.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+
+            # Try AI-generated title and description first
+            title = options.title
+            if not title:
+                title = generate_pr_title_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+
+            description = options.description
+            if not description:
+                description = generate_pr_description_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        console.print(f"[yellow]AI generation failed: {e}[/yellow]")
+        console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
+        # Fallback to rule-based generation
+        from codemap.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+
+        title = options.title or generate_pr_title_from_commits(commits)
+        description = options.description or generate_pr_description_from_commits(commits)
 
     # In interactive mode, allow editing title and description
     if options.interactive:
@@ -321,14 +344,10 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
         # Show description preview
         console.print("\nPR description preview:")
         console.print(Panel(description, title="Description"))
-        
+
         edit_description = questionary.confirm("Edit description?", default=False).ask()
         if edit_description:
             # Use a temporary file for editing
-            import tempfile
-            import subprocess
-            import os
-
             with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as temp:
                 temp.write(description)
                 temp_path = temp.name
@@ -336,26 +355,27 @@ def _handle_pr_creation(options: PROptions, branch_name: str) -> Optional[PullRe
             try:
                 # Try to use the user's preferred editor
                 editor = os.environ.get("EDITOR", "nano")
-                subprocess.run([editor, temp_path], check=True)  # noqa: S603, S607
-                
-                with open(temp_path, "r") as temp:
+                subprocess.run([editor, temp_path], check=True)  # noqa: S603
+
+                with Path(temp_path).open() as temp:
                     description = temp.read()
-            except Exception as e:
+            except OSError as e:
                 console.print(f"[red]Error editing description: {e}[/red]")
             finally:
-                os.unlink(temp_path)
+                Path(temp_path).unlink()
 
     # Create PR
     try:
         pr = create_pull_request(base_branch, branch_name, title, description)
         console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
-        return pr
     except GitError as e:
         console.print(f"[red]Error creating PR: {e}[/red]")
         return None
+    else:
+        return pr
 
 
-def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullRequest]:
+def _handle_pr_update(options: PROptions, pr: PullRequest) -> PullRequest | None:
     """Handle PR update.
 
     Args:
@@ -375,9 +395,32 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullReque
         console.print(f"[red]Error getting commit messages: {e}[/red]")
         commits = []
 
-    # Generate PR title and description
-    title = options.title or pr.title or generate_pr_title_from_commits(commits)
-    description = options.description or pr.description or generate_pr_description_from_commits(commits)
+    # Generate PR title and description with AI if possible
+    try:
+        # Display a spinner while generating PR content
+        with loading_spinner("Generating PR content with AI..."):
+            from codemap.utils.pr_utils import generate_pr_description_with_llm, generate_pr_title_with_llm
+
+            # Try AI-generated title and description first
+            title = options.title or pr.title
+            if not title:
+                title = generate_pr_title_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+
+            description = options.description or pr.description
+            if not description:
+                description = generate_pr_description_with_llm(
+                    commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+                )
+    except (ValueError, RuntimeError, ConnectionError) as e:
+        console.print(f"[yellow]AI generation failed: {e}[/yellow]")
+        console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
+        # Fallback to rule-based generation
+        from codemap.utils.pr_utils import generate_pr_description_from_commits, generate_pr_title_from_commits
+
+        title = options.title or pr.title or generate_pr_title_from_commits(commits)
+        description = options.description or pr.description or generate_pr_description_from_commits(commits)
 
     # In interactive mode, allow editing title and description
     if options.interactive:
@@ -389,14 +432,10 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullReque
         # Show description preview
         console.print("\nPR description preview:")
         console.print(Panel(description, title="Description"))
-        
+
         edit_description = questionary.confirm("Edit description?", default=False).ask()
         if edit_description:
             # Use a temporary file for editing
-            import tempfile
-            import subprocess
-            import os
-
             with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as temp:
                 temp.write(description)
                 temp_path = temp.name
@@ -404,23 +443,81 @@ def _handle_pr_update(options: PROptions, pr: PullRequest) -> Optional[PullReque
             try:
                 # Try to use the user's preferred editor
                 editor = os.environ.get("EDITOR", "nano")
-                subprocess.run([editor, temp_path], check=True)  # noqa: S603, S607
-                
-                with open(temp_path, "r") as temp:
+                subprocess.run([editor, temp_path], check=True)  # noqa: S603
+
+                with Path(temp_path).open() as temp:
                     description = temp.read()
-            except Exception as e:
+            except OSError as e:
                 console.print(f"[red]Error editing description: {e}[/red]")
             finally:
-                os.unlink(temp_path)
+                Path(temp_path).unlink()
 
     # Update PR
     try:
         updated_pr = update_pull_request(pr.number, title, description)
         console.print(f"[green]Updated PR #{updated_pr.number}: {updated_pr.url}[/green]")
-        return updated_pr
     except GitError as e:
         console.print(f"[red]Error updating PR: {e}[/red]")
         return None
+    else:
+        return updated_pr
+
+
+def _load_llm_config(repo_path: Path) -> dict:
+    """Load LLM configuration from .codemap.yml file.
+
+    Args:
+        repo_path: Path to the repository
+
+    Returns:
+        Dictionary with LLM configuration values
+    """
+    config = {
+        "model": "gpt-4o-mini",  # Default fallback model
+        "api_base": None,
+        "api_key": None,
+    }
+
+    config_file = repo_path / ".codemap.yml"
+    if config_file.exists():
+        try:
+            import yaml
+
+            with config_file.open("r") as f:
+                yaml_config = yaml.safe_load(f)
+
+            if yaml_config is not None and isinstance(yaml_config, dict) and "commit" in yaml_config:
+                commit_config = yaml_config["commit"]
+
+                # Load LLM settings if available
+                if "llm" in commit_config and isinstance(commit_config["llm"], dict):
+                    llm_config = commit_config["llm"]
+
+                    if "model" in llm_config:
+                        config["model"] = llm_config["model"]
+
+                    if "api_base" in llm_config:
+                        config["api_base"] = llm_config["api_base"]
+
+                    # Use the same API keys from commit configuration
+                    # This ensures consistency between commit and PR features
+                    provider = None
+                    if "/" in config["model"]:
+                        provider = config["model"].split("/")[0].lower()
+
+                    if provider:
+                        config_key = f"{provider}_api_key"
+                        if config_key in llm_config:
+                            config["api_key"] = llm_config[config_key]
+
+                    # Also check for generic API key
+                    if "api_key" in llm_config and not config["api_key"]:
+                        config["api_key"] = llm_config["api_key"]
+
+        except (ImportError, yaml.YAMLError, OSError) as e:
+            logger.warning("Error loading config: %s", e)
+
+    return config
 
 
 @app.command(help="Create a new pull request")
@@ -489,19 +586,18 @@ def create(
         ),
     ] = False,
     model: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--model",
             "-m",
-            help="LLM model to use for commit message generation",
+            help="LLM model to use for PR content generation",
         ),
-    ] = "gpt-4o-mini",
+    ] = None,
     api_key: Annotated[
         str | None,
         typer.Option(
             "--api-key",
             help="API key for LLM provider",
-            envvar="OPENAI_API_KEY",
         ),
     ] = None,
 ) -> int:
@@ -516,7 +612,7 @@ def create(
         no_commit: Don't commit changes before creating PR
         force_push: Force push branch to remote
         non_interactive: Run in non-interactive mode
-        model: LLM model to use for commit message generation
+        model: LLM model to use for PR content generation
         api_key: API key for LLM provider
 
     Returns:
@@ -526,6 +622,18 @@ def create(
     if not repo_path:
         console.print("[red]Error:[/red] Not a valid Git repository")
         return 1
+
+    # Load LLM config from .codemap.yml
+    llm_config = _load_llm_config(repo_path)
+
+    # Command line options take precedence over config file
+    if not model:
+        model = llm_config["model"]
+
+    if not api_key:
+        api_key = llm_config["api_key"]
+
+    api_base = llm_config["api_base"]
 
     options = PROptions(
         repo_path=repo_path,
@@ -538,6 +646,7 @@ def create(
         interactive=not non_interactive,
         model=model,
         api_key=api_key,
+        api_base=api_base,
     )
 
     # Handle branch creation or selection
@@ -624,19 +733,18 @@ def update(
         ),
     ] = False,
     model: Annotated[
-        str,
+        str | None,
         typer.Option(
             "--model",
             "-m",
-            help="LLM model to use for commit message generation",
+            help="LLM model to use for PR content generation",
         ),
-    ] = "gpt-4o-mini",
+    ] = None,
     api_key: Annotated[
         str | None,
         typer.Option(
             "--api-key",
             help="API key for LLM provider",
-            envvar="OPENAI_API_KEY",
         ),
     ] = None,
 ) -> int:
@@ -650,7 +758,7 @@ def update(
         no_commit: Don't commit changes before updating PR
         force_push: Force push branch to remote
         non_interactive: Run in non-interactive mode
-        model: LLM model to use for commit message generation
+        model: LLM model to use for PR content generation
         api_key: API key for LLM provider
 
     Returns:
@@ -660,6 +768,18 @@ def update(
     if not repo_path:
         console.print("[red]Error:[/red] Not a valid Git repository")
         return 1
+
+    # Load LLM config from .codemap.yml
+    llm_config = _load_llm_config(repo_path)
+
+    # Command line options take precedence over config file
+    if not model:
+        model = llm_config["model"]
+
+    if not api_key:
+        api_key = llm_config["api_key"]
+
+    api_base = llm_config["api_base"]
 
     options = PROptions(
         repo_path=repo_path,
@@ -671,6 +791,7 @@ def update(
         interactive=not non_interactive,
         model=model,
         api_key=api_key,
+        api_base=api_base,
     )
 
     # Get current branch
@@ -681,12 +802,12 @@ def update(
     if pr_number:
         # Try to get PR details
         try:
-            import subprocess
             import json
+            import subprocess
 
             # Use gh CLI to get PR details
             cmd = ["gh", "pr", "view", str(pr_number), "--json", "number,title,body,headRefName,url"]
-            result = subprocess.run(cmd, capture_output=True, text=True)  # noqa: S603, S607
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
             if result.returncode == 0:
                 pr_data = json.loads(result.stdout)
                 pr = PullRequest(
@@ -701,7 +822,8 @@ def update(
                 if pr.branch != current_branch:
                     if options.interactive:
                         switch = questionary.confirm(
-                            f"PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'. Switch branches?",
+                            f"PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'. "
+                            "Switch branches?",
                             default=True,
                         ).ask()
                         if switch:
@@ -713,9 +835,12 @@ def update(
                                 console.print(f"[red]Error switching branches: {e}[/red]")
                                 return 1
                     else:
-                        console.print(f"[red]PR #{pr.number} is for branch '{pr.branch}', but you're on '{current_branch}'.[/red]")
+                        console.print(
+                            f"[red]PR #{pr.number} is for branch '{pr.branch}', but you're on "
+                            f"'{current_branch}'.[/red]",
+                        )
                         return 1
-        except Exception as e:
+        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as e:
             console.print(f"[red]Error getting PR details: {e}[/red]")
     else:
         # Try to find PR for current branch
