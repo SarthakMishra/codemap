@@ -7,12 +7,11 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
 
 import codemap.cli_app
+from codemap.utils.pr_utils import PullRequest
 
 app = codemap.cli_app.app
-from codemap.utils.pr_utils import PullRequest
 
 
 @pytest.fixture
@@ -109,11 +108,9 @@ def test_pr_create_command() -> None:
     """Test the PR create command."""
     # This test is skipped because it requires a refactoring of the CLI structure
     # The test will be updated in a future PR
-    pass
 
 
 def test_pr_update_command() -> None:
     """Test the PR update command."""
     # This test is skipped because it requires a refactoring of the CLI structure
     # The test will be updated in a future PR
-    pass
