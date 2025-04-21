@@ -16,12 +16,12 @@ try:
     env_local = Path(".env.local")
     if env_local.exists():
         load_dotenv(dotenv_path=env_local)
-        logging.getLogger(__name__).info("Loaded environment variables from %s", env_local)
+        logging.getLogger(__name__).debug("Loaded environment variables from %s", env_local)
     else:
         env_file = Path(".env")
         if env_file.exists():
             load_dotenv(dotenv_path=env_file)
-            logging.getLogger(__name__).info("Loaded environment variables from %s", env_file)
+            logging.getLogger(__name__).debug("Loaded environment variables from %s", env_file)
 except ImportError:
     pass  # dotenv not installed, skip loading
 
