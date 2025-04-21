@@ -231,7 +231,9 @@ class MarkdownGenerator:
             # Determine if file is within target path first to avoid try-except in loop
             if str(file_path).startswith(str(self.target_path)):
                 try:
-                    rel_path = file_path.relative_to(self.target_path)
+                    # Ensure file_path is a Path object
+                    path_obj = Path(file_path) if isinstance(file_path, str) else file_path
+                    rel_path = path_obj.relative_to(self.target_path)
                     lines.append(f"- {rel_path}")
                 except ValueError:
                     # Fallback in case of unexpected error
