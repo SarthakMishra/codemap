@@ -8,10 +8,11 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING, Union, cast
 
 import questionary
-from rich.console import Console
-from rich.markdown import Markdown
+from rich.console import Console, Group
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
+from rich.rule import Rule
+from rich.text import Text
 
 if TYPE_CHECKING:
     from .diff_splitter import DiffChunk as DiffSplitterChunk
@@ -58,17 +59,23 @@ def process_all_chunks(
     while i < len(chunks):
         chunk = chunks[i]
         if interactive:
-            # Display chunk information
+            # Display chunk information with consistent terminology
             console.print(f"\n[bold]Commit {i + 1} of {len(chunks)}[/bold]")
             _print_chunk_summary(chunk, i)
 
             # Generate commit message
             message, used_llm = _generate_commit_message(chunk, generator)
 
-            # Display proposed message
-            tag = "[blue]AI[/blue]" if used_llm else "[yellow]Simple[/yellow]"
-            console.print(f"\nProposed message ({tag}):")
-            console.print(f"[green]{message}[/green]")
+            # Display proposed message in a panel
+            tag = "AI" if used_llm else "Simple"
+            message_panel = Panel(
+                Text(message, style="green"),
+                title=f"[bold blue]Proposed message ({tag})[/]",
+                border_style="blue" if used_llm else "yellow",
+                expand=False,
+                padding=(1, 2),
+            )
+            console.print(message_panel)
 
             # Ask user what to do
             choices = [
@@ -152,7 +159,7 @@ def _print_chunk_summary(chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, i
         chunk: The diff chunk to print
         index: Index of the chunk
     """
-    console.print(f"Chunk {index + 1}:")
+    console.print(f"[bold]Commit {index + 1}[/bold]:")
     console.print(f"  Files: {', '.join(chunk.files)}")
 
     # Calculate changes
@@ -232,18 +239,35 @@ class CommitUI:
         """Initialize the commit UI."""
         self.console = Console()
 
-    def _display_chunk(self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk) -> None:
+    def _display_chunk(
+        self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, index: int = 0, total: int = 1
+    ) -> None:
         """Display a diff chunk to the user.
 
         Args:
             chunk: DiffChunk to display
+            index: The 0-based index of the current chunk
+            total: The total number of chunks
         """
-        # Show affected files
-        self.console.print("\n[bold blue]Files changed:[/]")
-        for file in chunk.files:
-            self.console.print(f"  • {file}")
+        # Import rich components
+        from rich.panel import Panel
+        from rich.text import Text
 
-        # Display changes
+        # Build file information
+        file_info = Text("Files: ", style="blue")
+        file_info.append(", ".join(chunk.files))
+
+        # Calculate changes
+        added = len(
+            [line for line in chunk.content.splitlines() if line.startswith("+") and not line.startswith("+++")]
+        )
+        removed = len(
+            [line for line in chunk.content.splitlines() if line.startswith("-") and not line.startswith("---")]
+        )
+        changes_info = Text("\nChanges: ", style="blue")
+        changes_info.append(f"{added} added, {removed} removed")
+
+        # Prepare diff content
         panel_content = chunk.content
         if not panel_content.strip():
             panel_content = "[dim]No content diff available (e.g., new file or mode change)[/dim]"
@@ -254,36 +278,59 @@ class CommitUI:
             remaining_lines = len(content_lines) - MAX_PREVIEW_LINES
             panel_content = "\n".join(content_lines[:MAX_PREVIEW_LINES]) + f"\n... ({remaining_lines} more lines)"
 
-        # Create a panel for the changes with better styling
-        changes_panel = Panel(
-            panel_content,
-            title=f"[bold cyan]Changes ({len(chunk.files)} file{'s' if len(chunk.files) > 1 else ''})[/]",
-            border_style="cyan",
-            expand=False,
-            padding=(1, 2),
-        )
-        console.print(changes_panel)
+        diff_content = Text("\n" + panel_content)
 
-        # Display generated message if available
-        if chunk.description:
+        # Determine title for the panel - use provided index and total
+        panel_title = f"[bold]Commit {index + 1} of {total}[/bold]"
+
+        # Create content for the panel conditionally
+        if getattr(chunk, "description", None):
+            # If there's a description, create a combined panel
             if getattr(chunk, "is_llm_generated", False):
-                message_panel = Panel(
-                    Markdown(chunk.description),
-                    title="[bold blue]LLM-Generated Commit Message[/]",
-                    border_style="blue",
-                    expand=False,
-                    padding=(1, 2),
-                )
-                self.console.print(message_panel)
+                message_title = "[bold blue]Proposed message (AI)[/]"
+                message_style = "blue"
             else:
-                message_panel = Panel(
-                    Markdown(f"{chunk.description} [dim](fallback message - LLM generation failed)[/dim]"),
-                    title="[bold yellow]Auto-generated Commit Message[/]",
-                    border_style="yellow",
-                    expand=False,
-                    padding=(1, 2),
-                )
-                self.console.print(message_panel)
+                message_title = "[bold yellow]Proposed message (Simple)[/]"
+                message_style = "yellow"
+
+            # Create separate panels and print them
+            # First, print the diff panel
+            diff_panel = Panel(
+                Group(file_info, changes_info, diff_content),
+                title=panel_title,
+                border_style="cyan",
+                expand=True,
+                width=self.console.width,
+                padding=(1, 2),
+            )
+            self.console.print(diff_panel)
+
+            # Print divider
+            self.console.print(Rule(style="dim"))
+
+            # Then print the message panel
+            message_panel = Panel(
+                Text(str(chunk.description), style="green"),
+                title=message_title,
+                border_style=message_style,
+                expand=True,
+                width=self.console.width,
+                padding=(1, 2),
+            )
+            self.console.print(message_panel)
+        else:
+            # If no description, just print the diff panel
+            panel = Panel(
+                Group(file_info, changes_info, diff_content),
+                title=panel_title,
+                border_style="cyan",
+                expand=True,
+                width=self.console.width,
+                padding=(1, 2),
+            )
+            self.console.print()
+            self.console.print(panel)
+            self.console.print()
 
     def _get_user_action(self) -> ChunkAction:
         """Get the user's desired action for the current chunk.
@@ -293,20 +340,19 @@ class CommitUI:
         """
         # Define options with their display text and corresponding action
         options: list[tuple[str, ChunkAction]] = [
-            ("Accept - Commit changes with current message", ChunkAction.ACCEPT),
-            ("Edit - Edit commit message", ChunkAction.EDIT),
-            ("Skip - Skip these changes", ChunkAction.SKIP),
-            ("Exit - Abort the commit process", ChunkAction.ABORT),
-            ("Regenerate - Regenerate the message", ChunkAction.REGENERATE),
+            ("Commit with this message", ChunkAction.ACCEPT),
+            ("Edit message and commit", ChunkAction.EDIT),
+            ("Regenerate message", ChunkAction.REGENERATE),
+            ("Skip this chunk", ChunkAction.SKIP),
+            ("Exit without committing", ChunkAction.ABORT),
         ]
 
-        # Display the question using questionary
-        self.console.print("\n[bold yellow]What would you like to do?[/]")
+        # Use questionary to get the user's choice
         result = questionary.select(
-            "",
+            "What would you like to do?",
             choices=[option[0] for option in options],
-            default=options[0][0],  # Set "Accept" as default
-            qmark="",  # Remove the question mark
+            default=options[0][0],  # Set "Commit with this message" as default
+            qmark="»",
             use_indicator=True,
             use_arrow_keys=True,
         ).ask()
@@ -332,16 +378,23 @@ class CommitUI:
         self.console.print("[dim]Press Enter to keep current message[/]")
         return Prompt.ask("Message", default=current_message)
 
-    def process_chunk(self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk) -> ChunkResult:
+    def process_chunk(
+        self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, index: int = 0, total: int = 1
+    ) -> ChunkResult:
         """Process a single diff chunk interactively.
 
         Args:
             chunk: DiffChunk to process
+            index: The 0-based index of the current chunk
+            total: The total number of chunks
 
         Returns:
             ChunkResult with the user's action and any modified message
         """
-        self._display_chunk(chunk)
+        # Display the combined diff and message panel
+        self._display_chunk(chunk, index, total)
+
+        # Now get the user's action through questionary (without displaying another message panel)
         action = self._get_user_action()
 
         if action == ChunkAction.EDIT:

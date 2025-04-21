@@ -156,7 +156,7 @@ class MessageGenerator:
             self.resolved_provider,
             self.resolved_api_base,
         ) = self._resolve_llm_configuration(self._initial_model, self._initial_provider, self._initial_api_base)
-        logger.info(
+        logger.debug(
             "Resolved LLM Configuration: Provider=%s, Model=%s, API_Base=%s",
             self.resolved_provider,
             self.resolved_model,
@@ -374,12 +374,6 @@ class MessageGenerator:
             if prefix in KNOWN_PROVIDERS:
                 # Model has prefix, this is the most specific information
                 inferred_provider = prefix
-                if resolved_provider and resolved_provider.lower() != inferred_provider:
-                    logger.warning(
-                        "Explicit provider '%s' conflicts with model prefix '%s'. Using prefix.",
-                        resolved_provider,
-                        inferred_provider,
-                    )
                 resolved_provider = inferred_provider
                 logger.debug("Provider '%s' inferred from model name '%s'", resolved_provider, resolved_model)
             # Has a slash, but not a known provider prefix. Treat as opaque model name.
@@ -566,11 +560,10 @@ class MessageGenerator:
             if env_var:
                 api_key = os.environ.get(env_var)
                 if api_key:
-                    logger.warning(
-                        "Found API key for %s in environment variable %s after initial load failed.",
-                        provider_to_use,
-                        env_var,
+                    logger.debug(
+                        "API key for resolved provider '%s' found in environment variable %s.", provider_to_use, env_var
                     )
+                    return api_key
 
         if not api_key:
             error_msg = (
@@ -843,7 +836,7 @@ class MessageGenerator:
         Raises:
             LLMError: If API key is missing or LLM call fails unexpectedly.
         """
-        logger.info(
+        logger.debug(
             "Generating message for chunk ID: %s. Using resolved config: Provider=%s, Model=%s",
             id(chunk),
             self.resolved_provider,
@@ -859,15 +852,15 @@ class MessageGenerator:
             is_llm_gen = getattr(chunk, "is_llm_generated", False)  # Check original object if possible
 
             if not is_generic and is_llm_gen:
-                logger.info("Chunk already has LLM-generated description: '%s'", existing_desc)
+                logger.debug("Chunk already has LLM-generated description: '%s'", existing_desc)
                 return existing_desc, True  # Assume it was LLM generated previously
             if not is_generic and not is_llm_gen:
-                logger.info(
+                logger.debug(
                     "Chunk has existing non-generic, non-LLM description: '%s'. Attempting to improve.", existing_desc
                 )
                 # Proceed to generate below
             elif is_generic:
-                logger.info("Existing description is generic ('%s'). Attempting to generate.", existing_desc)
+                logger.debug("Existing description is generic ('%s'). Attempting to generate.", existing_desc)
                 # Proceed to generate below
 
         # Verify API key availability using the resolved provider
@@ -931,7 +924,7 @@ class MessageGenerator:
                 message = self._call_llm_api(prompt)
 
             formatted_message = self._format_message(message)
-            logger.info("LLM generated message: '%s'", formatted_message)
+            logger.debug("LLM generated message: '%s'", formatted_message)
             # Mark the chunk if possible (requires chunk to be mutable or return new object)
             if isinstance(chunk, DiffChunk):
                 chunk.is_llm_generated = True  # Mark original object if it's the class type

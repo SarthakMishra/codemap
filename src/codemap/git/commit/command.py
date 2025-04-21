@@ -68,7 +68,7 @@ class CommitCommand:
             try:
                 # Use git add . to stage everything
                 run_git_command(["git", "add", "."])
-                logger.info("Staged all changes for analysis")
+                logger.debug("Staged all changes for analysis")
             except GitError as e:
                 logger.warning("Failed to stage all changes: %s", e)
                 # Continue with the process even if staging fails
@@ -113,15 +113,15 @@ class CommitCommand:
         # Constants to avoid magic numbers
         max_log_message_length = 40
 
-        logger.warning("COMMAND: Starting commit message generation for %s", chunk.files)
+        logger.debug("Starting commit message generation for %s", chunk.files)
         try:
             with loading_spinner("Generating commit message using LLM..."):
                 # Use the universal message generator
-                logger.warning("COMMAND: Calling generate_message")
+                logger.debug("Calling generate_message")
                 message, is_llm = generate_message(chunk, self.message_generator)
 
-                logger.warning(
-                    "COMMAND: Got response - is_llm=%s, message=%s",
+                logger.debug(
+                    "Got response - is_llm=%s, message=%s",
                     is_llm,
                     message[:max_log_message_length] + "..."
                     if message and len(message) > max_log_message_length
@@ -133,14 +133,14 @@ class CommitCommand:
                 chunk.is_llm_generated = is_llm
 
                 if is_llm:
-                    logger.info("Generated commit message using LLM: %s", message)
+                    logger.debug("Generated commit message using LLM: %s", message)
                 else:
                     logger.warning("Using automatically generated fallback message: %s", message)
 
         except LLMError as e:
             # If LLM generation fails, try fallback with clear indication
             logger.exception("LLM message generation failed")
-            logger.warning("COMMAND: LLM error: %s", str(e))
+            logger.warning("LLM error: %s", str(e))
             with loading_spinner("Falling back to simple message generation..."):
                 # Convert DiffChunk to DiffChunkDict before passing to fallback_generation
                 chunk_dict = DiffChunkDict(
@@ -152,7 +152,7 @@ class CommitCommand:
                 chunk.is_llm_generated = False
                 logger.warning("Using fallback message: %s", message)
         except (ValueError, RuntimeError) as e:
-            logger.warning("COMMAND: Other error: %s", str(e))
+            logger.warning("Other error: %s", str(e))
             msg = f"Failed to generate commit message: {e}"
             raise RuntimeError(msg) from e
 
@@ -171,13 +171,19 @@ class CommitCommand:
             RuntimeError: If Git operations fail
         """
         # Add logging here
-        logger.warning(
-            "ENTERING _process_chunk - Chunk ID: %s, Index: %d/%d, Initial Desc: %s",
+        logger.debug(
+            "Processing chunk - Chunk ID: %s, Index: %d/%d, Initial Desc: %s",
             id(chunk),
             index + 1,  # Display 1-based index
             total_chunks,
             getattr(chunk, "description", "<None>"),
         )
+
+        # Remove any chunk.index and chunk.total attributes if they exist
+        if hasattr(chunk, "index"):
+            delattr(chunk, "index")
+        if hasattr(chunk, "total"):
+            delattr(chunk, "total")
 
         while True:  # Loop to handle regeneration
             # Generate commit message
@@ -185,7 +191,8 @@ class CommitCommand:
 
             # Get user action
             # Explicitly use the CommitUI.process_chunk method to help type checking
-            result: ChunkResult = self.ui.process_chunk(chunk)
+            # Pass index and total as separate arguments to avoid modifying the chunk
+            result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
 
             if result.action == ChunkAction.ABORT:
                 return not self.ui.confirm_abort()
@@ -269,7 +276,18 @@ class CommitCommand:
 
             # Process each change group (staged, unstaged, untracked)
             for diff in changes:
-                # Always use semantic strategy for better commit organization
+                # Check sentence-transformers availability first with a separate loading spinner
+                with loading_spinner("Checking semantic analysis capabilities..."):
+                    # Force check of sentence-transformers availability
+                    self.splitter._check_sentence_transformers_availability()  # noqa: SLF001
+
+                # Show a separate loading spinner for model loading if sentence-transformers is available
+                if self.splitter._sentence_transformers_available:  # noqa: SLF001
+                    with loading_spinner("Loading embedding model..."):
+                        # Force check of model availability which loads the model
+                        self.splitter._check_model_availability()  # noqa: SLF001
+
+                # Now proceed with organizing changes semantically
                 with loading_spinner("Organizing changes semantically..."):
                     chunks = self.splitter.split_diff(diff, "semantic")
                 if not chunks:

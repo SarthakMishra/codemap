@@ -84,12 +84,9 @@ class DiffSplitter:
         # Initialize related file patterns
         self._related_file_patterns = self._initialize_related_file_patterns()
 
-        # Check sentence-transformers and model availability once at initialization
-        if DiffSplitter._sentence_transformers_available is None:
-            DiffSplitter._sentence_transformers_available = self._check_sentence_transformers_availability()
-
-        if DiffSplitter._sentence_transformers_available and DiffSplitter._model_available is None:
-            DiffSplitter._model_available = self._check_model_availability()
+        # Do NOT automatically check availability - let the command class do this explicitly
+        # This avoids checks happening during initialization without visible loading states
+        # The check methods will be called explicitly by the command with proper loading spinners
 
     @classmethod
     def _check_sentence_transformers_availability(cls) -> bool:
@@ -102,7 +99,7 @@ class DiffSplitter:
             # This is needed for the import check, but don't flag as unused
             import sentence_transformers  # type: ignore  # noqa: F401, PGH003
 
-            logger.info("\nsentence-transformers is available")
+            logger.debug("sentence-transformers is available")
             return True
         except ImportError:
             logger.warning(
@@ -140,7 +137,7 @@ class DiffSplitter:
                     sys.stdout = capture_out
 
                     # Log the model loading start
-                    logger.info("Loading embedding model: %s", model_name)
+                    logger.debug("Loading embedding model: %s", model_name)
 
                     # Load the model (this will trigger the loading bar output)
                     DiffSplitter._embedding_model = SentenceTransformer(model_name)
@@ -149,7 +146,7 @@ class DiffSplitter:
                     output = capture_out.getvalue()
                     if output and "Loading checkpoint shards" in output:
                         # Print with cleaner formatting that's more consistent with the rest of the UI
-                        logger.info("Initialized embedding model: %s", model_name)
+                        logger.debug("Initialized embedding model: %s", model_name)
                     # If there's other output, print it normally
                     elif output.strip():
                         original_stdout.write(output)
@@ -625,7 +622,7 @@ class DiffSplitter:
 
         # Check if sentence-transformers and model are available
         if not DiffSplitter._sentence_transformers_available or not DiffSplitter._model_available:
-            logger.info("Skipping semantic similarity grouping - embedding model not available")
+            logger.debug("Skipping semantic similarity grouping - embedding model not available")
             # Add chunks individually since we can't calculate similarity
             result_chunks.extend(chunks)
             return
@@ -1049,7 +1046,7 @@ class DiffSplitter:
             cls._model_available = cls._model_available or cls._check_model_availability(model_name=MODEL_NAME)
 
         if not cls._model_available:
-            logger.warning("Embedding model not available, returning empty embeddings")
+            logger.debug("Embedding model not available, returning empty embeddings")
             return {"embeddings": np.array([])}
 
         if not chunks:
@@ -1057,7 +1054,7 @@ class DiffSplitter:
 
         # At this point we know model is initialized and available
         if cls._embedding_model is None:
-            logger.warning("Embedding model is None but was marked as available, reinitializing")
+            logger.debug("Embedding model is None but was marked as available, reinitializing")
             cls._model_available = cls._check_model_availability(model_name=MODEL_NAME)
             if not cls._model_available:
                 return {"embeddings": np.array([])}
