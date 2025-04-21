@@ -565,7 +565,6 @@ def create(
         typer.Option(
             "--no-commit",
             help="Don't commit changes before creating PR",
-            is_flag=True,
         ),
     ] = False,
     force_push: Annotated[
@@ -574,7 +573,6 @@ def create(
             "--force-push",
             "-f",
             help="Force push branch to remote",
-            is_flag=True,
         ),
     ] = False,
     non_interactive: Annotated[
@@ -582,7 +580,6 @@ def create(
         typer.Option(
             "--non-interactive",
             help="Run in non-interactive mode",
-            is_flag=True,
         ),
     ] = False,
     model: Annotated[
@@ -712,7 +709,6 @@ def update(
         typer.Option(
             "--no-commit",
             help="Don't commit changes before updating PR",
-            is_flag=True,
         ),
     ] = False,
     force_push: Annotated[
@@ -721,7 +717,6 @@ def update(
             "--force-push",
             "-f",
             help="Force push branch to remote",
-            is_flag=True,
         ),
     ] = False,
     non_interactive: Annotated[
@@ -729,7 +724,6 @@ def update(
         typer.Option(
             "--non-interactive",
             help="Run in non-interactive mode",
-            is_flag=True,
         ),
     ] = False,
     model: Annotated[

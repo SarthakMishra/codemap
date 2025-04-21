@@ -666,15 +666,43 @@ DEFAULT_RUN_CONFIG = RunConfig()
 
 
 @app.command(help="Generate and apply conventional commits from Git diffs")
-def run(config: RunConfig = DEFAULT_RUN_CONFIG) -> int:
+def run(
+    repo_path: Path | None = None,
+    force_simple: bool = False,
+    api_key: str | None = None,
+    model: str = "openai/gpt-4o-mini",
+    api_base: str | None = None,
+    commit: bool = True,
+    prompt_template: str | None = None,
+    staged_only: bool = False,
+) -> int:
     """Run the commit command.
 
     Args:
-        config: Configuration options
+        repo_path: Path to the Git repository
+        force_simple: Force using simple message generation mode
+        api_key: API key for the LLM provider
+        model: Model to use for generation
+        api_base: Custom API base URL
+        commit: Whether to commit changes automatically
+        prompt_template: Custom prompt template file
+        staged_only: Only process staged changes
 
     Returns:
         Exit code
     """
+    # Create a RunConfig object from the parameters
+    config = RunConfig(
+        repo_path=repo_path,
+        force_simple=force_simple,
+        api_key=api_key,
+        model=model,
+        api_base=api_base,
+        commit=commit,
+        prompt_template=prompt_template,
+        staged_only=staged_only,
+    )
+
     # Validate the repository path
     try:
         repo_path = validate_repo_path(config.repo_path)

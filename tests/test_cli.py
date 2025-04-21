@@ -13,8 +13,11 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-from codemap.cli.main import _get_output_path, app
+import codemap.cli_app
+from codemap.cli.main import _get_output_path
 from codemap.config import DEFAULT_CONFIG
+
+app = codemap.cli_app.app
 
 runner = CliRunner()
 T = TypeVar("T")  # Generic type for return value of Path.open
@@ -100,7 +103,7 @@ def test_generate_command_with_config(sample_repo: Path) -> None:
     config = {
         "token_limit": 1000,
         "use_gitignore": False,
-        "output_dir": "docs",
+        "output_dir": str(sample_repo / "test_docs"),  # Use a path within sample_repo
     }
     config_file.write_text(yaml.dump(config))
 
@@ -113,6 +116,9 @@ def test_generate_command_with_config(sample_repo: Path) -> None:
         ["generate", str(sample_repo), "--config", str(config_file), "--map-tokens", "2000"],
     )
     assert result.exit_code == 0
+
+    # Verify output dir was created in the correct location
+    assert (sample_repo / "test_docs").exists()
 
 
 def test_generate_command_with_invalid_path() -> None:
@@ -148,15 +154,15 @@ def test_generate_command_with_missing_parent_directory(sample_repo: Path) -> No
     assert result.exit_code != 0  # Should fail
 
 
-def test_get_output_path() -> None:
+def test_get_output_path(temp_dir: Path) -> None:
     """Test output path generation."""
-    repo_root = Path("/test/repo")
+    repo_root = temp_dir
     config = {
         "output_dir": "docs",
     }
 
     # Test with custom output path
-    custom_path = Path("custom/path.md")
+    custom_path = temp_dir / "custom/path.md"
     assert _get_output_path(repo_root, custom_path, config) == custom_path
 
     # Test with config-based path - mock mkdir to avoid permission issues
@@ -189,7 +195,7 @@ def test_get_output_path_with_timestamp(sample_repo: Path) -> None:
     """Test output path generation with timestamp."""
     current_time = datetime.now(tz=timezone.utc)
     config = {
-        "output_dir": "docs",
+        "output_dir": str(sample_repo / "test_docs"),  # Use a path within sample_repo
     }
 
     with patch("codemap.cli.main.datetime") as mock_datetime:

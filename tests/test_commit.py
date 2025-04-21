@@ -523,23 +523,22 @@ def test_cli_command_execution() -> None:
         # Test with different configurations
         test_configs = [
             # Default config
-            RunConfig(),
+            {},
             # Custom model
-            RunConfig(model="claude-3-haiku-20240307"),
+            {"model": "claude-3-haiku-20240307"},
             # No commit (suggestion only)
-            RunConfig(commit=False),
+            {"commit": False},
             # Force simple mode
-            RunConfig(force_simple=True),
+            {"force_simple": True},
         ]
 
-        # Instead of using app.callback which doesn't call run directly,
-        # we'll directly test the run function with each config
+        # Test each configuration
         for config in test_configs:
-            # Call run directly
-            mock_run(config)
+            # Call run with unpacked parameters
+            mock_run(**config)
 
             # Verify run was called with the configuration
-            mock_run.assert_called_with(config)
+            mock_run.assert_called_with(**config)
 
 
 def test_run_command_happy_path() -> None:

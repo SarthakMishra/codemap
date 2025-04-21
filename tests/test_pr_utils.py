@@ -27,20 +27,20 @@ from codemap.utils.pr_utils import (
 
 
 @pytest.fixture
-def mock_run_git_command() -> pytest.MonkeyPatch:
+def mock_run_git_command() -> MagicMock:
     """Mock the run_git_command function."""
     with patch("codemap.utils.pr_utils.run_git_command") as mock:
         yield mock
 
 
 @pytest.fixture
-def mock_subprocess_run() -> pytest.MonkeyPatch:
+def mock_subprocess_run() -> MagicMock:
     """Mock subprocess.run."""
     with patch("subprocess.run") as mock:
         yield mock
 
 
-def test_get_current_branch(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_current_branch(mock_run_git_command: MagicMock) -> None:
     """Test get_current_branch function."""
     mock_run_git_command.return_value = "feature-branch\n"
 
@@ -50,7 +50,7 @@ def test_get_current_branch(mock_run_git_command: pytest.MonkeyPatch) -> None:
     assert result == "feature-branch"
 
 
-def test_get_current_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_current_branch_error(mock_run_git_command: MagicMock) -> None:
     """Test get_current_branch function when git command fails."""
     mock_run_git_command.side_effect = GitError("Command failed")
 
@@ -58,7 +58,7 @@ def test_get_current_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> N
         get_current_branch()
 
 
-def test_get_default_branch_from_remote(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_default_branch_from_remote(mock_run_git_command: MagicMock) -> None:
     """Test get_default_branch function when remote info is available."""
     mock_run_git_command.side_effect = [
         "  Remote branch:\n    HEAD branch: main\n    Remote branches:",
@@ -71,7 +71,7 @@ def test_get_default_branch_from_remote(mock_run_git_command: pytest.MonkeyPatch
     mock_run_git_command.assert_called_with(["git", "remote", "show", "origin"])
 
 
-def test_get_default_branch_fallback_to_main(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_default_branch_fallback_to_main(mock_run_git_command: MagicMock) -> None:
     """Test get_default_branch function when falling back to main."""
     mock_run_git_command.side_effect = ["Remote info without HEAD branch", "origin/main\norigin/feature-branch"]
 
@@ -81,7 +81,7 @@ def test_get_default_branch_fallback_to_main(mock_run_git_command: pytest.Monkey
     assert mock_run_git_command.call_count == 2
 
 
-def test_get_default_branch_fallback_to_master(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_default_branch_fallback_to_master(mock_run_git_command: MagicMock) -> None:
     """Test get_default_branch function when falling back to master."""
     mock_run_git_command.side_effect = ["Remote info without HEAD branch", "origin/master\norigin/feature-branch"]
 
@@ -91,14 +91,14 @@ def test_get_default_branch_fallback_to_master(mock_run_git_command: pytest.Monk
     assert mock_run_git_command.call_count == 2
 
 
-def test_create_branch(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_create_branch(mock_run_git_command: MagicMock) -> None:
     """Test create_branch function."""
     create_branch("feature-branch")
 
     mock_run_git_command.assert_called_once_with(["git", "checkout", "-b", "feature-branch"])
 
 
-def test_create_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_create_branch_error(mock_run_git_command: MagicMock) -> None:
     """Test create_branch function when git command fails."""
     mock_run_git_command.side_effect = GitError("Command failed")
 
@@ -106,14 +106,14 @@ def test_create_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
         create_branch("feature-branch")
 
 
-def test_checkout_branch(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_checkout_branch(mock_run_git_command: MagicMock) -> None:
     """Test checkout_branch function."""
     checkout_branch("feature-branch")
 
     mock_run_git_command.assert_called_once_with(["git", "checkout", "feature-branch"])
 
 
-def test_checkout_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_checkout_branch_error(mock_run_git_command: MagicMock) -> None:
     """Test checkout_branch function when git command fails."""
     mock_run_git_command.side_effect = GitError("Command failed")
 
@@ -121,7 +121,7 @@ def test_checkout_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None
         checkout_branch("feature-branch")
 
 
-def test_branch_exists_local(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_branch_exists_local(mock_run_git_command: MagicMock) -> None:
     """Test branch_exists function for local branch."""
     mock_run_git_command.return_value = "feature-branch"
 
@@ -131,7 +131,7 @@ def test_branch_exists_local(mock_run_git_command: pytest.MonkeyPatch) -> None:
     mock_run_git_command.assert_called_once_with(["git", "branch", "--list", "feature-branch"])
 
 
-def test_branch_exists_remote(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_branch_exists_remote(mock_run_git_command: MagicMock) -> None:
     """Test branch_exists function for remote branch."""
     mock_run_git_command.side_effect = ["", "origin/feature-branch"]
 
@@ -141,7 +141,7 @@ def test_branch_exists_remote(mock_run_git_command: pytest.MonkeyPatch) -> None:
     assert mock_run_git_command.call_count == 2
 
 
-def test_branch_not_exists(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_branch_not_exists(mock_run_git_command: MagicMock) -> None:
     """Test branch_exists function when branch doesn't exist."""
     mock_run_git_command.side_effect = ["", ""]
 
@@ -151,7 +151,7 @@ def test_branch_not_exists(mock_run_git_command: pytest.MonkeyPatch) -> None:
     assert mock_run_git_command.call_count == 2
 
 
-def test_branch_exists_git_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_branch_exists_git_error(mock_run_git_command: MagicMock) -> None:
     """Test branch_exists function when git command fails."""
     mock_run_git_command.side_effect = GitError("Command failed")
 
@@ -160,21 +160,21 @@ def test_branch_exists_git_error(mock_run_git_command: pytest.MonkeyPatch) -> No
     assert result is False
 
 
-def test_push_branch(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_push_branch(mock_run_git_command: MagicMock) -> None:
     """Test push_branch function."""
     push_branch("feature-branch")
 
     mock_run_git_command.assert_called_once_with(["git", "push", "-u", "origin", "feature-branch"])
 
 
-def test_push_branch_force(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_push_branch_force(mock_run_git_command: MagicMock) -> None:
     """Test push_branch function with force option."""
     push_branch("feature-branch", force=True)
 
     mock_run_git_command.assert_called_once_with(["git", "push", "--force", "-u", "origin", "feature-branch"])
 
 
-def test_push_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_push_branch_error(mock_run_git_command: MagicMock) -> None:
     """Test push_branch function when git command fails."""
     mock_run_git_command.side_effect = GitError("Command failed")
 
@@ -182,7 +182,7 @@ def test_push_branch_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
         push_branch("feature-branch")
 
 
-def test_get_commit_messages(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_commit_messages(mock_run_git_command: MagicMock) -> None:
     """Test get_commit_messages function."""
     mock_run_git_command.return_value = "feat: Add feature\nfix: Fix bug"
 
@@ -192,7 +192,7 @@ def test_get_commit_messages(mock_run_git_command: pytest.MonkeyPatch) -> None:
     assert result == ["feat: Add feature", "fix: Fix bug"]
 
 
-def test_get_commit_messages_empty(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_commit_messages_empty(mock_run_git_command: MagicMock) -> None:
     """Test get_commit_messages function with empty result."""
     mock_run_git_command.return_value = ""
 
@@ -201,7 +201,7 @@ def test_get_commit_messages_empty(mock_run_git_command: pytest.MonkeyPatch) -> 
     assert result == []
 
 
-def test_get_commit_messages_error(mock_run_git_command: pytest.MonkeyPatch) -> None:
+def test_get_commit_messages_error(mock_run_git_command: MagicMock) -> None:
     """Test get_commit_messages function when git command fails."""
     mock_run_git_command.side_effect = GitError("Command failed")
 
@@ -285,7 +285,7 @@ def test_generate_pr_description_from_commits() -> None:
     assert "- Update dependencies" in result
 
 
-def test_create_pull_request(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_create_pull_request(mock_subprocess_run: MagicMock) -> None:
     """Test create_pull_request function."""
     # First mock for gh --version check
     mock_version_process = MagicMock()
@@ -318,7 +318,7 @@ def test_create_pull_request(mock_subprocess_run: pytest.MonkeyPatch) -> None:
     assert result.number == 123
 
 
-def test_create_pull_request_gh_not_installed(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_create_pull_request_gh_not_installed(mock_subprocess_run: MagicMock) -> None:
     """Test create_pull_request function when gh CLI is not installed."""
     # Mock for gh --version check that fails
     mock_subprocess_run.side_effect = FileNotFoundError("No such file or directory: 'gh'")
@@ -327,7 +327,7 @@ def test_create_pull_request_gh_not_installed(mock_subprocess_run: pytest.Monkey
         create_pull_request("main", "feature-branch", "PR Title", "PR Description")
 
 
-def test_create_pull_request_error(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_create_pull_request_error(mock_subprocess_run: MagicMock) -> None:
     """Test create_pull_request function when gh command fails."""
     # First mock for gh --version check
     mock_version_process = MagicMock()
@@ -348,7 +348,7 @@ def test_create_pull_request_error(mock_subprocess_run: pytest.MonkeyPatch) -> N
         create_pull_request("main", "feature-branch", "PR Title", "PR Description")
 
 
-def test_update_pull_request(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_update_pull_request(mock_subprocess_run: MagicMock) -> None:
     """Test update_pull_request function."""
     # First mock for gh --version check
     mock_version_process = MagicMock()
@@ -396,7 +396,7 @@ def test_update_pull_request(mock_subprocess_run: pytest.MonkeyPatch) -> None:
         assert result.number == 123
 
 
-def test_update_pull_request_gh_not_installed(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_update_pull_request_gh_not_installed(mock_subprocess_run: MagicMock) -> None:
     """Test update_pull_request function when gh CLI is not installed."""
     # Mock for gh --version check that fails
     mock_subprocess_run.side_effect = FileNotFoundError("No such file or directory: 'gh'")
@@ -405,7 +405,7 @@ def test_update_pull_request_gh_not_installed(mock_subprocess_run: pytest.Monkey
         update_pull_request(123, "Updated Title", "Updated Description")
 
 
-def test_update_pull_request_error(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_update_pull_request_error(mock_subprocess_run: MagicMock) -> None:
     """Test update_pull_request function when gh command fails."""
     # First mock for gh --version check
     mock_version_process = MagicMock()
@@ -425,7 +425,7 @@ def test_update_pull_request_error(mock_subprocess_run: pytest.MonkeyPatch) -> N
             update_pull_request(123, "Updated Title", "Updated Description")
 
 
-def test_get_existing_pr(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_get_existing_pr(mock_subprocess_run: MagicMock) -> None:
     """Test get_existing_pr function."""
     # First mock for gh --version check
     mock_version_process = MagicMock()
@@ -458,7 +458,7 @@ def test_get_existing_pr(mock_subprocess_run: pytest.MonkeyPatch) -> None:
     assert result.number == 123
 
 
-def test_get_existing_pr_not_found(mock_subprocess_run: pytest.MonkeyPatch) -> None:
+def test_get_existing_pr_not_found(mock_subprocess_run: MagicMock) -> None:
     """Test get_existing_pr function when PR doesn't exist."""
     # First mock for gh --version check
     mock_version_process = MagicMock()

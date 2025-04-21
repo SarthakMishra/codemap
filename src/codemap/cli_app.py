@@ -80,7 +80,7 @@ MaxContentLengthOpt: TypeAlias = Annotated[
     ),
 ]
 TreeFlag: TypeAlias = Annotated[
-    bool | None,
+    bool,
     typer.Option(
         "--tree",
         "-t",
@@ -88,7 +88,7 @@ TreeFlag: TypeAlias = Annotated[
     ),
 ]
 VerboseFlag: TypeAlias = Annotated[
-    bool | None,
+    bool,
     typer.Option(
         "--verbose",
         "-v",
@@ -96,7 +96,7 @@ VerboseFlag: TypeAlias = Annotated[
     ),
 ]
 ForceFlag: TypeAlias = Annotated[
-    bool | None,
+    bool,
     typer.Option(
         "--force",
         "-f",
@@ -215,11 +215,11 @@ def _process_file(
 @app.command()
 def init(
     path: PathArg = Path(),
-    force_flag: ForceFlag = None,
-    is_verbose: VerboseFlag = None,
+    force_flag: ForceFlag = False,
+    is_verbose: VerboseFlag = False,
 ) -> None:
     """Initialize a new CodeMap project in the specified directory."""
-    setup_logging(is_verbose=bool(is_verbose))
+    setup_logging(is_verbose=is_verbose)
     try:
         repo_root = path.resolve()
         config_file = repo_root / ".codemap.yml"
@@ -317,11 +317,11 @@ def generate(
     config: ConfigOpt = None,
     map_tokens: MapTokensOpt = None,
     max_content_length: MaxContentLengthOpt = None,
-    tree: TreeFlag = None,
-    is_verbose: VerboseFlag = None,
+    tree: TreeFlag = False,
+    is_verbose: VerboseFlag = False,
 ) -> None:
-    """Generate documentation for the specified path."""
-    setup_logging(is_verbose=bool(is_verbose))
+    """Generate documentation for the specified codebase."""
+    setup_logging(is_verbose=is_verbose)
     try:
         target_path = path.resolve()
 
@@ -457,10 +457,10 @@ def commit(
             envvar="OPENAI_API_KEY",
         ),
     ] = None,
-    is_verbose: VerboseFlag = None,
+    is_verbose: VerboseFlag = False,
 ) -> None:
     """Generate and apply conventional commits from changes in a Git repository."""
-    setup_logging(is_verbose=is_verbose is True)
+    setup_logging(is_verbose=is_verbose)
 
     try:
         from .git.commit.command import CommitCommand
@@ -487,241 +487,8 @@ def commit(
         raise typer.Exit(1) from e
 
 
-# Create a PR command group
-pr_app = typer.Typer(help="Generate and manage pull requests")
-
-
-@pr_app.command(name="create")
-def pr_create(
-    path: Annotated[
-        Path | None,
-        typer.Argument(
-            help="Path to repository",
-            exists=True,
-        ),
-    ] = None,
-    branch_name: Annotated[
-        str | None,
-        typer.Option(
-            "--branch",
-            "-b",
-            help="Branch name to use (will be created if it doesn't exist)",
-        ),
-    ] = None,
-    base_branch: Annotated[
-        str | None,
-        typer.Option(
-            "--base",
-            help="Base branch for the PR (default: main or master)",
-        ),
-    ] = None,
-    title: Annotated[
-        str | None,
-        typer.Option(
-            "--title",
-            "-t",
-            help="PR title (generated from commits if not provided)",
-        ),
-    ] = None,
-    description: Annotated[
-        str | None,
-        typer.Option(
-            "--description",
-            "-d",
-            help="PR description (generated from commits if not provided)",
-        ),
-    ] = None,
-    no_commit: Annotated[
-        bool,
-        typer.Option(
-            "--no-commit",
-            help="Don't commit changes before creating PR",
-            is_flag=True,
-        ),
-    ] = False,
-    force_push: Annotated[
-        bool,
-        typer.Option(
-            "--force-push",
-            "-f",
-            help="Force push branch to remote",
-            is_flag=True,
-        ),
-    ] = False,
-    non_interactive: Annotated[
-        bool,
-        typer.Option(
-            "--non-interactive",
-            help="Run in non-interactive mode",
-            is_flag=True,
-        ),
-    ] = False,
-    model: Annotated[
-        str,
-        typer.Option(
-            "--model",
-            "-m",
-            help="LLM model to use for commit message generation",
-        ),
-    ] = "gpt-4o-mini",
-    api_key: Annotated[
-        str | None,
-        typer.Option(
-            "--api-key",
-            help="API key for LLM provider",
-            envvar="OPENAI_API_KEY",
-        ),
-    ] = None,
-    is_verbose: VerboseFlag = None,
-) -> None:
-    """Create a new pull request."""
-    setup_logging(is_verbose=is_verbose is True)
-
-    try:
-        from .cli.pr import create as pr_create_cmd
-
-        # Set API key in environment if provided
-        if api_key:
-            import os
-
-            os.environ["OPENAI_API_KEY"] = api_key
-
-        exit_code = pr_create_cmd(
-            path=path,
-            branch_name=branch_name,
-            base_branch=base_branch,
-            title=title,
-            description=description,
-            no_commit=no_commit,
-            force_push=force_push,
-            non_interactive=non_interactive,
-            model=model,
-            api_key=api_key,
-        )
-        if exit_code != 0:
-            sys.exit(exit_code)
-
-    except ImportError as e:
-        console.print("[red]Failed to import PR feature. Please check your installation.[/]")
-        logger.debug("Import error: %s", e)
-        raise typer.Exit(1) from e
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/]")
-        logger.debug("Error running PR create command", exc_info=True)
-        raise typer.Exit(1) from e
-
-
-@pr_app.command(name="update")
-def pr_update(
-    pr_number: Annotated[
-        int | None,
-        typer.Argument(
-            help="PR number to update (if not provided, will try to find PR for current branch)",
-        ),
-    ] = None,
-    path: Annotated[
-        Path | None,
-        typer.Option(
-            "--path",
-            "-p",
-            help="Path to repository",
-            exists=True,
-        ),
-    ] = None,
-    title: Annotated[
-        str | None,
-        typer.Option(
-            "--title",
-            "-t",
-            help="New PR title",
-        ),
-    ] = None,
-    description: Annotated[
-        str | None,
-        typer.Option(
-            "--description",
-            "-d",
-            help="New PR description",
-        ),
-    ] = None,
-    no_commit: Annotated[
-        bool,
-        typer.Option(
-            "--no-commit",
-            help="Don't commit changes before updating PR",
-            is_flag=True,
-        ),
-    ] = False,
-    force_push: Annotated[
-        bool,
-        typer.Option(
-            "--force-push",
-            "-f",
-            help="Force push branch to remote",
-            is_flag=True,
-        ),
-    ] = False,
-    non_interactive: Annotated[
-        bool,
-        typer.Option(
-            "--non-interactive",
-            help="Run in non-interactive mode",
-            is_flag=True,
-        ),
-    ] = False,
-    model: Annotated[
-        str,
-        typer.Option(
-            "--model",
-            "-m",
-            help="LLM model to use for commit message generation",
-        ),
-    ] = "gpt-4o-mini",
-    api_key: Annotated[
-        str | None,
-        typer.Option(
-            "--api-key",
-            help="API key for LLM provider",
-            envvar="OPENAI_API_KEY",
-        ),
-    ] = None,
-    is_verbose: VerboseFlag = None,
-) -> None:
-    """Update an existing pull request."""
-    setup_logging(is_verbose=is_verbose is True)
-
-    try:
-        from .cli.pr import update as pr_update_cmd
-
-        # Set API key in environment if provided
-        if api_key:
-            import os
-
-            os.environ["OPENAI_API_KEY"] = api_key
-
-        exit_code = pr_update_cmd(
-            pr_number=pr_number,
-            path=path,
-            title=title,
-            description=description,
-            no_commit=no_commit,
-            force_push=force_push,
-            non_interactive=non_interactive,
-            model=model,
-            api_key=api_key,
-        )
-        if exit_code != 0:
-            sys.exit(exit_code)
-
-    except ImportError as e:
-        console.print("[red]Failed to import PR feature. Please check your installation.[/]")
-        logger.debug("Import error: %s", e)
-        raise typer.Exit(1) from e
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/]")
-        logger.debug("Error running PR update command", exc_info=True)
-        raise typer.Exit(1) from e
-
+# Import and add the PR command group
+from .cli.pr import app as pr_app  # noqa: E402
 
 # Add the PR command group to the main app
 app.add_typer(pr_app, name="pr")

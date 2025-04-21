@@ -37,7 +37,7 @@ ignore = ["*"]
 typeCheckingMode = "off"
 
 [project.scripts]
-codemap = "codemap.cli_entry:main"
+codemap = "codemap.cli_app:main"
 
 [tool.pytest]
 testpaths = ["tests"]

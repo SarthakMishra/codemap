@@ -1,15 +1,15 @@
-"""Tests for the cli_entry module."""
+"""Tests for the cli_app module."""
 
 from unittest.mock import patch
 
 
 def test_main_function() -> None:
     """Test the main function."""
-    with patch("codemap.cli_entry.app") as mock_app:
+    with patch("codemap.cli_app.app") as mock_app:
         mock_app.return_value = 0
 
         # Import the module to get the main function
-        from codemap.cli_entry import main
+        from codemap.cli_app import main
 
         # Call the main function
         result = main()
@@ -22,11 +22,11 @@ def test_main_function() -> None:
 def test_module_import() -> None:
     """Test that the module can be imported without errors."""
     # Import the module
-    import codemap.cli_entry
+    import codemap.cli_app
 
     # Check that the module has the expected attributes
-    assert hasattr(codemap.cli_entry, "app")
-    assert hasattr(codemap.cli_entry, "main")
+    assert hasattr(codemap.cli_app, "app")
+    assert hasattr(codemap.cli_app, "main")
 
     # Check that app is a Typer instance
-    assert str(type(codemap.cli_entry.app)).endswith("typer.main.Typer'>")
+    assert str(type(codemap.cli_app.app)).endswith("typer.main.Typer'>")
