@@ -15,6 +15,7 @@ import typer
 from rich.markdown import Markdown
 from rich.padding import Padding
 from rich.panel import Panel
+from rich.text import Text
 
 try:
     from dotenv import load_dotenv
@@ -404,10 +405,16 @@ def process_chunk_interactively(context: ChunkContext) -> str:
     # Generate commit message
     message, used_llm = generate_commit_message(context.chunk, context.generator, context.mode)
 
-    # Display proposed message
-    tag = "[blue]AI[/blue]" if used_llm else "[yellow]Simple[/yellow]"
-    console.print(f"\nProposed message ({tag}):")
-    console.print(f"[green]{message}[/green]")
+    # Display proposed message in a panel
+    tag = "AI" if used_llm else "Simple"
+    message_panel = Panel(
+        Text(message, style="green"),
+        title=f"[bold blue]Proposed message ({tag})[/]",
+        border_style="blue" if used_llm else "yellow",
+        expand=False,
+        padding=(1, 2),
+    )
+    console.print(message_panel)
 
     # Ask user what to do
     choices = [
@@ -458,8 +465,16 @@ def display_suggested_messages(options: CommitOptions, chunks: list[DiffChunk], 
         print_chunk_summary(chunk, i)
         message, used_llm = generate_commit_message(chunk, generator, options.generation_mode)
 
-        tag = "[blue]AI[/blue]" if used_llm else "[yellow]Simple[/yellow]"
-        console.print(f"{tag} {message}")
+        # Display the message in a panel
+        tag = "AI" if used_llm else "Simple"
+        message_panel = Panel(
+            Text(message, style="green"),
+            title=f"[bold blue]{tag}[/]",
+            border_style="blue" if used_llm else "yellow",
+            expand=False,
+            padding=(1, 2),
+        )
+        console.print(message_panel)
         console.print()
 
 
