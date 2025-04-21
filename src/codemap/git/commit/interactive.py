@@ -16,10 +16,6 @@ from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from codemap.git import GitWrapper
-
     from .diff_splitter import DiffChunk
     from .message_generator import MessageGenerator
 
@@ -32,6 +28,7 @@ except ImportError:
 
 # Import LLMError for exception handling
 from codemap.git.commit.message_generator import LLMError
+from codemap.utils.git_utils import GitError, commit_only_files
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -88,19 +85,15 @@ def loading_spinner(message: str) -> Generator[None, None, None]:
 
 
 def process_all_chunks(
-    _repo_path: Path,  # Unused parameter but kept for API compatibility
     chunks: list[DiffChunk],
     generator: MessageGenerator,
-    git: GitWrapper,
     interactive: bool = True,
 ) -> int:
     """Process all chunks interactively or automatically.
 
     Args:
-        _repo_path: Repository path
         chunks: List of diff chunks
         generator: Message generator to use
-        git: Git wrapper
         interactive: Whether to process chunks interactively
 
     Returns:
@@ -134,10 +127,10 @@ def process_all_chunks(
             action = questionary.select("What would you like to do?", choices=choices).ask()
 
             if action == "commit":
-                _handle_commit_action(chunk, message, git)
+                _handle_commit_action(chunk, message)
                 i += 1
             elif action == "edit":
-                _handle_edit_action(chunk, message, git)
+                _handle_edit_action(chunk, message)
                 i += 1
             elif action == "regenerate":
                 # Stay on same index to regenerate
@@ -151,7 +144,7 @@ def process_all_chunks(
         else:
             # Non-interactive mode: commit all chunks automatically
             message, _ = _generate_commit_message(chunk, generator)
-            _handle_commit_action(chunk, message, git)
+            _handle_commit_action(chunk, message)
             i += 1
 
     console.print("[green]✓[/green] All changes committed!")
@@ -225,41 +218,32 @@ def _print_chunk_summary(chunk: DiffChunk, index: int) -> None:
         console.print("  [dim](New files - no diff content available)[/dim]")
 
 
-def _handle_commit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
-    """Handle the commit action.
+def _handle_commit_action(chunk: DiffChunk, message: str) -> None:
+    """Handle commit action for a chunk.
 
     Args:
         chunk: Diff chunk to commit
         message: Commit message
-        git: Git wrapper
     """
     try:
-        # Perform the commit
-        git.commit_only_specified_files(chunk.files, message)
-        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except (ValueError, RuntimeError) as e:
+        commit_only_files(chunk.files, message)
+        console.print(f"[green]✓[/green] Committed {len(chunk.files)} files")
+    except GitError as e:
         console.print(f"[red]Error:[/red] {e!s}")
 
 
-def _handle_edit_action(chunk: DiffChunk, message: str, git: GitWrapper) -> None:
-    """Handle the edit action.
+def _handle_edit_action(chunk: DiffChunk, message: str) -> None:
+    """Handle edit action for a chunk.
 
     Args:
         chunk: Diff chunk to commit
-        message: Default commit message
-        git: Git wrapper
+        message: Initial commit message to edit
     """
-    # Let user edit the message
-    new_message = questionary.text("Edit commit message:", default=message).ask()
-    if not new_message:
-        return
-
-    try:
-        # Perform the commit with the edited message
-        git.commit_only_specified_files(chunk.files, new_message)
-        console.print(f"[green]✓[/green] Committed {len(chunk.files)} file(s)")
-    except (ValueError, RuntimeError) as e:
-        console.print(f"[red]Error:[/red] {e!s}")
+    edited_message = Prompt.ask("Edit commit message", default=message)
+    if edited_message:
+        _handle_commit_action(chunk, edited_message)
+    else:
+        console.print("[yellow]Commit cancelled: empty message[/yellow]")
 
 
 class ChunkAction(Enum):
