@@ -41,16 +41,18 @@ jobs:
     - name: Run CI tasks (Unix)
       if: runner.os != 'Windows'
       shell: bash
-      run: |
-        source .venv/bin/activate
-        task ci:full
+      env:
+        VIRTUAL_ENV: ${{ github.workspace }}/.venv
+        PATH: ${{ github.workspace }}/.venv/bin:${{ env.PATH }}
+      run: task ci:full
     
     - name: Run CI tasks (Windows)
       if: runner.os == 'Windows'
       shell: cmd
-      run: |
-        call .venv\Scripts\activate
-        task ci:full
+      env:
+        VIRTUAL_ENV: ${{ github.workspace }}\.venv
+        PATH: ${{ github.workspace }}\.venv\Scripts;${{ env.PATH }}
+      run: task ci:full
     
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
