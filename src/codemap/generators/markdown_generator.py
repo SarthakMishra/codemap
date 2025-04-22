@@ -96,8 +96,8 @@ class MarkdownGenerator:
             True if the path should be processed.
         """
         # Skip files that match gitignore patterns if enabled
-        if self.config.get("use_gitignore", True) and parser.gitignore_patterns:
-            for pattern in parser.gitignore_patterns:
+        if self.config.get("use_gitignore", True) and parser.file_filter.gitignore_patterns:
+            for pattern in parser.file_filter.gitignore_patterns:
                 if self._matches_gitignore_pattern(path, pattern, parser):
                     return False
 
@@ -105,7 +105,7 @@ class MarkdownGenerator:
         return all(excluded not in str(path) for excluded in self.default_excluded)
 
     def _matches_gitignore_pattern(self, path: Path, pattern: str, parser: CodeParser) -> bool:
-        """Check if a path matches a gitignore pattern using the parser's method.
+        """Check if a path matches a gitignore pattern using the parser's file filter.
 
         Args:
             path: Path to check
@@ -115,8 +115,8 @@ class MarkdownGenerator:
         Returns:
             True if the path matches the pattern
         """
-        # This is a wrapper around the private method to avoid the linter warning
-        return parser.matches_pattern(path, pattern)
+        # Use the file_filter's matches_pattern method
+        return parser.file_filter.matches_pattern(path, pattern)
 
     def _add_path_to_tree(
         self,
@@ -154,7 +154,7 @@ class MarkdownGenerator:
         if path.is_file():
             # Show all files with checkboxes
             is_included = path.resolve() in state.included_files
-            can_parse = state.parser.should_parse(path)
+            can_parse = state.parser.file_filter.should_parse(path)
             # Files that can be parsed should show inclusion status
             checkbox = "[x]" if (can_parse and is_included) else "[ ]"
             state.tree["content"][str(path)] = f"{prefix}{prefix_symbol} {checkbox} {display_name}"
@@ -188,7 +188,7 @@ class MarkdownGenerator:
                 depth + 1,
                 is_last=is_last_child,
             )
-            if state.parser.should_parse(child):
+            if state.parser.file_filter.should_parse(child):
                 has_parseable = True
                 if not child_included:
                     all_parseable_included = False
