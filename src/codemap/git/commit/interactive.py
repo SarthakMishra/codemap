@@ -237,7 +237,7 @@ class CommitUI:
             True if the user confirms, False otherwise
         """
         return Confirm.ask(
-            "\n[bold red]Are you sure you want to abort?[/]",
+            "\n[bold yellow]Are you sure you want to exit without committing?[/]",
             default=False,
         )
 
@@ -263,12 +263,17 @@ class CommitUI:
         self.console.print(f"\n[bold green]✓[/] {message}")
 
     def show_error(self, message: str) -> None:
-        """Show an error message.
+        """Show an error message to the user.
 
         Args:
             message: Error message to display
         """
-        self.console.print(f"\n[bold red]✗[/] {message}")
+        if "No changes to commit" in message:
+            # This is an informational message, not an error
+            self.console.print(f"[yellow]{message}[/yellow]")
+        else:
+            # This is a real error
+            self.console.print(f"[red]Error:[/red] {message}")
 
     def show_skipped(self, files: list[str]) -> None:
         """Show which files were skipped.

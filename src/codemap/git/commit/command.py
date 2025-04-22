@@ -48,6 +48,7 @@ class CommitCommand:
             self.ui: CommitUI = CommitUI()
             self.splitter = DiffSplitter(self.repo_root)
             self.message_generator = MessageGenerator(self.repo_root, model=model)
+            self.error_state = None  # Tracks reason for failure: "failed", "aborted", etc.
         except GitError as e:
             raise RuntimeError(str(e)) from e
 
@@ -252,7 +253,13 @@ class CommitCommand:
             result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
 
             if result.action == ChunkAction.ABORT:
-                return not self.ui.confirm_abort()
+                # Check if user confirms abort
+                if not self.ui.confirm_abort():
+                    # User confirmed abort - mark as user-intended exit
+                    self.error_state = "aborted"
+                    return False
+                # User declined abort, continue with the current chunk
+                continue
 
             if result.action == ChunkAction.SKIP:
                 self.ui.show_skipped(chunk.files)
@@ -267,7 +274,10 @@ class CommitCommand:
 
             # For ACCEPT or EDIT actions: perform the commit
             message = result.message or chunk.description or "Update files"
-            return self._perform_commit(chunk, message)
+            success = self._perform_commit(chunk, message)
+            if not success:
+                self.error_state = "failed"
+            return success
 
     def process_all_chunks(self, chunks: list[DiffChunk], interactive: bool = True) -> bool:
         """Process all chunks interactively or automatically.
@@ -286,11 +296,13 @@ class CommitCommand:
             if interactive:
                 # Process chunk interactively
                 if not self._process_chunk(chunk, i, len(chunks)):
+                    self.error_state = "aborted"
                     return False
             else:
                 # Non-interactive mode: commit all chunks automatically
                 self._generate_commit_message(chunk)
                 if not self._perform_commit(chunk, chunk.description or "Update files"):
+                    self.error_state = "failed"
                     return False
 
             i += 1
@@ -337,6 +349,7 @@ class CommitCommand:
                     return False
         except (RuntimeError, ValueError) as e:
             self.ui.show_error(str(e))
+            self.error_state = "failed"
             return False
         else:
             return True
