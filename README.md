@@ -2,7 +2,7 @@
 
 [![Python Version](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![Status](https://img.shields.io/badge/status-unstable-red.svg)](https://github.com/SarthakMishra/code-map)
-[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Tests](https://github.com/SarthakMishra/codemap/actions/workflows/tests.yml/badge.svg)](https://github.com/SarthakMishra/code-map/actions/workflows/tests.yml)
 [![codecov](https://codecov.io/gh/SarthakMishra/codemap/branch/main/graph/badge.svg)](https://codecov.io/gh/SarthakMishra/codemap)
 
