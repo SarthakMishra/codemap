@@ -156,6 +156,63 @@ class CommitCommand:
             msg = f"Failed to generate commit message: {e}"
             raise RuntimeError(msg) from e
 
+    def _perform_commit(self, chunk: DiffChunk, message: str) -> bool:
+        """Perform the actual commit operation.
+
+        Args:
+            chunk: DiffChunk to commit
+            message: Commit message to use
+
+        Returns:
+            True if successful, False if failed
+        """
+        try:
+            # Make sure all files are staged first (in case any were missed or unstaged)
+            with loading_spinner("Staging files..."):
+                run_git_command(["git", "add", "."])
+
+                # Unstage files not in the current chunk to ensure only chunk files are committed
+                all_staged_files = get_staged_diff().files
+                files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
+                if files_to_unstage:
+                    unstage_files(files_to_unstage)
+
+                # Make sure the chunk files are staged (should be redundant but ensures consistency)
+                stage_files(chunk.files)
+
+            # Create commit using commit_only_files which handles hooks better
+            with loading_spinner("Creating commit..."):
+                try:
+                    # First try with hooks enabled
+                    other_staged = commit_only_files(chunk.files, message, ignore_hooks=False)
+                except GitError as hook_error:
+                    if "hook failed" in str(hook_error).lower():
+                        # If hook failed, ask user if they want to bypass hooks
+                        if self.ui.confirm_bypass_hooks():
+                            # Retry with hooks disabled
+                            other_staged = commit_only_files(chunk.files, message, ignore_hooks=True)
+                        else:
+                            raise  # Re-raise if user doesn't want to bypass hooks
+                    else:
+                        raise  # Re-raise if it's not a hook-related error
+
+                # Log if there were other files staged but not included
+                if other_staged:
+                    logger.warning("Other files were staged but not included in commit: %s", other_staged)
+
+            self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
+
+            # Re-stage all remaining changes for the next commit
+            # This ensures we don't lose track of any changes
+            with loading_spinner("Re-staging remaining changes..."):
+                run_git_command(["git", "add", "."])
+
+        except GitError as e:
+            self.ui.show_error(f"Failed to commit changes: {e}")
+            return False
+        else:
+            return True
+
     def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
         """Process a single chunk.
 
@@ -189,9 +246,7 @@ class CommitCommand:
             # Generate commit message
             self._generate_commit_message(chunk)
 
-            # Get user action
-            # Explicitly use the CommitUI.process_chunk method to help type checking
-            # Pass index and total as separate arguments to avoid modifying the chunk
+            # Get user action via UI
             result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
 
             if result.action == ChunkAction.ABORT:
@@ -205,59 +260,41 @@ class CommitCommand:
                 # Clear the existing description to force regeneration
                 chunk.description = None
                 chunk.is_llm_generated = False
-                self.ui.console.print("\n[yellow]Regenerating commit message...[/yellow]")
+                self.ui.show_regenerating()
                 continue  # Go back to the start of the loop
 
-            # For ACCEPT or EDIT actions
-            break  # Exit the loop and proceed with committing
+            # For ACCEPT or EDIT actions: perform the commit
+            message = result.message or chunk.description or "Update files"
+            return self._perform_commit(chunk, message)
 
-        try:
-            # Make sure all files are staged first (in case any were missed or unstaged)
-            with loading_spinner("Staging files..."):
-                run_git_command(["git", "add", "."])
+    def process_all_chunks(self, chunks: list[DiffChunk], interactive: bool = True) -> bool:
+        """Process all chunks interactively or automatically.
 
-                # Unstage files not in the current chunk to ensure only chunk files are committed
-                all_staged_files = get_staged_diff().files
-                files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
-                if files_to_unstage:
-                    unstage_files(files_to_unstage)
+        Args:
+            chunks: List of diff chunks to process
+            interactive: Whether to process interactively or automatically
 
-                # Make sure the chunk files are staged (should be redundant but ensures consistency)
-                stage_files(chunk.files)
+        Returns:
+            True if successful, False if failed or aborted
+        """
+        i = 0
+        while i < len(chunks):
+            chunk = chunks[i]
 
-            # Create commit using commit_only_files which handles hooks better
-            with loading_spinner("Creating commit..."):
-                message = result.message or chunk.description or "Update files"
-                try:
-                    # First try with hooks enabled
-                    other_staged = commit_only_files(chunk.files, message, ignore_hooks=False)
-                except GitError as hook_error:
-                    if "hook failed" in str(hook_error).lower():
-                        # If hook failed, ask user if they want to bypass hooks
-                        if self.ui.confirm_bypass_hooks():
-                            # Retry with hooks disabled
-                            other_staged = commit_only_files(chunk.files, message, ignore_hooks=True)
-                        else:
-                            raise  # Re-raise if user doesn't want to bypass hooks
-                    else:
-                        raise  # Re-raise if it's not a hook-related error
+            if interactive:
+                # Process chunk interactively
+                if not self._process_chunk(chunk, i, len(chunks)):
+                    return False
+            else:
+                # Non-interactive mode: commit all chunks automatically
+                self._generate_commit_message(chunk)
+                if not self._perform_commit(chunk, chunk.description or "Update files"):
+                    return False
 
-                # Log if there were other files staged but not included
-                if other_staged:
-                    logger.warning("Other files were staged but not included in commit: %s", other_staged)
+            i += 1
 
-            self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
-
-            # Re-stage all remaining files for the next commit
-            # This ensures we don't lose track of any changes
-            with loading_spinner("Re-staging remaining changes..."):
-                run_git_command(["git", "add", "."])
-
-        except GitError as e:
-            self.ui.show_error(f"Failed to commit changes: {e}")
-            return False
-        else:
-            return True
+        self.ui.show_all_committed()
+        return True
 
     def run(self) -> bool:
         """Run the commit command.
@@ -293,10 +330,9 @@ class CommitCommand:
                 if not chunks:
                     continue
 
-                # Process each chunk
-                for index, chunk in enumerate(chunks):
-                    if not self._process_chunk(chunk, index, len(chunks)):
-                        return False
+                # Process all chunks
+                if not self.process_all_chunks(chunks):
+                    return False
         except (RuntimeError, ValueError) as e:
             self.ui.show_error(str(e))
             return False
