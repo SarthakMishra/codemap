@@ -8,7 +8,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Import from our codebase - moved to top to fix E402
-from src.codemap.git.commit.message_generator import DiffChunkDict, MessageGenerator
+from src.codemap.git.commit.message_generator import DiffChunkData, MessageGenerator
 
 # Configure logging
 logging.basicConfig(
@@ -53,7 +53,7 @@ def test_openrouter_integration() -> None:
         logger.info("OPENROUTER_API_KEY starts with: %s...", openrouter_key[:10])
 
     # Create a simple test diff chunk
-    chunk = DiffChunkDict(
+    chunk = DiffChunkData(
         files=[".env.example"],
         content="""diff --git a/.env.example b/.env.example
 index 105c41b..fdcb59a 100644
