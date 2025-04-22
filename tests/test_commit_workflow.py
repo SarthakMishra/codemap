@@ -115,7 +115,7 @@ class TestCommitWorkflow(unittest.TestCase):
         """Test _process_chunk with ABORT action."""
         # Set up mocks
         self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.ABORT)
-        self.mock_ui.confirm_abort.return_value = True
+        self.mock_ui.confirm_abort.return_value = False
 
         # Call the method - using private method is necessary for the test
         result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)  # noqa: SLF001
