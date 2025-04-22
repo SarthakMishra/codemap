@@ -20,7 +20,7 @@ from codemap.cli.commit_cmd import (
     setup_message_generator,
 )
 from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter
-from codemap.git.commit.message_generator import DiffChunkDict, LLMError, MessageGenerator
+from codemap.git.commit.message_generator import DiffChunkData, LLMError, MessageGenerator
 from codemap.utils.git_utils import GitDiff
 
 console = Console(highlight=False)
@@ -223,10 +223,10 @@ def test_message_generator_fallback() -> None:
     with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
         generator = MessageGenerator(repo_root)
 
-        # Create a test chunk - convert to DiffChunkDict to match expected type
+        # Create a test chunk - convert to DiffChunkData to match expected type
         files = ["docs/README.md"]
         content = "diff content for README.md"
-        chunk_dict = DiffChunkDict(
+        chunk_data = DiffChunkData(
             files=files,
             content=content,
         )
@@ -237,7 +237,7 @@ def test_message_generator_fallback() -> None:
             patch.object(generator, "_call_llm_api", side_effect=LLMError("API call failed")),
         ):
             # Generate a message (should use fallback)
-            message = generator.fallback_generation(chunk_dict)
+            message = generator.fallback_generation(chunk_data)
 
             # Verify fallback message format
             assert message.startswith("docs: update")
@@ -254,8 +254,8 @@ def test_message_generator_openai() -> None:
         # Set provider manually for testing
         generator.provider = "openai"
 
-        # Create test data using DiffChunkDict
-        chunk_dict = DiffChunkDict(
+        # Create test data using DiffChunkData
+        chunk_data = DiffChunkData(
             files=["src/feature.py"],
             content=(
                 "diff --git a/src/feature.py b/src/feature.py\n@@ -1,5 +1,7 @@\n+def new_feature():\n+    return True"
@@ -268,7 +268,7 @@ def test_message_generator_openai() -> None:
             patch.object(generator, "_call_llm_api", return_value="feat(core): add new feature function"),
         ):
             # Generate a message
-            message, used_llm = generator.generate_message(chunk_dict)
+            message, used_llm = generator.generate_message(chunk_data)
 
             # Verify the message
             assert used_llm is True
@@ -285,8 +285,8 @@ def test_message_generator_anthropic() -> None:
         # Set provider manually for testing
         generator.provider = "anthropic"
 
-        # Create test data using DiffChunkDict
-        chunk_dict = DiffChunkDict(
+        # Create test data using DiffChunkData
+        chunk_data = DiffChunkData(
             files=["docs/README.md"],
             content=(
                 "diff --git a/docs/README.md b/docs/README.md\n"
@@ -307,7 +307,7 @@ def test_message_generator_anthropic() -> None:
             ),
         ):
             # Generate a message
-            message, used_llm = generator.generate_message(chunk_dict)
+            message, used_llm = generator.generate_message(chunk_data)
 
             # Verify the message
             assert used_llm is True
@@ -332,8 +332,8 @@ def test_message_generator_prefix_notation() -> None:
         # Verify the provider is extracted correctly from the model prefix
         assert generator.provider == "groq"  # Provider should be determined from the model prefix
 
-        # Create test data using DiffChunkDict
-        chunk_dict = DiffChunkDict(
+        # Create test data using DiffChunkData
+        chunk_data = DiffChunkData(
             files=["src/api.py"],
             content="diff content",
         )
@@ -344,7 +344,7 @@ def test_message_generator_prefix_notation() -> None:
             patch.object(generator, "_call_llm_api", return_value="feat(api): implement new endpoint"),
         ):
             # Generate a message
-            message, used_llm = generator.generate_message(chunk_dict)
+            message, used_llm = generator.generate_message(chunk_data)
 
             # Verify the message
             assert used_llm is True
@@ -596,7 +596,7 @@ def test_message_convention_customization() -> None:
 
         # Test each case by mocking the LLM response to each expected message
         for test_case in test_chunks:
-            chunk_dict = DiffChunkDict(
+            chunk_data = DiffChunkData(
                 files=test_case["files"],
                 content=test_case["content"],
             )
@@ -608,7 +608,7 @@ def test_message_convention_customization() -> None:
             ):
                 # For valid messages, LLM should succeed
                 if test_case["expected_validation"]:
-                    message, used_llm = generator.generate_message(chunk_dict)
+                    message, used_llm = generator.generate_message(chunk_data)
                     assert used_llm is True
                     assert message == test_case["expected_message"]
                 # For invalid messages, should fallback to simple generation
@@ -618,7 +618,7 @@ def test_message_convention_customization() -> None:
                         patch.object(generator, "_prepare_prompt"),
                         patch.object(generator, "_call_llm_api", side_effect=LLMError("Invalid format")),
                     ):
-                        message, used_llm = generator.generate_message(chunk_dict)
+                        message, used_llm = generator.generate_message(chunk_data)
                         assert used_llm is False
                         assert message == "fallback message"
 
@@ -664,8 +664,8 @@ def test_multiple_llm_providers() -> None:
             # Set mock flag for API key availability
             generator._mock_api_key_available = True
 
-            # Create test chunk using DiffChunkDict
-            chunk_dict = DiffChunkDict(
+            # Create test chunk using DiffChunkData
+            chunk_data = DiffChunkData(
                 files=["src/feature.py"],
                 content="mock diff content",
             )
@@ -680,7 +680,7 @@ def test_multiple_llm_providers() -> None:
                 ),
             ):
                 # Generate a message with this provider
-                message, used_llm = generator.generate_message(chunk_dict)
+                message, used_llm = generator.generate_message(chunk_data)
 
                 # Verify the message is correct and LLM was used
                 assert used_llm is True
@@ -935,8 +935,8 @@ def test_openrouter_configuration() -> None:
         # Verify provider is extracted correctly
         assert generator.provider == "openrouter"
 
-        # Create test data using DiffChunkDict
-        chunk_dict = DiffChunkDict(
+        # Create test data using DiffChunkData
+        chunk_data = DiffChunkData(
             files=["src/api.py"],
             content="diff content",
         )
@@ -947,7 +947,7 @@ def test_openrouter_configuration() -> None:
             patch.object(generator, "_call_llm_api", return_value="feat(api): implement new endpoint"),
         ):
             # Generate a message
-            message, used_llm = generator.generate_message(chunk_dict)
+            message, used_llm = generator.generate_message(chunk_data)
 
             # Verify the message
             assert used_llm is True
@@ -969,8 +969,8 @@ def test_model_with_multiple_slashes() -> None:
         # Set mock flag for API key availability
         generator._mock_api_key_available = True
 
-        # Create test data using DiffChunkDict
-        chunk_dict = DiffChunkDict(
+        # Create test data using DiffChunkData
+        chunk_data = DiffChunkData(
             files=["src/api.py"],
             content="diff content",
         )
@@ -981,7 +981,7 @@ def test_model_with_multiple_slashes() -> None:
             patch.object(generator, "_call_llm_api", return_value="feat(api): support for complex model names"),
         ):
             # Generate a message
-            message, used_llm = generator.generate_message(chunk_dict)
+            message, used_llm = generator.generate_message(chunk_data)
 
             # Extract provider inside the test to verify it's done correctly
             provider = None
