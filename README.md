@@ -1,5 +1,10 @@
 # CodeMap
 
+[![Python Version](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-green.svg)](LICENSE)
+[![Tests](https://github.com/SarthakMishra/code-map/actions/workflows/tests.yml/badge.svg)](https://github.com/SarthakMishra/code-map/actions/workflows/tests.yml)
+[![codecov](https://codecov.io/gh/SarthakMishra/code-map/branch/main/graph/badge.svg)](https://codecov.io/gh/SarthakMishra/code-map)
+
 ⚠️ **DEVELOPMENT STATUS**: CodeMap is currently in active development. Use with caution in production environments.
 
 ## Overview

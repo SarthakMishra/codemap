@@ -136,6 +136,17 @@ tasks:
           --cov-report=term-missing \
           {{.TESTS_DIR}}
 
+  test:coverage:xml:
+    desc: Run tests with coverage analysis and generate XML report
+    deps: [venv-check]
+    cmds:
+      - |
+        uv run pytest \
+          --cov={{.COV_MODULE}} \
+          --cov-branch \
+          --cov-report=xml \
+          {{.TESTS_DIR}}
+
   coverage:report:
     desc: Generate a coverage report from existing data
     deps: [venv-check]
@@ -165,7 +176,13 @@ tasks:
       - rm -rf {{.VENV_DIR}}
 
   ci:
-    desc: Run all checks and tests in CI mode
+    desc: Run all checks and tests
     cmds:
       - task: lint
       - task: test:coverage
+
+  ci:full:
+    desc: Run all checks and tests in CI mode
+    cmds:
+      - task: lint
+      - task: test:coverage:xml
