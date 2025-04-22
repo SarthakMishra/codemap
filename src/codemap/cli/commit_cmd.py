@@ -23,15 +23,15 @@ except ImportError:
     load_dotenv = None
 
 if TYPE_CHECKING:
-    from codemap.git.commit.message_generator import MessageGenerator
+    from codemap.git.message_generator import MessageGenerator
 
 from codemap.git import (
     DiffChunk,
     DiffSplitter,
     SplitStrategy,
 )
-from codemap.git.commit.command import CommitCommand
-from codemap.git.commit.message_generator import LLMError
+from codemap.git.command import CommitCommand
+from codemap.git.message_generator import LLMError
 from codemap.utils import validate_repo_path
 from codemap.utils.cli_utils import console, loading_spinner, setup_logging
 from codemap.utils.git_utils import (
@@ -204,7 +204,7 @@ def generate_commit_message(
     except (ValueError, RuntimeError, LLMError) as e:
         console.print(f"[red]Error generating message:[/red] {e}")
         # Still try to generate a fallback message
-        from codemap.git.commit.message_generator import DiffChunkData
+        from codemap.git.message_generator import DiffChunkData
 
         # Convert DiffChunk to DiffChunkData
         chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)

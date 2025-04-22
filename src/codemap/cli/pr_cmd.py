@@ -18,7 +18,7 @@ import typer
 from rich.panel import Panel
 
 from codemap.git import DiffSplitter, SplitStrategy
-from codemap.git.commit.command import CommitCommand
+from codemap.git.command import CommitCommand
 from codemap.utils import validate_repo_path
 from codemap.utils.cli_utils import console, loading_spinner, setup_logging
 from codemap.utils.git_utils import (
