@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Test script for direct OpenRouter API integration."""
 
 import logging
