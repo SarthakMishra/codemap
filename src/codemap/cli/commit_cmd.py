@@ -651,8 +651,13 @@ def validate_and_process_commit(
             run_git_command(["git", "add", "."])
 
         # Run the command (message will be prompted during the interactive process)
-        if not command.run():
+        result = command.run()
+
+        # Only raise an error if something unexpected happened
+        # Don't raise errors for user-initiated exits/aborts
+        if not result and command.error_state != "aborted":
             _raise_command_failed_error()
+
     except Exception as e:
         logger.exception("Error processing commit")
         console.print(f"[red]Error: {e}[/red]")
