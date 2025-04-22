@@ -42,7 +42,7 @@ class DocumentationProcessor:
             Tuple of (file_info, new_total_tokens)
         """
         try:
-            if not self.parser.should_parse(file_path):
+            if not self.parser.file_filter.should_parse(file_path):
                 return None, self.total_tokens
 
             # Count tokens first before parsing
