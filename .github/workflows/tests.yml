@@ -24,27 +24,33 @@ jobs:
         python-version: ${{ matrix.python-version }}
         cache: 'pip'
     
+    - name: Install Task
+      uses: arduino/setup-task@v2
+      with:
+        version: 3.x
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+    
     - name: Install dependencies
+      shell: bash
       run: |
         python -m pip install --upgrade pip
-        pip install .[dev]
+        pip install uv
+        uv venv
+        uv sync
     
-    - name: Lint with ruff
+    - name: Run CI tasks (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
       run: |
-        ruff check .
-        ruff format --check .
+        source .venv/bin/activate
+        task ci:full
     
-    - name: Lint with pylint
+    - name: Run CI tasks (Windows)
+      if: runner.os == 'Windows'
+      shell: cmd
       run: |
-        pylint src/
-    
-    - name: Type check with pyright
-      run: |
-        pyright src/ tests/
-    
-    - name: Run tests
-      run: |
-        pytest tests/ --cov=src --cov-report=xml
+        call .venv\Scripts\activate
+        task ci:full
     
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
