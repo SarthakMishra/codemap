@@ -8,6 +8,7 @@ from enum import Enum, auto
 from typing import TYPE_CHECKING
 
 import questionary
+import typer
 from rich.console import Console, Group
 from rich.panel import Panel
 from rich.prompt import Confirm, Prompt
@@ -235,11 +236,22 @@ class CommitUI:
 
         Returns:
             True if the user confirms, False otherwise
+
+        Raises:
+            typer.Exit: When the user confirms exiting
         """
-        return Confirm.ask(
+        confirmed = Confirm.ask(
             "\n[bold yellow]Are you sure you want to exit without committing?[/]",
             default=False,
         )
+
+        if confirmed:
+            self.console.print("[yellow]Exiting commit process...[/yellow]")
+            # Use a zero exit code to indicate a successful (intended) exit
+            # This prevents error messages from showing when exiting
+            raise typer.Exit(code=0)
+
+        return False
 
     def confirm_bypass_hooks(self) -> bool:
         """Ask the user to confirm bypassing git hooks.

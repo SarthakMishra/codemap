@@ -6,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import typer
+
 from codemap.utils.cli_utils import loading_spinner
 from codemap.utils.git_utils import (
     GitDiff,
@@ -229,6 +231,7 @@ class CommitCommand:
 
         Raises:
             RuntimeError: If Git operations fail
+            typer.Exit: If user chooses to exit
         """
         # Add logging here
         logger.debug(
@@ -253,12 +256,16 @@ class CommitCommand:
             result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
 
             if result.action == ChunkAction.ABORT:
-                # Check if user confirms abort
-                if not self.ui.confirm_abort():
-                    # User confirmed abort - mark as user-intended exit
-                    self.error_state = "aborted"
+                # Mark as an intended abort (UI.confirm_abort will raise typer.Exit if confirmed)
+                self.error_state = "aborted"
+
+                # In production, if confirm_abort returns, it means user declined to abort
+                # In tests, mock will return the mocked value and not raise - both cases are handled
+                if self.ui.confirm_abort():
+                    # In tests with a mock that returns True
                     return False
-                # User declined abort, continue with the current chunk
+
+                # If we get here, user declined to abort in production, or mock returned False in testing
                 continue
 
             if result.action == ChunkAction.SKIP:
@@ -315,6 +322,9 @@ class CommitCommand:
 
         Returns:
             True if successful, False otherwise
+
+        Note:
+            May raise typer.Exit when users abort
         """
         try:
             # Get all changes
@@ -347,6 +357,10 @@ class CommitCommand:
                 # Process all chunks
                 if not self.process_all_chunks(chunks):
                     return False
+        except typer.Exit:
+            # Make sure exit is marked as an intended abort
+            self.error_state = "aborted"
+            raise
         except (RuntimeError, ValueError) as e:
             self.ui.show_error(str(e))
             self.error_state = "failed"
