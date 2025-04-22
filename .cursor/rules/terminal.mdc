@@ -1,0 +1,19 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Always use `uv` as the package manager, do not use pip
+    - virtual enviranment is located in `.venv`
+    - Activate venv using `source .venv/bin/activate`
+    - To add new packahe `uv add [package_name]`
+    - To remove/uninstall package `uv remove [package_name]`
+    - Check `pyproject.toml` [pyproject.toml](mdc:pyproject.toml) to check dependencies
+
+- Use task runner when necessary
+    - We are using `Taskfile.yml` please check [Taskfile.yml](mdc:Taskfile.yml) for all tasks
+    - Important tasks
+        - `task lint:fix` fixes lint issues with ruff
+        - `task lint:fix-unstable` fixes lint issues using --unstable-fixes flag
+        - `task test` runs all tests using pytest
+        - `task ci` runs all lint check and tests with coverage report 

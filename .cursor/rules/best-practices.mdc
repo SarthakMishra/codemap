@@ -1,0 +1,36 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# CodeMap Development Best Practices
+
+## Separation & Organization
+- Keep core logic separate from interface code (CLI/API/UI)
+- Maintain package structure:
+  - `analyzer/`: Code analysis
+  - `generators/`: Output generation
+  - `utils/`: Helper functions
+  - `cli/`: Command line interface
+
+## Dependency Rules
+- Core modules must not import from interface modules
+- Interface modules can import from core
+- Avoid circular imports
+
+## Configuration
+- Add new options to `config.py`
+- Provide sensible defaults
+- Use environment variables for sensitive values
+- Design configs to work across CLI/API/UI
+
+## Error Handling
+- Use specific exception types
+- Write portable error messages
+- Log with context, sanitize sensitive data
+- Implement graceful degradation
+
+## Testing & Documentation
+- Write unit and integration tests
+- Document with clear examples
+- Update docstrings for all public functions
