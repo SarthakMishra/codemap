@@ -25,7 +25,7 @@ from codemap.utils.llm_utils import (
 
 from .diff_splitter import DiffChunk, DiffSplitter
 from .interactive import ChunkAction, ChunkResult, CommitUI
-from .message_generator import DiffChunkDict, LLMError, MessageGenerator
+from .message_generator import DiffChunkData, LLMError, MessageGenerator
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -142,10 +142,12 @@ class CommitCommand:
             logger.exception("LLM message generation failed")
             logger.warning("LLM error: %s", str(e))
             with loading_spinner("Falling back to simple message generation..."):
-                # Convert DiffChunk to DiffChunkDict before passing to fallback_generation
-                chunk_dict = DiffChunkDict(
-                    files=chunk.files, content=chunk.content, description=getattr(chunk, "description", None)
-                )
+                # Convert DiffChunk to DiffChunkData before passing to fallback_generation
+                description = getattr(chunk, "description", None)
+                chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
+                # Add description only if it exists to match TypedDict total=False
+                if description is not None:
+                    chunk_dict["description"] = description
                 message = self.message_generator.fallback_generation(chunk_dict)
                 chunk.description = message
                 # Mark as not LLM-generated
