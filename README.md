@@ -7,7 +7,7 @@
 [![codecov](https://codecov.io/gh/SarthakMishra/codemap/branch/main/graph/badge.svg)](https://codecov.io/gh/SarthakMishra/codemap)
 
 > [!Caution]
-> CodeMap is currently in active development. Use with caution in production environments.
+> CodeMap is currently in active development. Use with caution and expect breaking changes.
 
 ## Overview
 
