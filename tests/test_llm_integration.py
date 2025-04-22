@@ -7,8 +7,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-# Import from our codebase - moved to top to fix E402
-from src.codemap.git.commit.message_generator import DiffChunkData, MessageGenerator
+from src.codemap.git.message_generator import DiffChunkData, MessageGenerator
 
 # Configure logging
 logging.basicConfig(

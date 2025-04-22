@@ -19,8 +19,8 @@ from codemap.cli.commit_cmd import (
     process_chunk_interactively,
     setup_message_generator,
 )
-from codemap.git.commit.diff_splitter import DiffChunk, DiffSplitter
-from codemap.git.commit.message_generator import DiffChunkData, LLMError, MessageGenerator
+from codemap.git.diff_splitter import DiffChunk, DiffSplitter
+from codemap.git.message_generator import DiffChunkData, LLMError, MessageGenerator
 from codemap.utils.git_utils import GitDiff
 
 console = Console(highlight=False)
@@ -62,7 +62,7 @@ index 2345678..bcdefgh 100644
 @pytest.fixture
 def mock_diff_splitter() -> Generator[Mock, None, None]:
     """Create a mock DiffSplitter."""
-    with patch("codemap.git.commit.diff_splitter.DiffSplitter") as mock:
+    with patch("codemap.git.diff_splitter.DiffSplitter") as mock:
         splitter = Mock(spec=DiffSplitter)
         splitter.split_diff.return_value = [
             DiffChunk(

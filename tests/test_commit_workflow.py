@@ -4,9 +4,9 @@ import unittest
 from typing import cast
 from unittest.mock import Mock, patch
 
-from codemap.git.commit.command import CommitCommand
-from codemap.git.commit.diff_splitter import DiffChunk
-from codemap.git.commit.interactive import ChunkAction, ChunkResult
+from codemap.git.command import CommitCommand
+from codemap.git.diff_splitter import DiffChunk
+from codemap.git.interactive import ChunkAction, ChunkResult
 
 
 class TestCommitWorkflow(unittest.TestCase):
@@ -15,7 +15,7 @@ class TestCommitWorkflow(unittest.TestCase):
     def setUp(self) -> None:
         """Set up test environment with mocks."""
         # Patch get_repo_root to avoid actual Git operations
-        self.repo_root_patcher = patch("codemap.git.commit.command.get_repo_root")
+        self.repo_root_patcher = patch("codemap.git.command.get_repo_root")
         self.mock_get_repo_root = self.repo_root_patcher.start()
         self.mock_get_repo_root.return_value = "/mock/repo/path"
 
@@ -25,9 +25,9 @@ class TestCommitWorkflow(unittest.TestCase):
         self.mock_message_generator = Mock()
 
         # Create the CommitCommand with patched dependencies
-        with patch("codemap.git.commit.command.CommitUI", return_value=self.mock_ui), patch(
-            "codemap.git.commit.command.DiffSplitter", return_value=self.mock_splitter
-        ), patch("codemap.git.commit.command.MessageGenerator", return_value=self.mock_message_generator):
+        with patch("codemap.git.command.CommitUI", return_value=self.mock_ui), patch(
+            "codemap.git.command.DiffSplitter", return_value=self.mock_splitter
+        ), patch("codemap.git.command.MessageGenerator", return_value=self.mock_message_generator):
             self.command = CommitCommand()
 
         # Create a mock chunk for testing that will be treated as a DiffChunk
@@ -40,7 +40,7 @@ class TestCommitWorkflow(unittest.TestCase):
         """Clean up patches."""
         self.repo_root_patcher.stop()
 
-    @patch("codemap.git.commit.command.generate_message")
+    @patch("codemap.git.command.generate_message")
     def test_generate_commit_message(self, mock_generate_message: Mock) -> None:
         """Test the _generate_commit_message method."""
         # Set up mock return value
@@ -54,11 +54,11 @@ class TestCommitWorkflow(unittest.TestCase):
         assert self.mock_chunk.is_llm_generated
         mock_generate_message.assert_called_once_with(self.mock_chunk, self.mock_message_generator)
 
-    @patch("codemap.git.commit.command.run_git_command")
-    @patch("codemap.git.commit.command.stage_files")
-    @patch("codemap.git.commit.command.unstage_files")
-    @patch("codemap.git.commit.command.get_staged_diff")
-    @patch("codemap.git.commit.command.commit_only_files")
+    @patch("codemap.git.command.run_git_command")
+    @patch("codemap.git.command.stage_files")
+    @patch("codemap.git.command.unstage_files")
+    @patch("codemap.git.command.get_staged_diff")
+    @patch("codemap.git.command.commit_only_files")
     def test_perform_commit(
         self, mock_commit: Mock, mock_get_staged: Mock, mock_unstage: Mock, mock_stage: Mock, mock_run_git: Mock
     ) -> None:

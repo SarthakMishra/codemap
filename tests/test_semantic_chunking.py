@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from codemap.git.commit.diff_splitter import DiffSplitter
+from codemap.git.diff_splitter import DiffSplitter
 from codemap.utils.git_utils import GitDiff
 
 

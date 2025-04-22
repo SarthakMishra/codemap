@@ -3,7 +3,7 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from codemap.git.commit.interactive import ChunkAction, CommitUI
+from codemap.git.interactive import ChunkAction, CommitUI
 
 
 class TestCommitUI(unittest.TestCase):
