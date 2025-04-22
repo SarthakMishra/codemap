@@ -202,10 +202,15 @@ def generate_commit_message(
     except (ValueError, RuntimeError, LLMError) as e:
         console.print(f"[red]Error generating message:[/red] {e}")
         # Still try to generate a fallback message
-        from codemap.git.commit.message_generator import DiffChunkDict
+        from codemap.git.commit.message_generator import DiffChunkData
 
-        # Convert DiffChunk to DiffChunkDict
-        chunk_dict = DiffChunkDict(files=chunk.files, content=chunk.content, description=chunk.description)
+        # Convert DiffChunk to DiffChunkData
+        chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
+
+        # Add description if it exists
+        if chunk.description is not None:
+            chunk_dict["description"] = chunk.description
+
         message = generator.fallback_generation(chunk_dict)
         return message, False
 
