@@ -653,11 +653,14 @@ def validate_and_process_commit(
         # Run the command (message will be prompted during the interactive process)
         result = command.run()
 
-        # Only raise an error if something unexpected happened
-        # Don't raise errors for user-initiated exits/aborts
+        # If command completed but returned False and it wasn't an intentional abort,
+        # raise an error
         if not result and command.error_state != "aborted":
             _raise_command_failed_error()
 
+    except typer.Exit:
+        # Let typer.Exit propagate for clean CLI exit
+        raise
     except Exception as e:
         logger.exception("Error processing commit")
         console.print(f"[red]Error: {e}[/red]")
@@ -723,7 +726,7 @@ def commit_command(
                 # Log presence but not the actual key
                 logger.debug("%s is set in environment (length: %d)", key_var, len(os.environ[key_var]))
 
-    # Continue with normal command execution
+    # Continue with normal command execution - typer.Exit exceptions will propagate normally
     validate_and_process_commit(
         path=path,
         all_files=all_files,
