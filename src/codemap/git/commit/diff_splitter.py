@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 # Import the console from cli_utils
 from codemap.utils.cli_utils import console
@@ -103,12 +102,24 @@ class DiffSplitter:
             # This is needed for the import check, but don't flag as unused
             import sentence_transformers  # type: ignore  # noqa: F401, PGH003
 
+            # Set the class flag for future reference
+            cls._sentence_transformers_available = True
             logger.debug("sentence-transformers is available")
             return True
-        except ImportError:
+        except ImportError as e:
+            # Log the specific import error for better debugging
+            cls._sentence_transformers_available = False
             logger.warning(
-                "\nsentence-transformers not installed. Semantic similarity features will be limited. "
-                "Install with: pip install sentence-transformers numpy"
+                "sentence-transformers import failed: %s. Semantic similarity features will be limited. "
+                "Install with: pip install sentence-transformers numpy",
+                e,
+            )
+            return False
+        except (RuntimeError, ValueError, AttributeError) as e:
+            # Catch specific errors during import
+            cls._sentence_transformers_available = False
+            logger.warning(
+                "Unexpected error importing sentence-transformers: %s. Semantic similarity features will be limited.", e
             )
             return False
 
@@ -133,44 +144,33 @@ class DiffSplitter:
                 logger.debug("Loading embedding model: %s", model_name)
 
                 try:
-                    # Create a Rich progress bar for model loading
-                    with Progress(
-                        SpinnerColumn(),
-                        TextColumn("[bold blue]Loading model..."),
-                        BarColumn(),
-                        TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-                        TimeElapsedColumn(),
-                        console=console,
-                        transient=False,
-                    ) as progress:
-                        # Add a task for the progress bar
-                        task = progress.add_task("Downloading model files...", total=100)
+                    # Use a simpler loading approach without Progress bar
+                    # to avoid "Only one live display may be active at once" error
+                    console.print("Loading embedding model...")
 
-                        # Define a callback to update progress
-                        def progress_callback(progress_value: float) -> None:
-                            # Update the progress bar
-                            progress.update(task, completed=progress_value * 100)
+                    # Load the model without progress tracking
+                    DiffSplitter._embedding_model = SentenceTransformer(model_name)
 
-                        # Load the model with progress tracking
-                        # First check if model exists in local cache
-                        DiffSplitter._embedding_model = SentenceTransformer(model_name)
-
-                        # Mark as complete
-                        progress.update(task, completed=100)
+                    console.print("[green]✓[/green] Model loaded successfully")
 
                     logger.debug("Initialized embedding model: %s", model_name)
+                    # Explicitly set the class variable to True when model loads successfully
+                    cls._model_available = True
                     return True
                 except ImportError as e:
                     logger.exception("Missing dependencies for embedding model")
                     console.print(f"[red]Error: Missing dependencies: {e}[/red]")
+                    cls._model_available = False
                     return False
                 except MemoryError:
                     logger.exception("Not enough memory to load embedding model")
                     console.print("[red]Error: Not enough memory to load embedding model[/red]")
+                    cls._model_available = False
                     return False
                 except ValueError as e:
                     logger.exception("Invalid model configuration")
                     console.print(f"[red]Error: Invalid model configuration: {e}[/red]")
+                    cls._model_available = False
                     return False
                 except RuntimeError as e:
                     error_msg = str(e)
@@ -181,16 +181,21 @@ class DiffSplitter:
                     else:
                         logger.exception("Runtime error when loading model")
                         console.print(f"[red]Error loading model: {error_msg}[/red]")
+                    cls._model_available = False
                     return False
                 except Exception as e:
                     logger.exception("Unexpected error loading embedding model")
                     console.print(f"[red]Unexpected error loading model: {e}[/red]")
+                    cls._model_available = False
                     return False
+            # If we already have a model loaded, make sure to set the flag to True
+            cls._model_available = True
             return True
         except Exception as e:
             # This is the outer exception handler for any unexpected errors
             logger.exception("Failed to load embedding model %s", model_name)
             console.print(f"[red]Failed to load embedding model: {e}[/red]")
+            cls._model_available = False
             return False
 
     def _initialize_related_file_patterns(self) -> list[tuple[re.Pattern, re.Pattern]]:
@@ -944,6 +949,14 @@ class DiffSplitter:
         """
         # For test environments, allow semantic splitting even without model
         is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
+
+        # Add right before the check in _split_semantic
+        logger.debug(
+            "Status before fallback decision: sentence_transformers_available=%s, model_available=%s, is_test_environment=%s",  # noqa: E501
+            DiffSplitter._sentence_transformers_available,
+            DiffSplitter._model_available,
+            is_test_environment,
+        )
 
         # Check if sentence-transformers and model are available
         # If not, log a clear warning about falling back to simpler strategy
