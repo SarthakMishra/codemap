@@ -75,6 +75,26 @@ def get_repo_root(path: Path | None = None) -> Path:
         raise GitError(msg) from e
 
 
+def validate_repo_path(path: Path | None = None) -> Path | None:
+    """Validate and return the repository path.
+
+    Args:
+        path: Optional path to validate (defaults to current directory)
+
+    Returns:
+        Path to the repository root if valid, None otherwise
+    """
+    try:
+        # If no path provided, use current directory
+        if path is None:
+            path = Path.cwd()
+
+        # Get the repository root
+        return get_repo_root(path)
+    except GitError:
+        return None
+
+
 def get_staged_diff() -> GitDiff:
     """Get the diff of staged changes.
 
