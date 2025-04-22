@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import TYPE_CHECKING, Any, Iterable, cast
+from typing import TYPE_CHECKING, Any, Iterable, TypedDict, cast
 
 import yaml
 
@@ -86,26 +86,13 @@ IMPORTANT:
 """
 
 
-# Type hint for DiffChunk attributes - replacing TypedDict with a regular dict type for cleaner code
-class DiffChunkDict(dict):
-    """Type hint for DiffChunk attributes."""
+# Define a TypedDict to represent the structure of a DiffChunk
+class DiffChunkData(TypedDict, total=False):
+    """TypedDict representing the structure of a DiffChunk."""
 
-    def __init__(
-        self,
-        files: list[str] | None = None,
-        content: str = "",
-        description: str | None = None,
-    ) -> None:
-        """Initialize with DiffChunk attributes."""
-        super().__init__()
-        self["files"] = files or []
-        self["content"] = content
-        if description is not None:
-            self["description"] = description
-
-    def get(self, key: str, default: object = None) -> object:
-        """Get a value with default."""
-        return super().get(key, default)
+    files: list[str]
+    content: str
+    description: str
 
 
 class LLMError(Exception):
@@ -426,10 +413,17 @@ class MessageGenerator:
 
         return resolved_model, resolved_provider, resolved_api_base
 
-    def _extract_file_info(self, chunk: DiffChunkDict) -> dict[str, Any]:
-        """Extract information about the files in the diff. (Unchanged)."""
+    def _extract_file_info(self, chunk: DiffChunk | DiffChunkData) -> dict[str, Any]:
+        """Extract file information from the diff chunk.
+
+        Args:
+            chunk: Diff chunk to extract information from
+
+        Returns:
+            Dictionary with information about files
+        """
         file_info = {}
-        files = chunk.get("files", [])
+        files = chunk.files if isinstance(chunk, DiffChunk) else chunk.get("files", [])
         if not isinstance(files, list):
             try:
                 # Convert to list only if it's actually iterable
@@ -491,12 +485,23 @@ class MessageGenerator:
                 logger.warning("Error loading/parsing commit convention from config: %s", e)
         return convention
 
-    def _prepare_prompt(self, chunk: DiffChunkDict) -> str:
-        """Prepare the LLM prompt based on the diff chunk. (Unchanged)."""
+    def _prepare_prompt(self, chunk: DiffChunk | DiffChunkData) -> str:
+        """Prepare the prompt for the LLM.
+
+        Args:
+            chunk: Diff chunk to prepare prompt for
+
+        Returns:
+            Prepared prompt with diff and file information
+        """
         file_info = self._extract_file_info(chunk)
         convention = self._get_commit_convention()
+
+        # Get the diff content from the chunk
+        diff_content = chunk.content if isinstance(chunk, DiffChunk) else chunk.get("content", "")
+
         context = {
-            "diff": chunk.get("content", ""),
+            "diff": diff_content,
             "files": file_info,
             "convention": convention,
         }
@@ -720,19 +725,21 @@ class MessageGenerator:
         message = " ".join(message.splitlines())
         return self._sanitize_commit_message(message)  # Ensure sanitization is called
 
-    def fallback_generation(self, chunk: DiffChunkDict) -> str:
-        """Generate a simple commit message without using an LLM. (Unchanged, but added sanitization call)."""
+    def fallback_generation(self, chunk: DiffChunk | DiffChunkData) -> str:
+        """Generate a fallback commit message without LLM.
+
+        This is used when LLM-based generation fails or is disabled.
+
+        Args:
+            chunk: Diff chunk to generate message for
+
+        Returns:
+            Generated commit message
+        """
         commit_type = "chore"
-        files = chunk.get("files", [])
-        if not isinstance(files, list):
-            try:
-                # Convert to list only if it's actually iterable
-                if hasattr(files, "__iter__") and not isinstance(files, str):
-                    files = list(cast("Iterable", files))
-                else:
-                    files = []
-            except (TypeError, ValueError):
-                files = []
+
+        # Get files from the chunk
+        files = chunk.files if isinstance(chunk, DiffChunk) else chunk.get("files", [])
 
         string_files = [f for f in files if isinstance(f, str)]  # Filter only strings for path operations
 
@@ -744,7 +751,9 @@ class MessageGenerator:
                 commit_type = "docs"
                 break
 
-        content = chunk.get("content", "")
+        # Get content from the chunk
+        content = chunk.content if isinstance(chunk, DiffChunk) else chunk.get("content", "")
+
         if isinstance(content, str) and ("fix" in content.lower() or "bug" in content.lower()):
             commit_type = "fix"  # Be slightly smarter about 'fix' type
 
@@ -812,29 +821,31 @@ class MessageGenerator:
         logger.warning("API key for resolved provider '%s' is MISSING.", provider)
         return False
 
-    def _adapt_chunk_access(self, chunk: DiffChunkDict | DiffChunk) -> DiffChunkDict:
-        """Adapt a DiffChunk to ensure it can be accessed with dictionary-style operations. (Unchanged)."""
-        if isinstance(chunk, dict):
-            return chunk
+    def _adapt_chunk_access(self, chunk: DiffChunk | DiffChunkData) -> DiffChunkData:
+        """Adapt chunk access to work with both DiffChunk objects and dictionaries.
 
+        Args:
+            chunk: Chunk to adapt
+
+        Returns:
+            Dictionary with chunk data
+        """
         if isinstance(chunk, DiffChunk):
-            return DiffChunkDict(
-                files=chunk.files, content=chunk.content, description=getattr(chunk, "description", None)
+            return DiffChunkData(
+                files=chunk.files,
+                content=chunk.content,
+                description=chunk.description if chunk.description else "",
             )
-        error_msg = f"Unsupported chunk type: {type(chunk)}"
-        raise TypeError(error_msg)
+        return cast("DiffChunkData", chunk)
 
-    def generate_message(self, chunk: DiffChunkDict | DiffChunk) -> tuple[str, bool]:
+    def generate_message(self, chunk: DiffChunk | DiffChunkData) -> tuple[str, bool]:
         """Generate a commit message for the given diff chunk.
 
         Args:
-            chunk: DiffChunk (or dict) to generate message for
+            chunk: Diff chunk to generate message for
 
         Returns:
-            Tuple of (generated message, whether LLM was used)
-
-        Raises:
-            LLMError: If API key is missing or LLM call fails unexpectedly.
+            Tuple of (message, was_generated_by_llm)
         """
         logger.debug(
             "Generating message for chunk ID: %s. Using resolved config: Provider=%s, Model=%s",
