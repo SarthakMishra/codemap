@@ -163,3 +163,9 @@ tasks:
     cmds:
       - task: clean
       - rm -rf {{.VENV_DIR}}
+
+  ci:
+    desc: Run all checks and tests in CI mode
+    cmds:
+      - task: lint
+      - task: test:coverage
