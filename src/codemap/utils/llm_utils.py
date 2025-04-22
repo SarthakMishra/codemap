@@ -188,50 +188,66 @@ def generate_message(
 
 
 def create_universal_generator(
-    repo_path: Path | None,
-    model: str | None = "openai/gpt-4o-mini",
-    api_key: str | None = None,
-    api_base: str | None = None,
+    repo_path: Path,
     prompt_template: str | None = None,
-    prompt_template_path: str | None = None,
+    model: str | None = None,
+    provider: str | None = None,
+    api_base: str | None = None,
+    api_key: str | None = None,
 ) -> MessageGenerator:
-    """Create a universal message generator that can be used by any module.
-
-    This is a simplified function that combines the provider extraction and setup
-    for easy use in any module.
+    """Create a universal message generator with the specified options.
 
     Args:
-        repo_path: Path to the repository
-        model: Model name (with or without provider prefix)
-        api_key: API key (optional, will be pulled from environment if not provided)
-        api_base: API base URL (optional)
-        prompt_template: Custom prompt template content (optional)
-        prompt_template_path: Path to custom prompt template file (optional)
+        repo_path: Repository root path
+        prompt_template: Custom prompt template
+        model: Model to use
+        provider: Provider to use
+        api_base: API base URL
+        api_key: API key
 
     Returns:
-        Configured MessageGenerator
+        Configured MessageGenerator instance
     """
-    # Ensure repo_path and model are not None
-    actual_repo_path = repo_path if repo_path is not None else Path()
-    actual_model = model or "openai/gpt-4o-mini"
-
-    # Try to load .env file if it exists
     try:
-        from dotenv import load_dotenv
+        # Import here to avoid circular imports
+        from codemap.git.commit.message_generator import MessageGenerator
+        from codemap.utils.config_loader import ConfigLoader
 
-        load_dotenv()
-    except ImportError:
-        pass
+        # Create a config loader to get default settings
+        config_loader = ConfigLoader(repo_root=repo_path)
 
-    # Create the generator using the centralized function
-    return setup_message_generator(
-        repo_path=actual_repo_path,
-        model=actual_model,
-        prompt_template=prompt_template,
-        prompt_template_path=prompt_template_path,
-        api_base=api_base,
-        api_key=api_key,
-    )
+        # If model not provided, use the one from config
+        if not model:
+            llm_config = config_loader.get_llm_config()
+            model = llm_config["model"]
+            # If provider not explicitly provided, use the one from config
+            if not provider:
+                provider = llm_config.get("provider")
+
+        # Ensure model is never None to satisfy typing
+        model_to_use = model if model is not None else "openai/gpt-4o-mini"  # Default fallback
+
+        # Create the generator with the specific model configuration
+        # Include provider explicitly to ensure it's properly resolved
+        generator = MessageGenerator(
+            repo_root=repo_path,
+            prompt_template=prompt_template,
+            model=model_to_use,
+            provider=provider,
+            api_base=api_base,
+            config_loader=config_loader,
+        )
+
+        # If API key was explicitly provided, add it to the generator's api_keys dict
+        if api_key and generator.resolved_provider:
+            generator._api_keys[generator.resolved_provider] = api_key  # noqa: SLF001
+
+        return generator
+    except (ImportError, ValueError, RuntimeError) as e:
+        # Handle any import or instantiation errors
+        logger.exception("Error creating message generator: %s")
+        error_message = "Failed to create message generator: " + str(e)
+        raise RuntimeError(error_message) from e
 
 
 def generate_text_with_llm(
