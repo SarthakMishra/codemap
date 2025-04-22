@@ -10,7 +10,7 @@ from typing import Protocol, TypeVar, runtime_checkable
 from rich.console import Console
 
 # Import the MessageGenerator class - avoid circular imports
-from codemap.git.commit.message_generator import DiffChunkData, LLMError, MessageGenerator
+from codemap.git.message_generator import DiffChunkData, LLMError, MessageGenerator
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -210,7 +210,7 @@ def create_universal_generator(
     """
     try:
         # Import here to avoid circular imports
-        from codemap.git.commit.message_generator import MessageGenerator
+        from codemap.git.message_generator import MessageGenerator
         from codemap.utils.config_loader import ConfigLoader
 
         # Create a config loader to get default settings
