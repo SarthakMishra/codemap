@@ -28,6 +28,7 @@ from codemap.utils.git_utils import (
     get_staged_diff,
     get_unstaged_diff,
     get_untracked_files,
+    run_git_command,
 )
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 from codemap.utils.pr_utils import (
@@ -278,7 +279,8 @@ def _handle_commits(options: PROptions) -> bool:
             console.print("[yellow]No changes to commit after filtering.[/yellow]")
             return True
 
-        # Set up message generator
+        # Set up message generator - we don't need to store it since
+        # CommitCommand will handle message generation internally
         create_universal_generator(
             repo_path=options.repo_path,
             model=options.model,
@@ -286,8 +288,41 @@ def _handle_commits(options: PROptions) -> bool:
             api_base=options.api_base,
         )
 
+        # Make sure to stage all files before analyzing
+        try:
+            # Use git add . to stage all files for analysis
+            with loading_spinner("Staging files for analysis..."):
+                run_git_command(["git", "add", "."])
+        except GitError as e:
+            logger.warning("Failed to stage all changes: %s", e)
+            # Continue with the process even if staging fails
+
         # Process all chunks using the CommitCommand
         command = CommitCommand(path=options.repo_path, model=options.model or "gpt-4o-mini")
+
+        # Explicitly initialize the sentence transformers model with proper loading spinners
+        with loading_spinner("Checking semantic analysis capabilities..."):
+            model_available = command.splitter._check_sentence_transformers_availability()  # noqa: SLF001
+
+        if not model_available:
+            console.print(
+                "[yellow]Semantic analysis will be limited. To enable full capabilities, install: "
+                "pip install sentence-transformers numpy[/yellow]"
+            )
+
+        if command.splitter._sentence_transformers_available:  # noqa: SLF001
+            with loading_spinner(
+                "Loading embedding model for semantic analysis (first use may download model files)..."
+            ):
+                model_loaded = command.splitter._check_model_availability()  # noqa: SLF001
+
+            if not model_loaded:
+                console.print(
+                    "[yellow]Semantic analysis will use simplified approach due to model loading issues.[/yellow]"
+                )
+            else:
+                console.print("[green]Semantic analysis model loaded successfully.[/green]")
+
         result = command.process_all_chunks(
             chunks,
             interactive=options.interactive,
