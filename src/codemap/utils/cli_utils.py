@@ -42,8 +42,14 @@ def setup_logging(*, is_verbose: bool) -> None:
     Args:
         is_verbose: Whether to enable debug logging.
     """
-    # Override LOG_LEVEL environment variable if verbose flag is set
+    # Set log level based on verbosity
+    # In verbose mode, use DEBUG or the level specified in LOG_LEVEL env var
+    # In non-verbose mode, only show ERROR and above
     log_level = "DEBUG" if is_verbose else os.environ.get("LOG_LEVEL", "INFO").upper()
+
+    # When not in verbose mode, override to only show errors
+    if not is_verbose:
+        log_level = "ERROR"
 
     logging.basicConfig(
         level=log_level,
@@ -51,6 +57,24 @@ def setup_logging(*, is_verbose: bool) -> None:
         datefmt="[%X]",
         handlers=[RichHandler(rich_tracebacks=True, show_time=True, show_path=True)],
     )
+
+    # Also set specific loggers to ERROR when not in verbose mode
+    if not is_verbose:
+        # Suppress logs from these packages completely unless in verbose mode
+        logging.getLogger("litellm").setLevel(logging.ERROR)
+        logging.getLogger("httpx").setLevel(logging.ERROR)
+        logging.getLogger("httpcore").setLevel(logging.ERROR)
+        logging.getLogger("urllib3").setLevel(logging.ERROR)
+        logging.getLogger("requests").setLevel(logging.ERROR)
+        logging.getLogger("openai").setLevel(logging.ERROR)
+        logging.getLogger("tqdm").setLevel(logging.ERROR)
+
+        # Set codemap loggers to ERROR level
+        logging.getLogger("codemap").setLevel(logging.ERROR)
+
+        # Specifically suppress git-related logs
+        logging.getLogger("codemap.utils.git_utils").setLevel(logging.ERROR)
+        logging.getLogger("codemap.git").setLevel(logging.ERROR)
 
 
 def create_spinner_progress() -> Progress:
