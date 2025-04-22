@@ -10,7 +10,7 @@ from typing import Protocol, TypeVar, runtime_checkable
 from rich.console import Console
 
 # Import the MessageGenerator class - avoid circular imports
-from codemap.git.commit.message_generator import DiffChunkDict, LLMError, MessageGenerator
+from codemap.git.commit.message_generator import DiffChunkData, LLMError, MessageGenerator
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -153,11 +153,12 @@ def generate_message(
     # Create a safe dictionary representation of chunk for fallback
     try:
         # Use getattr with default values to safely extract attributes from DiffChunkLike
-        chunk_dict = DiffChunkDict(
-            files=getattr(chunk, "files", []),
-            content=getattr(chunk, "content", ""),
-            description=getattr(chunk, "description", None),
-        )
+        chunk_dict = DiffChunkData(files=getattr(chunk, "files", []), content=getattr(chunk, "content", ""))
+
+        # Add description if it exists
+        description = getattr(chunk, "description", None)
+        if description is not None:
+            chunk_dict["description"] = description
 
         if use_simple_mode:
             # Use fallback generation without LLM
@@ -171,11 +172,13 @@ def generate_message(
         # If LLM generation fails, log and use fallback
         logger.warning("LLM message generation failed: %s", str(e))
         # Create a safe dictionary representation of chunk for fallback
-        chunk_dict = DiffChunkDict(
-            files=getattr(chunk, "files", []),
-            content=getattr(chunk, "content", ""),
-            description=getattr(chunk, "description", None),
-        )
+        chunk_dict = DiffChunkData(files=getattr(chunk, "files", []), content=getattr(chunk, "content", ""))
+
+        # Add description if it exists
+        description = getattr(chunk, "description", None)
+        if description is not None:
+            chunk_dict["description"] = description
+
         message = message_generator.fallback_generation(chunk_dict)
         return message, False
     except (ValueError, RuntimeError):
