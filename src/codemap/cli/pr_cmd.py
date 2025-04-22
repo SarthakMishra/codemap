@@ -11,7 +11,7 @@ import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated
 
 import questionary
 import typer
@@ -19,9 +19,7 @@ import yaml
 from rich.panel import Panel
 
 from codemap.git import DiffSplitter, SplitStrategy
-from codemap.git.commit.diff_splitter import DiffChunk as DiffSplitterChunk
-from codemap.git.commit.interactive import process_all_chunks
-from codemap.git.commit.message_generator import DiffChunk as MessageGeneratorDiffChunk
+from codemap.git.commit.command import CommitCommand
 from codemap.utils import validate_repo_path
 from codemap.utils.cli_utils import console, loading_spinner, setup_logging
 from codemap.utils.git_utils import (
@@ -281,24 +279,24 @@ def _handle_commits(options: PROptions) -> bool:
             return True
 
         # Set up message generator
-        generator = create_universal_generator(
+        create_universal_generator(
             repo_path=options.repo_path,
             model=options.model,
             api_key=options.api_key,
             api_base=options.api_base,
         )
 
-        # Process all chunks
-        result = process_all_chunks(
-            cast("list[DiffSplitterChunk | MessageGeneratorDiffChunk]", chunks),
-            generator,
+        # Process all chunks using the CommitCommand
+        command = CommitCommand(path=options.repo_path, model=options.model or "gpt-4o-mini")
+        result = command.process_all_chunks(
+            chunks,
             interactive=options.interactive,
         )
     except (OSError, ValueError, RuntimeError, ConnectionError) as e:
         console.print(f"[red]Error committing changes: {e}[/red]")
         return False
     else:
-        return result == 0
+        return result
 
 
 def _handle_push(options: PROptions, branch_name: str | None) -> bool:
