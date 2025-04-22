@@ -15,7 +15,6 @@ from typing import Annotated
 
 import questionary
 import typer
-import yaml
 from rich.panel import Panel
 
 from codemap.git import DiffSplitter, SplitStrategy
@@ -25,6 +24,7 @@ from codemap.utils.cli_utils import console, loading_spinner, setup_logging
 from codemap.utils.git_utils import (
     GitDiff,
     GitError,
+    get_repo_root,
     get_staged_diff,
     get_unstaged_diff,
     get_untracked_files,
@@ -165,24 +165,32 @@ def _handle_branch_creation(options: PROptions) -> str | None:
             chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
 
             if chunks:
-                # Set up message generator for the first chunk
-                generator = create_universal_generator(
-                    repo_path=options.repo_path,
-                    model=options.model,
-                    api_key=options.api_key,
-                    api_base=options.api_base,
-                )
+                # Ensure repo_path is not None before passing it, as required by create_universal_generator
+                if options.repo_path is None:
+                    # Handle the case where repo_path is None, maybe log an error or skip suggestion
+                    logger.error(
+                        "Repository path is required for generating branch name suggestion but was not provided."
+                    )
+                    suggested_name = ""  # Fallback to empty suggestion
+                else:
+                    # Set up message generator for the first chunk
+                    generator = create_universal_generator(
+                        repo_path=options.repo_path,  # Now known to be Path
+                        model=options.model,
+                        api_key=options.api_key,
+                        api_base=options.api_base,
+                    )
 
-                # Generate a commit message for the first chunk
-                try:
-                    message, _ = generate_message(chunks[0], generator)
-                    # Extract the first line as the commit message
-                    first_line = message.split("\n")[0] if "\n" in message else message
-                    suggested_name = suggest_branch_name([first_line])
-                except (ValueError, RuntimeError, ConnectionError) as e:
-                    # Fallback to a simple branch name
-                    logger.warning("Error generating branch name: %s", e)
-                    suggested_name = suggest_branch_name([f"update-{chunks[0].files[0]}"])
+                    # Generate a commit message for the first chunk
+                    try:
+                        message, _ = generate_message(chunks[0], generator)
+                        # Extract the first line as the commit message
+                        first_line = message.split("\n")[0] if "\n" in message else message
+                        suggested_name = suggest_branch_name([first_line])
+                    except (ValueError, RuntimeError, ConnectionError) as e:
+                        # Fallback to a simple branch name
+                        logger.warning("Error generating branch name: %s", e)
+                        suggested_name = suggest_branch_name([f"update-{chunks[0].files[0]}"])
 
         # Ask for branch name
         branch_name = questionary.text(
@@ -281,8 +289,22 @@ def _handle_commits(options: PROptions) -> bool:
 
         # Set up message generator - we don't need to store it since
         # CommitCommand will handle message generation internally
+        # Ensure repo_path is not None before passing it
+        if options.repo_path is None:
+            # Handle None repo_path by using current directory
+            logger.warning("Repository path not provided, using current directory")
+            repo_path = Path.cwd()
+            try:
+                # Try to get repo root to validate it's a git repo
+                repo_path = get_repo_root(repo_path)
+            except GitError as e:
+                console.print(f"[red]Error: Not a valid git repository: {e}[/red]")
+                return False
+        else:
+            repo_path = options.repo_path
+
         create_universal_generator(
-            repo_path=options.repo_path,
+            repo_path=repo_path,  # Now guaranteed to be a valid Path
             model=options.model,
             api_key=options.api_key,
             api_base=options.api_base,
@@ -563,7 +585,7 @@ def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest
 
 
 def _load_llm_config(repo_path: Path | None) -> dict:
-    """Load LLM configuration from .codemap.yml file.
+    """Load LLM configuration from ConfigLoader.
 
     Args:
         repo_path: Path to the repository
@@ -571,54 +593,13 @@ def _load_llm_config(repo_path: Path | None) -> dict:
     Returns:
         Dictionary with LLM configuration values
     """
-    config = {
-        "model": "openai/gpt-4o-mini",  # Default fallback model
-        "api_base": None,
-        "api_key": None,
-    }
+    from codemap.utils.config_loader import ConfigLoader
 
-    # Ensure repo_path is not None
-    if repo_path is None:
-        return config
+    # Create a config loader instance
+    config_loader = ConfigLoader(repo_root=repo_path)
 
-    config_file = repo_path / ".codemap.yml"
-    if config_file.exists():
-        try:
-            with config_file.open("r") as f:
-                yaml_config = yaml.safe_load(f)
-
-            if yaml_config is not None and isinstance(yaml_config, dict) and "commit" in yaml_config:
-                commit_config = yaml_config["commit"]
-
-                # Load LLM settings if available
-                if "llm" in commit_config and isinstance(commit_config["llm"], dict):
-                    llm_config = commit_config["llm"]
-
-                    if "model" in llm_config:
-                        config["model"] = llm_config["model"]
-
-                    if "api_base" in llm_config:
-                        config["api_base"] = llm_config["api_base"]
-
-                    # Use the same API keys from commit configuration
-                    # This ensures consistency between commit and PR features
-                    provider = None
-                    if "/" in config["model"]:
-                        provider = config["model"].split("/")[0].lower()
-
-                    if provider:
-                        config_key = f"{provider}_api_key"
-                        if config_key in llm_config:
-                            config["api_key"] = llm_config[config_key]
-
-                    # Also check for generic API key
-                    if "api_key" in llm_config and not config["api_key"]:
-                        config["api_key"] = llm_config["api_key"]
-
-        except (ImportError, yaml.YAMLError, OSError) as e:
-            logger.warning("Error loading config: %s", e)
-
-    return config
+    # Get the LLM configuration
+    return config_loader.get_llm_config()
 
 
 def pr_command(
@@ -665,12 +646,13 @@ def pr_command(
         if not repo_path:
             _exit_with_error("[red]Error:[/red] Not a valid Git repository")
 
-        # Load LLM config from .codemap.yml
+        # Load LLM config from ConfigLoader
         llm_config = _load_llm_config(repo_path)
 
         # Command line options take precedence over config file
         if not model:
             model = llm_config["model"]
+            # No need to extract provider here as it's not used
 
         if not api_key:
             api_key = llm_config["api_key"]

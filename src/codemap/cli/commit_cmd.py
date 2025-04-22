@@ -22,11 +22,15 @@ try:
 except ImportError:
     load_dotenv = None
 
+if TYPE_CHECKING:
+    from codemap.git.commit.message_generator import MessageGenerator
+
 from codemap.git import (
     DiffChunk,
     DiffSplitter,
     SplitStrategy,
 )
+from codemap.git.commit.command import CommitCommand
 from codemap.git.commit.message_generator import LLMError
 from codemap.utils import validate_repo_path
 from codemap.utils.cli_utils import console, loading_spinner, setup_logging
@@ -37,13 +41,11 @@ from codemap.utils.git_utils import (
     get_staged_diff,
     get_unstaged_diff,
     get_untracked_files,
+    run_git_command,
 )
 from codemap.utils.llm_utils import create_universal_generator, generate_message
 
 from .cli_types import VerboseFlag
-
-if TYPE_CHECKING:
-    from codemap.git.commit.message_generator import MessageGenerator
 
 # Truncate to maximum of 10 lines
 MAX_PREVIEW_LINES = 10
@@ -619,6 +621,44 @@ def _run_commit_command(config: RunConfig) -> int:
         return 1
 
 
+def _raise_command_failed_error() -> None:
+    """Raise an error for failed command execution."""
+    msg = "Command failed to run successfully"
+    raise RuntimeError(msg)
+
+
+def validate_and_process_commit(
+    path: Path | None,
+    all_files: bool = False,
+    model: str = "gpt-4o-mini",
+) -> None:
+    """Validate repository path and process commit.
+
+    Args:
+        path: Path to repository
+        all_files: Whether to commit all files
+        model: Model to use for generation
+    """
+    try:
+        # Create the CommitCommand instance
+        command = CommitCommand(
+            path=path,
+            model=model,
+        )
+
+        # Stage files if all_files flag is set
+        if all_files:
+            run_git_command(["git", "add", "."])
+
+        # Run the command (message will be prompted during the interactive process)
+        if not command.run():
+            _raise_command_failed_error()
+    except Exception as e:
+        logger.exception("Error processing commit")
+        console.print(f"[red]Error: {e}[/red]")
+        raise typer.Exit(1) from e
+
+
 def commit_command(
     path: Annotated[
         Path | None,
@@ -627,75 +667,60 @@ def commit_command(
             exists=True,
         ),
     ] = None,
+    message: Annotated[str | None, typer.Option("--message", "-m", help="Commit message")] = None,
+    all_files: Annotated[bool, typer.Option("--all", "-a", help="Commit all changes")] = False,
     model: Annotated[
         str,
         typer.Option(
             "--model",
-            "-m",
             help="LLM model to use for message generation",
         ),
-    ] = "openai/gpt-4o-mini",
-    api_key: Annotated[
-        str | None,
-        typer.Option(
-            "--api-key",
-            help="OpenAI API key (or set OPENAI_API_KEY env var)",
-            envvar="OPENAI_API_KEY",
-        ),
-    ] = None,
-    api_base: Annotated[
-        str | None,
-        typer.Option(
-            "--api-base",
-            help="Custom API base URL for the LLM provider",
-        ),
-    ] = None,
-    force_simple: Annotated[
-        bool,
-        typer.Option(
-            "--simple",
-            "-s",
-            help="Use simple message generation (no LLM)",
-        ),
-    ] = False,
-    prompt_template: Annotated[
-        str | None,
-        typer.Option(
-            "--template",
-            "-t",
-            help="Path to custom prompt template file",
-        ),
-    ] = None,
-    staged_only: Annotated[
-        bool,
-        typer.Option(
-            "--staged-only",
-            help="Only process staged changes",
-        ),
-    ] = False,
+    ] = "gpt-4o-mini",
+    strategy: Annotated[str, typer.Option("--strategy", "-s", help="Strategy for splitting diffs")] = "semantic",
+    non_interactive: Annotated[bool, typer.Option("--non-interactive", help="Run in non-interactive mode")] = False,
     is_verbose: VerboseFlag = False,
 ) -> None:
-    """Generate and apply conventional commits from changes in a Git repository."""
+    """Generate AI-assisted commit messages for staged changes.
+
+    This command analyzes your staged changes and generates commit messages using an LLM.
+    """
     setup_logging(is_verbose=is_verbose)
 
-    try:
-        # Create run configuration
-        config = RunConfig(
-            repo_path=path,
-            force_simple=force_simple,
-            api_key=api_key,
-            model=model,
-            api_base=api_base,
-            prompt_template=prompt_template,
-            staged_only=staged_only,
-        )
+    # Log environment setup and key configuration
+    if is_verbose:
+        # Log Python and environment details
+        logger.debug("Python Path: %s", sys.executable)
+        logger.debug("Python Version: %s", sys.version)
 
-        # Run commit command
-        exit_code = _run_commit_command(config)
-        if exit_code != 0:
-            sys.exit(exit_code)
+        # Log model information
+        logger.debug("Using model: %s", model)
 
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/]")
-        logger.debug("Error running commit command", exc_info=True)
-        raise typer.Exit(1) from e
+        # Log command parameters
+        logger.debug("Message: %s", message)
+        logger.debug("Strategy: %s", strategy)
+        logger.debug("Non-interactive mode: %s", non_interactive)
+
+        # Check sentence_transformers
+        try:
+            import sentence_transformers
+
+            logger.debug("sentence_transformers version: %s", sentence_transformers.__version__)
+        except ImportError:
+            logger.debug("sentence_transformers is not installed or importable")
+        except (AttributeError, RuntimeError) as e:
+            logger.debug("Error checking sentence_transformers: %s", e)
+
+        # Log important environment variables (without revealing API keys)
+        provider_prefixes = ["OPENAI", "GROQ", "ANTHROPIC", "MISTRAL", "COHERE", "TOGETHER", "OPENROUTER"]
+        for prefix in provider_prefixes:
+            key_var = f"{prefix}_API_KEY"
+            if key_var in os.environ:
+                # Log presence but not the actual key
+                logger.debug("%s is set in environment (length: %d)", key_var, len(os.environ[key_var]))
+
+    # Continue with normal command execution
+    validate_and_process_commit(
+        path=path,
+        all_files=all_files,
+        model=model,
+    )
