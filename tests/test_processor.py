@@ -9,6 +9,7 @@ import pytest
 
 from codemap.analyzer.processor import DocumentationProcessor
 from codemap.analyzer.tree_parser import CodeParser
+from codemap.utils.file_filters import FileFilter
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -19,8 +20,11 @@ if TYPE_CHECKING:
 @pytest.fixture
 def mock_code_parser() -> MagicMock:
     """Mock CodeParser for testing."""
+    file_filter = MagicMock(spec=FileFilter)
+    file_filter.should_parse.return_value = True
+
     parser = MagicMock(spec=CodeParser)
-    parser.should_parse.return_value = True
+    parser.file_filter = file_filter
     parser.parse_file.return_value = {"type": "test", "content": "test content"}
     return parser
 
@@ -43,14 +47,14 @@ def test_process_file(mock_code_parser: MagicMock, temp_py_file: Path) -> None:
     # Verify results
     assert file_info == {"type": "test", "content": "test content"}
     assert tokens > 0
-    mock_code_parser.should_parse.assert_called_once_with(temp_py_file)
+    mock_code_parser.file_filter.should_parse.assert_called_once_with(temp_py_file)
     mock_code_parser.parse_file.assert_called_once_with(temp_py_file)
 
 
 def test_process_file_should_not_parse(mock_code_parser: MagicMock, temp_py_file: Path) -> None:
     """Test processing a file that should not be parsed."""
     processor = DocumentationProcessor(mock_code_parser, token_limit=100)
-    mock_code_parser.should_parse.return_value = False
+    mock_code_parser.file_filter.should_parse.return_value = False
 
     # Process the file
     file_info, tokens = processor.process_file(temp_py_file)
@@ -58,7 +62,7 @@ def test_process_file_should_not_parse(mock_code_parser: MagicMock, temp_py_file
     # Verify results
     assert file_info is None
     assert tokens == 0
-    mock_code_parser.should_parse.assert_called_once_with(temp_py_file)
+    mock_code_parser.file_filter.should_parse.assert_called_once_with(temp_py_file)
     mock_code_parser.parse_file.assert_not_called()
 
 
@@ -68,7 +72,7 @@ def test_token_limit_reached(mock_code_parser: MagicMock, temp_py_file: Path) ->
     # Create a custom subclass for testing that makes the token count predictable
     class TestDocumentationProcessor(DocumentationProcessor):
         def process_file(self, file_path: Path, progress: Progress | None = None) -> tuple[dict[str, Any] | None, int]:  # noqa: ARG002
-            if not self.parser.should_parse(file_path):
+            if not self.parser.file_filter.should_parse(file_path):
                 return None, self.total_tokens
 
             # For this test, always return 200 tokens
@@ -91,7 +95,7 @@ def test_token_limit_reached(mock_code_parser: MagicMock, temp_py_file: Path) ->
     # Verify results
     assert file_info is None  # Should be None because token limit is reached
     assert tokens == 0
-    mock_code_parser.should_parse.assert_called_once_with(temp_py_file)
+    mock_code_parser.file_filter.should_parse.assert_called_once_with(temp_py_file)
     # Make sure parse_file is not called when token limit is reached
     mock_code_parser.parse_file.assert_not_called()
 

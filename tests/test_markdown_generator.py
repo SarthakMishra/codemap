@@ -162,9 +162,13 @@ def test_different_file_extensions(generator: MarkdownGenerator, sample_repo: Pa
 
     # Create mock parser for these files
     with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class:
+        file_filter_mock = Mock()
+        file_filter_mock.should_parse.return_value = True
+        file_filter_mock.gitignore_patterns = []
+        file_filter_mock.matches_pattern.return_value = False
+
         parser = Mock()
-        parser.should_parse.return_value = True
-        parser.gitignore_patterns = []
+        parser.file_filter = file_filter_mock
         mock_parser_class.return_value = parser
 
         # Create parsed file data with different languages
@@ -235,9 +239,13 @@ def test_tree_with_specific_path(generator: MarkdownGenerator, sample_repo: Path
 
     # Generate tree for the subdir only
     with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class:
+        file_filter_mock = Mock()
+        file_filter_mock.should_parse.return_value = True
+        file_filter_mock.gitignore_patterns = []
+
         parser = Mock()
+        parser.file_filter = file_filter_mock
         parser.should_parse.return_value = True
-        parser.gitignore_patterns = []
         mock_parser_class.return_value = parser
 
         # Generate a tree for the specific subdirectory
@@ -273,11 +281,13 @@ def test_tree_with_parsed_files_highlighting(tmp_path: Path) -> None:
 
     # Generate tree with parsed_files parameter
     with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class:
+        file_filter_mock = Mock()
+        file_filter_mock.should_parse.return_value = True
+        file_filter_mock.gitignore_patterns = []
+        file_filter_mock.matches_pattern.return_value = False
+
         parser = Mock(spec=CodeParser)
-        parser.should_parse.return_value = True
-        parser.gitignore_patterns = []
-        # Make sure _should_process_path returns True for all paths
-        parser.matches_pattern.return_value = False
+        parser.file_filter = file_filter_mock
         mock_parser_class.return_value = parser
 
         # First verify that without parsed_files, all files are included
