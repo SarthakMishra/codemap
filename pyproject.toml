@@ -20,6 +20,7 @@ dependencies = [
     "typer>=0.15.2",
     "typing-extensions>=4.13.2",
     "sentence-transformers>=4.1.0",
+    "watchdog>=6.0.0",
 ]
 
 [dependency-groups]
