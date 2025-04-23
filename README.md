@@ -23,6 +23,9 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 
 ## Installation
 
+> [!Note]
+> This package will be published to PyPI upon reaching a stable version.
+
 ```bash
 # Install with pipx
 pipx install git+https://github.com/SarthakMishra/codemap.git
@@ -80,6 +83,9 @@ codemap generate -v
 ## Smart Commit Feature
 
 Create intelligent Git commits with AI-assisted message generation. The tool analyzes your changes, splits them into logical chunks, and generates meaningful commit messages using LLMs.
+
+> [!Warning]
+> By default, `codemap commit` uses the `--no-verify` Git flag. This is done to prevent potential instability when interacting with Git pre-commit hooks. While this behavior can be disabled in the configuration file (`.codemap.yml`), doing so may lead to unexpected issues with certain hook setups. If you encounter problems related to Git hooks, please [open an issue](https://github.com/SarthakMishra/codemap/issues).
 
 ### Basic Usage
 
