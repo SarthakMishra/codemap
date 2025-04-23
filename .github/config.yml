@@ -1,0 +1,71 @@
+# Configuration for welcome - https://github.com/behaviorbot/welcome
+
+# Configuration for new-issue-welcome - https://github.com/behaviorbot/new-issue-welcome
+# Comment to be posted to on first time issues
+newIssueWelcomeComment: >
+  👋 Thanks for opening your first issue in CodeMap! We appreciate your contribution.
+  
+  To help us address this efficiently:
+  - Make sure you've followed our issue template
+  - Include relevant logs or error messages
+  - Specify your Python version and OS
+  - Add `codemap --version` output
+  
+  Our team will review this soon. Meanwhile, check out our [contributing guidelines](CONTRIBUTING.md).
+
+# Configuration for new-pr-welcome - https://github.com/behaviorbot/new-pr-welcome
+# Comment to be posted to on PRs from first time contributors in your repository
+newPRWelcomeComment: >
+  🎉 Thank you for your first pull request to CodeMap!
+  
+  Before we review:
+  - Ensure tests are passing (`task test`)
+  - Run linting checks (`task lint`)
+  - Add tests for new features
+  - Update documentation if needed
+  - Follow our commit message convention
+  
+  Need help? Feel free to ask questions in the PR comments.
+
+# Comment on first-time merged pull requests
+firstPRMergeComment: >
+  🚀 Congratulations on your first merged pull request in CodeMap!
+  
+  We appreciate your contribution to making CodeMap better.
+  Consider starring the repository if you found it helpful.
+
+# Configuration for sentiment-bot
+sentimentBotToxicityThreshold: .7
+
+# Configuration for saved replies
+savedReplies:
+  - name: duplicate
+    reply: >
+      Thanks for your contribution! This issue appears to be a duplicate of another one.
+      Please search existing issues before creating new ones.
+  
+  - name: needs-repro
+    reply: >
+      Could you please provide a minimal reproducible example? This will help us investigate the issue faster.
+      Include:
+      - Your Python version
+      - CodeMap version
+      - Minimal code sample
+      - Expected vs actual behavior
+  
+  - name: feature-request
+    reply: >
+      Thanks for the feature request! To help us evaluate it better, please provide:
+      - Use case and motivation
+      - Proposed solution/implementation
+      - Alternative approaches considered
+      
+  - name: help-wanted
+    reply: >
+      This issue is marked as 'help-wanted'. We welcome contributions from the community!
+      If you'd like to work on this, please:
+      1. Comment that you're interested
+      2. Fork the repository
+      3. Create a PR with your solution
+      
+      Need guidance? We're happy to help!
