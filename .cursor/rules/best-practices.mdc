@@ -29,8 +29,3 @@ alwaysApply: true
 - Write portable error messages
 - Log with context, sanitize sensitive data
 - Implement graceful degradation
-
-## Testing & Documentation
-- Write unit and integration tests
-- Document with clear examples
-- Update docstrings for all public functions
