@@ -18,7 +18,7 @@
 
 2.  **Refine Language Configurations (`processor/chunking/languages/*.py`):**
     *   [X] Review and expand node types in `PYTHON_CONFIG` and `JAVASCRIPT_CONFIG`.
-    *   [ ] Add configurations for other languages you intend to support.
+    *   [X] Add configurations for other languages you intend to support.
     *   [X] Standardize how entity names are extracted for different node types across languages.
 
 3.  **Basic Dependency Extraction (Syntax-based in `processor/chunking/syntax.py`):**
