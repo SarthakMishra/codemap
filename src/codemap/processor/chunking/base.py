@@ -14,10 +14,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Sequence
 
+from codemap.processor.analysis.git.models import GitMetadata
 from codemap.processor.analysis.tree_sitter.base import EntityType
 
 if TYPE_CHECKING:
-    from datetime import datetime
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -51,33 +51,6 @@ class Location:
         if self.start_col is not None and self.end_col is not None:
             return f"{self.file_path}:{self.start_line}:{self.start_col}-{self.end_line}:{self.end_col}"
         return f"{self.file_path}:{self.start_line}-{self.end_line}"
-
-
-@dataclass(frozen=True)
-class GitMetadata:
-    """Git-related metadata for a code chunk.
-
-    Tracks version control information for the chunk, including both original
-    authorship and last modification details.
-    """
-
-    is_committed: bool
-    """Whether the chunk is committed to the repository."""
-
-    commit_id: str
-    """Git commit hash where this chunk was last modified."""
-
-    commit_message: str
-    """Message of the last commit."""
-
-    timestamp: datetime
-    """Timestamp of the original commit."""
-
-    branch: list[str]
-    """List of branch names where this chunk exists."""
-
-    last_modified_at: datetime | None = None
-    """Timestamp of the last modification, if different from original commit."""
 
 
 @dataclass(frozen=True)

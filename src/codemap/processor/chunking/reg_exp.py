@@ -6,7 +6,8 @@ import logging
 import re
 from typing import TYPE_CHECKING, Callable, Sequence
 
-from codemap.processor.chunking.base import Chunk, ChunkingStrategy, ChunkMetadata, EntityType, GitMetadata, Location
+from codemap.processor.analysis.git.models import GitMetadata
+from codemap.processor.chunking.base import Chunk, ChunkingStrategy, ChunkMetadata, EntityType, Location
 
 if TYPE_CHECKING:
     from pathlib import Path

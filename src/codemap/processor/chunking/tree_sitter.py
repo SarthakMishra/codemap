@@ -6,9 +6,10 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
+from codemap.processor.analysis.git.models import GitMetadata
 from codemap.processor.analysis.tree_sitter import TreeSitterAnalyzer, get_language_by_extension
 from codemap.processor.analysis.tree_sitter.base import EntityType
-from codemap.processor.chunking.base import Chunk, ChunkingStrategy, ChunkMetadata, GitMetadata, Location
+from codemap.processor.chunking.base import Chunk, ChunkingStrategy, ChunkMetadata, Location
 from codemap.processor.chunking.reg_exp import RegExpChunker
 
 if TYPE_CHECKING:
