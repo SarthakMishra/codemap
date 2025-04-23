@@ -12,54 +12,15 @@ from __future__ import annotations
 import abc
 import logging
 from dataclasses import dataclass, field
-from enum import Enum, auto
 from typing import TYPE_CHECKING, Any, Callable, Sequence
+
+from codemap.processor.analysis.tree_sitter.base import EntityType
 
 if TYPE_CHECKING:
     from datetime import datetime
     from pathlib import Path
 
 logger = logging.getLogger(__name__)
-
-
-class EntityType(Enum):
-    """Types of code entities that can be extracted."""
-
-    # File-level entities
-    MODULE = auto()
-    NAMESPACE = auto()
-    PACKAGE = auto()
-
-    # Type definitions
-    CLASS = auto()
-    INTERFACE = auto()
-    PROTOCOL = auto()  # Similar to interface but for structural typing
-    STRUCT = auto()
-    ENUM = auto()
-    TYPE_ALIAS = auto()
-
-    # Functions and methods
-    FUNCTION = auto()
-    METHOD = auto()
-    PROPERTY = auto()  # For getter/setter methods
-    TEST_CASE = auto()
-    TEST_SUITE = auto()
-
-    # Variables and constants
-    VARIABLE = auto()
-    CONSTANT = auto()
-    CLASS_FIELD = auto()  # For class-level variables/fields
-
-    # Code organization
-    IMPORT = auto()
-    DECORATOR = auto()
-
-    # Documentation
-    COMMENT = auto()
-    DOCSTRING = auto()
-
-    # Special cases
-    UNKNOWN = auto()
 
 
 @dataclass(frozen=True)
@@ -100,20 +61,20 @@ class GitMetadata:
     authorship and last modification details.
     """
 
+    is_committed: bool
+    """Whether the chunk is committed to the repository."""
+
     commit_id: str
     """Git commit hash where this chunk was last modified."""
 
-    author: str
-    """Original author of the code chunk."""
+    commit_message: str
+    """Message of the last commit."""
 
     timestamp: datetime
     """Timestamp of the original commit."""
 
-    branch: str
-    """Branch name where this chunk exists."""
-
-    last_modified_by: str | None = None
-    """User who last modified this chunk, if different from author."""
+    branch: list[str]
+    """List of branch names where this chunk exists."""
 
     last_modified_at: datetime | None = None
     """Timestamp of the last modification, if different from original commit."""
@@ -235,9 +196,8 @@ class ChunkingStrategy(abc.ABC):
 
     A chunking strategy defines how to break down source code into meaningful chunks.
     Different strategies might use different approaches:
-    - Syntax-based (using AST)
+    - Tree-sitter-based (using tree-sitter AST)
     - Rule-based (using regular expressions)
-    - ML-based (using embeddings)
 
     The only required method is `chunk`. The `merge` and `split` operations
     are optional and have default implementations.
