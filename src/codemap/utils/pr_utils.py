@@ -231,8 +231,8 @@ def generate_pr_title_with_llm(
         commit_list = "\n".join([f"- {commit}" for commit in commits])
 
         # Prepare prompt
-        prompt = """Based on the following commits, generate a clear, concise PR title that captures the
-essence of the changes.
+        prompt = f"""Based on the following commits, generate a clear, concise PR title that captures the
+        essence of the changes.
         Follow these guidelines:
         - Focus on the most important change
         - If there are multiple related changes, summarize them
@@ -244,9 +244,16 @@ essence of the changes.
         - Include the type of change if clear (Feature, Fix, Refactor, etc.)
 
         Commits:
-        """
+        {commit_list}
 
-        prompt += commit_list + "\n\n        PR Title:"
+        PR Title:
+        ---
+
+        IMPORTANT:
+        - Do not include any other text in your response except the PR title.
+        - Do not wrap the PR title in quotes.
+        - Do not add any explanations or other text to your response.
+        """
 
         # Call LLM with repo_path used for context
         title = generate_text_with_llm(prompt, actual_model, api_key, api_base)
@@ -439,8 +446,14 @@ def generate_pr_description_with_llm(
         Commits:
         {commit_list}
 
-        PR Description:"""
+        PR Description:
+        ---
 
+        IMPORTANT:
+        - Do not include any other text in your response except the PR description.
+        - Do not wrap the PR description in quotes.
+        - Do not add any explanations or other text to your response.
+        """
         # Call LLM with repo_path used for context
         return generate_text_with_llm(prompt, actual_model, api_key, api_base)
     except (ValueError, RuntimeError, ConnectionError) as e:
