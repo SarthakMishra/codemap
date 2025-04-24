@@ -69,7 +69,7 @@ class EmbeddingResult:
     tokens: int
     """Number of tokens in the content."""
 
-    model_used: str
+    model: str
     """The model used to generate the embedding."""
 
     file_path: Path | None = None
@@ -98,6 +98,6 @@ class EmbeddingResult:
             content=content,
             embedding=embedding_vector,
             tokens=response["usage"]["prompt_tokens"],
-            model_used=response["model"],
+            model=response["model"],
             file_path=file_path,
         )

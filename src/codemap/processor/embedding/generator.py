@@ -185,7 +185,7 @@ class EmbeddingGenerator:
                         content=chunk.content,
                         embedding=np.array(embedding_data, dtype=np.float32),
                         tokens=token_count,
-                        model_used=model_name,
+                        model=model_name,
                         file_path=file_path,
                         chunk_id=chunk_id,
                     )
