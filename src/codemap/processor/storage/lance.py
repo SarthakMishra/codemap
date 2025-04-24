@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING, Sequence
 import lancedb
 import pandas as pd
 
+from codemap.processor.analysis.lsp.models import LSPMetadata, LSPReference, LSPTypeInfo
 from codemap.processor.chunking.base import Chunk
 from codemap.processor.embedding.models import EmbeddingResult
 from codemap.processor.storage.base import StorageBackend, StorageConfig
@@ -38,6 +40,7 @@ class LanceDBStorage(StorageBackend):
     CHUNKS_TABLE = "chunks"
     EMBEDDINGS_TABLE = "embeddings"
     FILE_HISTORY_TABLE = "file_history"
+    LSP_METADATA_TABLE = "lsp_metadata"
 
     def __init__(self, config: StorageConfig) -> None:
         """Initialize the LanceDB storage backend.
@@ -138,6 +141,28 @@ class LanceDBStorage(StorageBackend):
             file_history_table = self._db.open_table(self.FILE_HISTORY_TABLE)
             self._create_indices(file_history_table, ["file_path"])
 
+        # Create LSP metadata table if it doesn't exist
+        if self.LSP_METADATA_TABLE not in existing_tables:
+            logger.info("Creating LSP metadata table")
+            # Create LSP metadata table with schema
+            lsp_metadata_data = {
+                "chunk_id": [],  # ID of the chunk this metadata belongs to
+                "chunk_name": [],  # Full name of the chunk
+                "file_path": [],  # File path
+                "commit_id": [],  # Git commit ID
+                "hover_text": [],  # Hover information
+                "symbol_references": [],  # JSON serialized references
+                "type_info": [],  # JSON serialized type information
+                "definition_uri": [],  # URI to definition
+                "is_definition": [],  # Whether this is a definition
+                "additional_attributes": [],  # JSON serialized additional attributes
+            }
+            lsp_metadata_df = pd.DataFrame(lsp_metadata_data)
+            self._db.create_table(self.LSP_METADATA_TABLE, data=lsp_metadata_df, mode="create")
+            # Create indices
+            lsp_metadata_table = self._db.open_table(self.LSP_METADATA_TABLE)
+            self._create_indices(lsp_metadata_table, ["chunk_id", "file_path", "chunk_name"])
+
     def _create_indices(self, table: Table, columns: list[str]) -> None:
         """Create indices on specified columns.
 
@@ -210,44 +235,167 @@ class LanceDBStorage(StorageBackend):
             logger.exception("Failed to store chunks")
             raise
 
-    def _update_file_history(self, chunks: Sequence[Chunk], commit_id: str | None = None) -> None:
-        """Update file history tracking.
+    def store_lsp_metadata(
+        self, lsp_metadata: dict[str, LSPMetadata], chunks: Sequence[Chunk], commit_id: str | None = None
+    ) -> None:
+        """Store LSP metadata for chunks.
 
         Args:
-            chunks: Sequence of code chunks
+            lsp_metadata: Dictionary mapping chunk full names to LSP metadata
+            chunks: The chunks that the LSP metadata belongs to
             commit_id: Optional Git commit ID
         """
-        if not commit_id:
-            return  # Skip history tracking if no commit_id provided
-
-        if not self._db:
+        if not lsp_metadata or not chunks:
             return
 
-        # Get unique file paths
-        file_paths = set()
-        for chunk in chunks:
-            file_path = str(chunk.metadata.location.file_path)
-            file_paths.add(file_path)
+        if not self._connection_initialized:
+            self.initialize()
 
-        # Create history records
-        timestamp = datetime.now(timezone.utc).isoformat()
+        if not self._db:
+            logger.warning("No database connection, cannot store LSP metadata")
+            return
 
-        # Use list comprehension for better performance
-        history_records = [
-            {
-                "file_path": file_path,
-                "commit_id": commit_id,
-                "timestamp": timestamp,
-                "is_deleted": False,
-            }
-            for file_path in file_paths
-        ]
+        lsp_metadata_table = self._db.open_table(self.LSP_METADATA_TABLE)
 
-        # Store history records
-        if history_records:
-            history_table = self._db.open_table(self.FILE_HISTORY_TABLE)
-            history_df = pd.DataFrame(history_records)
-            history_table.add(history_df)
+        # Create a mapping from chunk full name to chunk ID
+        chunk_id_map = {chunk.full_name: self._generate_chunk_id(chunk, commit_id) for chunk in chunks}
+
+        # Create records for LSP metadata
+        lsp_records = []
+
+        for chunk_name, metadata in lsp_metadata.items():
+            # Skip if we don't have a chunk ID for this name
+            if chunk_name not in chunk_id_map:
+                logger.warning("No chunk ID found for %s, skipping LSP metadata", chunk_name)
+                continue
+
+            chunk_id = chunk_id_map[chunk_name]
+
+            # Find the corresponding chunk to get file path
+            chunk = next((c for c in chunks if c.full_name == chunk_name), None)
+            file_path = str(chunk.metadata.location.file_path) if chunk else ""
+
+            # Serialize complex objects to JSON
+            symbol_references_json = "[]"
+            if metadata.symbol_references:
+                symbol_references_json = json.dumps(
+                    [
+                        {
+                            "target_name": ref.target_name,
+                            "target_uri": ref.target_uri,
+                            "target_range": ref.target_range,
+                            "reference_type": ref.reference_type,
+                        }
+                        for ref in metadata.symbol_references
+                    ]
+                )
+
+            type_info_json = "null"
+            if metadata.type_info:
+                type_info_json = json.dumps(
+                    {
+                        "type_name": metadata.type_info.type_name,
+                        "is_built_in": metadata.type_info.is_built_in,
+                        "type_hierarchy": metadata.type_info.type_hierarchy,
+                    }
+                )
+
+            additional_attrs_json = "{}"
+            if metadata.additional_attributes:
+                additional_attrs_json = json.dumps(metadata.additional_attributes)
+
+            lsp_records.append(
+                {
+                    "chunk_id": chunk_id,
+                    "chunk_name": chunk_name,
+                    "file_path": file_path,
+                    "commit_id": commit_id or "",
+                    "hover_text": metadata.hover_text or "",
+                    "symbol_references": symbol_references_json,
+                    "type_info": type_info_json,
+                    "definition_uri": metadata.definition_uri or "",
+                    "is_definition": metadata.is_definition,
+                    "additional_attributes": additional_attrs_json,
+                }
+            )
+
+        if lsp_records:
+            # Store LSP metadata
+            lsp_metadata_df = pd.DataFrame(lsp_records)
+            lsp_metadata_table.add(lsp_metadata_df, mode="overwrite")
+            logger.info("Stored %d LSP metadata records", len(lsp_records))
+
+    def get_lsp_metadata(self, chunk_id: str) -> LSPMetadata | None:
+        """Retrieve LSP metadata for a chunk.
+
+        Args:
+            chunk_id: ID of the chunk
+
+        Returns:
+            LSP metadata if found, None otherwise
+        """
+        if not self._connection_initialized:
+            self.initialize()
+
+        if not self._db:
+            logger.warning("No database connection, cannot retrieve LSP metadata")
+            return None
+
+        lsp_metadata_table = self._db.open_table(self.LSP_METADATA_TABLE)
+
+        # Query for the LSP metadata
+        results = lsp_metadata_table.search().where(f"chunk_id = '{chunk_id}'").to_pandas()
+
+        if results.empty:
+            return None
+
+        # Convert to LSPMetadata
+        row = results.iloc[0].to_dict()
+
+        # Deserialize complex objects from JSON
+        symbol_references = []
+        if row["symbol_references"]:
+            try:
+                refs_data = json.loads(row["symbol_references"])
+                symbol_references = [
+                    LSPReference(
+                        target_name=ref_data["target_name"],
+                        target_uri=ref_data["target_uri"],
+                        target_range=ref_data["target_range"],
+                        reference_type=ref_data["reference_type"],
+                    )
+                    for ref_data in refs_data
+                ]
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Error deserializing symbol references: %s", e)
+
+        type_info = None
+        if row["type_info"] and row["type_info"] != "null":
+            try:
+                type_data = json.loads(row["type_info"])
+                type_info = LSPTypeInfo(
+                    type_name=type_data["type_name"],
+                    is_built_in=type_data["is_built_in"],
+                    type_hierarchy=type_data["type_hierarchy"],
+                )
+            except (json.JSONDecodeError, KeyError) as e:
+                logger.warning("Error deserializing type info: %s", e)
+
+        additional_attributes = {}
+        if row["additional_attributes"]:
+            try:
+                additional_attributes = json.loads(row["additional_attributes"])
+            except json.JSONDecodeError as e:
+                logger.warning("Error deserializing additional attributes: %s", e)
+
+        return LSPMetadata(
+            symbol_references=symbol_references,
+            type_info=type_info,
+            hover_text=row["hover_text"] if row["hover_text"] else None,
+            definition_uri=row["definition_uri"] if row["definition_uri"] else None,
+            is_definition=row["is_definition"],
+            additional_attributes=additional_attributes,
+        )
 
     def store_embeddings(self, embeddings: Sequence[EmbeddingResult]) -> None:
         """Store embeddings for code chunks.
@@ -374,36 +522,11 @@ class LanceDBStorage(StorageBackend):
 
         return chunks
 
-    def _restore_chunk_hierarchy(self, chunks: list[Chunk]) -> None:
-        """Restore parent-child relationships between chunks.
+    def search_by_text(self, query: str, limit: int = 10) -> list[tuple[Chunk, float]]:
+        """Search for chunks by text content.
 
         Args:
-            chunks: List of chunks to process
-        """
-        # Create mapping of full_name to chunk
-        chunk_map = {chunk.full_name: chunk for chunk in chunks}
-
-        # Set parent-child relationships
-        for chunk in chunks:
-            parent_id = getattr(chunk, "_parent_id", None)
-            if parent_id and parent_id in chunk_map:
-                # Chunk objects are frozen, so we need to recreate them
-                parent = chunk_map[parent_id]
-                # This is a workaround since Chunk is frozen
-                object.__setattr__(chunk, "parent", parent)
-
-                # Add chunk to parent's children
-                children = list(parent.children)
-                children.append(chunk)
-                object.__setattr__(parent, "children", tuple(children))
-
-    def search_by_content(self, query: str, limit: int = 10) -> list[tuple[Chunk, float]]:
-        """Search for chunks by content.
-
-        This is a text-based search, not a semantic search.
-
-        Args:
-            query: Search query
+            query: Text query
             limit: Maximum number of results to return
 
         Returns:
@@ -413,36 +536,108 @@ class LanceDBStorage(StorageBackend):
             self.initialize()
 
         if not self._db:
-            logger.warning("No database connection, cannot search content")
+            logger.warning("No database connection, cannot search by text")
             return []
 
         chunks_table = self._db.open_table(self.CHUNKS_TABLE)
 
-        # Perform full-text search
-        # Note: This depends on LanceDB's capabilities; we'll use a fallback approach
-        try:
-            # Try direct search if supported
-            results = chunks_table.search(query).limit(limit).to_pandas()
-        except (ValueError, NotImplementedError, RuntimeError) as e:
-            # Use specific exception types instead of broad Exception
-            logger.warning("Full-text search failed, falling back to LIKE query: %s", e)
-            # Fallback to LIKE query
-            results = chunks_table.search().where(f"content LIKE '%{query}%'").limit(limit).to_pandas()
+        # For basic text search, use a simple LIKE operator
+        # In a real implementation, this would use more sophisticated text indexing
+        search_query = f"content LIKE '%{query}%'"
+
+        # Perform text search
+        results = chunks_table.search().where(search_query).limit(limit).to_pandas()
 
         if results.empty:
             return []
 
-        # Convert to Chunk objects with scores
+        # Convert to Chunk objects with arbitrary scores
+        # In a real implementation, we'd use proper relevance scoring
         chunks_with_scores = []
         for _, row in results.iterrows():
             chunk_data = row.to_dict()
             chunk = dict_to_chunk(chunk_data)
-
-            # Get score from results if available, otherwise use 1.0
-            score = row.get("_score", 1.0)
+            # Assign a fixed score for now - would be replaced with real relevance score
+            # This is a simplified implementation
+            score = 0.5
             chunks_with_scores.append((chunk, score))
 
         return chunks_with_scores
+
+    def search_by_content(self, query: str, limit: int = 10) -> list[tuple[Chunk, float]]:
+        """Search for chunks by content similarity.
+
+        This is a simple implementation that delegates to search_by_text.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results to return
+
+        Returns:
+            List of (chunk, score) tuples, sorted by score (highest first)
+        """
+        # For simplicity, delegate to text search
+        return self.search_by_text(query, limit)
+
+    def search_hybrid(
+        self, query: str, vector: list[float], limit: int = 10, weight: float = 0.5
+    ) -> list[tuple[Chunk, float]]:
+        """Search using both vector and text matching for best results.
+
+        Args:
+            query: Text search query
+            vector: Vector search query
+            limit: Maximum number of results to return
+            weight: Weight between text (0.0) and vector (1.0) search
+
+        Returns:
+            List of (chunk, score) tuples, sorted by score (highest first)
+        """
+        if not self._connection_initialized:
+            self.initialize()
+
+        if not self._db:
+            logger.warning("No database connection, cannot perform hybrid search")
+            return []
+
+        # This is a simplified implementation that combines results from vector and text search
+        # In a real implementation, we'd use a more sophisticated hybrid search approach
+
+        # First, try vector search
+        vector_results = []
+        try:
+            vector_results = self.search_by_vector(vector, limit=limit)
+        except (ValueError, TypeError, RuntimeError) as e:
+            logger.debug("Error in vector search part of hybrid search: %s", str(e))
+
+        # Then add text search results
+        text_results = self.search_by_text(query, limit=limit)
+
+        # Combine results with the specified weight
+        combined_results = {}
+        for chunk, score in vector_results:
+            # Use chunk ID as key for deduplication
+            chunk_id = getattr(chunk, "id", str(hash(chunk.full_name)))
+            # Apply vector weight
+            combined_results[chunk_id] = (chunk, score * weight)
+
+        for chunk, score in text_results:
+            # Use chunk ID as key for deduplication
+            chunk_id = getattr(chunk, "id", str(hash(chunk.full_name)))
+            if chunk_id in combined_results:
+                # Combine with existing score using weights
+                existing_chunk, existing_score = combined_results[chunk_id]
+                combined_results[chunk_id] = (existing_chunk, existing_score + score * (1.0 - weight))
+            else:
+                # Apply text weight
+                combined_results[chunk_id] = (chunk, score * (1.0 - weight))
+
+        # Convert back to list and sort by score (highest first)
+        results = list(combined_results.values())
+        results.sort(key=lambda x: x[1], reverse=True)
+
+        # Limit results
+        return results[:limit]
 
     def search_by_vector(self, vector: list[float], limit: int = 10) -> list[tuple[Chunk, float]]:
         """Search for chunks by vector similarity.
@@ -487,63 +682,51 @@ class LanceDBStorage(StorageBackend):
 
         return chunks_with_scores
 
-    def search_hybrid(
-        self, query: str, vector: list[float], limit: int = 10, weight: float = 0.5
-    ) -> list[tuple[Chunk, float]]:
-        """Hybrid search combining text and vector similarity.
+    def _update_file_history(self, chunks: Sequence[Chunk], commit_id: str | None = None) -> None:
+        """Update file history when chunks are stored.
+
+        This adds an entry to the file history table for each unique file.
 
         Args:
-            query: Text search query
-            vector: Vector search query
-            limit: Maximum number of results to return
-            weight: Weight between text (0.0) and vector (1.0) search
-
-        Returns:
-            List of (chunk, score) tuples, sorted by score (highest first)
+            chunks: The chunks being stored
+            commit_id: Optional Git commit ID
         """
-        if not self._connection_initialized:
-            self.initialize()
-
         if not self._db:
-            logger.warning("No database connection, cannot perform hybrid search")
-            return []
+            return
 
-        # For now, we'll implement a simplified hybrid search approach
-        # by performing vector search and filtering results
-        try:
-            # Get vector search results
-            vector_results = self.search_by_vector(vector, limit * 2)  # Get more results to filter
+        # Get unique file paths
+        unique_file_paths = set()
+        for chunk in chunks:
+            if hasattr(chunk.metadata, "location") and hasattr(chunk.metadata.location, "file_path"):
+                unique_file_paths.add(str(chunk.metadata.location.file_path))
 
-            if not vector_results:
-                # Fall back to text search if vector search returns nothing
-                return self.search_by_content(query, limit)
+        if not unique_file_paths:
+            return
 
-            # Filter results based on the text query
-            filtered_results = []
-            for chunk, score in vector_results:
-                if query.lower() in chunk.content.lower():
-                    # Boost score for text matches
-                    adjusted_score = score * (1 - weight) + weight
-                    filtered_results.append((chunk, adjusted_score))
-                else:
-                    # Keep vector score for non-text matches
-                    filtered_results.append((chunk, score * (1 - weight)))
+        history_table = self._db.open_table(self.FILE_HISTORY_TABLE)
 
-            # Sort by score and limit results
-            filtered_results.sort(key=lambda x: x[1], reverse=True)
-            return filtered_results[:limit]
+        timestamp = datetime.now(timezone.utc).isoformat()
 
-        except (ValueError, RuntimeError) as e:
-            # Use specific exception types instead of broad Exception
-            logger.warning("Hybrid search failed, falling back to vector search: %s", e)
-            # Fallback to vector-only search
-            return self.search_by_vector(vector, limit)
+        history_records = [
+            {
+                "file_path": file_path,
+                "commit_id": commit_id or "",
+                "timestamp": timestamp,
+                "is_deleted": False,
+            }
+            for file_path in unique_file_paths
+        ]
+
+        if history_records:
+            history_df = pd.DataFrame(history_records)
+            history_table.add(history_df)
+            logger.debug("Updated file history for %d files", len(history_records))
 
     def delete_file(self, file_path: str) -> None:
-        """Delete all chunks for a file.
+        """Delete all chunks and metadata for a file.
 
         Args:
-            file_path: Path to the file
+            file_path: Path to the file to delete
         """
         if not self._connection_initialized:
             self.initialize()
@@ -554,24 +737,30 @@ class LanceDBStorage(StorageBackend):
 
         chunks_table = self._db.open_table(self.CHUNKS_TABLE)
         embeddings_table = self._db.open_table(self.EMBEDDINGS_TABLE)
+        lsp_metadata_table = self._db.open_table(self.LSP_METADATA_TABLE)
 
-        # Get chunk IDs for this file
-        results = chunks_table.search().where(f"file_path = '{file_path}'").select(["id"]).to_pandas()
+        # Get chunk IDs for the file
+        results = chunks_table.search().where(f"file_path = '{file_path}'").to_pandas()
 
-        if results.empty:
-            logger.info("No chunks found for file %s", file_path)
-            return
+        if not results.empty:
+            # Extract chunk IDs
+            chunk_ids = results["id"].tolist()
 
-        chunk_ids = results["id"].tolist()
+            # Delete chunks by ID
+            for chunk_id in chunk_ids:
+                chunks_table.delete(f"id = '{chunk_id}'")
 
-        # Delete chunks
-        for chunk_id in chunk_ids:
-            chunks_table.delete(f"id = '{chunk_id}'")
-            embeddings_table.delete(f"chunk_id = '{chunk_id}'")
+            # Delete embeddings by chunk_id
+            for chunk_id in chunk_ids:
+                embeddings_table.delete(f"chunk_id = '{chunk_id}'")
 
-        logger.info("Deleted %d chunks for file %s", len(chunk_ids), file_path)
+            # Delete LSP metadata by chunk_id
+            for chunk_id in chunk_ids:
+                lsp_metadata_table.delete(f"chunk_id = '{chunk_id}'")
 
-        # Update file history to mark the file as deleted
+            logger.info("Deleted %d chunks, their embeddings, and LSP metadata for file %s", len(chunk_ids), file_path)
+
+        # Mark the file as deleted in the history
         self._mark_file_deleted(file_path)
 
     def _mark_file_deleted(self, file_path: str) -> None:
@@ -634,16 +823,69 @@ class LanceDBStorage(StorageBackend):
 
         return history
 
+    def _restore_chunk_hierarchy(self, chunks: list[Chunk]) -> None:
+        """Restore parent-child relationships between chunks.
+
+        Args:
+            chunks: List of chunks to process
+        """
+        # Create a lookup dictionary by chunk full name (safer than relying on id)
+        chunk_dict = {chunk.full_name: chunk for chunk in chunks}
+
+        # First pass: restore parent links
+        for chunk in chunks:
+            # Get the parent metadata from chunk attributes
+            parent_full_name = getattr(chunk, "_parent_full_name", None)
+            if parent_full_name and parent_full_name in chunk_dict:
+                parent = chunk_dict[parent_full_name]
+                # Use object.__setattr__ to modify frozen dataclass
+                object.__setattr__(chunk, "parent", parent)
+
+        # Second pass: restore children lists
+        for chunk in chunks:
+            # Find all chunks that have this chunk as parent
+            children = [c for c in chunks if c.parent is chunk]
+            if children:
+                # Use object.__setattr__ to modify frozen dataclass
+                object.__setattr__(chunk, "children", tuple(children))
+
+    def _generate_chunk_id(self, chunk: Chunk, commit_id: str | None = None) -> str:
+        """Generate a chunk ID for storage.
+
+        The ID format is: {file_path}:{line_range}:{chunk_name}:{commit_id if any}
+
+        Args:
+            chunk: The chunk to generate an ID for
+            commit_id: Optional Git commit ID
+
+        Returns:
+            A unique chunk ID
+        """
+        location = getattr(chunk.metadata, "location", None)
+        if not location:
+            # Fallback ID if no location
+            return f"{id(chunk)}:{commit_id or ''}"
+
+        file_path = str(location.file_path)
+        line_range = f"{location.start_line}-{location.end_line}"
+        name = chunk.metadata.name
+
+        # Format: {file_path}:{line_range}:{name}:{commit_id if any}
+        if commit_id:
+            return f"{file_path}:{line_range}:{name}:{commit_id}"
+        return f"{file_path}:{line_range}:{name}"
+
 
 def try_create_index(table: Table, column: str) -> None:
-    """Create index on a column, handling errors outside the loop.
+    """Try to create an index on a column, handling errors gracefully.
 
     Args:
         table: LanceDB table
-        column: Column name to create index on
+        column: Column to create index on
     """
     try:
+        # Create index for the column
         table.create_index(column)
-    except (ValueError, RuntimeError, TypeError) as e:
-        # Use specific error types instead of broad Exception
-        logger.warning("Failed to create index on %s: %s", column, e)
+    except (ValueError, RuntimeError) as e:
+        # If index couldn't be created (e.g., exists already, unsupported)
+        logger.warning("Could not create index on %s: %s", column, e)
