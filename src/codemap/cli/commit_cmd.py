@@ -391,7 +391,7 @@ def _commit_changes(
             logger.warning("There are %d other staged files that weren't included in this commit", len(other_staged))
 
         return True
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to create commit")
         return False
 
