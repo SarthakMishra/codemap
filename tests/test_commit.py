@@ -512,7 +512,7 @@ class TestInteractiveCommit(GitTestBase):
             patch("codemap.cli.commit_cmd.print_chunk_summary"),
             patch("codemap.cli.commit_cmd.console"),
             patch("codemap.cli.commit_cmd.generate_commit_message", return_value=("feat: add new feature", True)),
-            patch("codemap.cli.commit_cmd.handle_commit_action"),
+            patch("codemap.cli.commit_cmd._commit_with_message"),
         ):
             # Configure the mock select to return a mock that has an ask method
             mock_select.return_value.ask.return_value = "commit"
