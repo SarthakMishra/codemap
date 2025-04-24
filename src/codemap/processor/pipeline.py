@@ -26,8 +26,8 @@ from codemap.processor.embedding.generator import EmbeddingGenerator
 from codemap.processor.embedding.models import EmbeddingConfig
 from codemap.processor.storage.base import StorageConfig
 from codemap.processor.storage.lance import LanceDBStorage
+from codemap.processor.watcher import FileWatcher
 from codemap.utils.file_utils import read_file_content
-from codemap.watcher.watcher import FileWatcher
 
 logger = logging.getLogger(__name__)
 
