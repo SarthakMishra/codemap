@@ -20,6 +20,8 @@ from typing import Callable
 
 from codemap.processor.analysis.git.analyzer import GitMetadataAnalyzer
 from codemap.processor.analysis.git.models import GitMetadata
+from codemap.processor.analysis.lsp.analyzer import LSPAnalyzer
+from codemap.processor.analysis.lsp.models import LSPMetadata
 from codemap.processor.chunking.base import Chunk
 from codemap.processor.chunking.tree_sitter import TreeSitterChunker
 from codemap.processor.embedding.generator import EmbeddingGenerator
@@ -45,6 +47,9 @@ class ProcessingJob:
     chunks: list[Chunk] = field(default_factory=list)
     """Chunks extracted from the file (if not a deletion)."""
 
+    lsp_metadata: dict[str, LSPMetadata] = field(default_factory=dict)
+    """LSP metadata for chunks, keyed by chunk full name."""
+
     started_at: float = field(default_factory=time.time)
     """Time when processing started."""
 
@@ -69,6 +74,7 @@ class ProcessingPipeline:
         embedding_config: EmbeddingConfig | None = None,
         ignored_patterns: set[str] | None = None,
         max_workers: int = 4,
+        enable_lsp: bool = True,
         on_chunks_processed: Callable[[list[Chunk], Path], None] | None = None,
         on_file_deleted: Callable[[Path], None] | None = None,
     ) -> None:
@@ -80,6 +86,7 @@ class ProcessingPipeline:
             embedding_config: Configuration for embedding generation, if None a default config will be used
             ignored_patterns: Set of glob patterns to ignore when watching for changes
             max_workers: Maximum number of worker threads for processing
+            enable_lsp: Whether to enable LSP analysis (True by default)
             on_chunks_processed: Callback when chunks are processed for a file
             on_file_deleted: Callback when a file is deleted
         """
@@ -99,6 +106,10 @@ class ProcessingPipeline:
         # Setup processing components
         self.chunker = TreeSitterChunker()
         self.git_analyzer = GitMetadataAnalyzer(repo_path)
+
+        # Initialize LSP analyzer if enabled
+        self.enable_lsp = enable_lsp
+        self.lsp_analyzer = LSPAnalyzer(repo_path) if enable_lsp else None
 
         # Initialize embedding generator
         self.embedding_generator = EmbeddingGenerator(embedding_config)
@@ -159,6 +170,13 @@ class ProcessingPipeline:
         # Shutdown thread pool
         self.executor.shutdown(wait=True)
 
+        # Close LSP analyzer if enabled
+        if self.lsp_analyzer:
+            try:
+                self.lsp_analyzer.close()
+            except Exception:
+                logger.exception("Error closing LSP analyzer")
+
         # Close storage
         if hasattr(self, "storage"):
             try:
@@ -214,16 +232,40 @@ class ProcessingPipeline:
             # Update job with results
             job.chunks = chunks
 
+            # Enrich with LSP metadata if enabled
+            lsp_metadata = {}
+            if self.enable_lsp and self.lsp_analyzer and chunks:
+                try:
+                    logger.debug("Enriching chunks with LSP metadata for %s", file_path)
+                    lsp_metadata = self.lsp_analyzer.enrich_chunks(chunks)
+                    job.lsp_metadata = lsp_metadata
+                    logger.debug("Enriched %d chunks with LSP metadata for %s", len(lsp_metadata), file_path)
+                except (ValueError, TypeError, RuntimeError, AttributeError) as e:
+                    logger.warning("Error enriching chunks with LSP for %s: %s", file_path, e)
+
             # Generate embeddings for the chunks
+            # Note: We could potentially enhance the content with LSP info for better embeddings
             embeddings = self.embedding_generator.generate_embeddings(chunks)
 
             # Store chunks and embeddings
             try:
                 commit_id = git_metadata.commit_id
                 self.storage.store_chunks(chunks, commit_id)
+
+                # Store LSP metadata if available
+                if lsp_metadata:
+                    self.storage.store_lsp_metadata(lsp_metadata, chunks, commit_id)
+
                 if embeddings:
                     self.storage.store_embeddings(embeddings)
-                logger.debug("Stored %d chunks and %d embeddings for %s", len(chunks), len(embeddings), file_path)
+
+                logger.debug(
+                    "Stored %d chunks, %d LSP metadata, and %d embeddings for %s",
+                    len(chunks),
+                    len(lsp_metadata),
+                    len(embeddings),
+                    file_path,
+                )
             except Exception:
                 logger.exception("Error storing data for %s", file_path)
 
@@ -374,12 +416,8 @@ class ProcessingPipeline:
                     if isinstance(vector, list):
                         # Search by vector
                         return self.storage.search_by_vector(vector, limit)
-
-                # If we couldn't get a proper vector, fall back to text search
-                logger.info("Could not generate valid vector embedding, falling back to text search")
             except Exception:
-                logger.exception("Error in vector search")
-                logger.info("Falling back to text search")
+                logger.exception("Error during vector search")
 
-        # Fallback to text search
-        return self.storage.search_by_content(query, limit)
+        # Fallback to text search or if use_vector is False
+        return self.storage.search_by_text(query, limit)
