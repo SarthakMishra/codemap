@@ -174,14 +174,19 @@ def stage_files(files: list[str]) -> None:
 
         # Get list of deleted but tracked files from git status
         deleted_tracked_files = set()
+        already_staged_deletions = set()
         try:
             # Parse git status to find deleted files
             status_output = run_git_command(["git", "status", "--porcelain"])
             for line in status_output.splitlines():
-                if line.startswith(" D") or line.startswith("D "):
-                    # Extract the filename (starts at position 3)
+                if line.startswith(" D"):
+                    # Unstaged deletion (space followed by D)
                     deleted_tracked_files.add(line[3:])
+                elif line.startswith("D "):
+                    # Staged deletion (D followed by space)
+                    already_staged_deletions.add(line[3:])
             logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
+            logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
         except GitError:
             logger.warning("Failed to get git status for deleted files")
 
@@ -206,9 +211,15 @@ def stage_files(files: list[str]) -> None:
             # 1. Exist in filesystem
             # 2. Are tracked by git
             # 3. Are known deleted files from git status
+            # 4. Are already staged deletions
             filtered_files = []
             for file in valid_files:
-                if Path(file).exists() or file in tracked_files or file in deleted_tracked_files:
+                if (
+                    Path(file).exists()
+                    or file in tracked_files
+                    or file in deleted_tracked_files
+                    or file in already_staged_deletions
+                ):
                     filtered_files.append(file)
                 else:
                     logger.warning("Skipping non-existent and untracked file: %s", file)
@@ -228,17 +239,22 @@ def stage_files(files: list[str]) -> None:
             exists = Path(file).exists()
             logger.debug("File %s exists in filesystem: %s", file, exists)
 
-        # Separate files into existing and non-existing
+        # Separate files into different categories
         existing_files = []
         deleted_files = []
+        already_staged_files = []
+
         for file in valid_files:
-            if Path(file).exists():
+            if file in already_staged_deletions:
+                already_staged_files.append(file)
+            elif Path(file).exists():
                 existing_files.append(file)
             else:
                 deleted_files.append(file)
 
         logger.info("Existing files to stage: %s", ", ".join(existing_files) if existing_files else "None")
         logger.info("Deleted files to handle: %s", ", ".join(deleted_files) if deleted_files else "None")
+        logger.info("Already staged deletions: %s", ", ".join(already_staged_files) if already_staged_files else "None")
 
         # Stage existing files if any
         if existing_files:
@@ -262,8 +278,8 @@ def stage_files(files: list[str]) -> None:
                 raise
 
             # Separate deleted files into tracked and untracked
-            tracked_deleted = [f for f in deleted_files if f in tracked_files or f in deleted_tracked_files]
-            untracked_deleted = [f for f in deleted_files if f not in tracked_files and f not in deleted_tracked_files]
+            tracked_deleted = [f for f in deleted_files if f in tracked_files and f not in already_staged_deletions]
+            untracked_deleted = [f for f in deleted_files if f not in tracked_files]
 
             # Log warning for untracked deleted files
             for file in untracked_deleted:
@@ -411,14 +427,19 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
 
     # Get list of deleted but tracked files from git status
     deleted_tracked_files = set()
+    already_staged_deletions = set()
     try:
         # Parse git status to find deleted files
         status_output = run_git_command(["git", "status", "--porcelain"])
         for line in status_output.splitlines():
-            if line.startswith(" D") or line.startswith("D "):
-                # Extract the filename (starts at position 3)
+            if line.startswith(" D"):
+                # Unstaged deletion (space followed by D)
                 deleted_tracked_files.add(line[3:])
+            elif line.startswith("D "):
+                # Staged deletion (D followed by space)
+                already_staged_deletions.add(line[3:])
         logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
+        logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
     except GitError:
         logger.warning("Failed to get git status for deleted files")
 
@@ -445,9 +466,15 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
         # 1. Exist in filesystem
         # 2. Are tracked by git
         # 3. Are known deleted files from git status
+        # 4. Are already staged deletions
         filtered_files = []
         for file in valid_files:
-            if Path(file).exists() or file in tracked_files or file in deleted_tracked_files:
+            if (
+                Path(file).exists()
+                or file in tracked_files
+                or file in deleted_tracked_files
+                or file in already_staged_deletions
+            ):
                 filtered_files.append(file)
             else:
                 logger.warning("Skipping non-existent and untracked file: %s", file)
