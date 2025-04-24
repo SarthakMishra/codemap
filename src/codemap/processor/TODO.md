@@ -23,8 +23,8 @@
 
 3.  **Basic Dependency Extraction (Syntax-based in `processor/chunking/tree_sitter.py`):**
     *   [X] Implement logic to identify import statements (`import_` types).
-    *   [ ] Extract imported names and populate `ChunkMetadata.dependencies`.
-    *   [ ] Mapping dependencies, function calls/usage, different entity usage/relationships.
+    *   [X] Extract imported names and populate `ChunkMetadata.dependencies`.
+    *   [ ] Mapping dependencies, inheritance, function calls/usage, different entity usage/relationships.
 
 **Phase 2: Git Integration**
 
