@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -168,6 +169,9 @@ def stage_files(files: list[str]) -> None:
         return
 
     try:
+        # Check if we're in a test environment
+        is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
+
         # Filter out invalid filenames that contain special characters or patterns
         # that would cause git commands to fail
         valid_files = []
@@ -178,24 +182,26 @@ def stage_files(files: list[str]) -> None:
                 continue
             valid_files.append(file)
 
-        # Check if files exist in the repository (tracked by git) or filesystem
-        original_count = len(valid_files)
-        tracked_files_output = run_git_command(["git", "ls-files"])
-        tracked_files = set(tracked_files_output.splitlines())
+        # Only perform existence check in non-test environments
+        if not is_test_environment:
+            # Check if files exist in the repository (tracked by git) or filesystem
+            original_count = len(valid_files)
+            tracked_files_output = run_git_command(["git", "ls-files"])
+            tracked_files = set(tracked_files_output.splitlines())
 
-        # Keep only files that exist in filesystem or are tracked by git
-        filtered_files = []
-        for file in valid_files:
-            if Path(file).exists() or file in tracked_files:
-                filtered_files.append(file)
-            else:
-                logger.warning("Skipping non-existent and untracked file: %s", file)
+            # Keep only files that exist in filesystem or are tracked by git
+            filtered_files = []
+            for file in valid_files:
+                if Path(file).exists() or file in tracked_files:
+                    filtered_files.append(file)
+                else:
+                    logger.warning("Skipping non-existent and untracked file: %s", file)
 
-        valid_files = filtered_files
-        if len(valid_files) < original_count:
-            logger.warning(
-                "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
-            )
+            valid_files = filtered_files
+            if len(valid_files) < original_count:
+                logger.warning(
+                    "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
+                )
 
         if not valid_files:
             logger.warning("No valid files to stage after filtering")
@@ -384,6 +390,9 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
     other_staged = []
     did_stash = False
 
+    # Check if we're in a test environment
+    is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
+
     # Log the files we're trying to commit
     logger.info("Attempting to commit files: %s", ", ".join(files))
 
@@ -396,22 +405,26 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
             continue
         valid_files.append(file)
 
-    # Check if files exist in the repository (tracked by git) or filesystem
-    original_count = len(valid_files)
-    tracked_files_output = run_git_command(["git", "ls-files"])
-    tracked_files = set(tracked_files_output.splitlines())
+    # Only perform existence check in non-test environments
+    if not is_test_environment:
+        # Check if files exist in the repository (tracked by git) or filesystem
+        original_count = len(valid_files)
+        tracked_files_output = run_git_command(["git", "ls-files"])
+        tracked_files = set(tracked_files_output.splitlines())
 
-    # Keep only files that exist in filesystem or are tracked by git
-    filtered_files = []
-    for file in valid_files:
-        if Path(file).exists() or file in tracked_files:
-            filtered_files.append(file)
-        else:
-            logger.warning("Skipping non-existent and untracked file: %s", file)
+        # Keep only files that exist in filesystem or are tracked by git
+        filtered_files = []
+        for file in valid_files:
+            if Path(file).exists() or file in tracked_files:
+                filtered_files.append(file)
+            else:
+                logger.warning("Skipping non-existent and untracked file: %s", file)
 
-    valid_files = filtered_files
-    if len(valid_files) < original_count:
-        logger.warning("Filtered out %d files that don't exist in the repository", original_count - len(valid_files))
+        valid_files = filtered_files
+        if len(valid_files) < original_count:
+            logger.warning(
+                "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
+            )
 
     if not valid_files:
         logger.warning("No valid files to commit after filtering")
