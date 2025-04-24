@@ -25,6 +25,8 @@ dependencies = [
     "tree-sitter-language-pack>=0.7.2",
     "lancedb>=0.21.2",
     "pandas>=2.2.3",
+    "multilspy>=0.0.15",
+    "pytest-mock>=3.14.0",
 ]
 
 [dependency-groups]
@@ -34,6 +36,7 @@ dev = [
     "pyright>=1.1.399",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
+    "pytest-mock>=3.14.0",
     "pytest-xdist[psutil]>=3.6.1",
     "ruff>=0.11.6",
 ]
@@ -119,7 +122,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003"]
+"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 
 [tool.ruff.lint.mccabe]
