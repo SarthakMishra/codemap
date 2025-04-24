@@ -23,6 +23,8 @@ dependencies = [
     "watchdog>=6.0.0",
     "tree-sitter>=0.24.0",
     "tree-sitter-language-pack>=0.7.2",
+    "lancedb>=0.21.2",
+    "pandas>=2.2.3",
 ]
 
 [dependency-groups]
