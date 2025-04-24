@@ -1075,14 +1075,19 @@ class DiffSplitter:
 
         # Get list of deleted but tracked files from git status
         deleted_tracked_files = set()
+        already_staged_deletions = set()
         try:
             # Parse git status to find deleted files
             status_output = run_git_command(["git", "status", "--porcelain"])
             for line in status_output.splitlines():
-                if line.startswith(" D") or line.startswith("D "):
-                    # Extract the filename (starts at position 3)
+                if line.startswith(" D"):
+                    # Unstaged deletion (space followed by D)
                     deleted_tracked_files.add(line[3:])
+                elif line.startswith("D "):
+                    # Staged deletion (D followed by space)
+                    already_staged_deletions.add(line[3:])
             logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
+            logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
         except GitError:
             logger.warning("Failed to get git status for deleted files")
 
@@ -1108,9 +1113,15 @@ class DiffSplitter:
                     # 1. Exist in filesystem
                     # 2. Are tracked by git
                     # 3. Are known deleted files from git status
+                    # 4. Are already staged deletions
                     filtered_files = []
                     for file in valid_files:
-                        if Path(file).exists() or file in tracked_files or file in deleted_tracked_files:
+                        if (
+                            Path(file).exists()
+                            or file in tracked_files
+                            or file in deleted_tracked_files
+                            or file in already_staged_deletions
+                        ):
                             filtered_files.append(file)
                         else:
                             logger.warning("Skipping non-existent and untracked file in diff: %s", file)
@@ -1125,7 +1136,7 @@ class DiffSplitter:
                     # If we can't check git tracked files, at least filter by filesystem existence and git status
                     filtered_files = []
                     for file in valid_files:
-                        if Path(file).exists() or file in deleted_tracked_files:
+                        if Path(file).exists() or file in deleted_tracked_files or file in already_staged_deletions:
                             filtered_files.append(file)
                         else:
                             logger.warning("Skipping non-existent file in diff: %s", file)
