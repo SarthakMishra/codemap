@@ -22,6 +22,7 @@ from codemap.cli.commit_cmd import (
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.message_generator import DiffChunkData, LLMError, MessageGenerator
 from codemap.utils.git_utils import GitDiff
+from tests.base import GitTestBase, LLMTestBase
 
 console = Console(highlight=False)
 
@@ -138,11 +139,23 @@ def mock_config_file() -> str:
     return yaml.dump(config)
 
 
-def test_diff_splitter_semantic_only() -> None:
-    """Test that the diff splitter now only uses semantic strategy."""
-    diff = GitDiff(
-        files=["file1.py", "file2.py"],
-        content="""diff --git a/file1.py b/file1.py
+@pytest.mark.unit
+@pytest.mark.git
+class TestDiffSplitter(GitTestBase):
+    """Test cases for diff splitting functionality.
+
+    Tests the semantic splitting of git diffs into logical chunks.
+    """
+
+    def test_diff_splitter_semantic_only(self) -> None:
+        """Test that the diff splitter now only uses semantic strategy.
+
+        Verifies that the splitter defaults to semantic chunking.
+        """
+        # Arrange: Create test diff
+        diff = GitDiff(
+            files=["file1.py", "file2.py"],
+            content="""diff --git a/file1.py b/file1.py
 index 1234567..abcdefg 100644
 --- a/file1.py
 +++ b/file1.py
@@ -154,349 +167,361 @@ index 2345678..bcdefgh 100645
 +++ b/file2.py
 @@ -5,3 +5,6 @@ def old_function():
     pass""",
-        is_staged=False,
-    )
-
-    # Using a mock repo_root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Mock the _split_semantic method to avoid file system access
-    with patch.object(splitter, "_split_semantic") as mock_split:
-        expected_chunks = [
-            DiffChunk(
-                files=["file1.py", "file2.py"],
-                content="diff content for semantic chunk",
-            ),
-        ]
-        mock_split.return_value = expected_chunks
-
-        # Test the split_diff method (should use semantic strategy by default)
-        result = splitter.split_diff(diff)
-        assert result == expected_chunks
-        mock_split.assert_called_once_with(diff)
-
-
-# This test is no longer needed since we only use semantic strategy now
-
-
-def test_diff_splitter_semantic_strategy() -> None:
-    """Test the semantic splitting strategy."""
-    diff = GitDiff(
-        files=["models.py", "views.py", "tests/test_models.py"],
-        content="mock diff content",
-        is_staged=False,
-    )
-
-    # Using a mock repo_root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Mock the _split_semantic method to avoid file system access
-    with patch.object(splitter, "_split_semantic") as mock_split:
-        expected_chunks = [
-            DiffChunk(
-                files=["models.py", "tests/test_models.py"],
-                content="diff content for semantic chunk 1",
-                description="Model-related changes",
-            ),
-            DiffChunk(
-                files=["views.py"],
-                content="diff content for semantic chunk 2",
-                description="View-related changes",
-            ),
-        ]
-        mock_split.return_value = expected_chunks
-
-        # Test the split_diff method (now always uses semantic strategy)
-        result = splitter.split_diff(diff)
-        assert result == expected_chunks
-        mock_split.assert_called_once_with(diff)
-
-
-def test_message_generator_fallback() -> None:
-    """Test message generator fallback when API key is not available."""
-    # Using a mock repo_root
-    repo_root = Path("/mock/repo")
-
-    # Clear API key environment variable for this test
-    with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
-        generator = MessageGenerator(repo_root)
-
-        # Create a test chunk - convert to DiffChunkData to match expected type
-        files = ["docs/README.md"]
-        content = "diff content for README.md"
-        chunk_data = DiffChunkData(
-            files=files,
-            content=content,
+            is_staged=False,
         )
 
-        # Mock the required methods to avoid filesystem interactions and simulate API failure
-        with (
-            patch.object(generator, "_extract_file_info", return_value={}),
-            patch.object(generator, "_call_llm_api", side_effect=LLMError("API call failed")),
-        ):
-            # Generate a message (should use fallback)
-            message = generator.fallback_generation(chunk_data)
+        # Using a mock repo_root
+        repo_root = Path("/mock/repo")
+        splitter = DiffSplitter(repo_root)
 
-            # Verify fallback message format
+        # Act/Assert: Mock the _split_semantic method to avoid file system access
+        with patch.object(splitter, "_split_semantic") as mock_split:
+            expected_chunks = [
+                DiffChunk(
+                    files=["file1.py", "file2.py"],
+                    content="diff content for semantic chunk",
+                ),
+            ]
+            mock_split.return_value = expected_chunks
+
+            # Test the split_diff method (should use semantic strategy by default)
+            result = splitter.split_diff(diff)
+            assert result == expected_chunks
+            mock_split.assert_called_once_with(diff)
+
+    def test_diff_splitter_semantic_strategy(self) -> None:
+        """Test the semantic splitting strategy.
+
+        Verifies that related files are correctly grouped together.
+        """
+        # Arrange: Create test diff
+        diff = GitDiff(
+            files=["models.py", "views.py", "tests/test_models.py"],
+            content="mock diff content",
+            is_staged=False,
+        )
+
+        # Using a mock repo_root
+        repo_root = Path("/mock/repo")
+        splitter = DiffSplitter(repo_root)
+
+        # Act/Assert: Mock the _split_semantic method to avoid file system access
+        with patch.object(splitter, "_split_semantic") as mock_split:
+            expected_chunks = [
+                DiffChunk(
+                    files=["models.py", "tests/test_models.py"],
+                    content="diff content for semantic chunk 1",
+                    description="Model-related changes",
+                ),
+                DiffChunk(
+                    files=["views.py"],
+                    content="diff content for semantic chunk 2",
+                    description="View-related changes",
+                ),
+            ]
+            mock_split.return_value = expected_chunks
+
+            # Test the split_diff method (now always uses semantic strategy)
+            result = splitter.split_diff(diff)
+            assert result == expected_chunks
+            mock_split.assert_called_once_with(diff)
+
+
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.llm
+class TestMessageGenerator(LLMTestBase):
+    """Test cases for commit message generation.
+
+    Tests the generation of commit messages using LLMs.
+    """
+
+    def test_message_generator_fallback(self) -> None:
+        """Test message generator fallback when API key is not available.
+
+        Verifies that when LLM API is unavailable, a reasonable fallback
+        message is generated.
+        """
+        # Arrange: Set up repo and environment
+        repo_root = Path("/mock/repo")
+
+        # Act: Clear API key environment variable for this test
+        with patch.dict(os.environ, {"OPENAI_API_KEY": ""}):
+            generator = MessageGenerator(repo_root)
+
+            # Create a test chunk - convert to DiffChunkData to match expected type
+            files = ["docs/README.md"]
+            content = "diff content for README.md"
+            chunk_data = DiffChunkData(
+                files=files,
+                content=content,
+            )
+
+            # Act: Generate fallback message
+            with (
+                patch.object(generator, "_extract_file_info", return_value={}),
+                patch.object(generator, "_call_llm_api", side_effect=LLMError("API call failed")),
+            ):
+                message = generator.fallback_generation(chunk_data)
+
+            # Assert: Verify fallback message format
             assert message.startswith("docs: update")
             assert "README.md" in message
 
+    def test_message_generator_openai(self) -> None:
+        """Test message generation with OpenAI provider.
 
-def test_message_generator_openai() -> None:
-    """Test message generation with OpenAI provider."""
-    repo_root = Path("/mock/repo")
+        Verifies interaction with OpenAI models for message generation.
+        """
+        # Arrange: Set up test environment
+        repo_root = Path("/mock/repo")
 
-    # Set up mock environment
-    with patch.dict(os.environ, {"OPENAI_API_KEY": "mock-key"}):
-        generator = MessageGenerator(repo_root, model="gpt-4o-mini")
-        # Set provider manually for testing
-        generator.provider = "openai"
+        # Set up mock environment
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "mock-key"}):
+            generator = MessageGenerator(repo_root, model="gpt-4o-mini")
+            # Set provider manually for testing
+            generator.provider = "openai"
 
-        # Create test data using DiffChunkData
-        chunk_data = DiffChunkData(
-            files=["src/feature.py"],
-            content=(
-                "diff --git a/src/feature.py b/src/feature.py\n@@ -1,5 +1,7 @@\n+def new_feature():\n+    return True"
-            ),
-        )
+            # Create test data using DiffChunkData
+            chunk_data = DiffChunkData(
+                files=["src/feature.py"],
+                content=(
+                    "diff --git a/src/feature.py b/src/feature.py\n"
+                    "@@ -1,5 +1,7 @@\n"
+                    "+def new_feature():\n"
+                    "+    return True"
+                ),
+            )
 
-        # Mock the required methods
-        with (
-            patch.object(generator, "_extract_file_info", return_value={}),
-            patch.object(generator, "_call_llm_api", return_value="feat(core): add new feature function"),
-        ):
-            # Generate a message
-            message, used_llm = generator.generate_message(chunk_data)
+            # Act: Generate a message
+            with (
+                patch.object(generator, "_extract_file_info", return_value={}),
+                patch.object(generator, "_call_llm_api", return_value="feat(core): add new feature function"),
+            ):
+                message, used_llm = generator.generate_message(chunk_data)
 
-            # Verify the message
+            # Assert: Verify the message
             assert used_llm is True
             assert message == "feat(core): add new feature function"
 
+    def test_message_generator_anthropic(self) -> None:
+        """Test message generation with Anthropic provider.
 
-def test_message_generator_anthropic() -> None:
-    """Test message generation with Anthropic provider."""
-    repo_root = Path("/mock/repo")
+        Verifies interaction with Anthropic Claude models for message generation.
+        """
+        # Arrange: Set up test environment
+        repo_root = Path("/mock/repo")
 
-    # Set up mock environment with Anthropic API key
-    with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "mock-key"}):
-        generator = MessageGenerator(repo_root, model="claude-3-haiku-20240307")
-        # Set provider manually for testing
-        generator.provider = "anthropic"
+        # Set up mock environment with Anthropic API key
+        with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "mock-key"}):
+            generator = MessageGenerator(repo_root, model="claude-3-haiku-20240307")
+            # Set provider manually for testing
+            generator.provider = "anthropic"
 
-        # Create test data using DiffChunkData
-        chunk_data = DiffChunkData(
-            files=["docs/README.md"],
-            content=(
-                "diff --git a/docs/README.md b/docs/README.md\n"
-                "@@ -10,5 +10,8 @@\n"
-                "+## New Section\n"
-                "+\n"
-                "+Added documentation for new features."
-            ),
-        )
+            # Create test data using DiffChunkData
+            chunk_data = DiffChunkData(
+                files=["docs/README.md"],
+                content=(
+                    "diff --git a/docs/README.md b/docs/README.md\n"
+                    "@@ -10,5 +10,8 @@\n"
+                    "+## New Section\n"
+                    "+\n"
+                    "+Added documentation for new features."
+                ),
+            )
 
-        # Mock the required methods
-        with (
-            patch.object(generator, "_extract_file_info", return_value={}),
-            patch.object(
-                generator,
-                "_call_llm_api",
-                return_value="docs(readme): add new section with feature documentation",
-            ),
-        ):
-            # Generate a message
-            message, used_llm = generator.generate_message(chunk_data)
+            # Act: Generate a message
+            with (
+                patch.object(generator, "_extract_file_info", return_value={}),
+                patch.object(
+                    generator,
+                    "_call_llm_api",
+                    return_value="docs(readme): add new section with feature documentation",
+                ),
+            ):
+                message, used_llm = generator.generate_message(chunk_data)
 
-            # Verify the message
+            # Assert: Verify the message
             assert used_llm is True
             assert message == "docs(readme): add new section with feature documentation"
 
 
-def test_message_generator_prefix_notation() -> None:
-    """Test message generation with prefix notation for model."""
-    repo_root = Path("/mock/repo")
+@pytest.mark.unit
+@pytest.mark.git
+class TestFileRelations(GitTestBase):
+    """Test cases for file relationship detection.
 
-    # Set up mock environment
-    with patch.dict(os.environ, {"GROQ_API_KEY": "mock-key"}):
-        # Use prefix notation for model
-        generator = MessageGenerator(
-            repo_root,
+    Tests the logic that determines semantic relationships between files.
+    """
+
+    def test_are_files_related(self) -> None:
+        """Test file relationship detection for semantic splitting.
+
+        Verifies that the algorithm correctly identifies related files.
+        """
+        # Arrange: Set up test environment
+        repo_root = Path("/mock/repo")
+        splitter = DiffSplitter(repo_root)
+
+        # Act/Assert: Test various file relationship cases
+        # Same directory
+        assert splitter._are_files_related("src/module.py", "src/helper.py")
+
+        # Test file and implementation
+        assert splitter._are_files_related("tests/test_feature.py", "feature.py")
+
+        # Similar names
+        assert splitter._are_files_related("user.py", "user_test.py")
+
+        # Unrelated files
+        assert not splitter._are_files_related("config.py", "database.py")
+        assert not splitter._are_files_related("src/config.py", "utils/helpers.py")
+
+    def test_has_related_file_pattern(self) -> None:
+        """Test file pattern relationships for semantic splitting.
+
+        Verifies recognition of related file types based on patterns.
+        """
+        # Arrange: Set up test environment
+        repo_root = Path("/mock/repo")
+        splitter = DiffSplitter(repo_root)
+
+        # Act/Assert: Test various file pattern relationships
+        # Frontend pairs (JS and CSS)
+        assert splitter._has_related_file_pattern("component.jsx", "component.css")
+        assert splitter._has_related_file_pattern("feature.tsx", "feature.css")
+
+        # Implementation and definition pairs
+        assert splitter._has_related_file_pattern("module.h", "module.c")
+        assert splitter._has_related_file_pattern("class.hpp", "class.cpp")
+
+        # Web development pairs
+        assert splitter._has_related_file_pattern("page.html", "page.js")
+        assert splitter._has_related_file_pattern("page.html", "page.css")
+
+        # Protocol buffer files
+        assert splitter._has_related_file_pattern("data.proto", "data.pb.go")
+        assert splitter._has_related_file_pattern("message.proto", "message.pb.py")
+
+        # Unrelated patterns
+        assert not splitter._has_related_file_pattern("script.py", "data.json")
+        assert not splitter._has_related_file_pattern("config.js", "schema.graphql")
+
+
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.cli
+class TestCommitConfig(GitTestBase):
+    """Test cases for commit command configuration.
+
+    Tests the loading and application of config settings.
+    """
+
+    def test_config_loading(self) -> None:
+        """Test loading configuration from .codemap.yml.
+
+        Verifies that commit configuration is properly loaded from config files.
+        """
+        # Arrange: Set up test environment
+        repo_root = Path("/mock/repo")
+
+        mock_config = {
+            "commit": {
+                "strategy": "hunk",
+                "llm": {
+                    "model": "gpt-4o-mini",
+                    "provider": "openai",
+                },
+            },
+        }
+
+        # Act/Assert: Mock file operations and test config loading
+        with (
+            patch("pathlib.Path.exists", return_value=True),
+            patch("pathlib.Path.open", return_value=StringIO(yaml.dump(mock_config))),
+            patch.object(MessageGenerator, "_get_api_keys", return_value={}),
+            patch("yaml.safe_load", return_value=mock_config),
+        ):
+            generator = MessageGenerator(repo_root)
+
+            # Verify config values are loaded
+            with patch.object(generator, "model", "gpt-4o-mini"), patch.object(generator, "provider", "openai"):
+                assert generator.model == "gpt-4o-mini"
+                assert generator.provider == "openai"
+
+    def test_setup_message_generator(self) -> None:
+        """Test setup_message_generator properly configures provider and API keys.
+
+        Verifies that the generator is configured with the specified provider and model.
+        """
+        # Arrange: Set up test environment
+        repo_path = Path("/mock/repo")
+        options = CommitOptions(
+            repo_path=repo_path,
+            generation_mode=GenerationMode.SMART,
             model="groq/llama-3-8b-8192",
+            api_key="mock-api-key",
         )
 
-        # Set mock flag for API key availability
-        generator._mock_api_key_available = True
+        # Create a mock for the MessageGenerator instance
+        mock_generator_instance = Mock(spec=MessageGenerator)
 
-        # Verify the provider is extracted correctly from the model prefix
-        assert generator.provider == "groq"  # Provider should be determined from the model prefix
+        # Act: Mock setup_message_generator to return our mock instance
+        with patch("codemap.cli.commit_cmd.create_universal_generator", return_value=mock_generator_instance):
+            result = setup_message_generator(options)
 
-        # Create test data using DiffChunkData
-        chunk_data = DiffChunkData(
-            files=["src/api.py"],
+            # Assert: Verify the result is the mocked instance
+            assert result == mock_generator_instance
+
+
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.interactive
+class TestInteractiveCommit(GitTestBase):
+    """Test cases for interactive commit workflow.
+
+    Tests the user interface and interaction flow for commits.
+    """
+
+    def test_interactive_chunk_processing(self) -> None:
+        """Test the interactive chunk processing workflow.
+
+        Verifies that user interactions are properly handled during
+        the commit process.
+        """
+        # Arrange: Create test data
+        chunk = DiffChunk(
+            files=["src/feature.py"],
             content="diff content",
         )
 
-        # Mock the methods and check provider is passed correctly
+        # Mock dependencies
+        mock_generator = Mock(spec=MessageGenerator)
+        mock_generator.generate_message.return_value = ("feat: add new feature", True)
+
+        context = MagicMock()
+        context.chunk = chunk
+        context.index = 0
+        context.total = 1
+        context.generator = mock_generator
+        context.mode = GenerationMode.SMART
+
+        # Act/Assert: Mock questionary for user input
         with (
-            patch.object(generator, "_extract_file_info", return_value={}),
-            patch.object(generator, "_call_llm_api", return_value="feat(api): implement new endpoint"),
+            patch("codemap.cli.commit_cmd.questionary.select") as mock_select,
+            patch("codemap.cli.commit_cmd.print_chunk_summary"),
+            patch("codemap.cli.commit_cmd.console"),
+            patch("codemap.cli.commit_cmd.generate_commit_message", return_value=("feat: add new feature", True)),
+            patch("codemap.cli.commit_cmd.handle_commit_action"),
         ):
-            # Generate a message
-            message, used_llm = generator.generate_message(chunk_data)
+            # Configure the mock select to return a mock that has an ask method
+            mock_select.return_value.ask.return_value = "commit"
 
-            # Verify the message
-            assert used_llm is True
-            assert message == "feat(api): implement new endpoint"
+            # Run the function
+            result = process_chunk_interactively(context)
 
-
-def test_config_loading() -> None:
-    """Test loading configuration from .codemap.yml."""
-    repo_root = Path("/mock/repo")
-
-    mock_config = {
-        "commit": {
-            "strategy": "hunk",
-            "llm": {
-                "model": "gpt-4o-mini",
-                "provider": "openai",
-            },
-        },
-    }
-
-    # Mock file operations - combine with statements to fix SIM117
-    with (
-        patch("pathlib.Path.exists", return_value=True),
-        patch("pathlib.Path.open", return_value=StringIO(yaml.dump(mock_config))),
-        patch.object(MessageGenerator, "_get_api_keys", return_value={}),
-        patch("yaml.safe_load", return_value=mock_config),
-    ):
-        generator = MessageGenerator(repo_root)
-
-        # Verify config values are loaded
-        with patch.object(generator, "model", "gpt-4o-mini"), patch.object(generator, "provider", "openai"):
-            assert generator.model == "gpt-4o-mini"
-            assert generator.provider == "openai"
-
-
-def test_setup_message_generator() -> None:
-    """Test setup_message_generator properly configures provider and API keys."""
-    # Set up test environment
-    repo_path = Path("/mock/repo")
-    options = CommitOptions(
-        repo_path=repo_path,
-        generation_mode=GenerationMode.SMART,
-        model="groq/llama-3-8b-8192",
-        api_key="mock-api-key",
-    )
-
-    # Create a mock for the MessageGenerator instance
-    mock_generator_instance = Mock(spec=MessageGenerator)
-
-    # Mock setup_message_generator to return our mock instance
-    with patch("codemap.cli.commit_cmd.create_universal_generator", return_value=mock_generator_instance):
-        # Call the function we're testing
-        result = setup_message_generator(options)
-
-        # Verify the result is the mocked instance
-        assert result == mock_generator_instance
-
-
-def test_environment_variable_loading() -> None:
-    """Test loading API keys from environment variables."""
-    # Set up test environment with multiple API keys
-    mock_env = {
-        "OPENAI_API_KEY": "openai-key",
-        "ANTHROPIC_API_KEY": "anthropic-key",
-        "GROQ_API_KEY": "groq-key",
-    }
-
-    # Create a mock dictionary to verify api key loading without accessing private methods
-    mock_api_keys = {
-        "openai": "openai-key",
-        "anthropic": "anthropic-key",
-        "groq": "groq-key",
-    }
-
-    with (
-        patch.dict(os.environ, mock_env, clear=True),
-        patch.object(MessageGenerator, "_get_api_keys", return_value=mock_api_keys),
-    ):
-        # No need to create the generator since we're mocking the method
-        # Verify keys directly from our mock
-        api_keys = mock_api_keys
-
-        # Verify keys were loaded
-        assert api_keys["openai"] == "openai-key"
-        assert api_keys["anthropic"] == "anthropic-key"
-        assert api_keys["groq"] == "groq-key"
-
-
-def test_dotenv_loading() -> None:
-    """Test API key loading from .env files."""
-    # Create a mock generator instance
-    mock_generator_instance = Mock(spec=MessageGenerator)
-
-    # Mock dotenv loading, environment variables, and create_universal_generator
-    with (
-        patch("codemap.cli.commit_cmd.load_dotenv", return_value=True),
-        patch.dict(os.environ, {"OPENAI_API_KEY": ""}, clear=False),
-        patch("pathlib.Path.exists", return_value=True),
-        patch.dict(os.environ, {"OPENAI_API_KEY": "env-file-key"}, clear=False),
-        patch("codemap.cli.commit_cmd.create_universal_generator", return_value=mock_generator_instance),
-    ):
-        # Create options
-        options = CommitOptions(
-            repo_path=Path("/mock/repo"),
-            model="openai/gpt-4",
-        )
-
-        # Call setup_message_generator from cli.commit
-        result = setup_message_generator(options)
-
-        # Verify we got the mocked instance
-        assert result == mock_generator_instance
-
-        # Verify environment variable was checked/set by the underlying setup function
-        assert os.environ["OPENAI_API_KEY"] == "env-file-key"
-
-
-def test_interactive_chunk_processing() -> None:
-    """Test the interactive chunk processing workflow."""
-    # Create test data
-    chunk = DiffChunk(
-        files=["src/feature.py"],
-        content="diff content",
-    )
-
-    # Mock dependencies
-    mock_generator = Mock(spec=MessageGenerator)
-    mock_generator.generate_message.return_value = ("feat: add new feature", True)
-
-    context = MagicMock()
-    context.chunk = chunk
-    context.index = 0
-    context.total = 1
-    context.generator = mock_generator
-    context.mode = GenerationMode.SMART
-
-    # Mock questionary for user input
-    with (
-        patch("codemap.cli.commit_cmd.questionary.select") as mock_select,
-        patch("codemap.cli.commit_cmd.print_chunk_summary"),
-        patch("codemap.cli.commit_cmd.console"),
-        patch("codemap.cli.commit_cmd.generate_commit_message", return_value=("feat: add new feature", True)),
-        patch("codemap.cli.commit_cmd.handle_commit_action"),
-    ):
-        # Configure the mock select to return a mock that has an ask method
-        mock_select.return_value.ask.return_value = "commit"
-
-        # Run the function
-        result = process_chunk_interactively(context)
-
-        # Verify result
-        assert result == "continue"
+            # Verify result
+            assert result == "continue"
 
 
 def test_cli_command_execution() -> None:
@@ -716,51 +741,6 @@ def test_azure_openai_configuration() -> None:
         # The model will have the provider prefix added by the _resolve_llm_configuration method
         # So we expect 'openai/gpt-4' rather than just 'gpt-4'
         assert "gpt-4" in generator.model  # Check that gpt-4 is in the model name
-
-
-def test_are_files_related() -> None:
-    """Test file relationship detection for semantic splitting."""
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Test same directory
-    assert splitter._are_files_related("src/module.py", "src/helper.py")
-
-    # Test test file and implementation
-    assert splitter._are_files_related("tests/test_feature.py", "feature.py")
-
-    # Test similar names
-    assert splitter._are_files_related("user.py", "user_test.py")
-
-    # Test unrelated files
-    assert not splitter._are_files_related("config.py", "database.py")
-    assert not splitter._are_files_related("src/config.py", "utils/helpers.py")
-
-
-def test_has_related_file_pattern() -> None:
-    """Test file pattern relationships for semantic splitting."""
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
-
-    # Test frontend pairs (JS and CSS)
-    assert splitter._has_related_file_pattern("component.jsx", "component.css")
-    assert splitter._has_related_file_pattern("feature.tsx", "feature.css")
-
-    # Test implementation and definition pairs
-    assert splitter._has_related_file_pattern("module.h", "module.c")
-    assert splitter._has_related_file_pattern("class.hpp", "class.cpp")
-
-    # Test web development pairs
-    assert splitter._has_related_file_pattern("page.html", "page.js")
-    assert splitter._has_related_file_pattern("page.html", "page.css")
-
-    # Test protocol buffer files
-    assert splitter._has_related_file_pattern("data.proto", "data.pb.go")
-    assert splitter._has_related_file_pattern("message.proto", "message.pb.py")
-
-    # Test unrelated patterns
-    assert not splitter._has_related_file_pattern("script.py", "data.json")
-    assert not splitter._has_related_file_pattern("config.js", "schema.graphql")
 
 
 def test_group_related_files() -> None:

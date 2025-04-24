@@ -13,26 +13,34 @@ class TestCliEntry(CLITestBase):
     """Test cases for the CLI entry points."""
 
     def test_main_function(self) -> None:
-        """Test the main function."""
+        """Test the main function.
+
+        Tests that the main function in cli_app calls the app function
+        and returns its result.
+        """
         with patch("codemap.cli_app.app") as mock_app:
             mock_app.return_value = 0
 
             # Import the module to get the main function
             from codemap.cli_app import main
 
-            # Call the main function
+            # Act: Call the main function
             result = main()
 
-            # Check the result
+            # Assert: Check the result
             assert result == 0
             mock_app.assert_called_once()
 
     def test_module_import(self) -> None:
-        """Test that the module can be imported without errors."""
-        # Import the module
+        """Test that the module can be imported without errors.
+
+        Verifies that the module exports the expected attributes and
+        that app is a Typer instance.
+        """
+        # Arrange/Act: Import the module
         import codemap.cli_app
 
-        # Check that the module has the expected attributes
+        # Assert: Check that the module has the expected attributes
         assert hasattr(codemap.cli_app, "app")
         assert hasattr(codemap.cli_app, "main")
 
@@ -40,8 +48,14 @@ class TestCliEntry(CLITestBase):
         assert str(type(codemap.cli_app.app)).endswith("typer.main.Typer'>")
 
     def test_cli_invoke(self) -> None:
-        """Test that the CLI can be invoked."""
-        # This is a simple smoke test to ensure the CLI can be invoked
+        """Test that the CLI can be invoked.
+
+        A smoke test to ensure the CLI can be invoked with basic parameters.
+        Validates that the help option works and returns a successful exit code.
+        """
+        # Act: Invoke the CLI with help option
         result = self.invoke_command(["--help"])
+
+        # Assert: Check the result
         assert result.exit_code == 0
         assert "Usage:" in result.stdout
