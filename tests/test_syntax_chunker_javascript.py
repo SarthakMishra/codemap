@@ -169,69 +169,78 @@ export { MyClass, regularFunction, arrowFunction };
 """
 
 
-def test_javascript_chunking(javascript_code: str) -> None:
-    """Test chunking JavaScript code."""
-    chunker = TreeSitterChunker()
-    chunks = chunker.chunk(javascript_code, Path("test.js"))
-
-    # Verify module chunk
-    assert len(chunks) == 1
-    module = chunks[0]
-    assert module.metadata.entity_type == EntityType.MODULE
-
-    # The JSDoc comment extraction might not be fully implemented yet, so make this check optional
-    if module.metadata.description:
-        assert "Module docstring" in module.metadata.description
-
-    # Count the total number of chunks
-    all_chunks = get_all_chunks(module)
-    assert len(all_chunks) > 5, "Should have a reasonable number of chunks"
-
-    # ----- Verify basic structure -----
-    # Just ensure we're getting some basic structure correctly parsed
-    # This is a more relaxed test than the Python version since the JavaScript parser
-    # might still need more refinement
-
-    # Check if we have any functions
-    functions = [c for c in module.children if c.metadata.entity_type == EntityType.FUNCTION]
-    assert len(functions) > 0, "Should have at least one function"
-
-    # Check if we have any classes
-    classes = [c for c in module.children if c.metadata.entity_type == EntityType.CLASS]
-    assert len(classes) >= 0, "Classes might be recognized if properly implemented"
-
-    # Check if we have any imports
-    imports = [c for c in module.children if c.metadata.entity_type == EntityType.IMPORT]
-    assert len(imports) >= 0, "Imports might be recognized if properly implemented"
-
-    # Check if we have any constants
-    constants = [c for c in module.children if c.metadata.entity_type == EntityType.CONSTANT]
-    assert len(constants) >= 0, "Constants might be recognized if properly implemented"
-
-    # Check if we have any variables
-    variables = [c for c in module.children if c.metadata.entity_type == EntityType.VARIABLE]
-    assert len(variables) >= 0, "Variables might be recognized if properly implemented"
-
-
-def test_javascript_chunk_splitting(javascript_code: str) -> None:
-    """Test splitting large chunks."""
-    chunker = TreeSitterChunker()
-    chunks = chunker.chunk(javascript_code, Path("test.js"))
-
-    # Get the module chunk
-    module = chunks[0]
-
-    # Test splitting the module chunk directly since we know it's large
-    max_size = 500  # Use a larger size that will still cause splitting but is more reasonable
-    split_chunks = chunker.split(module, max_size)
-
-    # Verify splitting
-    assert len(split_chunks) >= 1, "Should split into at least one chunk"
-
-
 def get_all_chunks(root_chunk: Chunk) -> list[Chunk]:
     """Recursively get all chunks including children."""
     all_chunks = [root_chunk]
     for child in root_chunk.children:
         all_chunks.extend(get_all_chunks(child))
     return all_chunks
+
+
+@pytest.mark.unit
+@pytest.mark.processor
+@pytest.mark.chunking
+class TestJavaScriptSyntaxChunker:
+    """Tests for JavaScript syntax-based chunking functionality."""
+
+    def setup_method(self) -> None:
+        """Set up test environment with a chunker instance."""
+        self.chunker = TreeSitterChunker()
+
+    def test_javascript_chunking(self, javascript_code: str) -> None:
+        """Test chunking JavaScript code."""
+        # Arrange - javascript_code fixture is used
+
+        # Act
+        chunks = self.chunker.chunk(javascript_code, Path("test.js"))
+
+        # Assert - Verify module chunk
+        assert len(chunks) == 1
+        module = chunks[0]
+        assert module.metadata.entity_type == EntityType.MODULE
+
+        # The JSDoc comment extraction might not be fully implemented yet, so make this check optional
+        if module.metadata.description:
+            assert "Module docstring" in module.metadata.description
+
+        # Count the total number of chunks
+        all_chunks = get_all_chunks(module)
+        assert len(all_chunks) > 5, "Should have a reasonable number of chunks"
+
+        # ----- Verify basic structure -----
+        # Just ensure we're getting some basic structure correctly parsed
+        # This is a more relaxed test than the Python version since the JavaScript parser
+        # might still need more refinement
+
+        # Check if we have any functions
+        functions = [c for c in module.children if c.metadata.entity_type == EntityType.FUNCTION]
+        assert len(functions) > 0, "Should have at least one function"
+
+        # Check if we have any classes
+        classes = [c for c in module.children if c.metadata.entity_type == EntityType.CLASS]
+        assert len(classes) >= 0, "Classes might be recognized if properly implemented"
+
+        # Check if we have any imports
+        imports = [c for c in module.children if c.metadata.entity_type == EntityType.IMPORT]
+        assert len(imports) >= 0, "Imports might be recognized if properly implemented"
+
+        # Check if we have any constants
+        constants = [c for c in module.children if c.metadata.entity_type == EntityType.CONSTANT]
+        assert len(constants) >= 0, "Constants might be recognized if properly implemented"
+
+        # Check if we have any variables
+        variables = [c for c in module.children if c.metadata.entity_type == EntityType.VARIABLE]
+        assert len(variables) >= 0, "Variables might be recognized if properly implemented"
+
+    def test_javascript_chunk_splitting(self, javascript_code: str) -> None:
+        """Test splitting large chunks."""
+        # Arrange
+        chunks = self.chunker.chunk(javascript_code, Path("test.js"))
+        module = chunks[0]  # Get the module chunk
+
+        # Act
+        max_size = 500  # Use a larger size that will still cause splitting but is more reasonable
+        split_chunks = self.chunker.split(module, max_size)
+
+        # Assert
+        assert len(split_chunks) >= 1, "Should split into at least one chunk"

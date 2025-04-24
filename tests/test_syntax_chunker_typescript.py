@@ -229,97 +229,103 @@ export { Circle, regularFunction, arrowFunction, Direction, type User };
 """
 
 
-def test_typescript_chunking(typescript_code: str) -> None:
-    """Test chunking TypeScript code."""
-    chunker = TreeSitterChunker()
-    chunks = chunker.chunk(typescript_code, Path("test.ts"))
-
-    # Verify module chunk
-    assert len(chunks) == 1
-    module = chunks[0]
-    assert module.metadata.entity_type == EntityType.MODULE
-
-    # The JSDoc comment extraction might not be fully implemented yet, so make this check optional
-    if module.metadata.description:
-        assert "Module docstring" in module.metadata.description
-
-    # Count the total number of chunks
-    all_chunks = get_all_chunks(module)
-
-    # If we're using fallback chunking, there will be only one chunk (the module itself)
-    # so we should skip detailed testing
-    if len(all_chunks) <= 1:
-        # Check if we're using the fallback chunker (single chunk, no detailed parsing)
-        # In this case, consider the test successful as TypeScript support might not be fully implemented
-        return
-
-    # ----- Verify basic structure -----
-    # Just ensure we're getting some basic structure correctly parsed
-    # This is a more relaxed test than the Python version since the TypeScript parser
-    # might still need more refinement
-
-    # Check for TypeScript-specific entities if support is implemented
-    # Type aliases
-    type_aliases = [c for c in module.children if c.metadata.entity_type == EntityType.TYPE_ALIAS]
-    assert len(type_aliases) >= 0, "Type aliases might be recognized if properly implemented"
-
-    # Interfaces
-    interfaces = [c for c in module.children if c.metadata.entity_type == EntityType.INTERFACE]
-    assert len(interfaces) >= 0, "Interfaces might be recognized if properly implemented"
-
-    # Enums
-    enums = [c for c in module.children if c.metadata.entity_type == EntityType.ENUM]
-    assert len(enums) >= 0, "Enums might be recognized if properly implemented"
-
-    # Namespaces
-    namespaces = [c for c in module.children if c.metadata.entity_type == EntityType.NAMESPACE]
-    assert len(namespaces) >= 0, "Namespaces might be recognized if properly implemented"
-
-    # Classes
-    classes = [c for c in module.children if c.metadata.entity_type == EntityType.CLASS]
-    assert len(classes) >= 0, "Classes might be recognized if properly implemented"
-
-    # Functions
-    functions = [c for c in module.children if c.metadata.entity_type == EntityType.FUNCTION]
-    assert len(functions) >= 0, "Functions might be recognized if properly implemented"
-
-    # Constants
-    constants = [c for c in module.children if c.metadata.entity_type == EntityType.CONSTANT]
-    assert len(constants) >= 0, "Constants might be recognized if properly implemented"
-
-    # Variables
-    variables = [c for c in module.children if c.metadata.entity_type == EntityType.VARIABLE]
-    assert len(variables) >= 0, "Variables might be recognized if properly implemented"
-
-    # Imports
-    imports = [c for c in module.children if c.metadata.entity_type == EntityType.IMPORT]
-    assert len(imports) >= 0, "Imports might be recognized if properly implemented"
-
-
-def test_typescript_chunk_splitting(typescript_code: str) -> None:
-    """Test splitting large chunks."""
-    chunker = TreeSitterChunker()
-    chunks = chunker.chunk(typescript_code, Path("test.ts"))
-
-    # Get the module chunk
-    module = chunks[0]
-
-    # If we're using fallback chunking, just verify that the module can be split
-    all_chunks = get_all_chunks(module)
-    if len(all_chunks) <= 1:
-        pass
-
-    # Test splitting the module chunk directly since we know it's large
-    max_size = 500  # Use a larger size that will still cause splitting but is more reasonable
-    split_chunks = chunker.split(module, max_size)
-
-    # Verify splitting
-    assert len(split_chunks) >= 1, "Should split into at least one chunk"
-
-
 def get_all_chunks(root_chunk: Chunk) -> list[Chunk]:
     """Recursively get all chunks including children."""
     all_chunks = [root_chunk]
     for child in root_chunk.children:
         all_chunks.extend(get_all_chunks(child))
     return all_chunks
+
+
+@pytest.mark.unit
+@pytest.mark.processor
+@pytest.mark.chunking
+class TestTypeScriptSyntaxChunker:
+    """Tests for TypeScript syntax-based chunking functionality."""
+
+    def setup_method(self) -> None:
+        """Set up test environment with a chunker instance."""
+        self.chunker = TreeSitterChunker()
+
+    def test_typescript_chunking(self, typescript_code: str) -> None:
+        """Test chunking TypeScript code."""
+        # Arrange - typescript_code fixture is used
+
+        # Act
+        chunks = self.chunker.chunk(typescript_code, Path("test.ts"))
+
+        # Assert - Verify module chunk
+        assert len(chunks) == 1
+        module = chunks[0]
+        assert module.metadata.entity_type == EntityType.MODULE
+
+        # The JSDoc comment extraction might not be fully implemented yet, so make this check optional
+        if module.metadata.description:
+            assert "Module docstring" in module.metadata.description
+
+        # Count the total number of chunks
+        all_chunks = get_all_chunks(module)
+
+        # If we're using fallback chunking, there will be only one chunk (the module itself)
+        # so we should skip detailed testing
+        if len(all_chunks) <= 1:
+            # Check if we're using the fallback chunker (single chunk, no detailed parsing)
+            # In this case, consider the test successful as TypeScript support might not be fully implemented
+            return
+
+        # ----- Verify basic structure -----
+        # Verify TypeScript-specific entities if support is implemented
+
+        # Type aliases
+        type_aliases = [c for c in module.children if c.metadata.entity_type == EntityType.TYPE_ALIAS]
+        assert len(type_aliases) >= 0, "Type aliases might be recognized if properly implemented"
+
+        # Interfaces
+        interfaces = [c for c in module.children if c.metadata.entity_type == EntityType.INTERFACE]
+        assert len(interfaces) >= 0, "Interfaces might be recognized if properly implemented"
+
+        # Enums
+        enums = [c for c in module.children if c.metadata.entity_type == EntityType.ENUM]
+        assert len(enums) >= 0, "Enums might be recognized if properly implemented"
+
+        # Namespaces
+        namespaces = [c for c in module.children if c.metadata.entity_type == EntityType.NAMESPACE]
+        assert len(namespaces) >= 0, "Namespaces might be recognized if properly implemented"
+
+        # Classes
+        classes = [c for c in module.children if c.metadata.entity_type == EntityType.CLASS]
+        assert len(classes) >= 0, "Classes might be recognized if properly implemented"
+
+        # Functions
+        functions = [c for c in module.children if c.metadata.entity_type == EntityType.FUNCTION]
+        assert len(functions) >= 0, "Functions might be recognized if properly implemented"
+
+        # Constants
+        constants = [c for c in module.children if c.metadata.entity_type == EntityType.CONSTANT]
+        assert len(constants) >= 0, "Constants might be recognized if properly implemented"
+
+        # Variables
+        variables = [c for c in module.children if c.metadata.entity_type == EntityType.VARIABLE]
+        assert len(variables) >= 0, "Variables might be recognized if properly implemented"
+
+        # Imports
+        imports = [c for c in module.children if c.metadata.entity_type == EntityType.IMPORT]
+        assert len(imports) >= 0, "Imports might be recognized if properly implemented"
+
+    def test_typescript_chunk_splitting(self, typescript_code: str) -> None:
+        """Test splitting large chunks."""
+        # Arrange
+        chunks = self.chunker.chunk(typescript_code, Path("test.ts"))
+        module = chunks[0]  # Get the module chunk
+
+        # If we're using fallback chunking, just verify that the module can be split
+        all_chunks = get_all_chunks(module)
+        if len(all_chunks) <= 1:
+            pass
+
+        # Act
+        max_size = 500  # Use a larger size that will still cause splitting but is more reasonable
+        split_chunks = self.chunker.split(module, max_size)
+
+        # Assert
+        assert len(split_chunks) >= 1, "Should split into at least one chunk"
