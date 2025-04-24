@@ -342,38 +342,85 @@ def _handle_other_files(chunk: DiffChunk, other_staged: list[str], other_untrack
     return True
 
 
-def _perform_commit(chunk: DiffChunk, message: str) -> None:
+def _commit_changes(
+    message: str,
+    files: list[str],
+    ignore_hooks: bool = False,
+) -> bool:
+    """Commit the changes with the provided message.
+
+    Args:
+        message: The commit message to use
+        files: The list of files to commit
+        ignore_hooks: Whether to ignore Git hooks if they fail
+
+    Returns:
+        Success status (True if commit was created)
+    """
+    try:
+        # Filter out files that don't exist or aren't tracked by Git
+        valid_files = []
+        tracked_files = set()
+
+        try:
+            # Get tracked files from Git
+            tracked_output = run_git_command(["git", "ls-files"])
+            tracked_files = set(tracked_output.splitlines())
+        except (OSError, ImportError) as e:
+            logger.warning("Failed to get tracked files, will rely on filesystem checks only: %s", e)
+
+        # Verify each file exists or is tracked
+        for file in files:
+            if Path(file).exists() or file in tracked_files:
+                valid_files.append(file)
+            else:
+                logger.warning("Skipping file that doesn't exist or isn't tracked: %s", file)
+
+        if not valid_files:
+            logger.error("No valid files to commit")
+            return False
+
+        # Commit the changes
+        logger.info("Creating commit with message: %s", message)
+        logger.info("Files to commit: %s", ", ".join(valid_files))
+
+        # Call git_utils to create the commit
+        other_staged = commit_only_files(valid_files, message, ignore_hooks=ignore_hooks)
+
+        if other_staged:
+            logger.warning("There are %d other staged files that weren't included in this commit", len(other_staged))
+
+        return True
+    except Exception as e:
+        logger.exception("Failed to create commit")
+        return False
+
+
+def _perform_commit(chunk: DiffChunk, message: str) -> bool:
     """Perform the actual commit.
 
     Args:
         chunk: Diff chunk to commit
         message: Commit message
+
+    Returns:
+        True if commit was successful
     """
-    try:
-        # Commit only the files in this chunk
-        commit_only_files(chunk.files, message)
+    success = _commit_changes(message, chunk.files)
+    if success:
         console.print(f"[green]✓[/green] Committed {len(chunk.files)} files")
-    except GitError as e:
-        console.print(f"[red]Error:[/red] {e!s}")
+    return success
 
 
-def handle_commit_action(chunk: DiffChunk, message: str) -> None:
-    """Handle commit action.
-
-    Args:
-        chunk: Diff chunk to commit
-        message: Commit message
-    """
-    console.print("Committing changes...")
-    _perform_commit(chunk, message)
-
-
-def handle_edit_action(chunk: DiffChunk, message: str) -> None:
-    """Handle edit action.
+def _edit_commit_message(message: str, _unused_chunk: DiffChunk) -> str:
+    """Let the user edit the commit message.
 
     Args:
-        chunk: Diff chunk to edit and commit
-        message: Initial commit message to edit
+        message: The initial commit message
+        _unused_chunk: The diff chunk for context (unused but kept for API consistency)
+
+    Returns:
+        The edited message, or empty string if user cancels
     """
     # Ask for a new commit message
     edited_message = questionary.text(
@@ -382,8 +429,44 @@ def handle_edit_action(chunk: DiffChunk, message: str) -> None:
         validate=lambda text: bool(text.strip()) or "Commit message cannot be empty",
     ).unsafe_ask()
 
-    if edited_message:
-        _perform_commit(chunk, edited_message)
+    return edited_message if edited_message else ""
+
+
+def _commit_with_message(chunk: DiffChunk, message: str) -> None:
+    """Commit the changes with the provided message.
+
+    Args:
+        chunk: The diff chunk to commit
+        message: The commit message to use
+    """
+    console.print("Committing changes...")
+    success = _perform_commit(chunk, message)
+    if not success:
+        console.print("[red]Failed to commit changes[/red]")
+
+
+def _commit_with_user_input(chunk: DiffChunk, generated_message: str) -> None:
+    """Commit the changes with user input for the message.
+
+    Args:
+        chunk: The diff chunk to commit
+        generated_message: The initial generated message to edit
+    """
+    try:
+        # Let user edit the message
+        edited_message = _edit_commit_message(generated_message, chunk)
+
+        if edited_message:
+            success = _perform_commit(chunk, edited_message)
+            if not success:
+                console.print("[red]Failed to commit changes[/red]")
+        else:
+            console.print("[yellow]Commit canceled - empty message[/yellow]")
+    except KeyboardInterrupt:
+        console.print("[yellow]Commit canceled by user[/yellow]")
+    except Exception:
+        logger.exception("Error during commit process")
+        console.print("[red]Error:[/red] An unexpected error occurred during the commit process")
 
 
 @dataclass
@@ -435,9 +518,9 @@ def process_chunk_interactively(context: ChunkContext) -> str:
     action = questionary.select("What would you like to do?", choices=choices).ask()
 
     if action == "commit":
-        handle_commit_action(context.chunk, message)
+        _commit_with_message(context.chunk, message)
     elif action == "edit":
-        handle_edit_action(context.chunk, message)
+        _commit_with_user_input(context.chunk, message)
     elif action == "regenerate":
         # Just loop back for this chunk with smart generation
         return process_chunk_interactively(
