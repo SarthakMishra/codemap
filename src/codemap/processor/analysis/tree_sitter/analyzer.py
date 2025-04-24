@@ -187,6 +187,14 @@ class TreeSitterAnalyzer:
         except (UnicodeDecodeError, IndexError):
             node_content = ""
 
+        # Extract dependencies from import statements
+        dependencies = []
+        if entity_type == EntityType.IMPORT:
+            try:
+                dependencies = handler.extract_imports(node, content_bytes)
+            except (AttributeError, UnicodeDecodeError, IndexError, ValueError) as e:
+                logger.warning("Failed to extract dependencies: %s", e)
+
         # Build result
         result = {
             "type": entity_type.name if entity_type != EntityType.UNKNOWN else "UNKNOWN",
@@ -200,7 +208,12 @@ class TreeSitterAnalyzer:
             "docstring": docstring_text,
             "content": node_content,
             "children": [],
+            "language": language,
         }
+
+        # Add dependencies only if they exist to keep the output clean
+        if dependencies:
+            result["dependencies"] = dependencies
 
         # Process child nodes
         body_node = handler.get_body_node(node)
