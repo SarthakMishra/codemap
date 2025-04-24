@@ -28,6 +28,9 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 > [!Note]
 > This package will be published to PyPI upon reaching a stable version.
 
+> [!Important]
+> CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
+
 ```bash
 # Install with pipx
 pipx install git+https://github.com/SarthakMishra/codemap.git
