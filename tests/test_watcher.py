@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from codemap.watcher import FileWatcher
+from codemap.processor.watcher import FileWatcher
 
 
 def test_file_watcher_initialization() -> None:
