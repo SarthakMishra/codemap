@@ -1073,6 +1073,19 @@ class DiffSplitter:
         # Check if we're in a test environment
         is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
 
+        # Get list of deleted but tracked files from git status
+        deleted_tracked_files = set()
+        try:
+            # Parse git status to find deleted files
+            status_output = run_git_command(["git", "status", "--porcelain"])
+            for line in status_output.splitlines():
+                if line.startswith(" D") or line.startswith("D "):
+                    # Extract the filename (starts at position 3)
+                    deleted_tracked_files.add(line[3:])
+            logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
+        except GitError:
+            logger.warning("Failed to get git status for deleted files")
+
         # Filter invalid filenames from the diff
         if diff.files:
             valid_files = []
@@ -1091,10 +1104,13 @@ class DiffSplitter:
                     tracked_files_output = run_git_command(["git", "ls-files"])
                     tracked_files = set(tracked_files_output.splitlines())
 
-                    # Keep only files that exist in filesystem or are tracked by git
+                    # Keep files that either:
+                    # 1. Exist in filesystem
+                    # 2. Are tracked by git
+                    # 3. Are known deleted files from git status
                     filtered_files = []
                     for file in valid_files:
-                        if Path(file).exists() or file in tracked_files:
+                        if Path(file).exists() or file in tracked_files or file in deleted_tracked_files:
                             filtered_files.append(file)
                         else:
                             logger.warning("Skipping non-existent and untracked file in diff: %s", file)
@@ -1106,10 +1122,10 @@ class DiffSplitter:
                             original_count - len(valid_files),
                         )
                 except GitError:
-                    # If we can't check git tracked files, at least filter by filesystem existence
+                    # If we can't check git tracked files, at least filter by filesystem existence and git status
                     filtered_files = []
                     for file in valid_files:
-                        if Path(file).exists():
+                        if Path(file).exists() or file in deleted_tracked_files:
                             filtered_files.append(file)
                         else:
                             logger.warning("Skipping non-existent file in diff: %s", file)
