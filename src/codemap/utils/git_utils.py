@@ -179,12 +179,15 @@ def stage_files(files: list[str]) -> None:
             # Parse git status to find deleted files
             status_output = run_git_command(["git", "status", "--porcelain"])
             for line in status_output.splitlines():
-                if line.startswith(" D"):
+                # Ensure line is a string, not bytes
+                line_str = line if isinstance(line, str) else line.decode("utf-8")
+
+                if line_str.startswith(" D"):
                     # Unstaged deletion (space followed by D)
-                    deleted_tracked_files.add(line[3:])
-                elif line.startswith("D "):
+                    deleted_tracked_files.add(line_str[3:])
+                elif line_str.startswith("D "):
                     # Staged deletion (D followed by space)
-                    already_staged_deletions.add(line[3:])
+                    already_staged_deletions.add(line_str[3:])
             logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
             logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
         except GitError:
@@ -432,12 +435,15 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
         # Parse git status to find deleted files
         status_output = run_git_command(["git", "status", "--porcelain"])
         for line in status_output.splitlines():
-            if line.startswith(" D"):
+            # Ensure line is a string, not bytes
+            line_str = line if isinstance(line, str) else line.decode("utf-8")
+
+            if line_str.startswith(" D"):
                 # Unstaged deletion (space followed by D)
-                deleted_tracked_files.add(line[3:])
-            elif line.startswith("D "):
+                deleted_tracked_files.add(line_str[3:])
+            elif line_str.startswith("D "):
                 # Staged deletion (D followed by space)
-                already_staged_deletions.add(line[3:])
+                already_staged_deletions.add(line_str[3:])
         logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
         logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
     except GitError:
