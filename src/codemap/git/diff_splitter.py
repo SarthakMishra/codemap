@@ -14,6 +14,7 @@ import numpy as np
 
 # Import the console from cli_utils
 from codemap.utils.cli_utils import console
+from codemap.utils.git_utils import GitError, run_git_command
 
 # Constants for configuration
 MIN_CHUNKS_FOR_CONSOLIDATION = 1
@@ -1079,8 +1080,46 @@ class DiffSplitter:
                     continue
                 valid_files.append(file)
 
+            # Check if files exist in the repository (tracked by git) or filesystem
+            original_count = len(valid_files)
+            try:
+                tracked_files_output = run_git_command(["git", "ls-files"])
+                tracked_files = set(tracked_files_output.splitlines())
+
+                # Keep only files that exist in filesystem or are tracked by git
+                filtered_files = []
+                for file in valid_files:
+                    if Path(file).exists() or file in tracked_files:
+                        filtered_files.append(file)
+                    else:
+                        logger.warning("Skipping non-existent and untracked file in diff: %s", file)
+
+                valid_files = filtered_files
+                if len(valid_files) < original_count:
+                    logger.warning(
+                        "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
+                    )
+            except GitError:
+                # If we can't check git tracked files, at least filter by filesystem existence
+                filtered_files = []
+                for file in valid_files:
+                    if Path(file).exists():
+                        filtered_files.append(file)
+                    else:
+                        logger.warning("Skipping non-existent file in diff: %s", file)
+
+                valid_files = filtered_files
+                if len(valid_files) < original_count:
+                    logger.warning(
+                        "Filtered out %d files that don't exist in the filesystem", original_count - len(valid_files)
+                    )
+
             # Replace files list with valid files only
             diff.files = valid_files
+
+        if not diff.files:
+            logger.warning("No valid files to process after filtering")
+            return []
 
         # Convert string strategy to enum if needed
         if isinstance(strategy, str):
