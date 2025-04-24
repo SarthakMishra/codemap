@@ -51,17 +51,17 @@ tasks:
   test:pytest:
     desc: Run pytest only
     cmds:
-      - pytest {{.TESTS_DIR}}
+      - pytest {{.TESTS_DIR}} -n logical
 
   test:coverage:
     desc: Run tests with coverage analysis
     cmds:
-      - pytest --cov={{.COV_MODULE}} --cov-report=term-missing {{.TESTS_DIR}}
+      - pytest --cov={{.COV_MODULE}} --cov-report=term-missing {{.TESTS_DIR}} -n logical
 
   test:coverage:xml:
     desc: Run tests with coverage analysis and generate XML report
     cmds:
-      - pytest --cov={{.COV_MODULE}} --cov-branch --cov-report=xml {{.TESTS_DIR}}
+      - pytest --cov={{.COV_MODULE}} --cov-branch --cov-report=xml {{.TESTS_DIR}} -n logical
 
   ci:
     desc: Run all checks and tests

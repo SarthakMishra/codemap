@@ -1,0 +1,67 @@
+---
+description: Integrating MultiLSPy library for LSP(Language Server Protocol)
+globs: 
+alwaysApply: false
+---
+# Using MultiLSPy in CodeMap
+
+MultiLSPy is a library for integrating with language servers to obtain static analysis information through the Language Server Protocol (LSP).
+
+## Basic Usage
+
+```python
+from multilspy import SyncLanguageServer
+from multilspy.multilspy_config import MultilspyConfig
+from multilspy.multilspy_logger import MultilspyLogger
+
+# Create configuration for desired language
+config = MultilspyConfig.from_dict({"code_language": "python"})
+logger = MultilspyLogger()
+
+# Initialize language server with project root path
+lsp = SyncLanguageServer.create(config, logger, "/path/to/project/root")
+
+# Use with context manager to handle server lifecycle
+with lsp.start_server():
+    # Request completions at a specific position
+    completions = lsp.request_completions(
+        "relative/path/to/file.py",  # Path relative to project root
+        line=10,                     # 0-based line number
+        column=15,                   # Column position (often at '.' for completions)
+        allow_incomplete=True        # Allow incomplete identifiers
+    )
+    
+    # Other available requests:
+    # result = lsp.request_definition(file_path, line, column)
+    # result = lsp.request_references(file_path, line, column)
+    # result = lsp.request_document_symbols(file_path)
+    # result = lsp.request_hover(file_path, line, column)
+```
+
+## Async Usage
+
+```python
+from multilspy import LanguageServer
+
+async with lsp.start_server():
+    result = await lsp.request_definition(file_path, line, column)
+```
+
+## Supported Languages
+
+- Python (jedi-language-server)
+- JavaScript/TypeScript
+- Java
+- Rust
+- C#
+- Go
+- Dart
+- Ruby
+- Kotlin
+
+## Integration Note
+
+When implementing LSP in the pipeline, use it after syntax chunking to enhance metadata with:
+- Symbol references
+- Type information
+- Function call dependencies

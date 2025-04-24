@@ -30,7 +30,7 @@ index 1234567..abcdefg 100644
     splitter = DiffSplitter(repo_root)
 
     # Extract old and new code
-    old_code, new_code = splitter._extract_code_from_diff(diff_content)  # pylint: disable=protected-access # noqa: SLF001
+    old_code, new_code = splitter._extract_code_from_diff(diff_content)  # pylint: disable=protected-access
 
     # Verify extracted content
     assert "def function1()" in old_code
@@ -71,7 +71,7 @@ class Example:
     splitter = DiffSplitter(repo_root)
 
     # Split the diff semantically
-    chunks = splitter._semantic_hunk_splitting("example.py", diff_content)  # pylint: disable=protected-access # noqa: SLF001
+    chunks = splitter._semantic_hunk_splitting("example.py", diff_content)  # pylint: disable=protected-access
 
     # Verify the chunking - implementation might return multiple chunks
     assert len(chunks) >= 1  # Ensure we get at least one chunk
@@ -95,7 +95,7 @@ class Example:
         content=diff_content,
         is_staged=False,
     )
-    enhanced_chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access # noqa: SLF001
+    enhanced_chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
 
     # Verify the enhanced semantic chunking
     assert len(enhanced_chunks) >= 1
@@ -137,7 +137,7 @@ class ShoppingCart {
     splitter = DiffSplitter(repo_root)
 
     # Split the diff semantically
-    chunks = splitter._semantic_hunk_splitting("example.js", diff_content)  # pylint: disable=protected-access # noqa: SLF001
+    chunks = splitter._semantic_hunk_splitting("example.js", diff_content)  # pylint: disable=protected-access
 
     # Verify the chunking - implementation might return multiple chunks
     assert len(chunks) >= 1  # Ensure we get at least one chunk
@@ -161,7 +161,7 @@ class ShoppingCart {
         content=diff_content,
         is_staged=False,
     )
-    enhanced_chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access # noqa: SLF001
+    enhanced_chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
 
     # Verify the enhanced semantic chunking
     assert len(enhanced_chunks) >= 1
@@ -215,7 +215,7 @@ function formatPrice(price) {
     splitter = DiffSplitter(repo_root)
 
     # Apply enhanced semantic splitting
-    chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access # noqa: SLF001
+    chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
 
     # Verify the chunking - should have at least one chunk per file
     assert len(chunks) >= 2
@@ -326,8 +326,8 @@ def test_embedding_similarity() -> None:
 
     # Save original class-level availability flags
     # pylint: disable=protected-access
-    original_st_available = DiffSplitter._sentence_transformers_available  # noqa: SLF001
-    original_model_available = DiffSplitter._model_available  # noqa: SLF001
+    original_st_available = DiffSplitter._sentence_transformers_available
+    original_model_available = DiffSplitter._model_available
 
     # Initialize diff splitter with a mock repo root
     repo_root = Path("/mock/repo")
@@ -336,8 +336,8 @@ def test_embedding_similarity() -> None:
     try:
         # Force the embeddings to return meaningful values for testing
         # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = True  # noqa: SLF001
-        DiffSplitter._model_available = True  # noqa: SLF001
+        DiffSplitter._sentence_transformers_available = True
+        DiffSplitter._model_available = True
 
         # Mock the embedding function to return predictable values
         with patch.object(splitter, "_get_code_embedding") as mock_embedding:
@@ -368,30 +368,30 @@ def test_embedding_similarity() -> None:
             """
 
             # Calculate similarities with mocked embeddings
-            sim1_2 = splitter._calculate_semantic_similarity(code1, code2)  # pylint: disable=protected-access # noqa: SLF001
-            sim1_3 = splitter._calculate_semantic_similarity(code1, code3)  # pylint: disable=protected-access # noqa: SLF001
+            sim1_2 = splitter._calculate_semantic_similarity(code1, code2)  # pylint: disable=protected-access
+            sim1_3 = splitter._calculate_semantic_similarity(code1, code3)  # pylint: disable=protected-access
 
             # Functions doing similar things should have higher similarity
             assert sim1_2 > sim1_3
     finally:
         # Restore original class-level availability flags
         # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = original_st_available  # noqa: SLF001
-        DiffSplitter._model_available = original_model_available  # noqa: SLF001
+        DiffSplitter._sentence_transformers_available = original_st_available
+        DiffSplitter._model_available = original_model_available
 
 
 def test_sentence_transformers_availability() -> None:
     """Test the sentence-transformers availability check functions."""
     # Save original class-level availability flags
     # pylint: disable=protected-access
-    original_st_available = DiffSplitter._sentence_transformers_available  # noqa: SLF001
-    original_model_available = DiffSplitter._model_available  # noqa: SLF001
+    original_st_available = DiffSplitter._sentence_transformers_available
+    original_model_available = DiffSplitter._model_available
 
     try:
         # Reset class variables to force availability check
         # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = None  # noqa: SLF001
-        DiffSplitter._model_available = None  # noqa: SLF001
+        DiffSplitter._sentence_transformers_available = None
+        DiffSplitter._model_available = None
 
         # We'll manually set the availability flags since the actual import may vary by environment
         # pylint: disable=protected-access
@@ -403,10 +403,10 @@ def test_sentence_transformers_availability() -> None:
             splitter = DiffSplitter(repo_root)
 
             # Force the sentence_transformers_available flag to True for testing
-            DiffSplitter._sentence_transformers_available = True  # noqa: SLF001
+            DiffSplitter._sentence_transformers_available = True
 
             # Check if sentence-transformers is now available in our mocked environment
-            assert DiffSplitter._sentence_transformers_available is True  # noqa: SLF001
+            assert DiffSplitter._sentence_transformers_available is True
 
             # Test with get_code_embedding
             with patch.object(splitter, "_get_code_embedding") as mock_embedding:
@@ -423,5 +423,5 @@ def test_sentence_transformers_availability() -> None:
     finally:
         # Restore original class-level availability flags
         # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = original_st_available  # noqa: SLF001
-        DiffSplitter._model_available = original_model_available  # noqa: SLF001
+        DiffSplitter._sentence_transformers_available = original_st_available
+        DiffSplitter._model_available = original_model_available

@@ -3,6 +3,7 @@ description:
 globs: 
 alwaysApply: true
 ---
+# Terminal/Commandline use Guidelines
 - Always use `uv` as the package manager, do not use pip
     - virtual enviranment is located in `.venv`
     - Activate venv using `source .venv/bin/activate`

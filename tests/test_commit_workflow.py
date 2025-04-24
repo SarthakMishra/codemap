@@ -47,7 +47,7 @@ class TestCommitWorkflow(unittest.TestCase):
         mock_generate_message.return_value = ("Test commit message", True)
 
         # Call the method - using private method is necessary for the test
-        self.command._generate_commit_message(cast("DiffChunk", self.mock_chunk))  # noqa: SLF001
+        self.command._generate_commit_message(cast("DiffChunk", self.mock_chunk))
 
         # Verify results
         assert self.mock_chunk.description == "Test commit message"
@@ -68,7 +68,7 @@ class TestCommitWorkflow(unittest.TestCase):
         mock_commit.return_value = []
 
         # Call the method - using private method is necessary for the test
-        result = self.command._perform_commit(cast("DiffChunk", self.mock_chunk), "Test commit message")  # noqa: SLF001
+        result = self.command._perform_commit(cast("DiffChunk", self.mock_chunk), "Test commit message")
 
         # Verify results
         assert result
@@ -87,7 +87,7 @@ class TestCommitWorkflow(unittest.TestCase):
         self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.ACCEPT, "Test message")
 
         # Call the method - using private method is necessary for the test
-        result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)  # noqa: SLF001
+        result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)
 
         # Verify results
         assert result
@@ -102,7 +102,7 @@ class TestCommitWorkflow(unittest.TestCase):
         self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.SKIP)
 
         # Call the method - using private method is necessary for the test
-        result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)  # noqa: SLF001
+        result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)
 
         # Verify results
         assert result
