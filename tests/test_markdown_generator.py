@@ -11,6 +11,9 @@ import pytest
 from codemap.analyzer.tree_parser import CodeParser
 from codemap.generators.markdown_generator import MarkdownGenerator
 
+# Mark all tests in this module with 'generators' marker
+pytestmark = pytest.mark.generators
+
 
 @pytest.fixture
 def sample_repo(tmp_path: Path) -> Path:
@@ -27,6 +30,7 @@ def generator(tmp_path: Path) -> MarkdownGenerator:
     return MarkdownGenerator(tmp_path, {})
 
 
+@pytest.mark.docs
 def test_generate_documentation_with_files(generator: MarkdownGenerator, sample_repo: Path) -> None:
     """Test documentation generation with real files."""
     # Create test files with class definitions
@@ -88,6 +92,7 @@ class User(BaseModel):
     assert "User" in doc
 
 
+@pytest.mark.docs
 def test_file_sorting(generator: MarkdownGenerator, sample_repo: Path) -> None:
     """Test that files are properly sorted in the documentation."""
     # Create test files
@@ -130,6 +135,7 @@ def test_file_sorting(generator: MarkdownGenerator, sample_repo: Path) -> None:
     assert a_pos < m_pos < z_pos
 
 
+@pytest.mark.filesystem
 def test_tree_generation(generator: MarkdownGenerator, sample_repo: Path) -> None:
     """Test the tree generation functionality."""
     # Create some files for the tree generation
@@ -139,16 +145,19 @@ def test_tree_generation(generator: MarkdownGenerator, sample_repo: Path) -> Non
     (sample_repo / "module2" / "file2.py").write_text("# Test file 2")
 
     # Generate a tree
-    tree = generator.generate_tree(sample_repo)
-    assert tree
+    with patch("pathlib.Path.exists", new=lambda _: True):
+        tree = generator.generate_tree(sample_repo)
+        assert tree
 
-    # The tree should contain the directories and files
-    assert "module1" in tree
-    assert "module2" in tree
-    assert "file1.py" in tree
-    assert "file2.py" in tree
+        # The tree should contain the directories and files
+        assert "module1" in tree
+        assert "module2" in tree
+        assert "file1.py" in tree
+        assert "file2.py" in tree
 
 
+@pytest.mark.docs
+@pytest.mark.filesystem
 def test_different_file_extensions(generator: MarkdownGenerator, sample_repo: Path) -> None:
     """Test that documentation generation works with different file extensions."""
     # Create files with different extensions
@@ -161,7 +170,9 @@ def test_different_file_extensions(generator: MarkdownGenerator, sample_repo: Pa
     (sample_repo / "index.html").write_text("<html><body>Hello</body></html>")
 
     # Create mock parser for these files
-    with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class:
+    with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class, patch(
+        "pathlib.Path.exists", new=lambda _: True
+    ):
         file_filter_mock = Mock()
         file_filter_mock.should_parse.return_value = True
         file_filter_mock.gitignore_patterns = []
@@ -229,6 +240,7 @@ def test_different_file_extensions(generator: MarkdownGenerator, sample_repo: Pa
         assert "Html" in doc
 
 
+@pytest.mark.filesystem
 def test_tree_with_specific_path(generator: MarkdownGenerator, sample_repo: Path) -> None:
     """Test generating a tree for a specific subdirectory."""
     # Create nested directory structure
@@ -238,7 +250,9 @@ def test_tree_with_specific_path(generator: MarkdownGenerator, sample_repo: Path
     (sample_repo / "another_file.py").write_text("# Another file")
 
     # Generate tree for the subdir only
-    with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class:
+    with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class, patch(
+        "pathlib.Path.exists", new=lambda _: True
+    ):
         file_filter_mock = Mock()
         file_filter_mock.should_parse.return_value = True
         file_filter_mock.gitignore_patterns = []
@@ -258,6 +272,7 @@ def test_tree_with_specific_path(generator: MarkdownGenerator, sample_repo: Path
 
 
 @pytest.mark.usefixtures("generator")
+@pytest.mark.filesystem
 def test_tree_with_parsed_files_highlighting(tmp_path: Path) -> None:
     """Test tree generation with parsed_files parameter to highlight specific files."""
     # Create a clean test directory (not using sample_repo which has other files)
@@ -280,7 +295,9 @@ def test_tree_with_parsed_files_highlighting(tmp_path: Path) -> None:
     test_generator = MarkdownGenerator(test_dir, {})
 
     # Generate tree with parsed_files parameter
-    with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class:
+    with patch("codemap.generators.markdown_generator.CodeParser") as mock_parser_class, patch(
+        "pathlib.Path.exists", new=lambda _: True
+    ):
         file_filter_mock = Mock()
         file_filter_mock.should_parse.return_value = True
         file_filter_mock.gitignore_patterns = []
@@ -305,6 +322,8 @@ def test_tree_with_parsed_files_highlighting(tmp_path: Path) -> None:
         assert "ignored.py" not in tree_filtered
 
 
+@pytest.mark.docs
+@pytest.mark.filesystem
 def test_custom_directory_selection(tmp_path: Path) -> None:
     """Test that we can generate documentation for a specific subdirectory."""
     # Create a test directory structure
@@ -335,10 +354,11 @@ def test_custom_directory_selection(tmp_path: Path) -> None:
     }
 
     # Generate documentation
-    doc = generator.generate_documentation(parsed_files)
+    with patch("pathlib.Path.exists", new=lambda _: True):
+        doc = generator.generate_documentation(parsed_files)
 
-    # The documentation should include the file from the subdirectory
-    assert "test.py" in doc
+        # The documentation should include the file from the subdirectory
+        assert "test.py" in doc
 
-    # The documentation should NOT include files outside the target directory
-    assert "root.py" not in doc
+        # The documentation should NOT include files outside the target directory
+        assert "root.py" not in doc

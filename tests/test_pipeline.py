@@ -19,6 +19,7 @@ from codemap.processor.pipeline import ProcessingJob, ProcessingPipeline
 from codemap.processor.watcher import FileWatcher
 
 
+@pytest.mark.processor
 class TestPipeline:
     """Tests for the processing pipeline."""
 
@@ -137,6 +138,7 @@ class TestPipeline:
             # Cleanup
             pipeline.stop()
 
+    @pytest.mark.asynchronous
     def test_start_stop_pipeline(self, pipeline: ProcessingPipeline, mock_file_watcher: MagicMock) -> None:
         """Test starting and stopping the pipeline."""
         # Start the pipeline
@@ -152,10 +154,11 @@ class TestPipeline:
         mock_file_watcher.stop.assert_called_once()
         assert pipeline.executor._shutdown is True
 
+    @pytest.mark.watcher
     def test_watcher_event_handlers(self, pipeline: ProcessingPipeline) -> None:
         """Test the file watcher event handlers."""
         # Mock process_file method to avoid actual processing
-        with patch.object(pipeline, "process_file") as mock_process:
+        with patch.object(pipeline, "process_file") as mock_process, patch("pathlib.Path.exists", new=lambda _: True):
             # Test file creation handler
             pipeline._handle_file_created("test_file.py")
             mock_process.assert_called_with("test_file.py")
@@ -165,7 +168,9 @@ class TestPipeline:
             mock_process.assert_called_with("test_file.py")
 
         # Test file deletion handler
-        with patch.object(pipeline.storage, "delete_file") as mock_delete:
+        with patch.object(pipeline.storage, "delete_file") as mock_delete, patch(
+            "pathlib.Path.exists", new=lambda _: False
+        ):
             pipeline._handle_file_deleted("test_file.py")
             mock_delete.assert_called_with("test_file.py")
 
@@ -178,7 +183,9 @@ class TestPipeline:
     def test_process_file_and_job_status(self, pipeline: ProcessingPipeline, test_file: Path) -> None:
         """Test file processing and job status tracking."""
         # Process the test file
-        with patch.object(pipeline, "_process_file_worker") as mock_worker:
+        with patch.object(pipeline, "_process_file_worker") as mock_worker, patch(
+            "pathlib.Path.exists", new=lambda _: True
+        ):
             pipeline.process_file(test_file)
 
             # Verify job was created
@@ -190,6 +197,7 @@ class TestPipeline:
             # Verify worker was called
             mock_worker.assert_called_with(test_file)
 
+    @pytest.mark.asynchronous
     def test_batch_processing(self, pipeline: ProcessingPipeline, temp_repo_dir: Path) -> None:
         """Test batch processing of multiple files."""
         # Create multiple test files
@@ -204,7 +212,7 @@ class TestPipeline:
                 f.write(f"# Test file {file_path.name}\n")
 
         # Mock process_file to avoid actual processing
-        with patch.object(pipeline, "process_file") as mock_process:
+        with patch.object(pipeline, "process_file") as mock_process, patch("pathlib.Path.exists", new=lambda _: True):
             # Batch process the files - cast to compatible type
             pipeline.batch_process(cast("List[str | Path]", test_files))
 
@@ -212,6 +220,7 @@ class TestPipeline:
             assert mock_process.call_count == 3
             mock_process.assert_has_calls([call(file) for file in test_files])
 
+    @pytest.mark.storage
     def test_search_functionality(self, pipeline: ProcessingPipeline, mocker: MockerFixture) -> None:
         """Test the search functionality of the pipeline."""
         # Create method mocks explicitly
@@ -232,23 +241,25 @@ class TestPipeline:
         search_text_mock = mocker.patch.object(pipeline.storage, "search_by_text", return_value=[(MagicMock(), 0.8)])
 
         # Test vector search (default)
-        pipeline.search("test query")
+        with patch("pathlib.Path.exists", new=lambda _: True):
+            pipeline.search("test query")
 
-        # Verify vector search was used
-        gen_embed_mock.assert_called_once()
-        search_vector_mock.assert_called_once()
+            # Verify vector search was used
+            gen_embed_mock.assert_called_once()
+            search_vector_mock.assert_called_once()
 
-        # Test text search
-        gen_embed_mock.reset_mock()
-        search_vector_mock.reset_mock()
+            # Test text search
+            gen_embed_mock.reset_mock()
+            search_vector_mock.reset_mock()
 
-        pipeline.search("test query", use_vector=False)
+            pipeline.search("test query", use_vector=False)
 
-        # Verify text search was used instead
-        gen_embed_mock.assert_not_called()
-        search_vector_mock.assert_not_called()
-        search_text_mock.assert_called_once()
+            # Verify text search was used instead
+            gen_embed_mock.assert_not_called()
+            search_vector_mock.assert_not_called()
+            search_text_mock.assert_called_once()
 
+    @pytest.mark.asynchronous
     def test_cleanup_job(self, pipeline: ProcessingPipeline) -> None:
         """Test the job cleanup functionality."""
         # Create a test job
@@ -262,6 +273,7 @@ class TestPipeline:
         # Verify job was removed
         assert test_file not in pipeline.active_jobs
 
+    @pytest.mark.error_handling
     def test_error_handling_in_process_file(
         self, pipeline: ProcessingPipeline, test_file: Path, mocker: MockerFixture
     ) -> None:
@@ -274,7 +286,7 @@ class TestPipeline:
         pipeline.active_jobs[test_file] = job
 
         # Patch the cleanup to prevent it from removing the job
-        with patch.object(pipeline, "_cleanup_job"):
+        with patch.object(pipeline, "_cleanup_job"), patch("pathlib.Path.exists", new=lambda _: True):
             # Process file directly (not through thread)
             pipeline._process_file_worker(test_file)
 
@@ -286,6 +298,7 @@ class TestPipeline:
             assert str(job.error) == "Test error"
             assert job.completed_at is not None
 
+    @pytest.mark.asynchronous
     def test_callback_execution(self, pipeline: ProcessingPipeline, test_file: Path, mocker: MockerFixture) -> None:
         """Test that callbacks are executed properly."""
         # Setup callbacks
@@ -307,31 +320,39 @@ class TestPipeline:
         mocker.patch.object(pipeline.embedding_generator, "generate_embeddings", return_value=[MagicMock()])
 
         # Process a file
-        with patch.object(pipeline, "_cleanup_job"):  # Prevent actual cleanup
+        with patch.object(pipeline, "_cleanup_job"), patch(
+            "pathlib.Path.exists", new=lambda _: True
+        ):  # Prevent actual cleanup
             pipeline._process_file_worker(test_file)
 
             # Verify chunks processed callback was called with correct arguments
             on_chunks_processed.assert_called_once_with([test_chunk], test_file)
 
             # Test file deletion callback
-            pipeline._handle_file_deleted(str(test_file))
-            on_file_deleted.assert_called_once()
+            with patch("pathlib.Path.exists", new=lambda _: False):
+                pipeline._handle_file_deleted(str(test_file))
+                on_file_deleted.assert_called_once()
 
+    @pytest.mark.error_handling
+    @pytest.mark.storage
     def test_file_deletion_error_handling(self, pipeline: ProcessingPipeline, mocker: MockerFixture) -> None:
         """Test error handling during file deletion."""
         # Setup storage to raise an exception during deletion
         mocker.patch.object(pipeline.storage, "delete_file", side_effect=RuntimeError("Deletion error"))
 
         # Handle file deletion
-        pipeline._handle_file_deleted("test_error.py")
+        with patch("pathlib.Path.exists", new=lambda _: False):
+            pipeline._handle_file_deleted("test_error.py")
 
-        # Verify error was captured in job
-        job = pipeline.active_jobs.get(Path("test_error.py"))
-        assert job is not None
-        assert job.error is not None
-        assert isinstance(job.error, RuntimeError)
-        assert str(job.error) == "Deletion error"
+            # Verify error was captured in job
+            job = pipeline.active_jobs.get(Path("test_error.py"))
+            assert job is not None
+            assert job.error is not None
+            assert isinstance(job.error, RuntimeError)
+            assert str(job.error) == "Deletion error"
 
+    @pytest.mark.error_handling
+    @pytest.mark.storage
     def test_search_error_handling(self, pipeline: ProcessingPipeline, mocker: MockerFixture) -> None:
         """Test error handling in the search functionality."""
         # Setup embedding generator to raise an exception
@@ -341,7 +362,8 @@ class TestPipeline:
         search_text_mock = mocker.patch.object(pipeline.storage, "search_by_text", return_value=[(MagicMock(), 0.8)])
 
         # Search should fall back to text search when vector search fails
-        pipeline.search("test query")
+        with patch("pathlib.Path.exists", new=lambda _: True):
+            pipeline.search("test query")
 
-        # Verify fallback to text search
-        search_text_mock.assert_called_once()
+            # Verify fallback to text search
+            search_text_mock.assert_called_once()
