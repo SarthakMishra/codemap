@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,7 +16,7 @@ app = codemap.cli_app.app
 
 
 @pytest.fixture
-def mock_git_utils() -> dict[str, Any]:
+def mock_git_utils() -> Generator[dict[str, Any], None, None]:
     """Mock git utilities."""
     with patch("codemap.cli.pr_cmd.get_current_branch") as mock_get_current_branch, patch(
         "codemap.cli.pr_cmd.get_default_branch"

@@ -4,9 +4,12 @@ import logging
 import os
 from pathlib import Path
 
+import pytest
 from dotenv import load_dotenv
 
-from src.codemap.git.message_generator import DiffChunkData, MessageGenerator
+from src.codemap.git.message_generator import DiffChunkData
+from tests.base import LLMTestBase
+from tests.helpers import create_diff_chunk
 
 # Configure logging
 logging.basicConfig(
@@ -16,44 +19,36 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load environment variables from .env.local
-env_file = Path(".env.local")
-if env_file.exists():
-    load_dotenv(env_file)
-    logger.info("Loaded environment from %s", env_file)
-else:
-    logger.warning("Warning: %s not found", env_file)
 
+@pytest.mark.llm
+@pytest.mark.integration
+@pytest.mark.slow
+class TestLLMIntegration(LLMTestBase):
+    """Tests for LLM integration functionality."""
 
-# Test OpenRouter integration
-def test_openrouter_integration() -> None:
-    """Test direct OpenRouter integration."""
-    logger.info("Starting OpenRouter integration test")
+    def setup_method(self) -> None:
+        """Set up the test environment."""
+        # Load environment variables from .env.local
+        env_file = Path(".env.local")
+        if env_file.exists():
+            load_dotenv(env_file)
+            logger.info("Loaded environment from %s", env_file)
+        else:
+            logger.warning("Warning: %s not found", env_file)
 
-    # Get the current directory
-    repo_root = Path.cwd()
-    logger.info("Using repo root: %s", repo_root)
+        # Get the current directory
+        self.repo_root = Path.cwd()
+        logger.info("Using repo root: %s", self.repo_root)
 
-    # Create a message generator with OpenRouter
-    generator = MessageGenerator(
-        repo_root=repo_root,
-        model="qwen/qwen2.5-coder-7b-instruct",  # From .codemap.yml
-        provider="openrouter",  # From .codemap.yml
-    )
+    @pytest.mark.skipif("OPENROUTER_API_KEY" not in os.environ, reason="OPENROUTER_API_KEY not set in environment")
+    def test_openrouter_integration(self) -> None:
+        """Test direct OpenRouter integration."""
+        logger.info("Starting OpenRouter integration test")
 
-    logger.info("Created MessageGenerator with model=%s, provider=%s", generator.model, generator.provider)
-
-    # Print environment variable for debugging
-    openrouter_key = os.environ.get("OPENROUTER_API_KEY")
-    logger.info("OPENROUTER_API_KEY present: %s", openrouter_key is not None)
-    if openrouter_key:
-        # Show a few characters for verification
-        logger.info("OPENROUTER_API_KEY starts with: %s...", openrouter_key[:10])
-
-    # Create a simple test diff chunk
-    chunk = DiffChunkData(
-        files=[".env.example"],
-        content="""diff --git a/.env.example b/.env.example
+        # Create a simple test diff chunk
+        chunk = DiffChunkData(
+            files=[".env.example"],
+            content="""diff --git a/.env.example b/.env.example
 index 105c41b..fdcb59a 100644
 --- a/.env.example
 +++ b/.env.example
@@ -63,19 +58,45 @@ index 105c41b..fdcb59a 100644
  # GOOGLE_API_KEY=...
 +# OPENROUTER_API_KEY=..
 """,
-    )
+        )
 
-    logger.info("Attempting to generate message with chunk")
+        logger.info("Attempting to generate message with chunk")
 
-    # Try to generate a message
-    try:
-        message, is_llm = generator.generate_message(chunk)
-        logger.info("Message generation result: is_llm=%s, message=%s", is_llm, message)
-    except Exception:
-        logger.exception("Error generating message")
+        # Create actual generator instead of using the mock
+        from src.codemap.git.message_generator import MessageGenerator
 
-    logger.info("Test completed")
+        generator = MessageGenerator(
+            repo_root=self.repo_root,
+            model="qwen/qwen2.5-coder-7b-instruct",
+            provider="openrouter",
+        )
 
+        # Try to generate a message
+        try:
+            message, is_llm = generator.generate_message(chunk)
+            logger.info("Message generation result: is_llm=%s, message=%s", is_llm, message)
+            assert is_llm, "Message should be LLM-generated"
+            assert message, "Message should not be empty"
+        except Exception:
+            logger.exception("Error generating message")
+            pytest.fail("Message generation failed")
 
-if __name__ == "__main__":
-    test_openrouter_integration()
+        logger.info("Test completed")
+
+    def test_llm_mock(self) -> None:
+        """Test that the LLM mock works correctly."""
+        # This uses the mock from LLMTestBase
+        chunk = create_diff_chunk(
+            files=[".env.example"],
+            content="""diff --git a/.env.example b/.env.example
++# OPENROUTER_API_KEY=..
+""",
+        )
+
+        # Set a custom response
+        self.mock_llm_response(response="docs: add OpenRouter API key environment variable", success=True)
+
+        # Test the mock
+        message, is_llm = self.message_generator.generate_message(chunk)
+        assert message == "docs: add OpenRouter API key environment variable"
+        assert is_llm is True
