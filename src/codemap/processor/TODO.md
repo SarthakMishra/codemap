@@ -60,29 +60,42 @@
 
 7.  **Implement File Watcher Integration:**
     *   [X] Core watcher implementation exists (`watcher/watcher.py`).
-    *   [ ] Integrate `FileWatcher` into the main application flow.
-    *   [ ] Define and implement the callback functions (`on_created`, `on_modified`, `on_deleted`) passed to `FileEventHandler`. These callbacks should trigger the appropriate pipeline steps.
-    *   [ ] Implement debouncing/batching for file events if needed (potentially within the callbacks or the orchestrator).
-    *   [ ] Load ignored patterns (e.g., from `.gitignore` or `config.py`) and pass them to `FileEventHandler`. Use `utils/file_filters.py` if applicable.
+    *   [X] Integrate `FileWatcher` into the main application flow.
+    *   [X] Define and implement the callback functions (`on_created`, `on_modified`, `on_deleted`) passed to `FileEventHandler`. These callbacks should trigger the appropriate pipeline steps.
+    *   [X] Implement debouncing/batching for file events if needed (potentially within the callbacks or the orchestrator).
+    *   [X] Load ignored patterns (e.g., from `.gitignore` or `config.py`) and pass them to `FileEventHandler`. Use `utils/file_filters.py` if applicable.
 
 8.  **Design & Implement Storage Strategy:**
-    *   [ ] Choose storage solution(s) (Relational DB, Document DB, Vector DB, Combination).
-    *   [ ] Define schema/structure for storing `Chunk`, `ChunkMetadata`, and embeddings.
-    *   [ ] Implement data access layer (functions/classes) to save, update, delete, and retrieve chunk/embedding data. (Location TBD - could be `utils/storage_utils.py` or dedicated `storage/` module).
+    *   [X] Choose storage solution(s) (Relational DB, Document DB, Vector DB, Combination).
+    *   [X] Define schema/structure for storing `Chunk`, `ChunkMetadata`, and embeddings.
+    *   [X] Implement data access layer (functions/classes) to save, update, delete, and retrieve chunk/embedding data. 
+    *   [X] Implement `LanceDBStorage` as the primary storage backend.
+    *   [X] Create table schemas for chunks, embeddings, and file history.
+    *   [X] Implement CRUD operations for chunks and embeddings.
+    *   [X] Optimize storage performance with indexing.
 
 9.  **Implement Chunk Versioning (Time-based Changes):**
-    *   [ ] Decide on versioning strategy (per-commit copies, history tracking, diffs).
-    *   [ ] Integrate versioning with storage updates and Git metadata (`commit_id`). Ensure updates correctly handle modifications vs. creations/deletions based on file changes and commit history.
+    *   [X] Decide on versioning strategy (per-commit copies, history tracking, diffs).
+    *   [X] Integrate versioning with storage updates and Git metadata (`commit_id`). Ensure updates correctly handle modifications vs. creations/deletions based on file changes and commit history.
+    *   [X] Implement file history tracking in storage backend.
 
 10. **Implement Embedding Generation (`processor/embedding/`):**
-    *   [ ] Choose embedding model.
-    *   [ ] Implement embedding generation logic (likely in `processor/embedding/`).
-    *   [ ] Decide *what* content to embed.
-    *   [ ] Integrate into the pipeline after chunking/enrichment.
-    *   [ ] Store embeddings in the chosen (vector) storage.
+    *   [X] Choose embedding model.
+    *   [X] Implement embedding generation logic with `EmbeddingGenerator` in `processor/embedding/`.
+    *   [X] Define data models for embeddings with `EmbeddingResult` and `EmbeddingConfig`.
+    *   [X] Support multiple embedding providers through `EmbeddingProvider` enum.
+    *   [X] Implement batched embedding generation for efficiency.
+    *   [X] Integrate into the pipeline after chunking/enrichment.
+    *   [X] Store embeddings in the vector storage (LanceDB).
+    *   [X] Implement error handling and fallbacks for embedding generation.
 
 11. **Define and Implement the Update Pipeline Logic:**
-    *   [ ] Orchestrate the flow: File Event -> Identify Changes -> Fetch Git Info -> Chunk File (Syntax) -> Enrich (Git Meta, LSP) -> Generate Embeddings -> Update Storage.
+    *   [X] Orchestrate the flow: File Event -> Identify Changes -> Fetch Git Info -> Chunk File (Syntax) -> Enrich (Git Meta, LSP) -> Generate Embeddings -> Update Storage.
+    *   [X] Implement the `ProcessingPipeline` class with multi-threaded processing.
+    *   [X] Implement a job tracking system with `ProcessingJob` to monitor file processing status.
+    *   [X] Connect chunking, embedding, and storage components in a coherent flow.
+    *   [X] Add robust error handling throughout the pipeline.
+    *   [X] Implement search capabilities (vector and text-based) in the pipeline.
     *   [ ] Implement optimization logic (process only changed files/chunks). This might involve diffing or comparing against stored versions.
 
 **Phase 5: Testing & Robustness**
@@ -96,7 +109,17 @@
 
 13. **Logging and Monitoring:**
     *   [X] Ensure consistent, structured logging throughout all modules.
-    *   [ ] Add monitoring points (processing times, queue lengths if applicable).
+    *   [X] Add performance monitoring for critical operations like embedding generation and storage.
+    *   [ ] Implement more detailed monitoring points (processing times, queue lengths if applicable).
+
+**Phase 6: Code Quality & Maintenance**
+
+14. **Code Quality:**
+    *   [X] Enforce static typing with proper type hints across all modules.
+    *   [X] Fix linting issues and ensure code follows best practices.
+    *   [X] Add comprehensive docstrings to all public functions and classes.
+    *   [X] Resolve exception handling patterns (avoid blind exception catching).
+    *   [X] Optimize performance-critical code sections.
 
 **Future Considerations (Keep in Mind During Design):**
 

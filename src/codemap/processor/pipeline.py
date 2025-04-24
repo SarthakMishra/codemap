@@ -22,6 +22,10 @@ from codemap.processor.analysis.git.analyzer import GitMetadataAnalyzer
 from codemap.processor.analysis.git.models import GitMetadata
 from codemap.processor.chunking.base import Chunk
 from codemap.processor.chunking.tree_sitter import TreeSitterChunker
+from codemap.processor.embedding.generator import EmbeddingGenerator
+from codemap.processor.embedding.models import EmbeddingConfig
+from codemap.processor.storage.base import StorageConfig
+from codemap.processor.storage.lance import LanceDBStorage
 from codemap.utils.file_utils import read_file_content
 from codemap.watcher.watcher import FileWatcher
 
@@ -61,6 +65,8 @@ class ProcessingPipeline:
     def __init__(
         self,
         repo_path: Path,
+        storage_config: StorageConfig | None = None,
+        embedding_config: EmbeddingConfig | None = None,
         ignored_patterns: set[str] | None = None,
         max_workers: int = 4,
         on_chunks_processed: Callable[[list[Chunk], Path], None] | None = None,
@@ -70,6 +76,8 @@ class ProcessingPipeline:
 
         Args:
             repo_path: Path to the repository root
+            storage_config: Configuration for storage backend, if None a default local LanceDB config will be used
+            embedding_config: Configuration for embedding generation, if None a default config will be used
             ignored_patterns: Set of glob patterns to ignore when watching for changes
             max_workers: Maximum number of worker threads for processing
             on_chunks_processed: Callback when chunks are processed for a file
@@ -91,6 +99,24 @@ class ProcessingPipeline:
         # Setup processing components
         self.chunker = TreeSitterChunker()
         self.git_analyzer = GitMetadataAnalyzer(repo_path)
+
+        # Initialize embedding generator
+        self.embedding_generator = EmbeddingGenerator(embedding_config)
+
+        # Initialize storage
+        if storage_config is None:
+            # Default to a local LanceDB database in the repo
+            storage_dir = repo_path / ".codemap" / "storage"
+            storage_config = StorageConfig(uri=str(storage_dir))
+
+        self.storage = LanceDBStorage(storage_config)
+
+        # Try to initialize storage early to catch any issues
+        try:
+            self.storage.initialize()
+        except (RuntimeError, ValueError, ConnectionError) as e:
+            logger.warning("Failed to initialize storage: %s", e)
+            logger.warning("Storage operations will be attempted at runtime")
 
         # Callback handlers
         self.on_chunks_processed = on_chunks_processed
@@ -132,6 +158,14 @@ class ProcessingPipeline:
 
         # Shutdown thread pool
         self.executor.shutdown(wait=True)
+
+        # Close storage
+        if hasattr(self, "storage"):
+            try:
+                self.storage.close()
+            except Exception:
+                logger.exception("Error closing storage")
+
         logger.info("Processing pipeline stopped")
 
     def process_file(self, file_path: str | Path) -> None:
@@ -179,6 +213,20 @@ class ProcessingPipeline:
 
             # Update job with results
             job.chunks = chunks
+
+            # Generate embeddings for the chunks
+            embeddings = self.embedding_generator.generate_embeddings(chunks)
+
+            # Store chunks and embeddings
+            try:
+                commit_id = git_metadata.commit_id
+                self.storage.store_chunks(chunks, commit_id)
+                if embeddings:
+                    self.storage.store_embeddings(embeddings)
+                logger.debug("Stored %d chunks and %d embeddings for %s", len(chunks), len(embeddings), file_path)
+            except Exception:
+                logger.exception("Error storing data for %s", file_path)
+
             job.completed_at = time.time()
 
             # Call callback if provided
@@ -239,6 +287,14 @@ class ProcessingPipeline:
         job = ProcessingJob(file_path=path_obj, is_deletion=True)
         self.active_jobs[path_obj] = job
 
+        # Delete from storage
+        try:
+            self.storage.delete_file(file_path)
+            logger.debug("Deleted %s from storage", file_path)
+        except Exception as deletion_error:
+            logger.exception("Error deleting %s from storage", file_path)
+            job.error = deletion_error
+
         # Call callback if provided
         if self.on_file_deleted:
             try:
@@ -249,17 +305,14 @@ class ProcessingPipeline:
 
         job.completed_at = time.time()
 
-        # Clean up deletion job after a delay
-        self.executor.submit(self._cleanup_job, path_obj, delay=60)
-
     def get_job_status(self, file_path: str | Path) -> ProcessingJob | None:
         """Get the status of a processing job.
 
         Args:
-            file_path: Path to the file to check
+            file_path: Path to the file
 
         Returns:
-            The processing job if found, None otherwise
+            Processing job status if available, None otherwise
         """
         path_obj = Path(file_path)
         return self.active_jobs.get(path_obj)
@@ -272,3 +325,61 @@ class ProcessingPipeline:
         """
         for path in paths:
             self.process_file(path)
+
+    def search(self, query: str, limit: int = 10, use_vector: bool = True) -> list[tuple[Chunk, float]]:
+        """Search the codebase using the storage backend.
+
+        If use_vector is True, the query will be transformed into a vector
+        and used for semantic search. Otherwise, plain text search will be used.
+
+        Args:
+            query: Search query
+            limit: Maximum number of results to return
+            use_vector: Whether to use vector search
+
+        Returns:
+            List of (chunk, score) tuples, sorted by score (highest first)
+        """
+        if use_vector:
+            # Generate a vector for the query using the embedding generator
+            try:
+                # Create a dummy chunk for the query
+                from codemap.processor.chunking.base import ChunkMetadata, EntityType, Location
+
+                dummy_location = Location(
+                    file_path=Path("query"),
+                    start_line=1,
+                    end_line=1,
+                )
+
+                dummy_metadata = ChunkMetadata(
+                    entity_type=EntityType.UNKNOWN,
+                    name="query",
+                    location=dummy_location,
+                    language="text",
+                )
+
+                query_chunk = Chunk(content=query, metadata=dummy_metadata)
+
+                # Generate embedding
+                embedding = self.embedding_generator.generate_embedding(query_chunk)
+
+                if embedding and embedding.embedding is not None:
+                    # Convert to list if needed
+                    vector = embedding.embedding
+                    if hasattr(vector, "tolist"):
+                        vector = vector.tolist()
+
+                    # Ensure we have a list of floats as required by the API
+                    if isinstance(vector, list):
+                        # Search by vector
+                        return self.storage.search_by_vector(vector, limit)
+
+                # If we couldn't get a proper vector, fall back to text search
+                logger.info("Could not generate valid vector embedding, falling back to text search")
+            except Exception:
+                logger.exception("Error in vector search")
+                logger.info("Falling back to text search")
+
+        # Fallback to text search
+        return self.storage.search_by_content(query, limit)
