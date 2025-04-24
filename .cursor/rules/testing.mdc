@@ -20,6 +20,19 @@ alwaysApply: false
 - `llm` - LLM-related tests
 - `cli` - CLI-related tests
 - `fs` - Filesystem-related tests
+- `interactive` - Tests requiring user interaction
+- `lsp` - Language Server Protocol related tests
+- `core` - Core functionality tests
+- `generators` - Generator component tests
+- `docs` - Documentation related tests
+- `filesystem` - Filesystem operation tests
+- `processor` - Processor component tests
+- `asynchronous` - Tests involving asynchronous operations
+- `watcher` - File watcher related tests
+- `storage` - Storage related tests
+- `error_handling` - Error handling tests
+- `data` - Data processing tests
+- `performance` - Performance related tests
 
 ## Base Classes
 Use these base classes to standardize test patterns:
@@ -38,6 +51,7 @@ Common fixtures are available in `conftest.py`:
 - `mock_diff_splitter` - Mocked diff splitter
 - `console` - Rich console for testing
 - `mock_stdin` - Mocked stdin for interactive inputs
+- `cleanup_docs_dir` - Auto-use fixture that cleans up docs directories
 
 ## Helper Functions
 Use these helpers in `helpers.py` to reduce test code:
@@ -47,6 +61,7 @@ Use these helpers in `helpers.py` to reduce test code:
 - `create_python_file` - Create Python files
 - `patch_multiple` - Patch multiple objects at once
 - `read_fixture_file` - Read fixture files
+- `create_git_commit_data` - Create standardized Git commit data
 
 ## Class-Based Test Structure
 ```python
