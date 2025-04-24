@@ -224,6 +224,18 @@ class LanguageSyntaxHandler(abc.ABC):
             True if the node should be skipped
         """
 
+    @abc.abstractmethod
+    def extract_imports(self, node: Node, content_bytes: bytes) -> list[str]:
+        """Extract imported module names from an import statement.
+
+        Args:
+            node: The tree-sitter node representing an import statement
+            content_bytes: Source code content as bytes
+
+        Returns:
+            List of imported module names as strings
+        """
+
 
 class PythonConfig(LanguageConfig):
     """Configuration for Python language."""

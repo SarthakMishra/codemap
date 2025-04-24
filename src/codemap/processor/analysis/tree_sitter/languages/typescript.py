@@ -173,3 +173,16 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
         # Fall back to JavaScript children processing
         return super().get_children_to_process(node, body_node)
+
+    def extract_imports(self, node: Node, content_bytes: bytes) -> list[str]:
+        """Extract imported module names from a TypeScript import statement.
+
+        Args:
+            node: The tree-sitter node representing an import statement
+            content_bytes: Source code content as bytes
+
+        Returns:
+            List of imported module names as strings
+        """
+        # TypeScript import statements are the same as JavaScript
+        return super().extract_imports(node, content_bytes)

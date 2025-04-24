@@ -412,3 +412,63 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         # Skip syntax nodes that don't contribute to code structure
         return node.type in ["(", ")", "{", "}", "[", "]", ";", ".", ","]
+
+    def extract_imports(self, node: Node, content_bytes: bytes) -> list[str]:
+        """Extract imported module names from a Python import statement.
+
+        Args:
+            node: The tree-sitter node representing an import statement
+            content_bytes: Source code content as bytes
+
+        Returns:
+            List of imported module names as strings
+        """
+        if node.type not in self.config.import_:
+            return []
+
+        imported_names = []
+
+        try:
+            # Handle regular import statements: "import foo, bar"
+            if node.type == "import_statement":
+                for child in node.children:
+                    if child.type == "dotted_name":
+                        module_name = content_bytes[child.start_byte : child.end_byte].decode("utf-8", errors="ignore")
+                        imported_names.append(module_name)
+
+            # Handle import from statements: "from foo.bar import baz, qux"
+            elif node.type == "import_from_statement":
+                # Get the module being imported from
+                module_node = None
+                for child in node.children:
+                    if child.type == "dotted_name":
+                        module_node = child
+                        break
+
+                if module_node:
+                    module_name = content_bytes[module_node.start_byte : module_node.end_byte].decode(
+                        "utf-8", errors="ignore"
+                    )
+
+                    # Get the imported names
+                    import_node = node.child_by_field_name("import")
+                    if import_node:
+                        # Check for the wildcard import case: "from foo import *"
+                        for child in import_node.children:
+                            if child.type == "wildcard_import":
+                                imported_names.append(f"{module_name}.*")
+                                return imported_names
+
+                        # Regular named imports
+                        for child in import_node.children:
+                            if child.type == "import_list":
+                                for item in child.children:
+                                    if item.type in {"dotted_name", "identifier"}:
+                                        name = content_bytes[item.start_byte : item.end_byte].decode(
+                                            "utf-8", errors="ignore"
+                                        )
+                                        imported_names.append(f"{module_name}.{name}")
+        except (UnicodeDecodeError, IndexError, AttributeError) as e:
+            logger.warning("Failed to decode Python imports: %s", e)
+
+        return imported_names

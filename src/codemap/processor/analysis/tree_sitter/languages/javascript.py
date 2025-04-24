@@ -369,3 +369,65 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         # Skip syntax nodes that don't contribute to code structure
         return node.type in ["(", ")", "{", "}", "[", "]", ";", ".", ",", ":", "=>"]
+
+    def extract_imports(self, node: Node, content_bytes: bytes) -> list[str]:
+        """Extract imported module names from a JavaScript import statement.
+
+        Args:
+            node: The tree-sitter node representing an import statement
+            content_bytes: Source code content as bytes
+
+        Returns:
+            List of imported module names as strings
+        """
+        if node.type not in self.config.import_:
+            return []
+
+        imported_names = []
+
+        try:
+            # Find the source (module path) of the import
+            source_node = node.child_by_field_name("source")
+            if not source_node:
+                return []
+
+            # Extract the module path from the string literal
+            module_path = content_bytes[source_node.start_byte : source_node.end_byte].decode("utf-8", errors="ignore")
+            # Remove quotes
+            module_path = module_path.strip("\"'")
+
+            # Check for different import patterns:
+
+            # 1. Default import: "import Name from 'module'"
+            default_import = node.child_by_field_name("default")
+            if default_import:
+                name = content_bytes[default_import.start_byte : default_import.end_byte].decode(
+                    "utf-8", errors="ignore"
+                )
+                imported_names.append(f"{module_path}.default")
+
+            # 2. Named imports: "import { foo, bar as baz } from 'module'"
+            named_imports = node.child_by_field_name("named_imports")
+            if named_imports:
+                for child in named_imports.children:
+                    if child.type == "import_specifier":
+                        imported_name = child.child_by_field_name("name")
+                        if imported_name:
+                            name = content_bytes[imported_name.start_byte : imported_name.end_byte].decode(
+                                "utf-8", errors="ignore"
+                            )
+                            imported_names.append(f"{module_path}.{name}")
+
+            # 3. Namespace import: "import * as Name from 'module'"
+            namespace_import = node.child_by_field_name("namespace_import")
+            if namespace_import:
+                imported_names.append(f"{module_path}.*")
+
+            # If no specific imports found but we have a module, add the whole module
+            if not imported_names and module_path:
+                imported_names.append(module_path)
+
+        except (UnicodeDecodeError, IndexError, AttributeError) as e:
+            logger.warning("Failed to decode JavaScript imports: %s", e)
+
+        return imported_names
