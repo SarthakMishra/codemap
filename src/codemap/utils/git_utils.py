@@ -6,7 +6,6 @@ import logging
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -370,8 +369,8 @@ def unstash_changes() -> None:
 
 
 def commit_only_files(
-    files: List[str], message: str, *, commit_options: Optional[List[str]] = None, ignore_hooks: bool = False
-) -> List[str]:
+    files: list[str], message: str, *, commit_options: list[str] | None = None, ignore_hooks: bool = False
+) -> list[str]:
     """Commit only the specified files.
 
     Args:
@@ -386,7 +385,13 @@ def commit_only_files(
     try:
         # Get status to check for deleted files
         status_cmd = ["git", "status", "--porcelain"]
-        result = subprocess.run(status_cmd, capture_output=True, text=True, check=True)
+        result = subprocess.run(  # noqa: S603
+            status_cmd,
+            capture_output=True,
+            text=True,
+            check=True,
+            shell=False,  # Explicitly set shell=False for security
+        )
         status_output = result.stdout.strip()
 
         # Extract files from status output
@@ -418,20 +423,33 @@ def commit_only_files(
                 if status and "D" in status:
                     deleted_files.append(file)
                 else:
-                    logger.warning(f"File {file} does not exist and is not marked as deleted in git status")
+                    logger.warning("File %s does not exist and is not marked as deleted in git status", file)
 
         # Stage the files
         if existing_files:
             stage_files(existing_files)
 
         # Stage deleted files separately
+        failed_files = []
         if deleted_files:
+            # Process all files first, collecting errors
             for file in deleted_files:
                 try:
-                    subprocess.run(["git", "rm", file], check=True, capture_output=True, text=True)
-                    logger.info(f"Staged deleted file: {file}")
-                except subprocess.CalledProcessError as e:
-                    logger.warning(f"Failed to stage deleted file {file}: {e.stderr.strip()}")
+                    git_cmd = ["git", "rm", file]
+                    subprocess.run(  # noqa: S603
+                        git_cmd,
+                        check=True,
+                        capture_output=True,
+                        text=True,
+                        shell=False,  # Explicitly set shell=False for security
+                    )
+                    logger.info("Staged deleted file: %s", file)
+                except subprocess.CalledProcessError as e:  # noqa: PERF203
+                    failed_files.append((file, e.stderr.strip()))
+
+            # Report failures outside the loop to avoid PERF203
+            for file, error in failed_files:
+                logger.warning("Failed to stage deleted file %s: %s", file, error)
 
         # Get other staged files
         other_staged = get_other_staged_files(files)
@@ -446,8 +464,14 @@ def commit_only_files(
             commit_cmd.append("--no-verify")
 
         try:
-            subprocess.run(commit_cmd, check=True, capture_output=True, text=True)
-            logger.info(f"Created commit with message: {message}")
+            subprocess.run(  # noqa: S603
+                commit_cmd,
+                check=True,
+                capture_output=True,
+                text=True,
+                shell=False,  # Explicitly set shell=False for security
+            )
+            logger.info("Created commit with message: %s", message)
         except subprocess.CalledProcessError:
             logger.exception("Failed to create commit")
             raise
