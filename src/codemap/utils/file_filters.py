@@ -64,16 +64,39 @@ class FileFilter:
 
         # For .dot patterns (like .venv), match against both name and any part of the path
         if pattern.startswith("."):
+            # Get the parts of the path
             path_parts = Path(path_str).parts
+
+            # Check if any part of the path exactly equals the pattern (like ".env")
             if any(part == pattern for part in path_parts):
                 return True
-            if any(part == pattern[1:] for part in path_parts):
+
+            # Check if any filename/directory name starts with the pattern
+            # We're more strict here - requiring an exact match or the pattern
+            # at the beginning of a filename, not just anywhere in a path part
+            for part in path_parts:
+                if part == pattern or (pattern[1:] == part):  # Exact match for ".env" or "env"
+                    return True
+
+            # For checking full path matches, we need to be careful with dot files
+            # We use fnmatch for the name itself or the full path, but we need to be careful
+            # to only match exact path segments, not partial ones
+            if fnmatch.fnmatch(file_path.name, pattern):
                 return True
-            return (
-                fnmatch.fnmatch(file_path.name, pattern)
-                or fnmatch.fnmatch(path_str, pattern)
-                or fnmatch.fnmatch(path_str, f"*/{pattern}")
-            )
+
+            # Check if it matches as a full path component
+            if fnmatch.fnmatch(path_str, pattern) or fnmatch.fnmatch(path_str, f"*/{pattern}"):
+                # Additional check to ensure we're not matching a non-dot file
+                # when the pattern is a dot file
+                if pattern.startswith(".") and "/" in path_str:
+                    # Check if the matching part is actually a dot file
+                    # For example, "src/env/config" should not match ".env" pattern
+                    parts = path_str.split("/")
+                    matching_part = [p for p in parts if p.startswith(".") and fnmatch.fnmatch(p, pattern)]
+                    return len(matching_part) > 0
+                return True
+
+            return False
 
         # For patterns with directory separators (like **/temp/*), match the full path
         if "/" in pattern:

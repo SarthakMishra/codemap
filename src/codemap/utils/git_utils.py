@@ -178,6 +178,25 @@ def stage_files(files: list[str]) -> None:
                 continue
             valid_files.append(file)
 
+        # Check if files exist in the repository (tracked by git) or filesystem
+        original_count = len(valid_files)
+        tracked_files_output = run_git_command(["git", "ls-files"])
+        tracked_files = set(tracked_files_output.splitlines())
+
+        # Keep only files that exist in filesystem or are tracked by git
+        filtered_files = []
+        for file in valid_files:
+            if Path(file).exists() or file in tracked_files:
+                filtered_files.append(file)
+            else:
+                logger.warning("Skipping non-existent and untracked file: %s", file)
+
+        valid_files = filtered_files
+        if len(valid_files) < original_count:
+            logger.warning(
+                "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
+            )
+
         if not valid_files:
             logger.warning("No valid files to stage after filtering")
             return
@@ -377,10 +396,26 @@ def commit_only_files(files: list[str], message: str, ignore_hooks: bool = False
             continue
         valid_files.append(file)
 
+    # Check if files exist in the repository (tracked by git) or filesystem
+    original_count = len(valid_files)
+    tracked_files_output = run_git_command(["git", "ls-files"])
+    tracked_files = set(tracked_files_output.splitlines())
+
+    # Keep only files that exist in filesystem or are tracked by git
+    filtered_files = []
+    for file in valid_files:
+        if Path(file).exists() or file in tracked_files:
+            filtered_files.append(file)
+        else:
+            logger.warning("Skipping non-existent and untracked file: %s", file)
+
+    valid_files = filtered_files
+    if len(valid_files) < original_count:
+        logger.warning("Filtered out %d files that don't exist in the repository", original_count - len(valid_files))
+
     if not valid_files:
         logger.warning("No valid files to commit after filtering")
-        msg = "No valid files to commit"
-        raise GitError(msg)
+        return []
 
     logger.info("Valid files to commit: %s", ", ".join(valid_files))
 
