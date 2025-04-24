@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Sequence
 
@@ -93,6 +94,36 @@ class TreeSitterChunker(ChunkingStrategy):
             entity_type = EntityType.UNKNOWN
 
         location_data = analysis.get("location", {})
+
+        # Get dependencies from analysis result if available
+        dependencies = analysis.get("dependencies", [])
+
+        # If no dependencies were provided but this is an import statement, try to extract them
+        if not dependencies and entity_type == EntityType.IMPORT:
+            # This fallback code should only run if the analyzer didn't provide dependencies
+            # In the final implementation, the analyzer should handle all dependency extraction
+            try:
+                chunk_content = analysis.get("content", "")
+                language = analysis.get("language", "")
+                if chunk_content and language:
+                    # Simple regex-based extraction (fallback)
+                    if language == "python":
+                        # Extract Python imports
+                        import_pattern = r"import\s+([^\s;]+)|from\s+([^\s;]+)\s+import"
+                        for match in re.finditer(import_pattern, chunk_content):
+                            module = match.group(1) or match.group(2)
+                            if module:
+                                dependencies.append(module)
+                    elif language in ["javascript", "typescript"]:
+                        # Extract JS/TS imports
+                        import_pattern = r'from\s+[\'"]([^\'"]+)[\'"]'
+                        for match in re.finditer(import_pattern, chunk_content):
+                            module = match.group(1)
+                            if module:
+                                dependencies.append(module)
+            except (AttributeError, UnicodeDecodeError, IndexError, ValueError, re.error) as e:
+                logger.warning("Failed to extract dependencies in fallback: %s", e)
+
         metadata = ChunkMetadata(
             entity_type=entity_type,
             name=analysis.get("name", ""),
@@ -106,6 +137,7 @@ class TreeSitterChunker(ChunkingStrategy):
             language=analysis.get("language", ""),
             git=git_metadata,
             description=analysis.get("docstring"),
+            dependencies=dependencies,
         )
 
         # Get chunk content - use the specific content from analysis or extract from original
