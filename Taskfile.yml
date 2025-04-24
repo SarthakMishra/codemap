@@ -36,12 +36,40 @@ tasks:
   lint:pylint:
     desc: Run pylint
     cmds:
-      - pylint {{.SRC_DIR}}
+      - pylint {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:pyright:
     desc: Run pyright type checker
     cmds:
-      - pyright {{.SRC_DIR}}
+      - pyright {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  radon:
+    desc: Run radon
+    cmds:
+      - task: radon:cc
+      - task: radon:mi
+      - task: radon:raw
+      - task: radon:hal
+
+  radon:cc:
+    desc: Run radon cc
+    cmds:
+      - radon cc {{.SRC_DIR}} -O .radon/cc.txt
+
+  radon:mi:
+    desc: Run radon mi
+    cmds:
+      - radon mi {{.SRC_DIR}} -O .radon/mi.txt
+
+  radon:raw:
+    desc: Run radon raw
+    cmds:
+      - radon raw {{.SRC_DIR}} -O .radon/raw.txt
+
+  radon:hal:
+    desc: Run radon hal
+    cmds:
+      - radon hal {{.SRC_DIR}} -O .radon/hal.txt
 
   test:
     desc: Run all tests

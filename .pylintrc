@@ -34,9 +34,6 @@ enable=
 recursive=yes
 ignore=CVS,.git,__pycache__,.venv,venv,build,dist
 
-[FORMAT]
-max-line-length=88
-
 [BASIC]
 good-names=i,j,k,ex,Run,_,id,fp
 

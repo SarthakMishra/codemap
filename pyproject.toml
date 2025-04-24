@@ -33,17 +33,18 @@ dependencies = [
 dev = [
     "isort>=6.0.1",
     "pylint>=3.3.6",
-    "pyright>=1.1.399",
+    "pyright>=1.1.400",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "pytest-mock>=3.14.0",
     "pytest-xdist[psutil]>=3.6.1",
+    "radon>=6.0.1",
     "ruff>=0.11.6",
 ]
 
 [tool.pyright]
 # Define included and excluded directories
-include = ["src"]
+include = ["src", "tests"]
 exclude = [
     ".git",
     ".ruff_cache",
