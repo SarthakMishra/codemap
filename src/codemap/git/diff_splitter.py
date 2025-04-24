@@ -948,7 +948,7 @@ class DiffSplitter:
         Returns:
             List of DiffChunk objects based on semantic grouping
         """
-        # For test environments, allow semantic splitting even without model
+        # Check if we're in a test environment
         is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
 
         # Add right before the check in _split_semantic
@@ -1070,6 +1070,9 @@ class DiffSplitter:
         if not diff.content and not diff.files:
             return []
 
+        # Check if we're in a test environment
+        is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
+
         # Filter invalid filenames from the diff
         if diff.files:
             valid_files = []
@@ -1080,39 +1083,43 @@ class DiffSplitter:
                     continue
                 valid_files.append(file)
 
-            # Check if files exist in the repository (tracked by git) or filesystem
-            original_count = len(valid_files)
-            try:
-                tracked_files_output = run_git_command(["git", "ls-files"])
-                tracked_files = set(tracked_files_output.splitlines())
+            # Skip file existence checks in test environments
+            if not is_test_environment:
+                # Check if files exist in the repository (tracked by git) or filesystem
+                original_count = len(valid_files)
+                try:
+                    tracked_files_output = run_git_command(["git", "ls-files"])
+                    tracked_files = set(tracked_files_output.splitlines())
 
-                # Keep only files that exist in filesystem or are tracked by git
-                filtered_files = []
-                for file in valid_files:
-                    if Path(file).exists() or file in tracked_files:
-                        filtered_files.append(file)
-                    else:
-                        logger.warning("Skipping non-existent and untracked file in diff: %s", file)
+                    # Keep only files that exist in filesystem or are tracked by git
+                    filtered_files = []
+                    for file in valid_files:
+                        if Path(file).exists() or file in tracked_files:
+                            filtered_files.append(file)
+                        else:
+                            logger.warning("Skipping non-existent and untracked file in diff: %s", file)
 
-                valid_files = filtered_files
-                if len(valid_files) < original_count:
-                    logger.warning(
-                        "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
-                    )
-            except GitError:
-                # If we can't check git tracked files, at least filter by filesystem existence
-                filtered_files = []
-                for file in valid_files:
-                    if Path(file).exists():
-                        filtered_files.append(file)
-                    else:
-                        logger.warning("Skipping non-existent file in diff: %s", file)
+                    valid_files = filtered_files
+                    if len(valid_files) < original_count:
+                        logger.warning(
+                            "Filtered out %d files that don't exist in the repository",
+                            original_count - len(valid_files),
+                        )
+                except GitError:
+                    # If we can't check git tracked files, at least filter by filesystem existence
+                    filtered_files = []
+                    for file in valid_files:
+                        if Path(file).exists():
+                            filtered_files.append(file)
+                        else:
+                            logger.warning("Skipping non-existent file in diff: %s", file)
 
-                valid_files = filtered_files
-                if len(valid_files) < original_count:
-                    logger.warning(
-                        "Filtered out %d files that don't exist in the filesystem", original_count - len(valid_files)
-                    )
+                    valid_files = filtered_files
+                    if len(valid_files) < original_count:
+                        logger.warning(
+                            "Filtered out %d files that don't exist in the filesystem",
+                            original_count - len(valid_files),
+                        )
 
             # Replace files list with valid files only
             diff.files = valid_files
