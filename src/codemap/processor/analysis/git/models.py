@@ -13,8 +13,9 @@ if TYPE_CHECKING:
 class GitMetadata:
     """Git-related metadata for a code chunk.
 
-    Tracks version control information for the chunk, including both original
-    authorship and last modification details.
+    Tracks version control information for the chunk, including both
+    original authorship and last modification details.
+
     """
 
     is_committed: bool

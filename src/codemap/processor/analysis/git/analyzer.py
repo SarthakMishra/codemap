@@ -1,4 +1,5 @@
-"""Git metadata analyzer for extracting version control information for code chunks."""
+"""Git metadata analyzer for extracting version control information for code
+chunks."""
 
 from __future__ import annotations
 
@@ -32,8 +33,10 @@ class GitBlameInfo:
 class GitMetadataAnalyzer:
     """Analyzer for extracting Git metadata for code chunks.
 
-    This class provides methods to retrieve Git-related information about code
-    chunks, such as commit history, authorship, and changes over time.
+    This class provides methods to retrieve Git-related information
+    about code chunks, such as commit history, authorship, and changes
+    over time.
+
     """
 
     def __init__(self, repo_path: Path | None = None) -> None:
@@ -42,6 +45,7 @@ class GitMetadataAnalyzer:
         Args:
             repo_path: Path to the Git repository root. If None, it will be
                       detected from the current working directory.
+
         """
         self.repo_path = repo_path or self._detect_repo_root()
         self._verify_git_repo()
@@ -54,6 +58,7 @@ class GitMetadataAnalyzer:
 
         Raises:
             ValueError: If not in a Git repository
+
         """
         try:
             result = subprocess.run(  # noqa: S603
@@ -73,6 +78,7 @@ class GitMetadataAnalyzer:
 
         Raises:
             ValueError: If the path is not a valid Git repository
+
         """
         git_dir = self.repo_path / ".git"
         if not git_dir.exists() or not git_dir.is_dir():
@@ -84,6 +90,7 @@ class GitMetadataAnalyzer:
 
         Returns:
             Name of the current branch
+
         """
         try:
             result = subprocess.run(  # noqa: S603
@@ -102,6 +109,7 @@ class GitMetadataAnalyzer:
 
         Returns:
             Current commit hash
+
         """
         try:
             result = subprocess.run(  # noqa: S603
@@ -125,6 +133,7 @@ class GitMetadataAnalyzer:
 
         Returns:
             List of GitBlameInfo objects, one for each line
+
         """
         rel_path = file_path.relative_to(self.repo_path)
         line_range = f"-L {start_line},{end_line}"
@@ -184,6 +193,7 @@ class GitMetadataAnalyzer:
 
         Returns:
             GitMetadata object or None if not in a Git repository or not committed
+
         """
         try:
             # Get current branch and commit
@@ -233,6 +243,7 @@ class GitMetadataAnalyzer:
 
         Args:
             chunk: The chunk to enrich
+
         """
         if not chunk.metadata.location:
             logger.warning("Cannot enrich chunk without location information: %s", chunk.metadata.name)
