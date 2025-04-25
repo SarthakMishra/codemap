@@ -59,7 +59,7 @@ tasks:
   format:isort:
     desc: Run isort
     cmds:
-      - uv run isort --skip-gitignore {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}}
 
   format:docformatter:
     desc: Run docformatter
