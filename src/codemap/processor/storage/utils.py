@@ -8,10 +8,28 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from codemap.processor.analysis.tree_sitter.base import EntityType
 from codemap.processor.chunking.base import Chunk, ChunkMetadata, Location
 from codemap.processor.embedding.models import EmbeddingResult
 
 logger = logging.getLogger(__name__)
+
+
+class CodeMapJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder for CodeMap types."""
+
+    def default(self, o: object) -> object:
+        """Handle custom type serialization.
+
+        Args:
+            o: The object to serialize
+
+        Returns:
+            JSON-serializable representation
+        """
+        if isinstance(o, EntityType):
+            return o.name
+        return super().default(o)
 
 
 def chunk_to_dict(chunk: Chunk, commit_id: str | None = None) -> dict[str, Any]:
@@ -64,11 +82,10 @@ def chunk_to_dict(chunk: Chunk, commit_id: str | None = None) -> dict[str, Any]:
         "full_name": chunk.full_name,
         "parent_id": parent_id,
         "location": json.dumps(location_dict),
-        "metadata": json.dumps(metadata_dict),
+        "metadata": json.dumps(metadata_dict, cls=CodeMapJSONEncoder),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "commit_id": commit_id or "",
     }
-
 
 
 def dict_to_chunk(data: dict[str, Any]) -> Chunk:
@@ -94,9 +111,22 @@ def dict_to_chunk(data: dict[str, Any]) -> Chunk:
     # Parse metadata
     metadata_dict = json.loads(data["metadata"]) if isinstance(data["metadata"], str) else data["metadata"]
 
+    # Convert entity_type string to EntityType enum
+    entity_type_str = metadata_dict["entity_type"]
+    if isinstance(entity_type_str, str):
+        try:
+            entity_type = EntityType[entity_type_str]
+        except (KeyError, ValueError):
+            # Fallback to UNKNOWN if the enum value doesn't exist
+            logger.warning("Unknown entity type %s, defaulting to UNKNOWN", entity_type_str)
+            entity_type = EntityType.UNKNOWN
+    else:
+        # If it's already an EntityType, use it as is
+        entity_type = entity_type_str if isinstance(entity_type_str, EntityType) else EntityType.UNKNOWN
+
     metadata = ChunkMetadata(
         location=location,
-        entity_type=metadata_dict["entity_type"],
+        entity_type=entity_type,
         name=metadata_dict["name"],
         language=metadata_dict["language"],
         description=metadata_dict.get("description"),
@@ -104,25 +134,19 @@ def dict_to_chunk(data: dict[str, Any]) -> Chunk:
         attributes=metadata_dict.get("attributes", {}),
     )
 
-    # Store parent_id for later reconstruction
+    # Store parent_id for later reconstruction of parent-child relationships
     parent_id = data.get("parent_id")
-    if parent_id:
-        # We can't set the parent directly because Chunk is frozen,
-        # so we'll save the ID temporarily
-        object.__setattr__(metadata, "_parent_id", parent_id)
 
-    # Recreate the chunk
-    chunk = Chunk(
+    # Create the chunk and return it directly
+    return Chunk(
         content=data["content"],
         metadata=metadata,
-        children=[],  # Will be reconstructed later
+        # Don't set parent here - we'll do that during hierarchy reconstruction
+        # We must create parent-less chunks first, then restore hierarchy later
+        children=[],
+        _original_full_name=data["full_name"] if data.get("full_name") else None,
+        _parent_full_name=parent_id,
     )
-
-    # Also store the parent ID on the chunk for later use
-    if parent_id:
-        object.__setattr__(chunk, "_parent_id", parent_id)
-
-    return chunk
 
 
 def embedding_to_dict(embedding: EmbeddingResult, chunk_id: str) -> dict[str, Any]:
@@ -151,7 +175,6 @@ def embedding_to_dict(embedding: EmbeddingResult, chunk_id: str) -> dict[str, An
         "model": embedding.model,
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-
 
 
 def create_pyarrow_schema_for_chunks() -> dict[str, list]:
