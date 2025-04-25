@@ -25,6 +25,7 @@ class CodeParser:
 
         Args:
             config: Configuration dictionary with use_gitignore setting.
+
         """
         self.config = config or {}
         self.file_filter = FileFilter(config)
@@ -40,6 +41,7 @@ class CodeParser:
 
         Raises:
             OSError: If file cannot be read.
+
         """
         logger.debug("Parsing file: %s", file_path)
 

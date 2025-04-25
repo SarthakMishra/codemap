@@ -26,6 +26,7 @@ class DocumentationProcessor:
         Args:
             parser: The code parser to use
             token_limit: Maximum number of tokens allowed (0 means infinite)
+
         """
         self.parser = parser
         self.token_limit = token_limit
@@ -40,6 +41,7 @@ class DocumentationProcessor:
 
         Returns:
             Tuple of (file_info, new_total_tokens)
+
         """
         try:
             if not self.parser.file_filter.should_parse(file_path):
@@ -72,6 +74,7 @@ class DocumentationProcessor:
 
         Returns:
             Dictionary of parsed files
+
         """
         parsed_files: dict[Path, dict[str, Any]] = {}
 
@@ -102,6 +105,7 @@ class DocumentationProcessor:
 
         Returns:
             Dictionary of parsed files
+
         """
         # Process files based on whether target is a file or directory
         if target_path.is_file():
