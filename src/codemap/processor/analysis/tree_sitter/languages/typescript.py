@@ -66,6 +66,7 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
     """TypeScript-specific syntax handling logic.
 
     Inherits from JavaScript handler to reuse common logic.
+
     """
 
     def __init__(self) -> None:
@@ -84,6 +85,7 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
         Returns:
             The entity type
+
         """
         node_type = node.type
         logger.debug(
@@ -118,6 +120,7 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
         Returns:
             The extracted name
+
         """
         # Handle TypeScript-specific node types first
         name_node = None
@@ -148,6 +151,7 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
         Returns:
             The body node if available, None otherwise
+
         """
         # TypeScript-specific handling
         if node.type in ["interface_declaration", "namespace_declaration"] or node.type == "enum_declaration":
@@ -165,6 +169,7 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
         Returns:
             List of child nodes to process
+
         """
         # TypeScript-specific handling
         if node.type == "type_alias_declaration":
@@ -183,6 +188,7 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
         Returns:
             List of imported module names as strings
+
         """
         # TypeScript import statements are the same as JavaScript
         return super().extract_imports(node, content_bytes)

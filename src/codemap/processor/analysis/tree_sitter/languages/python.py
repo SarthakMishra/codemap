@@ -73,6 +73,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             The entity type
+
         """
         node_type = node.type
         logger.debug(
@@ -220,6 +221,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node is within a class context
+
         """
         ancestor = node.parent
         while ancestor:
@@ -240,6 +242,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node is a docstring
+
         """
         if not parent:
             return False
@@ -274,6 +277,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
             A tuple containing:
             - The extracted docstring text (or None).
             - The specific AST node representing the docstring (or None).
+
         """
         body_node = self.get_body_node(node)
         if not body_node:
@@ -333,6 +337,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             The extracted name
+
         """
         # Try to find the name field
         name_node = node.child_by_field_name("name")
@@ -372,6 +377,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             The body node if available, None otherwise
+
         """
         # For functions and classes in Python, the body is a 'block' node
         body_node = node.child_by_field_name("body")
@@ -393,6 +399,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             List of child nodes to process
+
         """
         # Process children of the body node if it exists, otherwise process direct children
         return list(body_node.children) if body_node else list(node.children)
@@ -405,6 +412,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node should be skipped
+
         """
         # Skip non-named nodes (like punctuation, operators)
         if not node.is_named:
@@ -422,6 +430,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             List of imported module names as strings
+
         """
         if node.type not in self.config.import_:
             return []

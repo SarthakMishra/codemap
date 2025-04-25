@@ -78,6 +78,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             The entity type
+
         """
         node_type = node.type
         logger.debug(
@@ -147,6 +148,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node is a JSDoc comment
+
         """
         if node.type != "comment":
             return False
@@ -166,6 +168,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node is a constant declaration
+
         """
         if node.type not in ["variable_declaration", "lexical_declaration"]:
             return False
@@ -185,6 +188,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node is a test function
+
         """
         if node.type == "call_expression":
             callee = node.child_by_field_name("function")
@@ -205,6 +209,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node is a test suite declaration
+
         """
         if node.type == "call_expression":
             callee = node.child_by_field_name("function")
@@ -227,6 +232,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
             A tuple containing:
             - The extracted docstring text (or None).
             - The specific AST node representing the docstring (or None).
+
         """
         # For functions, classes, and other definition nodes
         parent_node = node.parent
@@ -267,6 +273,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             The extracted name
+
         """
         # Try to find the name field based on node type
         name_node = None
@@ -317,6 +324,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             The body node if available, None otherwise
+
         """
         # Different fields based on node type
         if node.type in ["function_declaration", "method_definition", "class_declaration"]:
@@ -341,6 +349,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             List of child nodes to process
+
         """
         # Process children of the body node if it exists, otherwise process direct children
         if body_node:
@@ -362,6 +371,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             True if the node should be skipped
+
         """
         # Skip non-named nodes (like punctuation, operators)
         if not node.is_named:
@@ -379,6 +389,7 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 
         Returns:
             List of imported module names as strings
+
         """
         if node.type not in self.config.import_:
             return []

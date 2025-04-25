@@ -1,7 +1,9 @@
 """Base configuration for language-specific syntax chunking.
 
-This module provides the base configuration class for defining how different
-programming languages map their syntax elements to code chunks.
+This module provides the base configuration class for defining how
+different programming languages map their syntax elements to code
+chunks.
+
 """
 
 from __future__ import annotations
@@ -20,9 +22,11 @@ if TYPE_CHECKING:
 class LanguageConfig:
     """Configuration for language-specific syntax chunking.
 
-    This class defines how a specific programming language's syntax elements
-    map to different types of code chunks. Each field is a list of syntax node
-    types that represent that kind of entity in the language's AST.
+    This class defines how a specific programming language's syntax
+    elements map to different types of code chunks. Each field is a list
+    of syntax node types that represent that kind of entity in the
+    language's AST.
+
     """
 
     # File-level entities
@@ -108,6 +112,7 @@ class LanguageConfig:
 
         Returns:
             A set of all node types from all categories.
+
         """
         all_types = set()
         for attr in [
@@ -147,6 +152,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Args:
             config: Language-specific configuration
+
         """
         self.config = config
 
@@ -161,6 +167,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Returns:
             The entity type
+
         """
 
     @abc.abstractmethod
@@ -176,6 +183,7 @@ class LanguageSyntaxHandler(abc.ABC):
             - The extracted docstring text (or None).
             - The specific AST node representing the docstring that should be skipped
               during child processing (or None).
+
         """
 
     @abc.abstractmethod
@@ -188,6 +196,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Returns:
             The extracted name
+
         """
 
     @abc.abstractmethod
@@ -199,6 +208,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Returns:
             The body node if available, None otherwise
+
         """
 
     @abc.abstractmethod
@@ -211,6 +221,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Returns:
             List of child nodes to process
+
         """
 
     @abc.abstractmethod
@@ -222,6 +233,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Returns:
             True if the node should be skipped
+
         """
 
     @abc.abstractmethod
@@ -234,6 +246,7 @@ class LanguageSyntaxHandler(abc.ABC):
 
         Returns:
             List of imported module names as strings
+
         """
 
 
