@@ -50,21 +50,11 @@ jobs:
         uv venv
         uv sync
     
-    - name: Run CI tasks (Unix)
-      if: runner.os != 'Windows'
+    - name: Run CI tasks
       shell: bash
       env:
         VIRTUAL_ENV: ${{ github.workspace }}/.venv
         PATH: ${{ github.workspace }}/.venv/bin:${{ env.PATH }}
-        PYTHONPATH: ${{ github.workspace }}
-      run: task ci:full
-    
-    - name: Run CI tasks (Windows)
-      if: runner.os == 'Windows'
-      shell: cmd
-      env:
-        VIRTUAL_ENV: ${{ github.workspace }}\.venv
-        PATH: ${{ github.workspace }}\.venv\Scripts;${{ env.PATH }}
         PYTHONPATH: ${{ github.workspace }}
       run: task ci:full
     
