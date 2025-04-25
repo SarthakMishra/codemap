@@ -23,6 +23,7 @@ class User(BaseModel):
         Args:
             name: User's full name
             email: User's email address
+
         """
         super().__init__()
         self.name: str = name
@@ -39,6 +40,7 @@ class Order(BaseModel):
         Args:
             user: User who placed the order
             total: Total amount of the order
+
         """
         super().__init__()
         self.order_id: str = ""
@@ -57,6 +59,7 @@ class OrderItem(BaseModel):
             order: Parent order
             product: Product being ordered
             quantity: Number of items ordered
+
         """
         super().__init__()
         self.order: Order = order
@@ -74,6 +77,7 @@ class Product(BaseModel):
         Args:
             name: Product name
             price: Product price
+
         """
         super().__init__()
         self.name: str = name
