@@ -115,6 +115,11 @@ tasks:
     cmds:
       - pytest --cov={{.COV_MODULE}} --cov-branch --cov-report=xml {{.TESTS_DIR}} -n logical
 
+  docs:
+    desc: Check documentation coverage
+    cmds:
+      - uv run interrogate --style google --fail-under 90 --color -vv {{.SRC_DIR}}
+
   ci:
     desc: Run all checks and tests
     cmds:
