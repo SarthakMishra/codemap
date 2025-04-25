@@ -94,6 +94,7 @@ def _load_prompt_template(template_path: str | None) -> str | None:
 
     Returns:
         Loaded template or None if loading failed
+
     """
     if not template_path:
         return None
@@ -115,6 +116,7 @@ def _extract_provider_from_model(model: str) -> str | None:
 
     Returns:
         Provider name or None if not in expected format
+
     """
     # Handle explicit provider prefixes (get first part before slash)
     if "/" in model:
@@ -134,6 +136,7 @@ def _get_api_key_for_provider(provider: str) -> str | None:
 
     Returns:
         API key or None if not found
+
     """
     provider_env_vars = {
         "openai": "OPENAI_API_KEY",
@@ -169,6 +172,7 @@ def setup_message_generator(options: CommitOptions) -> MessageGenerator:
 
     Returns:
         Configured message generator
+
     """
     # Use the universal generator for simplified setup
     return create_universal_generator(
@@ -194,6 +198,7 @@ def generate_commit_message(
 
     Returns:
         Tuple of (message, whether LLM was used)
+
     """
     # Use the universal generate_message function from llm_utils
     use_simple_mode = mode == GenerationMode.SIMPLE
@@ -226,6 +231,7 @@ def print_chunk_summary(chunk: DiffChunk, index: int) -> None:
     Args:
         chunk: DiffChunk to summarize
         index: Index of the chunk (1-based for display)
+
     """
     # Print header
     console.print(f"\nCommit {index + 1} of {index + 1}")
@@ -280,6 +286,7 @@ def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bo
 
     Returns:
         Tuple of (other_staged, other_untracked, has_warnings)
+
     """
     other_staged = get_other_staged_files(chunk_files)
 
@@ -313,6 +320,7 @@ def _handle_other_files(chunk: DiffChunk, other_staged: list[str], other_untrack
 
     Returns:
         False if action is cancelled, True otherwise
+
     """
     # Prepare choices
     choices = [
@@ -359,6 +367,7 @@ def _commit_changes(
 
     Returns:
         Success status (True if commit was created)
+
     """
     try:
         # Filter out files that don't exist or aren't tracked by Git
@@ -412,6 +421,7 @@ def _perform_commit(chunk: DiffChunk, message: str) -> bool:
 
     Returns:
         True if commit was successful
+
     """
     success = _commit_changes(message, chunk.files)
     if success:
@@ -428,6 +438,7 @@ def _edit_commit_message(message: str, _unused_chunk: DiffChunk) -> str:
 
     Returns:
         The edited message, or empty string if user cancels
+
     """
     # Ask for a new commit message
     edited_message = questionary.text(
@@ -445,6 +456,7 @@ def _commit_with_message(chunk: DiffChunk, message: str) -> None:
     Args:
         chunk: The diff chunk to commit
         message: The commit message to use
+
     """
     console.print("Committing changes...")
     success = _perform_commit(chunk, message)
@@ -458,6 +470,7 @@ def _commit_with_user_input(chunk: DiffChunk, generated_message: str) -> None:
     Args:
         chunk: The diff chunk to commit
         generated_message: The initial generated message to edit
+
     """
     try:
         # Let user edit the message
@@ -495,6 +508,7 @@ def process_chunk_interactively(context: ChunkContext) -> str:
 
     Returns:
         Action to take ("continue", "exit")
+
     """
     console.print(f"\n[bold]Commit {context.index + 1} of {context.total}[/bold]")
     print_chunk_summary(context.chunk, context.index)
@@ -557,6 +571,7 @@ def display_suggested_messages(
         options: Commit options
         chunks: List of diff chunks
         generator: Message generator to use
+
     """
     console.print("Suggested commit messages (not committing):")
 
@@ -591,6 +606,7 @@ def process_all_chunks(
 
     Returns:
         Exit code (0 for success)
+
     """
     for i, chunk in enumerate(chunks):
         context = ChunkContext(
@@ -633,6 +649,7 @@ def _run_commit_command(config: RunConfig) -> int:
 
     Returns:
         Exit code
+
     """
     # Validate the repository path
     try:
@@ -730,6 +747,7 @@ def validate_and_process_commit(
         path: Path to repository
         all_files: Whether to commit all files
         model: Model to use for generation
+
     """
     try:
         # Create the CommitCommand instance
@@ -782,7 +800,9 @@ def commit_command(
 ) -> None:
     """Generate AI-assisted commit messages for staged changes.
 
-    This command analyzes your staged changes and generates commit messages using an LLM.
+    This command analyzes your staged changes and generates commit
+    messages using an LLM.
+
     """
     setup_logging(is_verbose=is_verbose)
 

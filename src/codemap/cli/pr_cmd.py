@@ -87,6 +87,7 @@ def _exit_with_error(message: str, exit_code: int = 1, exception: Exception | No
         message: Error message to display
         exit_code: Exit code to use
         exception: Exception that caused the error
+
     """
     console.print(message)
     if exception is None:
@@ -102,6 +103,7 @@ def _validate_branch_name(branch_name: str) -> bool:
 
     Returns:
         True if valid, False otherwise
+
     """
     # Check if branch name is valid
     if not branch_name or not re.match(r"^[a-zA-Z0-9_.-]+$", branch_name):
@@ -118,6 +120,7 @@ def _handle_branch_creation(options: PROptions) -> str | None:
 
     Returns:
         Branch name or None if cancelled
+
     """
     current_branch = get_current_branch()
     default_branch = get_default_branch()
@@ -241,6 +244,7 @@ def _handle_commits(options: PROptions) -> bool:
 
     Returns:
         True if successful, False otherwise
+
     """
     if not options.commit_first:
         return True
@@ -365,6 +369,7 @@ def _handle_push(options: PROptions, branch_name: str | None) -> bool:
 
     Returns:
         True if successful, False otherwise
+
     """
     # Ensure branch_name is not None
     if branch_name is None:
@@ -401,6 +406,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 
     Returns:
         Created PR or None if cancelled
+
     """
     # Ensure branch_name is not None
     if branch_name is None:
@@ -504,6 +510,7 @@ def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest
 
     Returns:
         Updated PR or None if cancelled
+
     """
     # Ensure PR is not None
     if pr is None:
@@ -592,6 +599,7 @@ def _load_llm_config(repo_path: Path | None) -> dict:
 
     Returns:
         Dictionary with LLM configuration values
+
     """
     from codemap.utils.config_loader import ConfigLoader
 
@@ -635,8 +643,9 @@ def pr_command(
 ) -> None:
     """Generate and manage pull requests.
 
-    Creates or updates pull requests with AI-generated content.
-    Handles branch creation, commits, and pushing changes.
+    Creates or updates pull requests with AI-generated content. Handles
+    branch creation, commits, and pushing changes.
+
     """
     setup_logging(is_verbose=is_verbose)
     logger.info("Starting PR command with action: %s", action)

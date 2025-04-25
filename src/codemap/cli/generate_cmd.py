@@ -35,6 +35,7 @@ def generate_tree_only(target_path: Path, output: Path | None, config_data: dict
         target_path: Path to generate tree for
         output: Optional output path
         config_data: Configuration data
+
     """
     with Progress() as progress:
         task = progress.add_task("Generating directory tree...", total=1)
@@ -61,6 +62,7 @@ def determine_output_path(project_root: Path, output: Path | None, config_data: 
 
     Returns:
         The determined output path
+
     """
     return get_output_path(project_root, output, config_data)
 
@@ -71,6 +73,7 @@ def write_documentation(output_path: Path, documentation: str) -> None:
     Args:
         output_path: Path to write documentation to
         documentation: Documentation content to write
+
     """
     with create_spinner_progress() as progress:
         task = progress.add_task("Writing documentation...", total=1)
