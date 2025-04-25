@@ -21,44 +21,51 @@ tasks:
   lint:ruff:
     desc: Run ruff linter
     cmds:
-      - ruff check {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:fix:
     desc: Run ruff linter with auto-fix
     cmds:
-      - ruff  --fix {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:fix-unsafe:
     desc: Run ruff linter with unsafe auto-fixes
     cmds:
-      - ruff  --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:pylint:
     desc: Run pylint
     cmds:
-      - pylint {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:pyright:
     desc: Run pyright type checker
     cmds:
-      - pyright {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}}
 
   format:
     desc: Run all formatters
     cmds:
       - task: format:isort
       - task: format:docformatter
+      - task: lint:fix-unsafe
       - task: format:ruff
+
   format:ruff:
     desc: Run ruff formatter
     cmds:
-      - ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
-      - ruff format {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}}
 
   format:isort:
     desc: Run isort
     cmds:
-      - docformatter --recursive --in-place {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  format:docformatter:
+    desc: Run docformatter
+    cmds:
+      - cmd: uv run docformatter --recursive --in-place {{.SRC_DIR}} {{.TESTS_DIR}}
+        ignore_error: true
 
   radon:
     desc: Run radon
