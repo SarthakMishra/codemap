@@ -26,12 +26,12 @@ tasks:
   lint:fix:
     desc: Run ruff linter with auto-fix
     cmds:
-      - ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
+      - ruff  --fix {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:fix-unsafe:
     desc: Run ruff linter with unsafe auto-fixes
     cmds:
-      - ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
+      - ruff  --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:pylint:
     desc: Run pylint
@@ -42,6 +42,23 @@ tasks:
     desc: Run pyright type checker
     cmds:
       - pyright {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  format:
+    desc: Run all formatters
+    cmds:
+      - task: format:isort
+      - task: format:docformatter
+      - task: format:ruff
+  format:ruff:
+    desc: Run ruff formatter
+    cmds:
+      - ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
+      - ruff format {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  format:isort:
+    desc: Run isort
+    cmds:
+      - docformatter --recursive --in-place {{.SRC_DIR}} {{.TESTS_DIR}}
 
   radon:
     desc: Run radon
