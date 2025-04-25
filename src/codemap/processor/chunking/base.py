@@ -117,10 +117,37 @@ class Chunk:
     children: list[Chunk] = field(default_factory=list)
     """Child chunks (e.g., methods and fields for a class)."""
 
+    _original_full_name: str | None = field(default=None, repr=False)
+    """Original full name from database, if reconstructed from storage."""
+
+    _parent_full_name: str | None = field(default=None, repr=False)
+    """Original parent full name from database, if reconstructed from storage."""
+
     def __post_init__(self) -> None:
         """Initialize computed fields."""
         # Ensure children list is immutable
         object.__setattr__(self, "children", tuple(self.children))
+
+    def __hash__(self) -> int:
+        """Make Chunk hashable for use as dictionary keys.
+
+        Returns:
+            Hash value based on content and full_name
+        """
+        return hash((self.content, self.full_name))
+
+    def __eq__(self, other: object) -> bool:
+        """Define equality for Chunk objects.
+
+        Args:
+            other: Object to compare with
+
+        Returns:
+            True if objects are equal, False otherwise
+        """
+        if not isinstance(other, Chunk):
+            return False
+        return self.content == other.content and self.full_name == other.full_name
 
     @property
     def full_name(self) -> str:
@@ -130,6 +157,11 @@ class Chunk:
             Dot-separated path from root to this chunk
             (e.g., 'module.MyClass.my_method').
         """
+        # Check if we have an original full_name from the database
+        if self.original_full_name is not None:
+            return self.original_full_name
+
+        # Otherwise calculate it based on parent relationship
         if self.parent:
             return f"{self.parent.full_name}.{self.metadata.name}"
         return self.metadata.name
@@ -162,6 +194,24 @@ class Chunk:
             The child chunk if found, None otherwise.
         """
         return next((child for child in self.children if child.metadata.name == name), None)
+
+    @property
+    def original_full_name(self) -> str | None:
+        """Get the original full name from database, if available.
+
+        Returns:
+            Original full name if available, None otherwise
+        """
+        return self._original_full_name
+
+    @property
+    def parent_full_name(self) -> str | None:
+        """Get the parent full name from database, if available.
+
+        Returns:
+            Parent full name if available, None otherwise
+        """
+        return self._parent_full_name
 
 
 class ChunkingStrategy(abc.ABC):
