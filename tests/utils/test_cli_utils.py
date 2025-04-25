@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from rich.progress import Progress
 
 from codemap.utils.cli_utils import (
+    SpinnerState,
+    console,
     create_spinner_progress,
     ensure_directory_exists,
+    loading_spinner,
     setup_logging,
 )
 from tests.base import CLITestBase
@@ -59,6 +62,67 @@ class TestCliUtils(CLITestBase):
         progress = create_spinner_progress()
         assert isinstance(progress, Progress)
         assert len(progress.columns) == 2  # Should have SpinnerColumn and TextColumn
+
+    def test_spinner_state_singleton(self) -> None:
+        """Test that SpinnerState behaves as a singleton."""
+        # Create first instance
+        spinner1 = SpinnerState()
+        spinner1.is_active = True
+
+        # Create second instance - should be same object
+        spinner2 = SpinnerState()
+
+        # Both should be the same instance
+        assert spinner1 is spinner2
+        assert spinner2.is_active is True
+
+        # Change value on second instance
+        spinner2.is_active = False
+
+        # First instance should reflect the change
+        assert spinner1.is_active is False
+
+    def test_loading_spinner_in_test_environment(self) -> None:
+        """Test loading spinner behavior in test environment."""
+        # PYTEST_CURRENT_TEST is set in pytest environment
+        with patch.dict(os.environ, {"PYTEST_CURRENT_TEST": "test_name"}), loading_spinner("Testing..."):
+            # Verify spinner state is not changed
+            assert not SpinnerState().is_active
+
+    def test_loading_spinner_in_ci_environment(self) -> None:
+        """Test loading spinner behavior in CI environment."""
+        # CI environment variable is set
+        with patch.dict(os.environ, {"CI": "true"}), loading_spinner("Testing..."):
+            # Verify spinner state is not changed
+            assert not SpinnerState().is_active
+
+    def test_loading_spinner_active_spinner(self) -> None:
+        """Test loading spinner behavior when spinner is already active."""
+        # Set spinner as active
+        spinner_state = SpinnerState()
+        spinner_state.is_active = True
+
+        # Should not create new spinner
+        with patch.object(console, "status") as mock_status, loading_spinner("Testing..."):
+            # Verify console.status was not called
+            mock_status.assert_not_called()
+
+        # Restore state
+        spinner_state.is_active = False
+
+    def test_loading_spinner_standard_usage(self) -> None:
+        """Test standard usage of loading spinner."""
+        # Create clean environment (no PYTEST_CURRENT_TEST, no CI)
+        with patch.dict(os.environ, {}, clear=True), patch.object(
+            console, "status", return_value=MagicMock()
+        ) as mock_status, loading_spinner("Working..."):
+            # Verify spinner is active
+            assert SpinnerState().is_active
+            # Verify console.status was called
+            mock_status.assert_called_once_with("Working...")
+
+        # Verify spinner is inactive after context exit
+        assert not SpinnerState().is_active
 
 
 @pytest.mark.unit
