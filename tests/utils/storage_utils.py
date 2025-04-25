@@ -33,6 +33,7 @@ def create_test_chunk(
 
     Returns:
         A chunk instance for testing
+
     """
     # Create location object
     location = Location(file_path=Path(file_path), start_line=start_line, end_line=end_line)
@@ -64,6 +65,7 @@ def create_test_embedding(
 
     Returns:
         An EmbeddingResult instance for testing
+
     """
     if embedding_values is None:
         embedding_values = [0.1, 0.2, 0.3, 0.4]

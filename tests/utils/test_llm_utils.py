@@ -31,6 +31,7 @@ class MockDiffChunk:
             files: List of files in the chunk
             content: Content of the chunk
             description: Optional description of the chunk
+
         """
         self.files = files
         self.content = content
@@ -58,6 +59,7 @@ def mock_env_vars() -> Generator[None, None, None]:
 
     Yields:
         None: This fixture doesn't yield a value, it just sets up and tears down.
+
     """
     orig_env = os.environ.copy()
     yield
@@ -186,7 +188,8 @@ class TestMessageGenerator:
 
     @patch("codemap.utils.llm_utils.MessageGenerator")
     def test_setup_message_generator_with_api_key_and_provider(self, mock_generator_class: MagicMock) -> None:
-        """Test setting up a message generator with an API key and specific provider."""
+        """Test setting up a message generator with an API key and specific
+        provider."""
         # Save original environment variables
         orig_env = os.environ.copy()
         try:
@@ -355,7 +358,8 @@ class TestUniversalGenerator:
     def test_create_universal_generator_with_model_and_prompt(
         self, mock_generator_class: MagicMock, mock_config_loader_class: MagicMock
     ) -> None:
-        """Test creating a universal generator with a model and prompt template."""
+        """Test creating a universal generator with a model and prompt
+        template."""
         # Set up mocks
         mock_config_loader = MagicMock()
         mock_config_loader_class.return_value = mock_config_loader

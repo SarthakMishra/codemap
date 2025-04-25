@@ -232,13 +232,15 @@ class TestCommitOperations:
         assert result == "Feature: Add new endpoint"
 
     def test_generate_pr_title_from_commits_fallback(self) -> None:
-        """Test generate_pr_title_from_commits function with non-conventional commit."""
+        """Test generate_pr_title_from_commits function with non-conventional
+        commit."""
         result = generate_pr_title_from_commits(["Update documentation"])
 
         assert result == "Update documentation"
 
     def test_generate_pr_description_from_commits_empty(self) -> None:
-        """Test generate_pr_description_from_commits function with empty commits."""
+        """Test generate_pr_description_from_commits function with empty
+        commits."""
         result = generate_pr_description_from_commits([])
 
         assert result == "No changes"
