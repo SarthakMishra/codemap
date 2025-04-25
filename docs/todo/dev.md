@@ -35,3 +35,5 @@ The current development environment has basic testing and linting setup but lack
    - Set up pre-commit hooks
    - Automate formatting and validation
    - Prevent non-compliant code from being committed
+
+6. Add licensing comments
