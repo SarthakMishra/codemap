@@ -24,6 +24,7 @@ class DiffChunk:
             files: List of files affected in this chunk
             content: The diff content
             description: Optional description of the changes
+
         """
         self.files: list[str] = files
         self.content: str = content
@@ -121,6 +122,7 @@ class MessageGenerator:
                       Overrides provider inferred from model prefix if both are present.
             api_base: Optional API base URL for the provider
             config_loader: Optional ConfigLoader instance to use for configuration
+
         """
         self.repo_root = repo_root
         self.prompt_template = prompt_template or DEFAULT_PROMPT_TEMPLATE
@@ -184,6 +186,7 @@ class MessageGenerator:
 
         Returns:
             The resolved model name
+
         """
         return self.resolved_model
 
@@ -193,6 +196,7 @@ class MessageGenerator:
 
         Args:
             value: The model name to set
+
         """
         self.resolved_model = value
 
@@ -201,6 +205,7 @@ class MessageGenerator:
         """Delete the model property.
 
         This is needed for unit tests using patch.object.
+
         """
 
     @property
@@ -209,6 +214,7 @@ class MessageGenerator:
 
         Returns:
             The resolved provider name
+
         """
         return self.resolved_provider
 
@@ -218,6 +224,7 @@ class MessageGenerator:
 
         Args:
             value: The provider name to set
+
         """
         self.resolved_provider = value
 
@@ -226,6 +233,7 @@ class MessageGenerator:
         """Delete the provider property.
 
         This is needed for unit tests using patch.object.
+
         """
 
     def _load_env_variables(self) -> None:
@@ -258,6 +266,7 @@ class MessageGenerator:
 
         Returns:
             Dictionary of API keys found for known providers.
+
         """
         api_keys: dict[str, str] = {}
 
@@ -308,8 +317,7 @@ class MessageGenerator:
     def _resolve_llm_configuration(
         self, model: str, provider: str | None, api_base: str | None
     ) -> tuple[str, str, str | None]:
-        """
-        Resolves the final model string, provider name, and API base URL.
+        """Resolves the final model string, provider name, and API base URL.
 
         Args:
             model: The model name (potentially with provider prefix).
@@ -320,6 +328,7 @@ class MessageGenerator:
             A tuple containing (resolved_model, resolved_provider, resolved_api_base).
             resolved_model will be in 'provider/model_name' format.
             resolved_provider will be the determined provider name.
+
         """
         resolved_model = model
         resolved_provider = provider
@@ -373,6 +382,7 @@ class MessageGenerator:
 
         Returns:
             Dictionary with information about files
+
         """
         file_info = {}
         files = chunk.files if isinstance(chunk, DiffChunk) else chunk.get("files", [])
@@ -423,6 +433,7 @@ class MessageGenerator:
 
         Returns:
             Prepared prompt with diff and file information
+
         """
         file_info = self._extract_file_info(chunk)
         convention = self._get_commit_convention()
@@ -453,6 +464,7 @@ class MessageGenerator:
 
         Raises:
             LLMError: If API call fails or litellm is not installed.
+
         """
         try:
             import litellm
@@ -598,11 +610,16 @@ class MessageGenerator:
 
         Returns:
             Dictionary with LLM configuration
+
         """
         return self._config_loader.get_llm_config()
 
     def _format_message(self, message: str) -> str:
-        """Format and clean the generated commit message. (Unchanged, but added sanitization call)."""
+        """Format and clean the generated commit message.
+
+        (Unchanged, but added sanitization call).
+
+        """
         message = message.strip().replace("```", "").replace("`", "")
         prefixes_to_remove = ["commit message:", "message:", "response:"]
         for prefix in prefixes_to_remove:
@@ -657,6 +674,7 @@ class MessageGenerator:
 
         Returns:
             Generated commit message
+
         """
         commit_type = "chore"
 
@@ -744,13 +762,15 @@ class MessageGenerator:
         return False
 
     def _adapt_chunk_access(self, chunk: DiffChunk | DiffChunkData) -> DiffChunkData:
-        """Adapt chunk access to work with both DiffChunk objects and dictionaries.
+        """Adapt chunk access to work with both DiffChunk objects and
+        dictionaries.
 
         Args:
             chunk: Chunk to adapt
 
         Returns:
             Dictionary with chunk data
+
         """
         if isinstance(chunk, DiffChunk):
             return DiffChunkData(
@@ -768,6 +788,7 @@ class MessageGenerator:
 
         Returns:
             Tuple of (message, was_generated_by_llm)
+
         """
         logger.debug(
             "Generating message for chunk ID: %s. Using resolved config: Provider=%s, Model=%s",
@@ -879,7 +900,11 @@ class MessageGenerator:
             return message, False
 
     def _sanitize_commit_message(self, message: str) -> str:
-        """Sanitize a commit message to comply with commitlint standards. (Unchanged)."""
+        """Sanitize a commit message to comply with commitlint standards.
+
+        (Unchanged).
+
+        """
         # Remove trailing period
         if message.endswith("."):
             message = message[:-1]

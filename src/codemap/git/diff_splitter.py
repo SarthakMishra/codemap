@@ -62,6 +62,7 @@ class DiffSplitter:
 
         Args:
             repo_root: Root directory of the Git repository
+
         """
         self.repo_root = repo_root or Path()
         self.code_extensions = {
@@ -98,6 +99,7 @@ class DiffSplitter:
 
         Returns:
             True if sentence-transformers is available, False otherwise
+
         """
         try:
             # This is needed for the import check, but don't flag as unused
@@ -133,6 +135,7 @@ class DiffSplitter:
 
         Returns:
             True if model is available, False otherwise
+
         """
         if not DiffSplitter._sentence_transformers_available:
             return False
@@ -204,6 +207,7 @@ class DiffSplitter:
 
         Returns:
             List of compiled regex pattern pairs
+
         """
         patterns = [
             # Frontend component pairs
@@ -278,6 +282,7 @@ class DiffSplitter:
 
         Raises:
             ImportError: If sentence-transformers is not installed
+
         """
         # Skip empty content
         if not content or not content.strip():
@@ -309,6 +314,7 @@ class DiffSplitter:
 
         Returns:
             Similarity score between 0 and 1
+
         """
         # Get embeddings
         emb1 = self._get_code_embedding(content1)
@@ -349,6 +355,7 @@ class DiffSplitter:
 
         Returns:
             List of DiffChunk objects, one per file
+
         """
         if not diff.content:
             # Handle untracked files specifically
@@ -403,6 +410,7 @@ class DiffSplitter:
 
         Returns:
             List of DiffChunk objects, one per hunk
+
         """
         if not diff.content:
             return []
@@ -470,6 +478,7 @@ class DiffSplitter:
 
         Returns:
             Tuple of (old_code, new_code) extracted from the diff
+
         """
         old_lines = []
         new_lines = []
@@ -516,6 +525,7 @@ class DiffSplitter:
 
         Returns:
             Compiled regex pattern or None if language not supported
+
         """
         patterns = {
             "py": r'(^class\s+\w+|^def\s+\w+|^if\s+__name__\s*==\s*[\'"]__main__[\'"]\s*:|^import\s+|^from\s+\w+\s+import)',  # noqa: E501
@@ -534,7 +544,8 @@ class DiffSplitter:
         return None
 
     def _semantic_hunk_splitting(self, file_path: str, diff_content: str) -> list[str]:
-        """Split a diff into more semantically meaningful chunks based on code structure.
+        """Split a diff into more semantically meaningful chunks based on code
+        structure.
 
         Args:
             file_path: Path to the file being diffed (used to determine language)
@@ -542,6 +553,7 @@ class DiffSplitter:
 
         Returns:
             List of split diff contents
+
         """
         # Get language based on file extension
         ext = Path(file_path).suffix
@@ -597,6 +609,7 @@ class DiffSplitter:
 
         Returns:
             List of DiffChunk objects based on semantic grouping
+
         """
         # First split by file
         file_chunks = self._split_by_file(diff)
@@ -655,6 +668,7 @@ class DiffSplitter:
             chunks: List of chunks to process
             result_chunks: List to append grouped chunks to (modified in place)
             similarity_threshold: Optional custom threshold to override default
+
         """
         if not chunks:
             return
@@ -702,6 +716,7 @@ class DiffSplitter:
 
         Returns:
             True if the files are related, False otherwise
+
         """
         # 1. Files in the same directory
         dir1 = file1.rsplit("/", 1)[0] if "/" in file1 else ""
@@ -752,6 +767,7 @@ class DiffSplitter:
 
         Returns:
             True if the files match a known pattern, False otherwise
+
         """
         for pattern1, pattern2 in self._related_file_patterns:
             if (pattern1.match(file1) and pattern2.match(file2)) or (pattern2.match(file1) and pattern1.match(file2)):
@@ -771,6 +787,7 @@ class DiffSplitter:
             file_chunks: List of file-based chunks
             processed_files: Set of already processed files (modified in place)
             semantic_chunks: List of semantic chunks (modified in place)
+
         """
         if not file_chunks:
             return
@@ -806,6 +823,7 @@ class DiffSplitter:
         Args:
             related_chunks: List of related file chunks
             semantic_chunks: List of semantic chunks to append to (modified in place)
+
         """
         if not related_chunks:
             return
@@ -842,6 +860,7 @@ class DiffSplitter:
 
         Returns:
             Commit type string (e.g., "feat", "fix", "test", "docs", "chore")
+
         """
         # Check for test files
         if any(f.startswith("tests/") or "_test." in f or "test_" in f for f in files):
@@ -867,6 +886,7 @@ class DiffSplitter:
 
         Returns:
             Description string
+
         """
         if len(files) == 1:
             return f"{commit_type}: update {files[0]}"
@@ -886,6 +906,7 @@ class DiffSplitter:
 
         Returns:
             Consolidated list of chunks
+
         """
         # If we have fewer than MIN_CHUNKS_FOR_CONSOLIDATION chunks, no need to consolidate
         if len(chunks) < MIN_CHUNKS_FOR_CONSOLIDATION:
@@ -947,6 +968,7 @@ class DiffSplitter:
 
         Returns:
             List of DiffChunk objects based on semantic grouping
+
         """
         # Check if we're in a test environment
         is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
@@ -1066,6 +1088,7 @@ class DiffSplitter:
 
         Returns:
             List of DiffChunk objects
+
         """
         if not diff.content and not diff.files:
             return []
@@ -1184,6 +1207,7 @@ class DiffSplitter:
 
         Returns:
             Dict with keys 'embeddings' containing numpy array of embeddings
+
         """
         # Ensure the model is initialized
         cls._sentence_transformers_available = (

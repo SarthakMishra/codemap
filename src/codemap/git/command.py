@@ -44,6 +44,7 @@ class CommitCommand:
         Args:
             path: Optional path to start from
             model: LLM model to use for commit message generation
+
         """
         try:
             self.repo_root = get_repo_root(path)
@@ -62,6 +63,7 @@ class CommitCommand:
 
         Raises:
             RuntimeError: If Git operations fail
+
         """
         try:
             changes = []
@@ -112,6 +114,7 @@ class CommitCommand:
 
         Raises:
             RuntimeError: If message generation fails
+
         """
         # Constants to avoid magic numbers
         max_log_message_length = 40
@@ -170,6 +173,7 @@ class CommitCommand:
 
         Returns:
             True if successful, False if failed
+
         """
         try:
             # Make sure all files are staged first (in case any were missed or unstaged)
@@ -232,6 +236,7 @@ class CommitCommand:
         Raises:
             RuntimeError: If Git operations fail
             typer.Exit: If user chooses to exit
+
         """
         # Add logging here
         logger.debug(
@@ -295,6 +300,7 @@ class CommitCommand:
 
         Returns:
             True if successful, False if failed or aborted
+
         """
         i = 0
         while i < len(chunks):
@@ -325,6 +331,7 @@ class CommitCommand:
 
         Note:
             May raise typer.Exit when users abort
+
         """
         try:
             # Get all changes
