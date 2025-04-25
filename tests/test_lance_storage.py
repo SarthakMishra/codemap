@@ -156,7 +156,7 @@ def test_create_tables_db_not_initialized() -> None:
 
 @pytest.mark.unit
 @pytest.mark.path_sensitive
-def test_store_chunks_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
+def test_store_chunks_no_db_connection() -> None:
 	"""Test storing chunks with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
 	storage._connection_initialized = True
@@ -198,7 +198,7 @@ def test_store_chunks_exception() -> None:
 
 @pytest.mark.unit
 @pytest.mark.path_sensitive
-def test_get_chunk_by_id_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
+def test_get_chunk_by_id_no_db_connection() -> None:
 	"""Test getting chunk by ID with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
 	storage._connection_initialized = True
@@ -237,7 +237,7 @@ def test_get_chunk_by_id_exception(caplog: pytest.LogCaptureFixture) -> None:
 
 @pytest.mark.unit
 @pytest.mark.path_sensitive
-def test_search_by_content_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
+def test_search_by_content_no_db_connection() -> None:
 	"""Test searching by content with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
 	storage._connection_initialized = True
@@ -273,7 +273,7 @@ def test_search_by_content_exception(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.unit
-def test_search_by_vector_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
+def test_search_by_vector_no_db_connection() -> None:
 	"""Test searching by vector with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
 	storage._connection_initialized = True
