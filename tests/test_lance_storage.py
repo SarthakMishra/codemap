@@ -155,6 +155,7 @@ def test_create_tables_db_not_initialized() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.path_sensitive
 def test_store_chunks_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
 	"""Test storing chunks with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
@@ -163,10 +164,8 @@ def test_store_chunks_no_db_connection(caplog: pytest.LogCaptureFixture) -> None
 
 	# Should log warning and return without error
 	with caplog.at_level(logging.WARNING):
-		# Force logger to capture properly
-		logging.getLogger("codemap.processor.storage.lance").warning("No database connection available")
 		storage.store_chunks([create_test_chunk()])
-		assert any("No database connection available" in record.message for record in caplog.records)
+		assert "No database connection available" in caplog.text
 
 
 @pytest.mark.unit
@@ -198,6 +197,7 @@ def test_store_chunks_exception() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.path_sensitive
 def test_get_chunk_by_id_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
 	"""Test getting chunk by ID with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
@@ -206,11 +206,9 @@ def test_get_chunk_by_id_no_db_connection(caplog: pytest.LogCaptureFixture) -> N
 
 	# Should log warning and return None
 	with caplog.at_level(logging.WARNING):
-		# Force logger to capture properly
-		logging.getLogger("codemap.processor.storage.lance").warning("No database connection")
 		result = storage.get_chunk_by_id("test-id")
 		assert result is None
-		assert any("No database connection" in record.message for record in caplog.records)
+		assert "No database connection" in caplog.text
 
 
 @pytest.mark.unit
@@ -238,6 +236,7 @@ def test_get_chunk_by_id_exception(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.path_sensitive
 def test_search_by_content_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
 	"""Test searching by content with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
@@ -246,11 +245,9 @@ def test_search_by_content_no_db_connection(caplog: pytest.LogCaptureFixture) ->
 
 	# Should log warning and return empty list
 	with caplog.at_level(logging.WARNING):
-		# Force logger to capture properly
-		logging.getLogger("codemap.processor.storage.lance").warning("No database connection")
 		result = storage.search_by_content("test query")
 		assert result == []
-		assert any("No database connection" in record.message for record in caplog.records)
+		assert "No database connection" in caplog.text
 
 
 @pytest.mark.unit
@@ -312,6 +309,7 @@ def test_search_by_vector_exception(caplog: pytest.LogCaptureFixture) -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.path_sensitive
 def test_get_file_history_no_db_connection(caplog: pytest.LogCaptureFixture) -> None:
 	"""Test getting file history with no DB connection."""
 	storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
@@ -325,6 +323,21 @@ def test_get_file_history_no_db_connection(caplog: pytest.LogCaptureFixture) -> 
 		result = storage.get_file_history("file.py")
 		assert result == []
 		assert any("No database connection" in record.message for record in caplog.records)
+
+
+# Alternative implementation using patch to isolate from environment issues
+@pytest.mark.unit
+def test_get_file_history_no_db_connection_with_mock() -> None:
+	"""Test getting file history with no DB connection using mock logger."""
+	with patch("codemap.processor.storage.lance.logger") as mock_logger:
+		storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
+		storage._connection_initialized = True
+		storage._db = None
+
+		result = storage.get_file_history("file.py")
+
+		assert result == []
+		mock_logger.warning.assert_called_with("No database connection, cannot retrieve file history")
 
 
 @pytest.mark.unit
@@ -375,6 +388,7 @@ def test_try_create_index() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.path_sensitive
 def test_create_vector_index_failure(caplog: pytest.LogCaptureFixture) -> None:
 	"""Test failure when creating vector index."""
 	mock_table = MagicMock()
@@ -385,7 +399,27 @@ def test_create_vector_index_failure(caplog: pytest.LogCaptureFixture) -> None:
 	# Test logging directly instead of using side_effect with __wrapped__
 	with caplog.at_level(logging.WARNING):
 		storage._create_vector_index(mock_table)
+		# Force sync of the caplog before checking
+		# This ensures the log message is captured
+		caplog.clear()
+		storage._create_vector_index(mock_table)
 		assert "Failed to create vector index: Invalid vector dimension" in caplog.text
+
+
+# Alternative implementation using patch to isolate from environment issues
+@pytest.mark.unit
+def test_create_vector_index_failure_with_mock() -> None:
+	"""Test failure when creating vector index using mock logger."""
+	with patch("codemap.processor.storage.lance.logger") as mock_logger:
+		mock_table = MagicMock()
+		mock_table.create_index.side_effect = ValueError("Invalid vector dimension")
+
+		storage = LanceDBStorage(StorageConfig(uri="/path/to/db"))
+		storage._create_vector_index(mock_table)
+
+		mock_logger.warning.assert_called_once_with(
+			"Failed to create vector index: %s", mock_table.create_index.side_effect
+		)
 
 
 @pytest.mark.storage
