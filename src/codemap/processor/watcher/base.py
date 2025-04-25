@@ -29,6 +29,7 @@ class FileEventHandler(FileSystemEventHandler):
             on_modified: Callback function for file modification events
             on_deleted: Callback function for file deletion events
             ignored_patterns: Set of glob patterns to ignore
+
         """
         super().__init__()
         self._created_callback = on_created
@@ -44,6 +45,7 @@ class FileEventHandler(FileSystemEventHandler):
 
         Returns:
             bool: True if path should be ignored, False otherwise
+
         """
         path_str = path.decode() if isinstance(path, bytes) else str(path)
         path_obj = Path(path_str)
@@ -54,6 +56,7 @@ class FileEventHandler(FileSystemEventHandler):
 
         Args:
             event: The file system event
+
         """
         if event.is_directory or self._should_ignore(event.src_path):
             return
@@ -67,6 +70,7 @@ class FileEventHandler(FileSystemEventHandler):
 
         Args:
             event: The file system event
+
         """
         if event.is_directory or self._should_ignore(event.src_path):
             return
@@ -80,6 +84,7 @@ class FileEventHandler(FileSystemEventHandler):
 
         Args:
             event: The file system event
+
         """
         if event.is_directory or self._should_ignore(event.src_path):
             return
@@ -110,6 +115,7 @@ class FileWatcher:
             on_deleted: Callback function for file deletion events
             ignored_patterns: Set of glob patterns to ignore
             recursive: Whether to watch directories recursively
+
         """
         self.paths = [Path(p) for p in ([paths] if isinstance(paths, (str, Path)) else paths)]
         self.recursive = recursive
