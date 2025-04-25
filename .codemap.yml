@@ -5,6 +5,10 @@ max_content_length: 2000
 
 # Commit feature configuration
 commit:
+  # Whether to bypass git hooks (--no-verify) when committing
+  # Set to true only if you want to skip hooks (default: false)
+  bypass_hooks: false
+  
   # LLM configuration
   llm:
     model: groq/meta-llama/llama-4-scout-17b-16e-instruct
