@@ -38,13 +38,14 @@ logger = logging.getLogger(__name__)
 class CommitCommand:
 	"""Handles the commit command workflow."""
 
-	def __init__(self, path: Path | None = None, model: str = "gpt-4o-mini") -> None:
+	def __init__(self, path: Path | None = None, model: str = "gpt-4o-mini", bypass_hooks: bool = False) -> None:
 		"""
 		Initialize the commit command.
 
 		Args:
 		    path: Optional path to start from
 		    model: LLM model to use for commit message generation
+		    bypass_hooks: Whether to bypass git hooks with --no-verify
 
 		"""
 		try:
@@ -53,6 +54,7 @@ class CommitCommand:
 			self.splitter = DiffSplitter(self.repo_root)
 			self.message_generator = MessageGenerator(self.repo_root, model=model)
 			self.error_state = None  # Tracks reason for failure: "failed", "aborted", etc.
+			self.bypass_hooks = bypass_hooks  # Whether to bypass git hooks with --no-verify
 		except GitError as e:
 			raise RuntimeError(str(e)) from e
 
@@ -172,11 +174,11 @@ class CommitCommand:
 		Perform the actual commit operation.
 
 		Args:
-		    chunk: DiffChunk to commit
+		    chunk: The chunk to commit
 		    message: Commit message to use
 
 		Returns:
-		    True if successful, False if failed
+		    True if successful, False otherwise
 
 		"""
 		try:
@@ -184,30 +186,32 @@ class CommitCommand:
 			with loading_spinner("Staging files..."):
 				run_git_command(["git", "add", "."])
 
-				# Unstage files not in the current chunk to ensure only chunk files are committed
-				all_staged_files = get_staged_diff().files
-				files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
-				if files_to_unstage:
-					unstage_files(files_to_unstage)
+			# Unstage files not in the current chunk to ensure only chunk files are committed
+			all_staged_files = get_staged_diff().files
+			files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
+			if files_to_unstage:
+				unstage_files(files_to_unstage)
 
-				# Make sure the chunk files are staged (should be redundant but ensures consistency)
-				stage_files(chunk.files)
+			# Make sure the chunk files are staged (should be redundant but ensures consistency)
+			stage_files(chunk.files)
 
 			# Create commit using commit_only_files which handles hooks better
 			with loading_spinner("Creating commit..."):
+				# Use the class's bypass_hooks setting as the default
+				initial_ignore_hooks = self.bypass_hooks
 				try:
-					# First try with hooks enabled
-					other_staged = commit_only_files(chunk.files, message, ignore_hooks=False)
+					# First try with hooks enabled (unless bypass_hooks is True)
+					other_staged = commit_only_files(chunk.files, message, ignore_hooks=initial_ignore_hooks)
 				except GitError as hook_error:
-					if "hook failed" in str(hook_error).lower():
-						# If hook failed, ask user if they want to bypass hooks
+					if "hook failed" in str(hook_error).lower() and not initial_ignore_hooks:
+						# If hook failed and we weren't already bypassing hooks, ask user if they want to bypass hooks
 						if self.ui.confirm_bypass_hooks():
 							# Retry with hooks disabled
 							other_staged = commit_only_files(chunk.files, message, ignore_hooks=True)
 						else:
 							raise  # Re-raise if user doesn't want to bypass hooks
 					else:
-						raise  # Re-raise if it's not a hook-related error
+						raise  # Re-raise if it's not a hook-related error or we were already bypassing hooks
 
 				# Log if there were other files staged but not included
 				if other_staged:
@@ -221,7 +225,36 @@ class CommitCommand:
 				run_git_command(["git", "add", "."])
 
 		except GitError as e:
-			self.ui.show_error(f"Failed to commit changes: {e}")
+			# Display the git error in a formatted box
+			error_message = str(e)
+
+			# Check if the error contains a detailed git error message with newlines
+			if "\n" in error_message:
+				# Split the message if it contains a "Git Error Output:" section
+				if "Git Error Output:" in error_message:
+					parts = error_message.split("Git Error Output:", 1)
+					main_error = parts[0].strip()
+					git_output = "Git Error Output:" + parts[1].strip()
+
+					# Show the main error first, then the details in a panel
+					self.ui.show_error(f"Failed to commit changes: {main_error}")
+
+					from rich.console import Console
+					from rich.panel import Panel
+
+					console = Console()
+					console.print(Panel(git_output, title="Git Command Output", border_style="red"))
+				else:
+					# Just show the full error in a formatted panel
+					from rich.console import Console
+					from rich.panel import Panel
+
+					console = Console()
+					console.print(Panel(error_message, title="Git Command Error", border_style="red"))
+			else:
+				# For simple one-line errors, just display directly
+				self.ui.show_error(f"Failed to commit changes: {error_message}")
+
 			return False
 		else:
 			return True
