@@ -21,27 +21,79 @@ tasks:
   lint:ruff:
     desc: Run ruff linter
     cmds:
-      - ruff check {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:fix:
     desc: Run ruff linter with auto-fix
     cmds:
-      - ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:fix-unsafe:
     desc: Run ruff linter with unsafe auto-fixes
     cmds:
-      - ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:pylint:
     desc: Run pylint
     cmds:
-      - pylint {{.SRC_DIR}}
+      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}}
 
   lint:pyright:
     desc: Run pyright type checker
     cmds:
-      - pyright {{.SRC_DIR}}
+      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  format:
+    desc: Run all formatters
+    cmds:
+      - task: format:isort
+      - task: format:docformatter
+      - task: lint:fix-unsafe
+      - task: format:ruff
+
+  format:ruff:
+    desc: Run ruff formatter
+    cmds:
+      - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  format:isort:
+    desc: Run isort
+    cmds:
+      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}}
+
+  format:docformatter:
+    desc: Run docformatter
+    cmds:
+      - cmd: uv run docformatter --recursive --in-place {{.SRC_DIR}} {{.TESTS_DIR}}
+        ignore_error: true
+
+  radon:
+    desc: Run radon
+    cmds:
+      - task: radon:cc
+      - task: radon:mi
+      - task: radon:raw
+      - task: radon:hal
+
+  radon:cc:
+    desc: Run radon cc
+    cmds:
+      - uv run radon cc {{.SRC_DIR}} -O .radon/cc.txt
+
+  radon:mi:
+    desc: Run radon mi
+    cmds:
+      - uv run radon mi {{.SRC_DIR}} -O .radon/mi.txt
+
+  radon:raw:
+    desc: Run radon raw
+    cmds:
+      - uv run radon raw {{.SRC_DIR}} -O .radon/raw.txt
+
+  radon:hal:
+    desc: Run radon hal
+    cmds:
+      - uv run radon hal {{.SRC_DIR}} -O .radon/hal.txt
 
   test:
     desc: Run all tests
@@ -51,21 +103,27 @@ tasks:
   test:pytest:
     desc: Run pytest only
     cmds:
-      - pytest {{.TESTS_DIR}}
+      - uv run pytest {{.TESTS_DIR}} -n logical
 
   test:coverage:
     desc: Run tests with coverage analysis
     cmds:
-      - pytest --cov={{.COV_MODULE}} --cov-report=term-missing {{.TESTS_DIR}}
+      - uv run pytest --cov={{.COV_MODULE}} --cov-report=term-missing {{.TESTS_DIR}} -n logical
 
   test:coverage:xml:
     desc: Run tests with coverage analysis and generate XML report
     cmds:
-      - pytest --cov={{.COV_MODULE}} --cov-branch --cov-report=xml {{.TESTS_DIR}}
+      - uv run pytest --cov={{.COV_MODULE}} --cov-branch --cov-report=xml {{.TESTS_DIR}} -n logical
+
+  docs:
+    desc: Check documentation coverage
+    cmds:
+      - uv run interrogate --style google --fail-under 90 --color -vv {{.SRC_DIR}}
 
   ci:
     desc: Run all checks and tests
     cmds:
+      - task: format
       - task: lint
       - task: test:coverage
 

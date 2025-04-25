@@ -1,10 +1,12 @@
 # CodeMap
 
-[![Python Version](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
-[![Status](https://img.shields.io/badge/status-unstable-red.svg)](https://github.com/SarthakMishra/code-map)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![Python Version](https://img.shields.io/badge/python-3.12-blue.svg)](https://www.python.org/)
 [![Tests](https://github.com/SarthakMishra/codemap/actions/workflows/tests.yml/badge.svg)](https://github.com/SarthakMishra/code-map/actions/workflows/tests.yml)
+[![CodeQL](https://github.com/SarthakMishra/codemap/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/SarthakMishra/codemap/actions/workflows/github-code-scanning/codeql)
 [![codecov](https://codecov.io/gh/SarthakMishra/codemap/branch/main/graph/badge.svg)](https://codecov.io/gh/SarthakMishra/codemap)
+[![Codacy Badge](https://app.codacy.com/project/badge/Grade/95d85720e3a14494abf27b5d2070d92f)](https://app.codacy.com/gh/SarthakMishra/codemap/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
+[![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > [!Caution]
 > CodeMap is currently in active development. Use with caution and expect breaking changes.
@@ -22,6 +24,12 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 - 🔃 AI-powered PR creation and management
 
 ## Installation
+
+> [!Note]
+> This package will be published to PyPI upon reaching a stable version.
+
+> [!Important]
+> CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
 
 ```bash
 # Install with pipx
@@ -80,6 +88,11 @@ codemap generate -v
 ## Smart Commit Feature
 
 Create intelligent Git commits with AI-assisted message generation. The tool analyzes your changes, splits them into logical chunks, and generates meaningful commit messages using LLMs.
+
+> [!Warning]
+> By default, `codemap commit` uses the `--no-verify` Git flag. This is done to prevent potential instability when interacting with Git pre-commit hooks. While this behavior can be disabled in the configuration file (`.codemap.yml`), doing so may lead to unexpected issues with certain hook setups. If you encounter problems related to Git hooks, please [open an issue](https://github.com/SarthakMishra/codemap/issues).
+>
+> **Known Issue:** The commit command may sometimes incorrectly identify test files containing diff code as actual diff files, causing Git commit operations to fail. If you encounter this error, simply re-run the command or use standard Git commit as a workaround. This issue will be fixed in an upcoming release.
 
 ### Basic Usage
 

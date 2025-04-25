@@ -1,0 +1,160 @@
+---
+description: 
+globs: tests/**
+alwaysApply: false
+---
+# CodeMap Testing Standards
+
+## Test Organization
+- Tests are in the `tests/` directory with key files:
+  - `base.py` - Base test classes for different test types
+  - `helpers.py` - Helper functions and utilities for tests
+  - `conftest.py` - Common fixtures available to all tests
+  - `fixtures/` - Test data and sample repositories
+
+## Test Categories (Markers)
+- `unit` - Unit tests (fast, isolated)
+- `integration` - Integration tests
+- `slow` - Tests that take time to run
+- `git` - Git-related tests
+- `llm` - LLM-related tests
+- `cli` - CLI-related tests
+- `fs` - Filesystem-related tests
+- `interactive` - Tests requiring user interaction
+- `lsp` - Language Server Protocol related tests
+- `core` - Core functionality tests
+- `generators` - Generator component tests
+- `docs` - Documentation related tests
+- `filesystem` - Filesystem operation tests
+- `processor` - Processor component tests
+- `asynchronous` - Tests involving asynchronous operations
+- `watcher` - File watcher related tests
+- `storage` - Storage related tests
+- `error_handling` - Error handling tests
+- `data` - Data processing tests
+- `performance` - Performance related tests
+
+## Base Classes
+Use these base classes to standardize test patterns:
+- `GitTestBase` - For Git-related tests with Git mocks pre-configured
+- `LLMTestBase` - For LLM-related tests with message generator mocks
+- `CLITestBase` - For CLI command tests with Typer runner setup
+- `FileSystemTestBase` - For filesystem operations with temp directory
+
+## Common Fixtures
+Common fixtures are available in `conftest.py`:
+- `temp_dir` - Temporary directory automatically cleaned up
+- `sample_repo` - Copy of sample repository for testing
+- `mock_git_utils` - Mocked Git utilities
+- `mock_message_generator` - Mocked LLM generator
+- `mock_git_diff` - Sample Git diff
+- `mock_diff_splitter` - Mocked diff splitter
+- `console` - Rich console for testing
+- `mock_stdin` - Mocked stdin for interactive inputs
+- `cleanup_docs_dir` - Auto-use fixture that cleans up docs directories
+
+## Helper Functions
+Use these helpers in `helpers.py` to reduce test code:
+- `create_diff_chunk` - Create a diff chunk for testing
+- `assert_chunk_processed` - Assert proper chunk processing
+- `create_file_content` - Create files with content
+- `create_python_file` - Create Python files
+- `patch_multiple` - Patch multiple objects at once
+- `read_fixture_file` - Read fixture files
+- `create_git_commit_data` - Create standardized Git commit data
+
+## Class-Based Test Structure
+```python
+@pytest.mark.unit
+@pytest.mark.git
+class TestGitFeature(GitTestBase):
+    """Test cases for a Git feature."""
+    
+    def setup_method(self):
+        """Set up test environment."""
+        # Additional setup if needed
+    
+    def test_specific_functionality(self):
+        """Test specific functionality."""
+        # Arrange: Set up test data
+        # Act: Call the code being tested
+        # Assert: Verify results
+```
+
+## Running Tests
+```bash
+# Run all tests
+task test
+
+# Run specific test file
+pytest tests/test_specific_file.py
+
+# Run tests with specific marker
+pytest -m git
+
+# Run tests with multiple markers (AND)
+pytest -m "git and unit"
+
+# Run tests with multiple markers (OR)
+pytest -m "git or llm"
+
+# Run tests with coverage
+pytest --cov=src/codemap
+```
+
+## Common Patterns
+
+### Parameterized Tests
+
+```python
+@pytest.mark.parametrize(
+    "input_data,expected_output",
+    [
+        ("test1", "TEST1"),
+        ("test2", "TEST2"),
+    ],
+)
+def test_with_different_inputs(self, input_data, expected_output):
+    result = some_function(input_data)
+    assert result == expected_output
+```
+
+### Mocking Dependencies
+
+```python
+@patch("module.some_function")
+def test_with_mock(self, mock_function):
+    mock_function.return_value = "mocked result"
+    result = code_using_some_function()
+    mock_function.assert_called_once()
+```
+
+## Testing Best Practices
+1. **Use base classes** for common functionality instead of duplicating setup code
+2. **Add appropriate markers** to categorize tests and make them selectable
+3. **Use fixtures** for setup and teardown to keep tests focused
+4. **Follow AAA pattern**:
+   - **Arrange**: Set up test data and preconditions
+   - **Act**: Call the code being tested
+   - **Assert**: Verify the outcome matches expectations
+5. **Test one thing per test** - Each test should have a single clear purpose
+6. **Use descriptive test names** that describe the scenario and expected behavior
+7. **Use parameterized tests** for testing with different inputs
+8. **Mock external dependencies** to isolate tests and avoid side effects
+9. **Prefer class-based tests** for related test cases that share setup
+10. **Use assertion helpers** for complex or repeated assertions
+11. **Keep tests independent** - Tests should not rely on each other
+12. **Test edge cases** - Include tests for boundary conditions and error scenarios
+13. **Write maintainable tests** - Keep tests simple and avoid excessive setup
+14. **Include appropriate file docstrings** explaining what is being tested
+
+## Creating a New Test
+
+1. Use the appropriate base class for your test type
+2. Add proper pytest markers to categorize your test
+3. Follow the naming convention: `test_*.py` for files, `Test*` for classes, `test_*` for methods
+4. Write descriptive docstrings explaining what each test does
+5. Use fixtures or setup_method for test setup
+6. Organize related tests within a single class
+7. Consider using parameterization for similar test cases
+8. Use the helper functions to reduce test code and improve clarity

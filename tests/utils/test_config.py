@@ -1,0 +1,109 @@
+"""Tests for configuration loading and validation."""
+
+import os
+from pathlib import Path
+
+import pytest
+import yaml
+
+from codemap.config import DEFAULT_CONFIG
+from codemap.utils.config_loader import ConfigError, ConfigLoader
+from tests.base import FileSystemTestBase
+from tests.helpers import create_file_content
+
+
+@pytest.mark.unit
+class TestConfigLoader(FileSystemTestBase):
+	"""Test cases for configuration loading and validation."""
+
+	def setup_method(self) -> None:
+		"""Set up test environment."""
+		# Ensure temp_dir exists before using it
+		if not hasattr(self, "temp_dir"):
+			# Create a temporary directory if it doesn't exist
+			import tempfile
+
+			self.temp_dir = Path(tempfile.mkdtemp())
+
+		self.config_file = self.temp_dir / ".codemap.yml"
+		self.old_cwd = Path.cwd()
+
+	def teardown_method(self) -> None:
+		"""Clean up test environment."""
+		# Ensure we return to the original directory
+		if hasattr(self, "old_cwd"):
+			os.chdir(self.old_cwd)
+
+		# Clean up temp directory if we created it ourselves
+		if hasattr(self, "temp_dir") and not hasattr(self, "_temp_dir_from_fixture"):
+			import shutil
+
+			shutil.rmtree(self.temp_dir)
+
+	# Add a fixture hook to detect when temp_dir is set by the fixture
+	@pytest.fixture(autouse=True)
+	def _setup_temp_dir_marker(self, temp_dir: Path) -> None:
+		self.temp_dir = temp_dir
+		self._temp_dir_from_fixture = True
+
+	def test_default_config_loading(self) -> None:
+		"""Test loading default configuration when no config file is provided."""
+		# Change to a temporary directory to ensure we don't pick up any .codemap.yml
+		os.chdir(str(self.temp_dir))
+
+		config_loader = ConfigLoader(None)
+		# Compare each section individually for better error messages
+		for key in DEFAULT_CONFIG:
+			assert config_loader.config[key] == DEFAULT_CONFIG[key], f"Mismatch in {key} section"
+
+	def test_custom_config_loading(self) -> None:
+		"""Test loading custom configuration from file."""
+		custom_config = {
+			"token_limit": 2000,
+			"use_gitignore": False,
+			"output_dir": "custom_docs",
+		}
+
+		create_file_content(self.config_file, yaml.dump(custom_config))
+		config_loader = ConfigLoader(str(self.config_file))
+
+		assert config_loader.config["token_limit"] == 2000
+		assert config_loader.config["use_gitignore"] is False
+		assert config_loader.config["output_dir"] == "custom_docs"
+
+	def test_config_validation(self) -> None:
+		"""Test configuration validation."""
+		invalid_config = {
+			"token_limit": "not_a_number",
+			"use_gitignore": "not_a_boolean",
+		}
+
+		create_file_content(self.config_file, yaml.dump(invalid_config))
+
+		with pytest.raises(ConfigError, match="token_limit must be an integer"):
+			ConfigLoader(str(self.config_file))
+
+	def test_config_merging(self) -> None:
+		"""Test merging custom config with default config."""
+		partial_config = {
+			"token_limit": 3000,
+		}
+
+		create_file_content(self.config_file, yaml.dump(partial_config))
+		config_loader = ConfigLoader(str(self.config_file))
+
+		assert config_loader.config["token_limit"] == 3000
+		assert "use_gitignore" in config_loader.config
+		assert config_loader.config["output_dir"] == "documentation"
+
+	def test_nonexistent_config_file(self) -> None:
+		"""Test handling of nonexistent config file."""
+		with pytest.raises(FileNotFoundError, match="Config file not found:"):
+			ConfigLoader("/nonexistent/config.yml")
+
+	def test_invalid_yaml_config(self) -> None:
+		"""Test handling of invalid YAML in config file."""
+		create_file_content(self.config_file, "invalid: yaml: content: :")
+
+		with pytest.raises(yaml.YAMLError, match="mapping values are not allowed here"):
+			ConfigLoader(str(self.config_file))

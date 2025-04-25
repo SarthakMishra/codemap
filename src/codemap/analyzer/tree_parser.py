@@ -12,82 +12,86 @@ from pygments.util import ClassNotFound
 from codemap.utils.file_filters import FileFilter
 
 if TYPE_CHECKING:
-    from pathlib import Path
+	from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 
 class CodeParser:
-    """Parses source code files to extract basic file information."""
+	"""Parses source code files to extract basic file information."""
 
-    def __init__(self, config: dict[str, Any] | None = None) -> None:
-        """Initialize the file parser.
+	def __init__(self, config: dict[str, Any] | None = None) -> None:
+		"""
+		Initialize the file parser.
 
-        Args:
-            config: Configuration dictionary with use_gitignore setting.
-        """
-        self.config = config or {}
-        self.file_filter = FileFilter(config)
+		Args:
+		    config: Configuration dictionary with use_gitignore setting.
 
-    def parse_file(self, file_path: Path) -> dict[str, Any]:
-        """Parse a file and extract basic information.
+		"""
+		self.config = config or {}
+		self.file_filter = FileFilter(config)
 
-        Args:
-            file_path: Path to the file to parse.
+	def parse_file(self, file_path: Path) -> dict[str, Any]:
+		"""
+		Parse a file and extract basic information.
 
-        Returns:
-            Dictionary containing the file information.
+		Args:
+		    file_path: Path to the file to parse.
 
-        Raises:
-            OSError: If file cannot be read.
-        """
-        logger.debug("Parsing file: %s", file_path)
+		Returns:
+		    Dictionary containing the file information.
 
-        # Initialize empty info dictionary
-        file_info: dict[str, Any] = {
-            "imports": [],
-            "classes": [],
-            "references": [],
-            "content": "",
-            "language": "unknown",
-        }
+		Raises:
+		    OSError: If file cannot be read.
 
-        if not self.file_filter.should_parse(file_path):
-            logger.debug("Skipping file (excluded by filters): %s", file_path)
-            return file_info
+		"""
+		logger.debug("Parsing file: %s", file_path)
 
-        try:
-            with file_path.open("r", encoding="utf-8") as f:
-                content = f.read()
-                file_info["content"] = content
+		# Initialize empty info dictionary
+		file_info: dict[str, Any] = {
+			"imports": [],
+			"classes": [],
+			"references": [],
+			"content": "",
+			"language": "unknown",
+		}
 
-                # Try to detect language using Pygments
-                try:
-                    # First try by filename
-                    lexer = get_lexer_for_filename(file_path.name)
-                except ClassNotFound:
-                    try:
-                        # If that fails, try to guess from content
-                        lexer = guess_lexer(content)
-                    except ClassNotFound:
-                        lexer = None
+		if not self.file_filter.should_parse(file_path):
+			logger.debug("Skipping file (excluded by filters): %s", file_path)
+			return file_info
 
-                if lexer:
-                    file_info["language"] = lexer.name.lower()
+		try:
+			with file_path.open("r", encoding="utf-8") as f:
+				content = f.read()
+				file_info["content"] = content
 
-                # Only extract imports and classes for Python files
-                if file_path.suffix == ".py":
-                    # Extract basic imports using regex
-                    import_pattern = re.compile(r"^(?:from|import)\s+([^\s]+)", re.MULTILINE)
-                    imports = import_pattern.findall(content)
-                    file_info["imports"] = [imp.strip() for imp in imports]
+				# Try to detect language using Pygments
+				try:
+					# First try by filename
+					lexer = get_lexer_for_filename(file_path.name)
+				except ClassNotFound:
+					try:
+						# If that fails, try to guess from content
+						lexer = guess_lexer(content)
+					except ClassNotFound:
+						lexer = None
 
-                    # Extract class names using regex
-                    class_pattern = re.compile(r"^\s*class\s+([^\s(:]+)", re.MULTILINE)
-                    classes = class_pattern.findall(content)
-                    file_info["classes"] = [cls.strip() for cls in classes]
+				if lexer:
+					file_info["language"] = lexer.name.lower()
 
-                return file_info
-        except (OSError, UnicodeDecodeError):
-            logger.exception("Failed to parse file %s", file_path)
-            return file_info
+				# Only extract imports and classes for Python files
+				if file_path.suffix == ".py":
+					# Extract basic imports using regex
+					import_pattern = re.compile(r"^(?:from|import)\s+([^\s]+)", re.MULTILINE)
+					imports = import_pattern.findall(content)
+					file_info["imports"] = [imp.strip() for imp in imports]
+
+					# Extract class names using regex
+					class_pattern = re.compile(r"^\s*class\s+([^\s(:]+)", re.MULTILINE)
+					classes = class_pattern.findall(content)
+					file_info["classes"] = [cls.strip() for cls in classes]
+
+				return file_info
+		except (OSError, UnicodeDecodeError):
+			logger.exception("Failed to parse file %s", file_path)
+			return file_info

@@ -1,0 +1,49 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Documentation Guidelines
+- Write docstrings for all public modules, functions, classes, and methods using `"""Triple quotes."""`.
+- Start with a concise summary line (imperative mood, e.g., "Calculate..." not "Calculates...") ending in a period.
+- If more explanation is needed, add a blank line after the summary, followed by more detailed paragraphs.
+- Explain the purpose and contents of the module at the top of the file.
+
+## Function and Method Docstrings
+- Include the following sections when applicable, indented:
+  - `Args:` List each parameter name, its type (in parentheses), and a description.
+    ```python
+    Args:
+        param1 (str): Description of the first parameter.
+        param2 (int, optional): Description of the second. Defaults to 0.
+    ```
+  - `Returns:` Describe the type and meaning of the return value. Use `Yields:` for generators.
+    ```python
+    Returns:
+        bool: True if successful, False otherwise.
+
+    Yields:
+        str: The next line from the file.
+    ```
+  - `Raises:` List exceptions raised and the conditions under which they are raised.
+    ```python
+    Raises:
+        ValueError: If `input_path` is invalid.
+    ```
+
+## Class Docstrings
+- Describe the class's purpose after the `class` line.
+- Include an `Attributes:` section for public attributes, similar to `Args:`.
+  ```python
+  Attributes:
+      name (str): The name of the instance.
+      is_active (bool): Indicates if the instance is active.
+  ```
+
+## Inline Comments
+- Use inline comments (`#`) sparingly to explain non-obvious logic ("why", not "what").
+- Keep them short and focused.
+
+## Type Hinting
+- Use Python type hints for function signatures and variables where it improves clarity.
+- Ensure docstring types (`Args:`, `Returns:`, `Attributes:`) are consistent with type hints.

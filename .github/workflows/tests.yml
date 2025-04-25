@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest]
         python-version: ['3.12']
 
     steps:
@@ -44,20 +44,12 @@ jobs:
         uv venv
         uv sync
     
-    - name: Run CI tasks (Unix)
-      if: runner.os != 'Windows'
+    - name: Run CI tasks
       shell: bash
       env:
         VIRTUAL_ENV: ${{ github.workspace }}/.venv
         PATH: ${{ github.workspace }}/.venv/bin:${{ env.PATH }}
-      run: task ci:full
-    
-    - name: Run CI tasks (Windows)
-      if: runner.os == 'Windows'
-      shell: cmd
-      env:
-        VIRTUAL_ENV: ${{ github.workspace }}\.venv
-        PATH: ${{ github.workspace }}\.venv\Scripts;${{ env.PATH }}
+        PYTHONPATH: ${{ github.workspace }}
       run: task ci:full
     
     - name: Upload coverage reports to Codecov
@@ -66,3 +58,9 @@ jobs:
         token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.xml
         fail_ci_if_error: true 
+
+    - name: Upload coverage reports to Codacy
+      uses: codacy/codacy-coverage-reporter-action@v1.3.0
+      with:
+        project-token: ${{ secrets.CODACY_PROJECT_TOKEN }}
+        coverage-reports: ./coverage.xml

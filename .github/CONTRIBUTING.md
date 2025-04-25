@@ -66,6 +66,43 @@ Before you start coding, make sure you have set up your development environment 
 
 We use a simplified Git Flow model to manage branches and releases.
 
+```mermaid
+gitGraph
+    commit
+    branch develop
+    checkout develop
+    commit
+
+    branch feature/new-feature
+    checkout feature/new-feature
+    commit
+    commit
+    checkout develop
+    merge feature/new-feature
+
+    branch feature/another-feature
+    checkout feature/another-feature
+    commit
+    checkout develop
+    merge feature/another-feature
+
+    branch release/v1.0.0
+    checkout release/v1.0.0
+    commit tag: "v1.0.0-rc"
+    checkout main
+    merge release/v1.0.0 tag: "v1.0.0"
+    checkout develop
+    merge release/v1.0.0
+
+    branch hotfix/critical-fix
+    checkout hotfix/critical-fix
+    commit
+    checkout main
+    merge hotfix/critical-fix tag: "v1.0.1"
+    checkout develop
+    merge hotfix/critical-fix
+```
+
 ### Core Branches
 
 -   **`main`**:

@@ -42,6 +42,9 @@ htmlcov/
 .ruff_cache/
 .mypy_cache/
 
+# Radon
+.radon/
+
 # Distribution
 *.tar.gz
 *.whl
