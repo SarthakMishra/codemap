@@ -33,6 +33,7 @@ def get_current_branch() -> str:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         return run_git_command(["git", "branch", "--show-current"]).strip()
@@ -49,6 +50,7 @@ def get_default_branch() -> str:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         # Try to get the default branch from the remote
@@ -80,6 +82,7 @@ def create_branch(branch_name: str) -> None:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         run_git_command(["git", "checkout", "-b", branch_name])
@@ -96,6 +99,7 @@ def checkout_branch(branch_name: str) -> None:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         run_git_command(["git", "checkout", branch_name])
@@ -113,6 +117,7 @@ def branch_exists(branch_name: str, include_remote: bool = True) -> bool:
 
     Returns:
         True if the branch exists, False otherwise
+
     """
     try:
         branches = run_git_command(["git", "branch", "--list", branch_name]).strip()
@@ -136,6 +141,7 @@ def push_branch(branch_name: str, force: bool = False) -> None:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         cmd = ["git", "push", "-u", "origin", branch_name]
@@ -159,6 +165,7 @@ def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         # Get commit messages between base and head
@@ -177,6 +184,7 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
 
     Returns:
         Generated PR title
+
     """
     if not commits:
         return "Update branch"
@@ -213,6 +221,7 @@ def generate_pr_title_with_llm(
 
     Returns:
         Generated PR title
+
     """
     import logging
 
@@ -278,6 +287,7 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
 
     Returns:
         Generated PR description
+
     """
     if not commits:
         return "No changes"
@@ -396,6 +406,7 @@ def generate_pr_description_with_llm(
 
     Returns:
         Generated PR description
+
     """
     import logging
 
@@ -476,6 +487,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 
     Raises:
         GitError: If PR creation fails
+
     """
     try:
         # Check if gh CLI is installed
@@ -537,6 +549,7 @@ def update_pull_request(pr_number: int | None, title: str, description: str) -> 
 
     Raises:
         GitError: If PR update fails
+
     """
     if pr_number is None:
         msg = "PR number cannot be None"
@@ -592,6 +605,7 @@ def get_existing_pr(branch_name: str) -> PullRequest | None:
 
     Returns:
         PullRequest object if found, None otherwise
+
     """
     try:
         # Check if gh CLI is installed
@@ -641,6 +655,7 @@ def suggest_branch_name(commits: list[str]) -> str:
 
     Returns:
         Suggested branch name
+
     """
     if not commits:
         # If no commits, use a timestamp
@@ -687,5 +702,6 @@ def get_timestamp() -> str:
 
     Returns:
         Timestamp string in format YYYYmmdd-HHMMSS
+
     """
     return datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")

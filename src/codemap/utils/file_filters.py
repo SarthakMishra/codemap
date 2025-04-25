@@ -22,6 +22,7 @@ class FileFilter:
 
         Args:
             config: Configuration dictionary with use_gitignore setting.
+
         """
         self.config = config or {}
         self.gitignore_patterns: list[str] = []
@@ -51,6 +52,7 @@ class FileFilter:
 
         Returns:
             True if the path matches the pattern
+
         """
         # Convert pattern and path to forward slashes for consistency
         pattern = pattern.replace(os.sep, "/")
@@ -115,6 +117,7 @@ class FileFilter:
 
         Returns:
             True if the path matches the pattern
+
         """
         return self._matches_pattern(file_path, pattern)
 
@@ -126,6 +129,7 @@ class FileFilter:
 
         Returns:
             True if the file should be parsed, False otherwise.
+
         """
         # Default excluded directories and files
         default_excluded = ["__pycache__", ".git", ".env", ".venv", "venv", "build", "dist"]

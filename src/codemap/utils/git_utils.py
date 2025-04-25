@@ -35,6 +35,7 @@ def run_git_command(command: list[str], cwd: Path | None = None) -> str:
 
     Raises:
         GitError: If the command fails
+
     """
     try:
         # Using subprocess.run with a list of arguments is safe since we're not using shell=True
@@ -65,6 +66,7 @@ def get_repo_root(path: Path | None = None) -> Path:
 
     Raises:
         GitError: If not in a Git repository
+
     """
     try:
         result = run_git_command(["git", "rev-parse", "--show-toplevel"], path)
@@ -82,6 +84,7 @@ def validate_repo_path(path: Path | None = None) -> Path | None:
 
     Returns:
         Path to the repository root if valid, None otherwise
+
     """
     try:
         # If no path provided, use current directory
@@ -102,6 +105,7 @@ def get_staged_diff() -> GitDiff:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         # Get list of staged files
@@ -128,6 +132,7 @@ def get_unstaged_diff() -> GitDiff:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         # Get list of modified files
@@ -151,7 +156,8 @@ def stage_files(files: list[str]) -> None:
 
     This function intelligently handles both existing and deleted files:
     - For existing files, it uses `git add`
-    - For files that no longer exist, it uses `git rm`
+    - For files that no longer exist but are tracked by git, it uses `git rm`
+    - For files that no longer exist but are still in index, it uses `git rm --cached`
 
     This prevents errors when trying to stage files that have been deleted
     but not yet tracked in git.
@@ -161,110 +167,134 @@ def stage_files(files: list[str]) -> None:
 
     Raises:
         GitError: If staging fails
+
     """
     if not files:
         logger.warning("No files provided to stage_files")
         return
 
+    # Keep track of all errors to report at the end
+    errors = []
+
     try:
-        # Get list of deleted but tracked files from git status
-        deleted_tracked_files = set()
-        already_staged_deletions = set()
+        # 1. Get information about file status
+        # ====================================
+        git_status_info = {}
+        tracked_files = set()
+        index_files = set()
+
+        # 1.1 Get git status information
         try:
-            # Parse git status to find deleted files
             status_output = run_git_command(["git", "status", "--porcelain"])
             for line in status_output.splitlines():
                 # Ensure line is a string, not bytes
                 line_str = line if isinstance(line, str) else line.decode("utf-8")
+                if not line_str:
+                    continue
 
-                if line_str.startswith(" D"):
-                    # Unstaged deletion (space followed by D)
-                    deleted_tracked_files.add(line_str[3:])
-                elif line_str.startswith("D "):
-                    # Staged deletion (D followed by space)
-                    already_staged_deletions.add(line_str[3:])
-            logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
-            logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
+                status = line_str[:2]
+                file_path = line_str[3:].strip()
+                git_status_info[file_path] = status
         except GitError:
-            logger.warning("Failed to get git status for deleted files")
+            errors.append("Failed to get git status information")
 
-        # Filter out invalid filenames that contain special characters or patterns
-        # that would cause git commands to fail
-        valid_files = []
+        # 1.2 Get tracked files
+        try:
+            tracked_files_output = run_git_command(["git", "ls-files"])
+            tracked_files = set(tracked_files_output.splitlines())
+        except GitError:
+            errors.append("Failed to get list of tracked files")
+
+        # 1.3 Get index files
+        try:
+            index_files_output = run_git_command(["git", "ls-files", "--stage"])
+            index_files = {line.split()[-1] for line in index_files_output.splitlines() if line.strip()}
+        except GitError:
+            errors.append("Failed to get list of files in git index")
+
+        # 2. Filter and categorize files
+        # ==============================
+        # Filter out invalid filenames
+        valid_files = [
+            file
+            for file in files
+            if not (any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'))
+        ]
+
+        # Skip any invalid filenames that were filtered out
         for file in files:
-            # Check if the filename looks like a template or pattern rather than a real file
-            if any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'):
+            if file not in valid_files:
                 logger.warning("Skipping invalid filename: %s", file)
-                continue
-            valid_files.append(file)
 
-        # Check if files exist in the repository (tracked by git) or filesystem
-        original_count = len(valid_files)
-        tracked_files_output = run_git_command(["git", "ls-files"])
-        tracked_files = set(tracked_files_output.splitlines())
-
-        # Keep files that either:
-        # 1. Exist in filesystem
-        # 2. Are tracked by git
-        # 3. Are known deleted files from git status
-        # 4. Are already staged deletions
-        filtered_files = []
-        for file in valid_files:
-            if (
-                Path(file).exists()
-                or file in tracked_files
-                or file in deleted_tracked_files
-                or file in already_staged_deletions
-            ):
-                filtered_files.append(file)
-            else:
-                logger.warning("Skipping non-existent and untracked file: %s", file)
-
-        valid_files = filtered_files
-        if len(valid_files) < original_count:
-            logger.warning(
-                "Filtered out %d files that don't exist in the repository", original_count - len(valid_files)
-            )
-
-        if not valid_files:
-            logger.warning("No valid files to stage after filtering")
-            return
-
-        # Check if files exist in the filesystem
-        for file in valid_files:
-            exists = Path(file).exists()
-            logger.debug("File %s exists in filesystem: %s", file, exists)
-
-        # Separate files into different categories
+        # Categorize files
         existing_files = []
-        deleted_files = []
+        deleted_tracked_files = []
+        deleted_index_files = []
+        untracked_nonexistent_files = []
 
         for file in valid_files:
-            if Path(file).exists():
+            path = Path(file)
+            if path.exists():
                 existing_files.append(file)
-            # If it doesn't exist in the filesystem but is in the tracked files,
-            # or is already known to be deleted, use git rm
-            elif file in tracked_files or file in deleted_tracked_files or file in already_staged_deletions:
-                deleted_files.append(file)
+            elif file in tracked_files:
+                deleted_tracked_files.append(file)
+            elif file in index_files:
+                deleted_index_files.append(file)
             else:
-                logger.warning("Skipping untracked file that doesn't exist: %s", file)
+                untracked_nonexistent_files.append(file)
+                logger.warning("Skipping file %s: Does not exist and is not tracked by git", file)
 
         # Log the categorized files
-        logger.debug("Existing files: %s", existing_files)
-        logger.debug("Deleted files: %s", deleted_files)
+        logger.debug("Existing files (%d): %s", len(existing_files), existing_files)
+        logger.debug("Deleted tracked files (%d): %s", len(deleted_tracked_files), deleted_tracked_files)
+        logger.debug("Deleted index files (%d): %s", len(deleted_index_files), deleted_index_files)
 
-        # Stage the existing files using git add
+        # 3. Process each file category
+        # =============================
+        # 3.1 Add existing files
         if existing_files:
-            logger.debug("Adding %d existing files", len(existing_files))
-            run_git_command(["git", "add", *existing_files])
+            try:
+                run_git_command(["git", "add", *existing_files])
+                logger.debug("Added %d existing files", len(existing_files))
+            except GitError as e:
+                errors.append(f"Failed to add existing files: {e!s}")
 
-        # Remove the deleted files using git rm
-        if deleted_files:
-            logger.debug("Removing %d deleted files", len(deleted_files))
-            run_git_command(["git", "rm", *deleted_files])
+        # 3.2 Remove deleted tracked files
+        for file in deleted_tracked_files:
+            cmd = ["git", "rm", file]
+            try:
+                run_git_command(cmd)
+                logger.debug("Removed deleted tracked file: %s", file)
+            except GitError as e:
+                if "did not match any files" in str(e):
+                    # File exists in tracked_files but can't be found, try with --cached
+                    deleted_index_files.append(file)
+                else:
+                    errors.append(f"Failed to remove deleted tracked file {file}: {e!s}")
 
-    except GitError as e:
-        msg = f"Failed to stage files: {e}"
+        # 3.3 Remove files from index
+        if deleted_index_files:
+            try:
+                run_git_command(["git", "rm", "--cached", *deleted_index_files])
+                logger.debug("Removed %d files from index", len(deleted_index_files))
+            except GitError as e:
+                errors.append(f"Failed to remove files from index: {e!s}")
+
+        # 4. Report errors if any occurred
+        # ================================
+        if errors:
+            error_msg = "; ".join(errors)
+            msg = f"Errors while staging files: {error_msg}"
+            logger.error(msg)
+            raise GitError(msg)  # noqa: TRY301
+
+    except GitError:
+        # Pass through GitError exceptions
+        raise
+    except Exception as e:
+        # Wrap other exceptions in GitError
+        msg = f"Unexpected error staging files: {e}"
+        logger.exception(msg)
         raise GitError(msg) from e
 
 
@@ -276,6 +306,7 @@ def commit(message: str) -> None:
 
     Raises:
         GitError: If commit fails
+
     """
     try:
         # For commit messages, we need to ensure they're properly quoted
@@ -311,6 +342,7 @@ def get_other_staged_files(targeted_files: list[str]) -> list[str]:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         # Get all staged files
@@ -337,6 +369,7 @@ def stash_staged_changes(exclude_files: list[str]) -> bool:
 
     Raises:
         GitError: If git operations fail
+
     """
     try:
         # First check if there are any other staged files
@@ -358,6 +391,7 @@ def unstash_changes() -> None:
 
     Raises:
         GitError: If git operations fail
+
     """
     try:
         stash_list = run_git_command(["git", "stash", "list"])
@@ -381,6 +415,7 @@ def commit_only_files(
 
     Returns:
         List of other staged files that weren't committed
+
     """
     try:
         # Get status to check for deleted files
@@ -411,45 +446,8 @@ def commit_only_files(
 
             status_files[file_path] = status
 
-        # Classify files as existing or deleted
-        existing_files = []
-        deleted_files = []
-
-        for file in files:
-            if Path(file).exists():
-                existing_files.append(file)
-            else:
-                status = status_files.get(file, "")
-                if status and "D" in status:
-                    deleted_files.append(file)
-                else:
-                    logger.warning("File %s does not exist and is not marked as deleted in git status", file)
-
-        # Stage the files
-        if existing_files:
-            stage_files(existing_files)
-
-        # Stage deleted files separately
-        failed_files = []
-        if deleted_files:
-            # Process all files first, collecting errors
-            for file in deleted_files:
-                try:
-                    git_cmd = ["git", "rm", file]
-                    subprocess.run(  # noqa: S603
-                        git_cmd,
-                        check=True,
-                        capture_output=True,
-                        text=True,
-                        shell=False,  # Explicitly set shell=False for security
-                    )
-                    logger.info("Staged deleted file: %s", file)
-                except subprocess.CalledProcessError as e:  # noqa: PERF203
-                    failed_files.append((file, e.stderr.strip()))
-
-            # Report failures outside the loop to avoid PERF203
-            for file, error in failed_files:
-                logger.warning("Failed to stage deleted file %s: %s", file, error)
+        # Stage all files - our improved stage_files function can handle both existing and deleted files
+        stage_files(files)
 
         # Get other staged files
         other_staged = get_other_staged_files(files)
@@ -492,6 +490,7 @@ def get_untracked_files() -> list[str]:
 
     Raises:
         GitError: If git command fails
+
     """
     try:
         # Use ls-files with --others to get untracked files and --exclude-standard to respect gitignore
@@ -509,6 +508,7 @@ def unstage_files(files: list[str]) -> None:
 
     Raises:
         GitError: If unstaging fails
+
     """
     try:
         run_git_command(["git", "restore", "--staged", *files])

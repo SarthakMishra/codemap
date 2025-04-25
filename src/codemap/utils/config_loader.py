@@ -38,6 +38,7 @@ class ConfigLoader:
 
         Raises:
             FileNotFoundError: If config_file is specified but not found
+
         """
         self.config_file = config_file
         self.repo_root = repo_root
@@ -51,6 +52,7 @@ class ConfigLoader:
         Raises:
             FileNotFoundError: If config_file is specified but not found
             yaml.YAMLError: If the YAML file cannot be parsed
+
         """
         # Always start with default config
         self._config = DEFAULT_CONFIG.copy()
@@ -108,6 +110,7 @@ class ConfigLoader:
 
         Raises:
             ConfigError: If any configuration values are invalid.
+
         """
         if "token_limit" in config and not isinstance(config["token_limit"], int):
             raise ConfigError(ConfigError.TOKEN_LIMIT_MSG)
@@ -124,6 +127,7 @@ class ConfigLoader:
 
         Returns:
             Configuration dictionary
+
         """
         return self._config
 
@@ -132,6 +136,7 @@ class ConfigLoader:
 
         Returns:
             Dictionary with LLM configuration values
+
         """
         llm_config = {
             "model": "openai/gpt-4o-mini",  # Default model
@@ -182,6 +187,7 @@ class ConfigLoader:
 
         Returns:
             Dictionary with commit convention settings
+
         """
         convention = {
             "types": ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore"],
@@ -215,6 +221,7 @@ def get_config(config_file: str | None = None, repo_root: Path | None = None) ->
 
     Returns:
         Configuration dictionary
+
     """
     loader = ConfigLoader(config_file=config_file, repo_root=repo_root)
     return loader.config

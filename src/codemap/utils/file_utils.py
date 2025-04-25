@@ -17,6 +17,7 @@ def count_tokens(file_path: Path) -> int:
 
     Returns:
         Estimated number of tokens in the file.
+
     """
     try:
         with file_path.open(encoding="utf-8") as f:
@@ -39,6 +40,7 @@ def read_file_content(file_path: Path | str) -> str:
     Raises:
         OSError: If the file cannot be read
         UnicodeDecodeError: If the file content cannot be decoded as UTF-8
+
     """
     path_obj = Path(file_path)
     try:
@@ -62,6 +64,7 @@ def get_output_path(repo_root: Path, output_path: Path | None, config: dict) -> 
 
     Returns:
         Output path
+
     """
     if output_path:
         return output_path

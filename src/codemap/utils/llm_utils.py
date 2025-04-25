@@ -36,6 +36,7 @@ def load_prompt_template(template_path: str | None) -> str | None:
 
     Returns:
         Loaded template or None if loading failed
+
     """
     if not template_path:
         return None
@@ -57,7 +58,8 @@ def setup_message_generator(
     api_base: str | None = None,
     api_key: str | None = None,
 ) -> MessageGenerator:
-    """Set up a message generator with the provided options, leveraging LiteLLM API key handling.
+    """Set up a message generator with the provided options, leveraging LiteLLM
+    API key handling.
 
     Args:
         repo_path: Path to the repository
@@ -69,6 +71,7 @@ def setup_message_generator(
 
     Returns:
         Configured message generator
+
     """
     # Load custom prompt template from file if path is provided
     custom_prompt = None
@@ -149,6 +152,7 @@ def generate_message(
 
     Returns:
         Tuple of (message, whether LLM was used)
+
     """
     # Create a safe dictionary representation of chunk for fallback
     try:
@@ -207,6 +211,7 @@ def create_universal_generator(
 
     Returns:
         Configured MessageGenerator instance
+
     """
     try:
         # Import here to avoid circular imports
@@ -266,6 +271,7 @@ def generate_text_with_llm(
 
     Raises:
         RuntimeError: If the LLM call fails
+
     """
     import logging
     import os
@@ -330,6 +336,7 @@ def extract_content_from_response(response: object) -> str:
 
     Returns:
         The extracted text content
+
     """
     # Try different methods to extract content
     try:

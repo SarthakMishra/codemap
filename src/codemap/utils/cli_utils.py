@@ -30,6 +30,7 @@ class SpinnerState:
 
         Returns:
             The singleton instance of SpinnerState
+
         """
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -41,6 +42,7 @@ def setup_logging(*, is_verbose: bool) -> None:
 
     Args:
         is_verbose: Whether to enable debug logging.
+
     """
     # Set log level based on verbosity
     # In verbose mode, use DEBUG or the level specified in LOG_LEVEL env var
@@ -82,6 +84,7 @@ def create_spinner_progress() -> Progress:
 
     Returns:
         A Progress instance with a spinner
+
     """
     return Progress(
         SpinnerColumn(),
@@ -98,6 +101,7 @@ def loading_spinner(message: str = "Processing...") -> Iterator[None]:
 
     Yields:
         None
+
     """
     # In test environments, don't display a spinner
     if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
@@ -127,6 +131,7 @@ def ensure_directory_exists(directory_path: Path) -> None:
 
     Args:
         directory_path: Path to ensure exists
+
     """
     try:
         directory_path.mkdir(parents=True, exist_ok=True)
