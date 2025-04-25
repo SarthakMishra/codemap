@@ -1,4 +1,5 @@
-"""Git metadata analysis module.
+"""
+Git metadata analysis module.
 
 This module provides functionality for extracting Git-related metadata
 from code, such as commit history, authorship, and last modification

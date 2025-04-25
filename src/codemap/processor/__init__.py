@@ -1,4 +1,5 @@
-"""Code processing modules for CodeMap.
+"""
+Code processing modules for CodeMap.
 
 This package contains modules for processing and analyzing code:
 - chunking: Strategies for breaking code into semantic chunks

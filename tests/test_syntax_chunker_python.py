@@ -12,8 +12,8 @@ from codemap.processor.chunking.tree_sitter import TreeSitterChunker
 
 @pytest.fixture
 def python_code() -> str:
-    """Sample Python code for testing."""
-    return '''"""Module docstring with detailed explanation.
+	"""Sample Python code for testing."""
+	return '''"""Module docstring with detailed explanation.
 
 This module demonstrates various Python constructs for testing the syntax chunker.
 """
@@ -140,147 +140,147 @@ def long_function_for_testing():
 
 
 def get_all_chunks(root_chunk: Chunk) -> list[Chunk]:
-    """Recursively get all chunks in a hierarchy."""
-    result = [root_chunk]
-    for child in root_chunk.children:
-        result.extend(get_all_chunks(child))
-    return result
+	"""Recursively get all chunks in a hierarchy."""
+	result = [root_chunk]
+	for child in root_chunk.children:
+		result.extend(get_all_chunks(child))
+	return result
 
 
 @pytest.mark.unit
 @pytest.mark.processor
 @pytest.mark.chunking
 class TestPythonSyntaxChunker:
-    """Tests for Python syntax-based chunking functionality."""
+	"""Tests for Python syntax-based chunking functionality."""
 
-    def setup_method(self) -> None:
-        """Set up test environment with a chunker instance."""
-        self.chunker = TreeSitterChunker()
+	def setup_method(self) -> None:
+		"""Set up test environment with a chunker instance."""
+		self.chunker = TreeSitterChunker()
 
-    def test_python_chunking(self, python_code: str) -> None:
-        """Test chunking Python code."""
-        # Arrange - python_code fixture is used
+	def test_python_chunking(self, python_code: str) -> None:
+		"""Test chunking Python code."""
+		# Arrange - python_code fixture is used
 
-        # Act
-        chunks = self.chunker.chunk(python_code, Path("test.py"))
+		# Act
+		chunks = self.chunker.chunk(python_code, Path("test.py"))
 
-        # Assert - Verify module chunk
-        assert len(chunks) == 1
-        module = chunks[0]
-        assert module.metadata.entity_type == EntityType.MODULE
-        assert module.metadata.description is not None
-        assert "Module docstring" in module.metadata.description
+		# Assert - Verify module chunk
+		assert len(chunks) == 1
+		module = chunks[0]
+		assert module.metadata.entity_type == EntityType.MODULE
+		assert module.metadata.description is not None
+		assert "Module docstring" in module.metadata.description
 
-        # Count the total number of chunks
-        all_chunks = get_all_chunks(module)
-        assert len(all_chunks) > 10, "Should have a reasonable number of chunks"
+		# Count the total number of chunks
+		all_chunks = get_all_chunks(module)
+		assert len(all_chunks) > 10, "Should have a reasonable number of chunks"
 
-        # ----- Verify imports -----
-        imports = [c for c in module.children if c.metadata.entity_type == EntityType.IMPORT]
-        assert len(imports) >= 2, "Should have at least 2 import statements"
+		# ----- Verify imports -----
+		imports = [c for c in module.children if c.metadata.entity_type == EntityType.IMPORT]
+		assert len(imports) >= 2, "Should have at least 2 import statements"
 
-        # ----- Verify classes -----
-        # Find all classes
-        classes = [c for c in module.children if c.metadata.entity_type == EntityType.CLASS]
-        assert len(classes) >= 3, "Should have at least 3 classes"
+		# ----- Verify classes -----
+		# Find all classes
+		classes = [c for c in module.children if c.metadata.entity_type == EntityType.CLASS]
+		assert len(classes) >= 3, "Should have at least 3 classes"
 
-        # Check MyClass
-        my_class = next(c for c in classes if c.metadata.name == "MyClass")
-        assert my_class.metadata.description is not None
-        assert "Class docstring" in my_class.metadata.description
+		# Check MyClass
+		my_class = next(c for c in classes if c.metadata.name == "MyClass")
+		assert my_class.metadata.description is not None
+		assert "Class docstring" in my_class.metadata.description
 
-        # Verify method chunks in MyClass
-        methods = [c for c in my_class.children if c.metadata.entity_type in (EntityType.METHOD, EntityType.PROPERTY)]
-        assert len(methods) >= 3, "MyClass should have at least 3 methods/properties"
+		# Verify method chunks in MyClass
+		methods = [c for c in my_class.children if c.metadata.entity_type in (EntityType.METHOD, EntityType.PROPERTY)]
+		assert len(methods) >= 3, "MyClass should have at least 3 methods/properties"
 
-        # Check individual methods
-        init_method = next(m for m in methods if m.metadata.name == "__init__")
-        assert init_method.metadata.description is not None
-        assert "Constructor docstring" in init_method.metadata.description
+		# Check individual methods
+		init_method = next(m for m in methods if m.metadata.name == "__init__")
+		assert init_method.metadata.description is not None
+		assert "Constructor docstring" in init_method.metadata.description
 
-        value_property = next(m for m in methods if m.metadata.name == "value")
-        assert value_property.metadata.entity_type == EntityType.PROPERTY
-        assert value_property.metadata.description is not None
-        assert "Property docstring" in value_property.metadata.description
+		value_property = next(m for m in methods if m.metadata.name == "value")
+		assert value_property.metadata.entity_type == EntityType.PROPERTY
+		assert value_property.metadata.description is not None
+		assert "Property docstring" in value_property.metadata.description
 
-        calculate_method = next(m for m in methods if m.metadata.name == "calculate")
-        assert calculate_method.metadata.entity_type == EntityType.METHOD
-        assert calculate_method.metadata.description is not None
-        assert "Regular method" in calculate_method.metadata.description
+		calculate_method = next(m for m in methods if m.metadata.name == "calculate")
+		assert calculate_method.metadata.entity_type == EntityType.METHOD
+		assert calculate_method.metadata.description is not None
+		assert "Regular method" in calculate_method.metadata.description
 
-        # ----- Verify functions -----
-        # Find all regular functions
-        regular_functions = [c for c in module.children if c.metadata.entity_type == EntityType.FUNCTION]
-        assert len(regular_functions) >= 2, "Should have at least 2 regular functions"
+		# ----- Verify functions -----
+		# Find all regular functions
+		regular_functions = [c for c in module.children if c.metadata.entity_type == EntityType.FUNCTION]
+		assert len(regular_functions) >= 2, "Should have at least 2 regular functions"
 
-        # Check regular function
-        reg_func = next(f for f in regular_functions if f.metadata.name == "regular_function")
-        assert reg_func.metadata.description is not None
-        assert "Regular function docstring" in reg_func.metadata.description
+		# Check regular function
+		reg_func = next(f for f in regular_functions if f.metadata.name == "regular_function")
+		assert reg_func.metadata.description is not None
+		assert "Regular function docstring" in reg_func.metadata.description
 
-        # Check long function
-        long_func = next(f for f in regular_functions if f.metadata.name == "long_function_for_testing")
-        assert long_func.metadata.description is not None
-        assert "Long function" in long_func.metadata.description
-        assert len(long_func.content) > 500, "Long function should have significant content"
+		# Check long function
+		long_func = next(f for f in regular_functions if f.metadata.name == "long_function_for_testing")
+		assert long_func.metadata.description is not None
+		assert "Long function" in long_func.metadata.description
+		assert len(long_func.content) > 500, "Long function should have significant content"
 
-        # ----- Verify test functions -----
-        test_func = next(c for c in module.children if c.metadata.entity_type == EntityType.TEST_CASE)
-        assert test_func.metadata.name == "test_function"
-        assert test_func.metadata.description is not None
-        assert "Test function docstring" in test_func.metadata.description
+		# ----- Verify test functions -----
+		test_func = next(c for c in module.children if c.metadata.entity_type == EntityType.TEST_CASE)
+		assert test_func.metadata.name == "test_function"
+		assert test_func.metadata.description is not None
+		assert "Test function docstring" in test_func.metadata.description
 
-        # ----- Verify constants -----
-        constants = [c for c in module.children if c.metadata.entity_type == EntityType.CONSTANT]
-        assert len(constants) >= 3, "Should have at least 3 constants"
+		# ----- Verify constants -----
+		constants = [c for c in module.children if c.metadata.entity_type == EntityType.CONSTANT]
+		assert len(constants) >= 3, "Should have at least 3 constants"
 
-        pi_constant = next(c for c in constants if c.metadata.name == "PI")
-        assert pi_constant is not None
+		pi_constant = next(c for c in constants if c.metadata.name == "PI")
+		assert pi_constant is not None
 
-        constant = next(c for c in constants if c.metadata.name == "CONSTANT")
-        assert constant.metadata.name == "CONSTANT"
+		constant = next(c for c in constants if c.metadata.name == "CONSTANT")
+		assert constant.metadata.name == "CONSTANT"
 
-        # ----- Verify variables -----
-        variables = [c for c in module.children if c.metadata.entity_type == EntityType.VARIABLE]
-        type_aliases = [c for c in module.children if c.metadata.entity_type == EntityType.TYPE_ALIAS]
+		# ----- Verify variables -----
+		variables = [c for c in module.children if c.metadata.entity_type == EntityType.VARIABLE]
+		type_aliases = [c for c in module.children if c.metadata.entity_type == EntityType.TYPE_ALIAS]
 
-        # Note: variables might be classified as TYPE_ALIAS in the current implementation
-        # So check for the variable names in either variables or type_aliases list
-        variable_names = {v.metadata.name for v in variables}.union({v.metadata.name for v in type_aliases})
-        assert "variable_one" in variable_names or "variable_two" in variable_names, (
-            "Should detect at least one of the variable names"
-        )
+		# Note: variables might be classified as TYPE_ALIAS in the current implementation
+		# So check for the variable names in either variables or type_aliases list
+		variable_names = {v.metadata.name for v in variables}.union({v.metadata.name for v in type_aliases})
+		assert "variable_one" in variable_names or "variable_two" in variable_names, (
+			"Should detect at least one of the variable names"
+		)
 
-        # ----- Verify type definitions -----
-        type_alias_names = {t.metadata.name for t in type_aliases}
-        assert "MyType" in type_alias_names or "T" in type_alias_names, "Should detect at least one type alias"
+		# ----- Verify type definitions -----
+		type_alias_names = {t.metadata.name for t in type_aliases}
+		assert "MyType" in type_alias_names or "T" in type_alias_names, "Should detect at least one type alias"
 
-    def test_chunk_splitting(self, python_code: str) -> None:
-        """Test splitting large chunks."""
-        # Arrange
-        chunks = self.chunker.chunk(python_code, Path("test.py"))
-        module = chunks[0]  # Get the module chunk
+	def test_chunk_splitting(self, python_code: str) -> None:
+		"""Test splitting large chunks."""
+		# Arrange
+		chunks = self.chunker.chunk(python_code, Path("test.py"))
+		module = chunks[0]  # Get the module chunk
 
-        # Find a large function to split
-        long_func = next(
-            c
-            for c in module.children
-            if c.metadata.entity_type == EntityType.FUNCTION and c.metadata.name == "long_function_for_testing"
-        )
-        max_size = 400  # Adjust size to be larger than the current chunk sizes
+		# Find a large function to split
+		long_func = next(
+			c
+			for c in module.children
+			if c.metadata.entity_type == EntityType.FUNCTION and c.metadata.name == "long_function_for_testing"
+		)
+		max_size = 400  # Adjust size to be larger than the current chunk sizes
 
-        # Act
-        split_chunks = self.chunker.split(long_func, max_size)
+		# Act
+		split_chunks = self.chunker.split(long_func, max_size)
 
-        # Assert
-        assert len(split_chunks) > 1, "Large function should be split into multiple chunks"
+		# Assert
+		assert len(split_chunks) > 1, "Large function should be split into multiple chunks"
 
-        # Check that the total content is preserved
-        combined_content = "".join(chunk.content for chunk in split_chunks)
-        assert combined_content == long_func.content
+		# Check that the total content is preserved
+		combined_content = "".join(chunk.content for chunk in split_chunks)
+		assert combined_content == long_func.content
 
-        # Check that each chunk doesn't exceed the max_size significantly
-        for chunk in split_chunks:
-            assert len(chunk.content) <= max_size * 1.1, (
-                f"Chunk size {len(chunk.content)} should be <= {max_size * 1.1} (max_size plus 10%)"
-            )
+		# Check that each chunk doesn't exceed the max_size significantly
+		for chunk in split_chunks:
+			assert len(chunk.content) <= max_size * 1.1, (
+				f"Chunk size {len(chunk.content)} should be <= {max_size * 1.1} (max_size plus 10%)"
+			)

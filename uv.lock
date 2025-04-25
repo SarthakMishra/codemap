@@ -179,7 +179,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "docformatter" },
-    { name = "isort" },
     { name = "pylint" },
     { name = "pyright" },
     { name = "pytest" },
@@ -216,7 +215,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "docformatter", specifier = ">=1.7.5" },
-    { name = "isort", specifier = ">=6.0.1" },
     { name = "pylint", specifier = ">=3.3.6" },
     { name = "pyright", specifier = ">=1.1.400" },
     { name = "pytest", specifier = ">=8.3.5" },

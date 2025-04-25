@@ -10,20 +10,20 @@ import typer  # type: ignore[import]
 
 # Load environment variables from .env files
 try:
-    from dotenv import load_dotenv
+	from dotenv import load_dotenv
 
-    # Try to load from .env.local first, then fall back to .env
-    env_local = Path(".env.local")
-    if env_local.exists():
-        load_dotenv(dotenv_path=env_local)
-        logging.getLogger(__name__).debug("Loaded environment variables from %s", env_local)
-    else:
-        env_file = Path(".env")
-        if env_file.exists():
-            load_dotenv(dotenv_path=env_file)
-            logging.getLogger(__name__).debug("Loaded environment variables from %s", env_file)
+	# Try to load from .env.local first, then fall back to .env
+	env_local = Path(".env.local")
+	if env_local.exists():
+		load_dotenv(dotenv_path=env_local)
+		logging.getLogger(__name__).debug("Loaded environment variables from %s", env_local)
+	else:
+		env_file = Path(".env")
+		if env_file.exists():
+			load_dotenv(dotenv_path=env_file)
+			logging.getLogger(__name__).debug("Loaded environment variables from %s", env_file)
 except ImportError:
-    pass  # dotenv not installed, skip loading
+	pass  # dotenv not installed, skip loading
 
 from .cli.commit_cmd import commit_command
 from .cli.generate_cmd import generate_command
@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize the main CLI app
 app = typer.Typer(
-    help="CodeMap - Generate optimized markdown documentation from your codebase.",
+	help="CodeMap - Generate optimized markdown documentation from your codebase.",
 )
 
 # Register commands
@@ -46,9 +46,9 @@ app.command(name="pr")(pr_command)
 
 
 def main() -> int:
-    """Run the CLI application."""
-    return app()
+	"""Run the CLI application."""
+	return app()
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+	sys.exit(main())
