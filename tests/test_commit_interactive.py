@@ -14,7 +14,9 @@ from tests.base import GitTestBase
 class TestCommitUI(GitTestBase):
     """Test cases for the CommitUI class.
 
-    Tests the user interface components for interactive commit functionality.
+    Tests the user interface components for interactive commit
+    functionality.
+
     """
 
     def setup_method(self) -> None:
@@ -34,6 +36,7 @@ class TestCommitUI(GitTestBase):
 
         Verifies that the Console.print method is called to display the
         chunk information.
+
         """
         # Act: Display the chunk
         self.ui.display_chunk(self.mock_chunk, 0, 1)
@@ -45,8 +48,9 @@ class TestCommitUI(GitTestBase):
     def test_display_message(self, mock_print: Mock) -> None:
         """Test that display_message shows a commit message panel.
 
-        Checks that the commit message is properly displayed using Rich's
-        formatting capabilities.
+        Checks that the commit message is properly displayed using
+        Rich's formatting capabilities.
+
         """
         # Act: Display a commit message
         self.ui.display_message("Test message", is_llm_generated=True)
@@ -58,8 +62,9 @@ class TestCommitUI(GitTestBase):
     def test_get_user_action(self, mock_select: Mock) -> None:
         """Test that get_user_action returns correct ChunkAction.
 
-        Tests the conversion from user selection string to the appropriate
-        ChunkAction enum value.
+        Tests the conversion from user selection string to the
+        appropriate ChunkAction enum value.
+
         """
         # Arrange: Set up the mock to return a specific action
         mock_select.return_value.ask.return_value = "Commit with this message"
@@ -75,6 +80,7 @@ class TestCommitUI(GitTestBase):
         """Test that edit_message returns the edited message.
 
         Verifies that user input is correctly captured and returned.
+
         """
         # Arrange: Mock user input
         mock_ask.return_value = "Edited message"
@@ -91,7 +97,9 @@ class TestCommitUI(GitTestBase):
     def test_process_chunk_accept(self, mock_edit: Mock, mock_action: Mock, mock_display: Mock) -> None:
         """Test that process_chunk returns correct ChunkResult for ACCEPT action.
 
-        Verifies the behavior when a user accepts a commit chunk without editing.
+        Verifies the behavior when a user accepts a commit chunk without
+        editing.
+
         """
         # Arrange: Set up mocks
         mock_action.return_value = ChunkAction.ACCEPT
@@ -111,7 +119,9 @@ class TestCommitUI(GitTestBase):
     def test_process_chunk_edit(self, mock_edit: Mock, mock_action: Mock, mock_display: Mock) -> None:
         """Test that process_chunk returns correct ChunkResult for EDIT action.
 
-        Verifies the behavior when a user chooses to edit the commit message.
+        Verifies the behavior when a user chooses to edit the commit
+        message.
+
         """
         # Arrange: Set up mocks
         mock_action.return_value = ChunkAction.EDIT
@@ -129,7 +139,8 @@ class TestCommitUI(GitTestBase):
     @patch.object(CommitUI, "display_chunk")
     @patch.object(CommitUI, "get_user_action")
     def test_process_chunk_other_actions(self, mock_action: Mock, mock_display: Mock) -> None:
-        """Test that process_chunk returns correct ChunkResult for other actions."""
+        """Test that process_chunk returns correct ChunkResult for other
+        actions."""
         # Test cases
         test_cases = [ChunkAction.SKIP, ChunkAction.ABORT, ChunkAction.REGENERATE]
 

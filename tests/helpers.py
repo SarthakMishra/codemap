@@ -22,6 +22,7 @@ def create_diff_chunk(
 
     Returns:
         A DiffChunk instance
+
     """
     chunk = MagicMock(spec=DiffChunk)
     chunk.files = files
@@ -37,6 +38,7 @@ def assert_chunk_processed(chunk: DiffChunk, message: str) -> None:
     Args:
         chunk: The processed chunk
         message: Expected message
+
     """
     assert chunk.description == message
     assert chunk.is_llm_generated
@@ -48,6 +50,7 @@ def create_file_content(path: Path, content: str) -> None:
     Args:
         path: Path where to create the file
         content: Content to write to the file
+
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
@@ -59,6 +62,7 @@ def create_python_file(path: Path, content: str | None = None) -> None:
     Args:
         path: Path where to create the file
         content: Content to write to the file (if None, a basic Python file is created)
+
     """
     if content is None:
         content = '"""Example module."""\n\ndef example_function():\n    """Example function."""\n    return True\n'
@@ -74,6 +78,7 @@ def patch_multiple(*args: str, **kwargs: str) -> Callable[[Callable], Callable]:
 
     Returns:
         Decorator function for patching
+
     """
 
     def decorator(func: Callable) -> Callable:
@@ -94,6 +99,7 @@ def read_fixture_file(rel_path: str) -> str:
 
     Returns:
         Content of the fixture file
+
     """
     path = Path(__file__).parent / "fixtures" / rel_path
     return path.read_text(encoding="utf-8")
@@ -119,6 +125,7 @@ def create_git_commit_data(
 
     Returns:
         A dictionary with commit data
+
     """
     if diff_content is None:
         diff_content = """diff --git a/file1.py b/file1.py

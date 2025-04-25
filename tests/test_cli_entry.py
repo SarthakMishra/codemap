@@ -17,6 +17,7 @@ class TestCliEntry(CLITestBase):
 
         Tests that the main function in cli_app calls the app function
         and returns its result.
+
         """
         with patch("codemap.cli_app.app") as mock_app:
             mock_app.return_value = 0
@@ -36,6 +37,7 @@ class TestCliEntry(CLITestBase):
 
         Verifies that the module exports the expected attributes and
         that app is a Typer instance.
+
         """
         # Arrange/Act: Import the module
         import codemap.cli_app
@@ -50,8 +52,10 @@ class TestCliEntry(CLITestBase):
     def test_cli_invoke(self) -> None:
         """Test that the CLI can be invoked.
 
-        A smoke test to ensure the CLI can be invoked with basic parameters.
-        Validates that the help option works and returns a successful exit code.
+        A smoke test to ensure the CLI can be invoked with basic
+        parameters. Validates that the help option works and returns a
+        successful exit code.
+
         """
         # Act: Invoke the CLI with help option
         result = self.invoke_command(["--help"])

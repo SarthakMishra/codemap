@@ -16,8 +16,9 @@ from tests.base import GitTestBase
 class TestCommitWorkflow(GitTestBase):
     """Test cases for commit workflow logic in CommitCommand.
 
-    Tests the workflow for processing git commits, including chunk handling,
-    message generation, and interactive actions.
+    Tests the workflow for processing git commits, including chunk
+    handling, message generation, and interactive actions.
+
     """
 
     def setup_method(self) -> None:
@@ -53,6 +54,7 @@ class TestCommitWorkflow(GitTestBase):
 
         Verifies that the method correctly processes a diff chunk and
         generates a commit message using the message generator.
+
         """
         # Arrange: Set up mock return value
         mock_generate_message.return_value = ("Test commit message", True)
@@ -77,6 +79,7 @@ class TestCommitWorkflow(GitTestBase):
 
         Tests the process of staging files and creating a commit with
         the provided message.
+
         """
         # Arrange: Set up mocks
         mock_get_staged.return_value = Mock(files=["file1.py", "file2.py", "file3.py"])
@@ -98,8 +101,9 @@ class TestCommitWorkflow(GitTestBase):
     def test_process_chunk_accept(self, mock_perform_commit: Mock, mock_generate_message: Mock) -> None:
         """Test _process_chunk with ACCEPT action.
 
-        Verifies that when a user accepts a chunk, the commit is performed
-        with the generated or edited message.
+        Verifies that when a user accepts a chunk, the commit is
+        performed with the generated or edited message.
+
         """
         # Arrange: Set up mocks
         mock_perform_commit.return_value = True
@@ -120,6 +124,7 @@ class TestCommitWorkflow(GitTestBase):
 
         Verifies that when a user skips a chunk, no commit is performed
         and the UI shows the skipped files.
+
         """
         # Arrange: Set up mocks
         self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.SKIP)
@@ -138,6 +143,7 @@ class TestCommitWorkflow(GitTestBase):
 
         Tests the handling of user abort action, including confirmation
         and state handling.
+
         """
         # Arrange: Set up mock for abort
         self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.ABORT)
@@ -171,8 +177,9 @@ class TestCommitWorkflow(GitTestBase):
     def test_process_all_chunks_interactive(self, mock_process_chunk: Mock) -> None:
         """Test process_all_chunks in interactive mode.
 
-        Verifies that all chunks are processed sequentially in interactive
-        mode, with appropriate UI feedback.
+        Verifies that all chunks are processed sequentially in
+        interactive mode, with appropriate UI feedback.
+
         """
         # Arrange: Set up mocks
         mock_chunk2 = Mock(spec=DiffChunk)
@@ -193,7 +200,9 @@ class TestCommitWorkflow(GitTestBase):
     def test_process_all_chunks_non_interactive(self, mock_perform_commit: Mock, mock_generate_message: Mock) -> None:
         """Test process_all_chunks in non-interactive mode.
 
-        Tests the automatic commit of all chunks without user interaction.
+        Tests the automatic commit of all chunks without user
+        interaction.
+
         """
         # Arrange: Set up mocks
         mock_chunk2 = Mock(spec=DiffChunk)

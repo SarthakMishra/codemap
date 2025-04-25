@@ -39,6 +39,7 @@ class TestEntityTypeEncoder(json.JSONEncoder):
         Args:
             *args: Variable length argument list passed to parent
             **kwargs: Arbitrary keyword arguments passed to parent
+
         """
         self.entities = set()
         super().__init__(*args, **kwargs)
@@ -51,6 +52,7 @@ class TestEntityTypeEncoder(json.JSONEncoder):
 
         Returns:
             A JSON serializable representation of the object
+
         """
         if isinstance(o, EntityType):
             return o.name

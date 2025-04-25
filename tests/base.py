@@ -40,6 +40,7 @@ class GitTestBase:
 
         Args:
             path: Mock path to use
+
         """
         patcher = patch("codemap.git.command.get_repo_root")
         self.mock_get_repo_root = patcher.start()
@@ -69,6 +70,7 @@ class LLMTestBase:
         Args:
             response: Response to return
             success: Whether the generation was successful
+
         """
         self.message_generator.generate_message.return_value = (response, success)
 
@@ -90,6 +92,7 @@ class CLITestBase:
 
         Returns:
             Command result
+
         """
         import codemap.cli_app
 
@@ -113,6 +116,7 @@ class FileSystemTestBase:
 
         Returns:
             Path to the created file
+
         """
         path = self.temp_dir / rel_path
         path.parent.mkdir(parents=True, exist_ok=True)

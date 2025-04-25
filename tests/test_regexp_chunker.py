@@ -91,7 +91,8 @@ class TestRegExpChunker:
         assert len(module.children) > 0
 
     def test_docstring_extraction(self, code_samples: dict[str, str]) -> None:
-        """Test that docstrings are properly extracted from different languages."""
+        """Test that docstrings are properly extracted from different
+        languages."""
         # Arrange - using code_samples fixture
 
         # Act & Assert for Python
@@ -115,7 +116,8 @@ class TestRegExpChunker:
         ],
     )
     def test_block_detection(self, code_samples: dict[str, str], language: str, file_extension: str) -> None:
-        """Test that the chunker properly detects code blocks for different languages."""
+        """Test that the chunker properly detects code blocks for different
+        languages."""
         # Arrange
         sample = code_samples[language]
         file_path = Path(f"test.{file_extension}")

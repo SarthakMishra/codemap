@@ -20,7 +20,9 @@ from codemap.utils.git_utils import GitDiff
 def cleanup_docs_dir() -> Generator[None, None, None]:
     """Auto-use fixture to clean up any docs directories created by tests.
 
-    This ensures we don't leave behind test files in the actual project directory.
+    This ensures we don't leave behind test files in the actual project
+    directory.
+
     """
     # Setup - nothing to do
     yield

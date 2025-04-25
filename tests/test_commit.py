@@ -145,12 +145,14 @@ class TestDiffSplitter(GitTestBase):
     """Test cases for diff splitting functionality.
 
     Tests the semantic splitting of git diffs into logical chunks.
+
     """
 
     def test_diff_splitter_semantic_only(self) -> None:
         """Test that the diff splitter now only uses semantic strategy.
 
         Verifies that the splitter defaults to semantic chunking.
+
         """
         # Arrange: Create test diff
         diff = GitDiff(
@@ -193,6 +195,7 @@ index 2345678..bcdefgh 100645
         """Test the semantic splitting strategy.
 
         Verifies that related files are correctly grouped together.
+
         """
         # Arrange: Create test diff
         diff = GitDiff(
@@ -234,6 +237,7 @@ class TestMessageGenerator(LLMTestBase):
     """Test cases for commit message generation.
 
     Tests the generation of commit messages using LLMs.
+
     """
 
     def test_message_generator_fallback(self) -> None:
@@ -241,6 +245,7 @@ class TestMessageGenerator(LLMTestBase):
 
         Verifies that when LLM API is unavailable, a reasonable fallback
         message is generated.
+
         """
         # Arrange: Set up repo and environment
         repo_root = Path("/mock/repo")
@@ -272,6 +277,7 @@ class TestMessageGenerator(LLMTestBase):
         """Test message generation with OpenAI provider.
 
         Verifies interaction with OpenAI models for message generation.
+
         """
         # Arrange: Set up test environment
         repo_root = Path("/mock/repo")
@@ -307,7 +313,9 @@ class TestMessageGenerator(LLMTestBase):
     def test_message_generator_anthropic(self) -> None:
         """Test message generation with Anthropic provider.
 
-        Verifies interaction with Anthropic Claude models for message generation.
+        Verifies interaction with Anthropic Claude models for message
+        generation.
+
         """
         # Arrange: Set up test environment
         repo_root = Path("/mock/repo")
@@ -351,13 +359,16 @@ class TestMessageGenerator(LLMTestBase):
 class TestFileRelations(GitTestBase):
     """Test cases for file relationship detection.
 
-    Tests the logic that determines semantic relationships between files.
+    Tests the logic that determines semantic relationships between
+    files.
+
     """
 
     def test_are_files_related(self) -> None:
         """Test file relationship detection for semantic splitting.
 
         Verifies that the algorithm correctly identifies related files.
+
         """
         # Arrange: Set up test environment
         repo_root = Path("/mock/repo")
@@ -381,6 +392,7 @@ class TestFileRelations(GitTestBase):
         """Test file pattern relationships for semantic splitting.
 
         Verifies recognition of related file types based on patterns.
+
         """
         # Arrange: Set up test environment
         repo_root = Path("/mock/repo")
@@ -415,12 +427,15 @@ class TestCommitConfig(GitTestBase):
     """Test cases for commit command configuration.
 
     Tests the loading and application of config settings.
+
     """
 
     def test_config_loading(self) -> None:
         """Test loading configuration from .codemap.yml.
 
-        Verifies that commit configuration is properly loaded from config files.
+        Verifies that commit configuration is properly loaded from
+        config files.
+
         """
         # Arrange: Set up test environment
         repo_root = Path("/mock/repo")
@@ -452,7 +467,9 @@ class TestCommitConfig(GitTestBase):
     def test_setup_message_generator(self) -> None:
         """Test setup_message_generator properly configures provider and API keys.
 
-        Verifies that the generator is configured with the specified provider and model.
+        Verifies that the generator is configured with the specified
+        provider and model.
+
         """
         # Arrange: Set up test environment
         repo_path = Path("/mock/repo")
@@ -481,13 +498,15 @@ class TestInteractiveCommit(GitTestBase):
     """Test cases for interactive commit workflow.
 
     Tests the user interface and interaction flow for commits.
+
     """
 
     def test_interactive_chunk_processing(self) -> None:
         """Test the interactive chunk processing workflow.
 
-        Verifies that user interactions are properly handled during
-        the commit process.
+        Verifies that user interactions are properly handled during the
+        commit process.
+
         """
         # Arrange: Create test data
         chunk = DiffChunk(

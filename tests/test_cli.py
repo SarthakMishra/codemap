@@ -64,13 +64,15 @@ class TestCLIInit(FileSystemTestBase):
     """Test cases for CLI initialization commands.
 
     Tests the init command functionality for setting up new projects.
+
     """
 
     def test_init_command(self) -> None:
         """Test the init command creates necessary files.
 
-        Validates that the initialization process creates the config file
-        and documentation directory correctly.
+        Validates that the initialization process creates the config
+        file and documentation directory correctly.
+
         """
         # Arrange: Set up directory structure for test
         config_file = self.temp_dir / ".codemap.yml"
@@ -88,8 +90,9 @@ class TestCLIInit(FileSystemTestBase):
     def test_init_command_with_existing_files(self) -> None:
         """Test init command handles existing files correctly.
 
-        Verifies behavior when files already exist (with force=False
-        and force=True).
+        Verifies behavior when files already exist (with force=False and
+        force=True).
+
         """
         # Arrange: Create initial files
         config_file = self.temp_dir / ".codemap.yml"
@@ -115,13 +118,17 @@ class TestCLIInit(FileSystemTestBase):
 class TestCLIGenerate(FileSystemTestBase):
     """Test cases for the generate command.
 
-    Tests the functionality for generating documentation and other outputs.
+    Tests the functionality for generating documentation and other
+    outputs.
+
     """
 
     def test_generate_command(self, sample_repo: Path) -> None:
         """Test the generate command with real files.
 
-        Verifies that the generate command produces output files correctly.
+        Verifies that the generate command produces output files
+        correctly.
+
         """
         # Arrange: Set up the sample repo
         config_file = sample_repo / ".codemap.yml"
@@ -141,6 +148,7 @@ class TestCLIGenerate(FileSystemTestBase):
         """Test generate command with custom config file.
 
         Tests that the command respects custom configuration settings.
+
         """
         # Arrange: Create a test config file
         config_file = sample_repo / "test_config.yml"
@@ -166,6 +174,7 @@ class TestCLIGenerate(FileSystemTestBase):
         """Test generate command with non-existent path.
 
         Verifies the behavior when an invalid path is provided.
+
         """
         # Arrange/Act: Set up invalid path
         invalid_path = Path("/nonexistent/path")
@@ -177,7 +186,9 @@ class TestCLIGenerate(FileSystemTestBase):
     def test_generate_command_creates_output_directory(self, sample_repo: Path) -> None:
         """Test generate command creates output directory if missing.
 
-        Validates that missing output directories are created when needed.
+        Validates that missing output directories are created when
+        needed.
+
         """
         # Arrange: Set up the repo
         (sample_repo / ".codemap.yml").parent.mkdir(exist_ok=True, parents=True)
@@ -195,7 +206,9 @@ class TestCLIGenerate(FileSystemTestBase):
     def test_generate_command_with_missing_parent_directory(self) -> None:
         """Test generate command fails gracefully with invalid output directory.
 
-        Verifies that the command handles invalid output paths correctly.
+        Verifies that the command handles invalid output paths
+        correctly.
+
         """
         # Arrange/Act: Set up invalid output path
         output_file = Path("/nonexistent/path/docs.md")
@@ -211,6 +224,7 @@ class TestOutputPath(FileSystemTestBase):
     """Test cases for output path handling.
 
     Tests the functionality for generating and managing output paths.
+
     """
 
     def test_get_output_path(self) -> None:
@@ -218,6 +232,7 @@ class TestOutputPath(FileSystemTestBase):
 
         Verifies that output paths are correctly generated based on
         repository root and configuration.
+
         """
         # Arrange: Set up test data
         repo_root = self.temp_dir
@@ -241,6 +256,7 @@ class TestOutputPath(FileSystemTestBase):
         """Test output path generation when a custom path is provided.
 
         Verifies that custom output paths are respected.
+
         """
         # Arrange: Define custom path
         custom_path = sample_repo / "custom" / "docs.md"
@@ -254,7 +270,9 @@ class TestOutputPath(FileSystemTestBase):
     def test_get_output_path_creates_directory(self, sample_repo: Path) -> None:
         """Test that output path generation creates missing directories.
 
-        Verifies that parent directories are created when they don't exist.
+        Verifies that parent directories are created when they don't
+        exist.
+
         """
         # Arrange: Set up config with nested directory
         config = {
@@ -271,7 +289,9 @@ class TestOutputPath(FileSystemTestBase):
     def test_get_output_path_with_timestamp(self, sample_repo: Path) -> None:
         """Test output path generation with timestamp.
 
-        Verifies that timestamps are correctly included in generated filenames.
+        Verifies that timestamps are correctly included in generated
+        filenames.
+
         """
         # Arrange: Set up test data
         current_time = datetime.now(tz=timezone.utc)
@@ -297,12 +317,15 @@ class TestTreeCommand(FileSystemTestBase):
     """Test cases for the tree generation command.
 
     Tests the functionality for generating directory trees.
+
     """
 
     def test_generate_tree_command(self, sample_repo: Path) -> None:
         """Test the tree generation command.
 
-        Verifies that directory structures can be created for tree generation.
+        Verifies that directory structures can be created for tree
+        generation.
+
         """
         # Arrange/Act: Create some files for the tree generation
         (sample_repo / "src" / "main.py").parent.mkdir(exist_ok=True, parents=True)
@@ -318,6 +341,7 @@ class TestTreeCommand(FileSystemTestBase):
         """Test the tree generation command with output to file.
 
         Verifies that tree output can be written to files correctly.
+
         """
         # Arrange: Create some files for the tree generation
         (sample_repo / "src" / "main.py").parent.mkdir(exist_ok=True, parents=True)
@@ -336,7 +360,9 @@ class TestTreeCommand(FileSystemTestBase):
     def test_respect_output_dir_from_config(self, sample_repo: Path) -> None:
         """Test that generate command respects output_dir from config.
 
-        Verifies that the command uses the output directory specified in config.
+        Verifies that the command uses the output directory specified in
+        config.
+
         """
         # Arrange: Create a config file with custom output_dir
         config_file = sample_repo / ".codemap.yml"

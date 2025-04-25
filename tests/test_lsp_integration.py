@@ -52,7 +52,8 @@ class TestLSPIntegration:
 
     @pytest.fixture
     def mock_git_analyzer(self) -> MagicMock:
-        """Create a mock GitMetadataAnalyzer to avoid Git repository validation."""
+        """Create a mock GitMetadataAnalyzer to avoid Git repository
+        validation."""
         mock_git = MagicMock(spec=GitMetadataAnalyzer)
         mock_git.get_current_commit.return_value = "mock-commit-id"
         mock_git.get_current_branch.return_value = "mock-branch"
