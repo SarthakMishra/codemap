@@ -13,6 +13,8 @@ DEFAULT_CONFIG = {
 	"commit": {
 		# Strategy for splitting diffs: file, hunk, semantic
 		"strategy": "file",
+		# Whether to bypass git hooks with --no-verify when committing
+		"bypass_hooks": False,
 		# LLM configuration
 		"llm": {
 			"model": "openai/gpt-4o-mini",
