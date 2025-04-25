@@ -47,8 +47,6 @@ from codemap.utils.git_utils import (
 )
 from codemap.utils.llm_utils import create_universal_generator
 
-from .cli_types import VerboseFlag
-
 # Truncate to maximum of 10 lines
 MAX_PREVIEW_LINES = 10
 
@@ -816,7 +814,7 @@ def commit_command(
 	] = "gpt-4o-mini",
 	strategy: Annotated[str, typer.Option("--strategy", "-s", help="Strategy for splitting diffs")] = "semantic",
 	non_interactive: Annotated[bool, typer.Option("--non-interactive", help="Run in non-interactive mode")] = False,
-	is_verbose: VerboseFlag = False,
+	is_verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging")] = False,
 ) -> None:
 	"""
 	Generate AI-assisted commit messages for staged changes.

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Annotated
 
 import typer
 from rich.progress import Progress
@@ -14,16 +15,6 @@ from codemap.generators.markdown_generator import MarkdownGenerator
 from codemap.utils.cli_utils import console, create_spinner_progress, ensure_directory_exists, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.file_utils import get_output_path
-
-from .cli_types import (
-	ConfigOpt,
-	MapTokensOpt,
-	MaxContentLengthOpt,
-	OutputOpt,
-	PathArg,
-	TreeFlag,
-	VerboseFlag,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -93,13 +84,60 @@ def write_documentation(output_path: Path, documentation: str) -> None:
 
 
 def generate_command(
-	path: PathArg = Path(),
-	output: OutputOpt = None,
-	config: ConfigOpt = None,
-	map_tokens: MapTokensOpt = None,
-	max_content_length: MaxContentLengthOpt = None,
-	tree: TreeFlag = False,
-	is_verbose: VerboseFlag = False,
+	path: Annotated[
+		Path,
+		typer.Argument(
+			exists=True,
+			help="Path to the codebase to analyze",
+			show_default=True,
+		),
+	] = Path(),
+	output: Annotated[
+		Path | None,
+		typer.Option(
+			"--output",
+			"-o",
+			help="Output file path (overrides config)",
+		),
+	] = None,
+	config: Annotated[
+		Path | None,
+		typer.Option(
+			"--config",
+			"-c",
+			help="Path to config file",
+		),
+	] = None,
+	map_tokens: Annotated[
+		int | None,
+		typer.Option(
+			"--map-tokens",
+			help="Override token limit (set to 0 for unlimited)",
+		),
+	] = None,
+	max_content_length: Annotated[
+		int | None,
+		typer.Option(
+			"--max-content-length",
+			help="Maximum content length for file display (set to 0 for unlimited)",
+		),
+	] = None,
+	tree: Annotated[
+		bool,
+		typer.Option(
+			"--tree",
+			"-t",
+			help="Generate only directory tree structure",
+		),
+	] = False,
+	is_verbose: Annotated[
+		bool,
+		typer.Option(
+			"--verbose",
+			"-v",
+			help="Enable verbose logging",
+		),
+	] = False,
 ) -> None:
 	"""Generate documentation for the specified codebase."""
 	setup_logging(is_verbose=is_verbose)

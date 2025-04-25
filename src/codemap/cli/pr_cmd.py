@@ -50,8 +50,6 @@ from codemap.utils.pr_utils import (
 	update_pull_request,
 )
 
-from .cli_types import PathArg, VerboseFlag
-
 logger = logging.getLogger(__name__)
 
 
@@ -619,7 +617,14 @@ def _load_llm_config(repo_path: Path | None) -> dict:
 
 
 def pr_command(
-	path: PathArg = Path(),
+	path: Annotated[
+		Path,
+		typer.Argument(
+			exists=True,
+			help="Path to the codebase to analyze",
+			show_default=True,
+		),
+	] = Path(),
 	action: Annotated[PRAction, typer.Argument(help="Action to perform: create or update")] = PRAction.CREATE,
 	branch_name: Annotated[str | None, typer.Option("--branch", "-b", help="Target branch name")] = None,
 	base_branch: Annotated[
@@ -647,7 +652,14 @@ def pr_command(
 	] = None,
 	api_base: Annotated[str | None, typer.Option("--api-base", help="API base URL for LLM")] = None,
 	api_key: Annotated[str | None, typer.Option("--api-key", help="API key for LLM")] = None,
-	is_verbose: VerboseFlag = False,
+	is_verbose: Annotated[
+		bool,
+		typer.Option(
+			"--verbose",
+			"-v",
+			help="Enable verbose logging",
+		),
+	] = False,
 ) -> None:
 	"""
 	Generate and manage pull requests.

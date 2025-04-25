@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
+from typing import Annotated
 
 import typer
 import yaml
@@ -13,15 +14,34 @@ from codemap.analyzer.tree_parser import CodeParser
 from codemap.config import DEFAULT_CONFIG
 from codemap.utils.cli_utils import console, setup_logging
 
-from .cli_types import ForceFlag, PathArg, VerboseFlag
-
 logger = logging.getLogger(__name__)
 
 
 def init_command(
-	path: PathArg = Path(),
-	force_flag: ForceFlag = False,
-	is_verbose: VerboseFlag = False,
+	path: Annotated[
+		Path,
+		typer.Argument(
+			exists=True,
+			help="Path to the codebase to analyze",
+			show_default=True,
+		),
+	] = Path(),
+	force_flag: Annotated[
+		bool,
+		typer.Option(
+			"--force",
+			"-f",
+			help="Force overwrite existing files",
+		),
+	] = False,
+	is_verbose: Annotated[
+		bool,
+		typer.Option(
+			"--verbose",
+			"-v",
+			help="Enable verbose logging",
+		),
+	] = False,
 ) -> None:
 	"""Initialize a new CodeMap project in the specified directory."""
 	setup_logging(is_verbose=is_verbose)
