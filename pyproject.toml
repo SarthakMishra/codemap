@@ -38,6 +38,7 @@ dependencies = [
 dev = [
     "docformatter>=1.7.5",
     "interrogate>=1.7.0",
+    "pre-commit>=4.2.0",
     "pylint>=3.3.6",
     "pyright>=1.1.400",
     "pytest>=8.3.5",
@@ -45,6 +46,7 @@ dev = [
     "pytest-mock>=3.14.0",
     "pytest-sugar>=1.0.0",
     "pytest-xdist[psutil]>=3.6.1",
+    "python-semantic-release>=9.3.1",
     "radon>=6.0.1",
     "ruff>=0.11.6",
 ]
@@ -184,3 +186,49 @@ known_first_party = ["codemap"]
 known_third_party = ["litellm", "numpy", "pygments", "dotenv", "yaml", "questionary", 
                     "requests", "rich", "typer", "typing_extensions", "sentence_transformers", 
                     "watchdog", "tree_sitter", "lancedb", "pandas", "multilspy"]
+
+[tool.semantic_release]
+version_variables = [
+    "src/codemap/__init__.py:__version__"
+]
+
+# Branch configuration following the project's Git flow
+# Main branch - stable production releases
+[tool.semantic_release.branches.main]
+match = "^main$"
+prerelease = false
+
+# Development branch - integration branch for upcoming features
+[tool.semantic_release.branches.dev]
+match = "^dev$"
+prerelease = true
+prerelease_token = "next"
+
+# Release branches - for preparing new stable releases
+[tool.semantic_release.branches.release]
+match = "^release\\/v?[0-9]+\\.[0-9]+\\.[0-9]+$"
+prerelease = true
+prerelease_token = "rc"
+
+# Feature branches - for developing new features
+[tool.semantic_release.branches.feature]
+match = "^feature\\/.*"
+prerelease = true
+prerelease_token = "alpha"
+
+# Commit message parsing configuration
+[tool.semantic_release.commit_parser_options]
+allowed_tags = [
+    "build",
+    "chore",
+    "ci",
+    "docs",
+    "feat",
+    "fix",
+    "perf",
+    "refactor",
+    "style",
+    "test"
+]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf"]
