@@ -36,6 +36,12 @@ jobs:
         version: 3.x
         repo-token: ${{ secrets.GITHUB_TOKEN }}
     
+    - name: Setup Git
+      run: |
+        git --version
+        git config --global user.name "GitHub Actions"
+        git config --global user.email "actions@github.com"
+    
     - name: Install dependencies
       shell: bash
       run: |
@@ -50,6 +56,7 @@ jobs:
       env:
         VIRTUAL_ENV: ${{ github.workspace }}/.venv
         PATH: ${{ github.workspace }}/.venv/bin:${{ env.PATH }}
+        PYTHONPATH: ${{ github.workspace }}
       run: task ci:full
     
     - name: Run CI tasks (Windows)
@@ -58,6 +65,7 @@ jobs:
       env:
         VIRTUAL_ENV: ${{ github.workspace }}\.venv
         PATH: ${{ github.workspace }}\.venv\Scripts;${{ env.PATH }}
+        PYTHONPATH: ${{ github.workspace }}
       run: task ci:full
     
     - name: Upload coverage reports to Codecov
