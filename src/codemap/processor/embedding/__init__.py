@@ -1,4 +1,5 @@
-"""Embedding module for generating and storing vector embeddings of code chunks."""
+"""Embedding module for generating and storing vector embeddings of code
+chunks."""
 
 from codemap.processor.embedding.generator import EmbeddingGenerator
 from codemap.processor.embedding.models import (

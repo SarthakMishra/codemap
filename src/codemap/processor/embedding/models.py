@@ -89,6 +89,7 @@ class EmbeddingResult:
 
         Returns:
             An EmbeddingResult instance
+
         """
         # Convert LiteLLM embedding response to our internal format
         embedding_data = response["data"][0]["embedding"]

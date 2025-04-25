@@ -26,16 +26,19 @@ class EmbeddingGenerator:
         Args:
             config: Configuration for the embedding generator. If None, a default
                    configuration is created using environment variables.
+
         """
         self.config = config or self._create_default_config()
         self._setup_litellm()
 
     @staticmethod
     def _create_default_config() -> EmbeddingConfig:
-        """Create a default configuration based on environment variables and config file.
+        """Create a default configuration based on environment variables and
+        config file.
 
         Returns:
             A default embedding configuration
+
         """
         # Get configuration from ConfigLoader if available
         try:
@@ -84,6 +87,7 @@ class EmbeddingGenerator:
 
         Returns:
             The model string for the configured provider
+
         """
         model = self.config.model
 
@@ -119,6 +123,7 @@ class EmbeddingGenerator:
 
         Returns:
             A list of embedding results
+
         """
         # Process chunks in batches to avoid rate limits
         batch_size = self.config.batch_size
@@ -140,6 +145,7 @@ class EmbeddingGenerator:
 
         Returns:
             List of embedding results for the batch
+
         """
         model = self._get_model_string()
         texts = [chunk.content for chunk in chunks]
@@ -206,6 +212,7 @@ class EmbeddingGenerator:
 
         Returns:
             A list of embedding results
+
         """
         return asyncio.run(self.generate_embeddings_async(chunks))
 
@@ -217,6 +224,7 @@ class EmbeddingGenerator:
 
         Returns:
             An embedding result or None if generation failed
+
         """
         results = self.generate_embeddings([chunk])
         return results[0] if results else None
