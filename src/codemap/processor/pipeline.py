@@ -6,6 +6,7 @@ This module defines the main processing pipeline that orchestrates:
 3. Analyzing code and extracting metadata
 4. Generating embeddings
 5. Storing processed data
+
 """
 
 from __future__ import annotations
@@ -63,8 +64,10 @@ class ProcessingJob:
 class ProcessingPipeline:
     """Main pipeline for code processing and analysis.
 
-    This class orchestrates the complete flow from file changes to processed data,
-    connecting file watching with code analysis, chunking, embedding, and storage.
+    This class orchestrates the complete flow from file changes to
+    processed data, connecting file watching with code analysis,
+    chunking, embedding, and storage.
+
     """
 
     def __init__(
@@ -89,6 +92,7 @@ class ProcessingPipeline:
             enable_lsp: Whether to enable LSP analysis (True by default)
             on_chunks_processed: Callback when chunks are processed for a file
             on_file_deleted: Callback when a file is deleted
+
         """
         self.repo_path = repo_path
         self.ignored_patterns = ignored_patterns or {
@@ -191,6 +195,7 @@ class ProcessingPipeline:
 
         Args:
             file_path: Path to the file to process
+
         """
         path_obj = Path(file_path)
 
@@ -206,6 +211,7 @@ class ProcessingPipeline:
 
         Args:
             file_path: Path to the file to process
+
         """
         job = self.active_jobs.get(file_path)
         if not job:
@@ -293,6 +299,7 @@ class ProcessingPipeline:
         Args:
             file_path: Path to the file/job to clean up
             delay: Time in seconds to wait before cleanup
+
         """
         if delay > 0:
             time.sleep(delay)
@@ -303,6 +310,7 @@ class ProcessingPipeline:
 
         Args:
             file_path: Path to the created file
+
         """
         logger.debug("File created: %s", file_path)
         self.process_file(file_path)
@@ -312,6 +320,7 @@ class ProcessingPipeline:
 
         Args:
             file_path: Path to the modified file
+
         """
         logger.debug("File modified: %s", file_path)
         self.process_file(file_path)
@@ -321,6 +330,7 @@ class ProcessingPipeline:
 
         Args:
             file_path: Path to the deleted file
+
         """
         path_obj = Path(file_path)
         logger.debug("File deleted: %s", file_path)
@@ -355,6 +365,7 @@ class ProcessingPipeline:
 
         Returns:
             Processing job status if available, None otherwise
+
         """
         path_obj = Path(file_path)
         return self.active_jobs.get(path_obj)
@@ -364,6 +375,7 @@ class ProcessingPipeline:
 
         Args:
             paths: List of file paths to process
+
         """
         for path in paths:
             self.process_file(path)
@@ -381,6 +393,7 @@ class ProcessingPipeline:
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
         if use_vector:
             # Generate a vector for the query using the embedding generator
