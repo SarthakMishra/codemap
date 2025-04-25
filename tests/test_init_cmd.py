@@ -84,10 +84,15 @@ class TestInitCommand:
 		# Verify CodeParser was initialized
 		mock_parser_cls.assert_called_once()
 
-		# Check success messages
+		# Check success messages - using exact path representation from the console
 		mock_console.print.assert_any_call("\n✨ CodeMap initialized successfully!")
-		mock_console.print.assert_any_call(f"[green]Created config file: {self.config_file}")
-		mock_console.print.assert_any_call(f"[green]Created documentation directory: {self.docs_dir}")
+
+		# Use str representation for paths to handle CI platform differences
+		mock_console.print.assert_any_call(f"[green]Created config file: {self.config_file!s}")
+		mock_console.print.assert_any_call(f"[green]Created documentation directory: {self.docs_dir!s}")
+		mock_console.print.assert_any_call("\nNext steps:")
+		mock_console.print.assert_any_call("1. Review and customize .codemap.yml")
+		mock_console.print.assert_any_call("2. Run 'codemap generate' to create documentation")
 
 	@patch("codemap.cli.init_cmd.console")
 	@patch("codemap.cli.init_cmd.CodeParser")
@@ -101,10 +106,13 @@ class TestInitCommand:
 		with pytest.raises(typer.Exit):
 			init_command(path=self.repo_root, force_flag=False, is_verbose=False)
 
-		# Verify warning message about existing files
+		# Verify warning message about existing files with exact path representation
 		mock_console.print.assert_any_call("[yellow]CodeMap files already exist:")
-		mock_console.print.assert_any_call(f"[yellow]  - {self.config_file}")
-		mock_console.print.assert_any_call(f"[yellow]  - {self.docs_dir}")
+
+		# Use str representation for paths to handle CI platform differences
+		all_calls = [str(call) for call in mock_console.print.call_args_list]
+		assert any(f"[yellow]  - {self.config_file!s}" in call for call in all_calls)
+		assert any(f"[yellow]  - {self.docs_dir!s}" in call for call in all_calls)
 		mock_console.print.assert_any_call("[yellow]Use --force to overwrite.")
 
 		# Verify files were not overwritten
