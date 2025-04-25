@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 from pathlib import Path
 
 import typer
@@ -54,7 +55,7 @@ def init_command(
 
             # Create documentation directory
             if docs_dir.exists() and force_flag:
-                docs_dir.rmdir()
+                shutil.rmtree(docs_dir)
             docs_dir.mkdir(exist_ok=True, parents=True)
             next(progress)
 
