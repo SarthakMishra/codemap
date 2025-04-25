@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from unittest.mock import Mock, patch
 
 import pytest
@@ -174,6 +175,48 @@ class TestGitCommitOperations(GitTestBase):
 
 			assert status_call, "Git status command was not called"
 			assert commit_call, "Git commit command was not called"
+
+	def test_commit_only_files_with_hook_error(self) -> None:
+		"""Test error handling when a git hook fails."""
+		with (
+			patch("codemap.utils.git_utils.get_other_staged_files") as mock_other,
+			patch(
+				"codemap.utils.git_utils.stage_files",
+			),
+			patch(
+				"codemap.utils.git_utils.subprocess.run",
+			) as mock_subprocess_run,
+			patch(
+				"pathlib.Path.exists",
+			) as mock_exists,
+		):
+			# Setup mocks
+			mock_other.return_value = []
+			mock_exists.return_value = True  # Files exist
+
+			# First call is for git status
+			status_result = Mock()
+			status_result.returncode = 0
+			status_result.stdout = ""
+			status_result.stderr = ""
+
+			# Second call is for git commit - simulate a pre-commit hook error
+			error = subprocess.CalledProcessError(1, ["git", "commit", "-m", "Test commit"])
+			error.stderr = "pre-commit hook failed with error code 1\nPlease fix your code and try again"
+			error.stdout = ""
+
+			# Set up the mock to return different results on each call
+			mock_subprocess_run.side_effect = [status_result, error]
+
+			# Function should raise GitError with detailed information
+			with pytest.raises(GitError) as excinfo:
+				commit_only_files(["file1.txt"], "Test commit")
+
+			# Check error message contains the git error details
+			error_message = str(excinfo.value)
+			assert "Git commit command failed" in error_message
+			assert "pre-commit hook failed" in error_message
+			assert "Git Error Output:" in error_message
 
 
 @pytest.mark.unit
