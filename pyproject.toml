@@ -4,9 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codemap"
-version = "0.4.3"
-description = "CLI tool for generating optimized markdown documentation from codebases"
+version = "0.4.4"
+description = "CLI tool that generates optimized markdown docs and streamline Git workflows"
 readme = "README.md"
+authors = [
+    { name="Sarthak Mishra", email="hi@sarthakmishra.com" },
+]
+license = { text = "MIT" }
+keywords = ["cli", "markdown", "git", "documentation", "codebase"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "litellm>=1.67.0",
