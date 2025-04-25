@@ -217,6 +217,26 @@ class ConfigLoader:
 
 		return convention
 
+	def get_commit_hooks(self) -> bool:
+		"""
+		Get commit hooks configuration.
+
+		Returns:
+		    Boolean indicating whether to bypass git hooks (--no-verify)
+
+		"""
+		# Default is False (do not bypass hooks)
+		bypass_hooks = False
+
+		# Check if commit section exists with bypass_hooks configuration
+		if "commit" in self._config and isinstance(self._config["commit"], dict):
+			commit_config = self._config["commit"]
+
+			if "bypass_hooks" in commit_config and isinstance(commit_config["bypass_hooks"], bool):
+				bypass_hooks = commit_config["bypass_hooks"]
+
+		return bypass_hooks
+
 
 def get_config(config_file: str | None = None, repo_root: Path | None = None) -> dict[str, Any]:
 	"""
