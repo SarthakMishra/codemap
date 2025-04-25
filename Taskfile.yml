@@ -132,3 +132,15 @@ tasks:
     cmds:
       - task: lint
       - task: test:coverage:xml
+
+  pre-commit:
+    desc: Run pre-commit hooks
+    cmds:
+      - task: format
+  
+  pre-push:
+    desc: Run pre-push hooks
+    cmds:
+      - task: format
+      - task: lint
+      - task: test
