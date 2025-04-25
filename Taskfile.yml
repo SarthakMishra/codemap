@@ -118,11 +118,13 @@ tasks:
   ci:
     desc: Run all checks and tests
     cmds:
+      - task: format
       - task: lint
       - task: test:coverage
 
   ci:full:
     desc: Run all checks and tests in CI mode
     cmds:
+      - task: format
       - task: lint
       - task: test:coverage:xml
