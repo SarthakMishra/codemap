@@ -1,0 +1,29 @@
+repos:
+-   repo: local
+    hooks:
+    -   id: uv-sync
+        name: uv sync
+        language: system
+        entry: uv sync
+        pass_filenames: false
+        files: ^(pyproject.toml|uv.lock)$
+        
+    -   id: pre-commit-tasks
+        name: Run pre-commit tasks (format, lint, test)
+        language: system
+        entry: task pre-commit
+        pass_filenames: false
+        types: [python]
+        # Run on both commit and push to ensure code quality
+        stages: [pre-commit]
+
+# Run tests before push (separate hook to avoid running tests on every commit)
+-   repo: local
+    hooks:
+    -   id: pytest
+        name: Run tests
+        language: system
+        entry: task pre-push
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]
