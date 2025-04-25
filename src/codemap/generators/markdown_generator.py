@@ -32,6 +32,7 @@ class MarkdownGenerator:
         Args:
             repo_path: Path to the repository or specific target to analyze
             config: Configuration dictionary
+
         """
         self.target_path = Path(repo_path).resolve()
         self.config = config or {}
@@ -59,6 +60,7 @@ class MarkdownGenerator:
 
         Returns:
             Path to the repository root
+
         """
         # If the start_path is a file or a specific directory that exists,
         # use its parent or the path itself as the root
@@ -94,6 +96,7 @@ class MarkdownGenerator:
 
         Returns:
             True if the path should be processed.
+
         """
         # Skip files that match gitignore patterns if enabled
         if self.config.get("use_gitignore", True) and parser.file_filter.gitignore_patterns:
@@ -105,7 +108,8 @@ class MarkdownGenerator:
         return all(excluded not in str(path) for excluded in self.default_excluded)
 
     def _matches_gitignore_pattern(self, path: Path, pattern: str, parser: CodeParser) -> bool:
-        """Check if a path matches a gitignore pattern using the parser's file filter.
+        """Check if a path matches a gitignore pattern using the parser's file
+        filter.
 
         Args:
             path: Path to check
@@ -114,6 +118,7 @@ class MarkdownGenerator:
 
         Returns:
             True if the path matches the pattern
+
         """
         # Use the file_filter's matches_pattern method
         return parser.file_filter.matches_pattern(path, pattern)
@@ -138,6 +143,7 @@ class MarkdownGenerator:
 
         Returns:
             True if all parseable files in this path (and subdirectories) are included.
+
         """
         if depth > state.max_depth:
             return False
@@ -211,13 +217,15 @@ class MarkdownGenerator:
         return all_parseable_included
 
     def _generate_file_tree(self, tree: dict[str, Any]) -> str:
-        """Generate a tree representation of the repository structure with checkboxes.
+        """Generate a tree representation of the repository structure with
+        checkboxes.
 
         Args:
             tree: Dictionary representing the tree structure or parsed files
 
         Returns:
             Generated tree representation with checkboxes.
+
         """
         # Check if we're getting a tree or parsed_files dictionary
         if "content" in tree:
@@ -248,13 +256,15 @@ class MarkdownGenerator:
         return "# Code Map\n\n_Generated documentation of the codebase structure and files._\n\n"
 
     def _generate_overview(self, parsed_files: dict[Path, dict[str, Any]]) -> str:
-        """Generate the overview section with file counts and repository structure.
+        """Generate the overview section with file counts and repository
+        structure.
 
         Args:
             parsed_files: Dictionary mapping file paths to their parsed contents.
 
         Returns:
             Generated overview section.
+
         """
         # Count files by language
         language_counts = {}
@@ -281,6 +291,7 @@ class MarkdownGenerator:
 
         Returns:
             Generated file documentation.
+
         """
         rel_path = file_path.relative_to(self.repo_root)
         language = file_info.get("language", "unknown")
@@ -320,6 +331,7 @@ class MarkdownGenerator:
 
         Returns:
             Markdown documentation as a string
+
         """
         parts: list[str] = []
 
@@ -354,6 +366,7 @@ class MarkdownGenerator:
             prefix: Current tree prefix for formatting.
             depth: Current depth in tree.
             is_last: Whether this is the last item in its parent directory.
+
         """
         if depth > state.max_depth:
             return
@@ -402,6 +415,7 @@ class MarkdownGenerator:
 
         Returns:
             Markdown-formatted tree structure
+
         """
         # Use target path by default
         root_path = path or self.target_path
@@ -469,6 +483,7 @@ class MarkdownGenerator:
 
         Returns:
             True if the path is under the root path, False otherwise
+
         """
         try:
             path.relative_to(root_path)
