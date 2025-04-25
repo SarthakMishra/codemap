@@ -32,6 +32,7 @@ from codemap.cli.commit_cmd import (
 	process_all_chunks,
 	process_chunk_interactively,
 	setup_message_generator,
+	validate_and_process_commit,
 )
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.message_generator import LLMError, MessageGenerator
@@ -1005,3 +1006,93 @@ class TestCommitCommand(CLITestBase, GitTestBase):
 			# Should exit with code 0 (no changes to commit)
 			result = _run_commit_command(config)
 			assert result == 0
+
+
+@pytest.mark.unit
+@pytest.mark.git
+class TestBypassHooksIntegration:
+	"""Test cases for bypass_hooks integration in the commit command."""
+
+	def test_bypass_hooks_from_config(self, tmp_path: Path) -> None:
+		"""Test that bypass_hooks is correctly loaded from config."""
+		# Create a test repository
+		repo_path = tmp_path / "test_repo"
+		repo_path.mkdir()
+
+		# Create a config file with bypass_hooks enabled
+		config_file = repo_path / ".codemap.yml"
+		config_content = """
+commit:
+  bypass_hooks: true
+"""
+		config_file.write_text(config_content)
+
+		# Mock ConfigLoader to return our test config
+		config_loader_mock = Mock()
+		config_loader_mock.get_commit_hooks.return_value = True
+
+		# Mock CommitCommand to capture the bypass_hooks param
+		commit_command_mock = Mock()
+
+		with (
+			patch("codemap.cli.commit_cmd.validate_repo_path", return_value=repo_path),
+			patch("codemap.cli.commit_cmd.ConfigLoader", return_value=config_loader_mock),
+			patch(
+				"codemap.cli.commit_cmd.CommitCommand", return_value=commit_command_mock
+			) as mock_commit_command_class,
+		):
+			# Call the validate_and_process_commit function
+			validate_and_process_commit(path=repo_path, all_files=False, model="test-model")
+
+			# Verify that CommitCommand was instantiated
+			mock_commit_command_class.assert_called_once()
+			_, kwargs = mock_commit_command_class.call_args
+
+			# Check if bypass_hooks is truthy (should be True from config)
+			assert bool(kwargs.get("bypass_hooks")) is True
+
+	def test_bypass_hooks_cli_override(self, tmp_path: Path) -> None:
+		"""Test that bypass_hooks from CLI overrides config file."""
+		# Create a test repository
+		repo_path = tmp_path / "test_repo"
+		repo_path.mkdir()
+
+		# Create a config file with bypass_hooks disabled
+		config_file = repo_path / ".codemap.yml"
+		config_content = """
+commit:
+  bypass_hooks: false
+"""
+		config_file.write_text(config_content)
+
+		# Mock ConfigLoader to return our test config
+		config_loader_mock = Mock()
+		config_loader_mock.get_commit_hooks.return_value = False
+
+		# Create a special bypass_hooks object with the _set_explicitly attribute
+		# Use MagicMock instead of primitive boolean so we can set attributes
+		bypass_hooks_cli = Mock()
+		# Define __bool__ as a proper method that returns True
+		bypass_hooks_cli.__bool__ = Mock(return_value=True)
+		bypass_hooks_cli._set_explicitly = True
+
+		# Mock CommitCommand to capture the bypass_hooks param
+		commit_command_mock = Mock()
+
+		with (
+			patch("codemap.cli.commit_cmd.validate_repo_path", return_value=repo_path),
+			patch("codemap.cli.commit_cmd.ConfigLoader", return_value=config_loader_mock),
+			patch(
+				"codemap.cli.commit_cmd.CommitCommand", return_value=commit_command_mock
+			) as mock_commit_command_class,
+		):
+			# Call the validate_and_process_commit function with CLI bypass_hooks=True
+			validate_and_process_commit(
+				path=repo_path, all_files=False, model="test-model", bypass_hooks=bypass_hooks_cli
+			)
+
+			# Verify that CommitCommand was instantiated with bypass_hooks=True (from CLI, not config)
+			mock_commit_command_class.assert_called_once()
+			_, kwargs = mock_commit_command_class.call_args
+			# Verify that bypass_hooks was passed correctly
+			assert kwargs.get("bypass_hooks") is bypass_hooks_cli

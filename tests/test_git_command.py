@@ -454,6 +454,40 @@ class TestCommitCommandHookBypass(GitTestBase):
 			self.mock_ui.confirm_bypass_hooks.assert_not_called()
 			self.mock_ui.show_error.assert_called_once()
 
+	def test_perform_commit_with_bypass_hooks_enabled(self) -> None:
+		"""Test commit with bypass_hooks config enabled (should bypass hooks without prompting)."""
+		# Arrange: Set up mocks
+		with (
+			patch("codemap.git.command.run_git_command") as mock_run_git,
+			patch("codemap.git.command.get_staged_diff") as mock_staged,
+			patch("codemap.git.command.stage_files"),
+			patch("codemap.git.command.unstage_files"),
+			patch("codemap.git.command.commit_only_files") as mock_commit,
+		):
+			# Configure mocks
+			mock_run_git.return_value = ""
+			mock_staged.return_value = GitDiff(files=self.mock_chunk.files, content="", is_staged=True)
+
+			# Set bypass_hooks to True in the command instance
+			self.command.bypass_hooks = True
+
+			# Setup commit_only_files to return empty list (success)
+			mock_commit.return_value = []
+
+			# Act: Call the method
+			result = self.command._perform_commit(self.mock_chunk, "Test commit message")
+
+			# Assert: Verify results
+			assert result is True
+			assert mock_commit.call_count == 1
+
+			# Verify call was made with ignore_hooks=True immediately (no need for two attempts)
+			assert mock_commit.call_args.kwargs.get("ignore_hooks") is True
+
+			# Verify UI confirms bypass was not needed (no prompt)
+			self.mock_ui.confirm_bypass_hooks.assert_not_called()
+			self.mock_ui.show_success.assert_called_once()
+
 
 @pytest.mark.unit
 @pytest.mark.git
