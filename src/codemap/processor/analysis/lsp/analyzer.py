@@ -21,13 +21,15 @@ logger = logging.getLogger(__name__)
 
 
 class LSPAnalyzer:
-    """Analyzer that uses Language Server Protocol to enrich code chunks with semantic information."""
+    """Analyzer that uses Language Server Protocol to enrich code chunks with
+    semantic information."""
 
     def __init__(self, project_root: Path) -> None:
         """Initialize the LSP analyzer.
 
         Args:
             project_root: The root directory of the project being analyzed.
+
         """
         self.project_root = project_root
         self.language_servers: dict[str, SyncLanguageServer] = {}
@@ -41,6 +43,7 @@ class LSPAnalyzer:
 
         Returns:
             A language server instance or None if the language is not supported.
+
         """
         if language in self.language_servers:
             return self.language_servers[language]
@@ -81,6 +84,7 @@ class LSPAnalyzer:
 
         Returns:
             A project-relative path string.
+
         """
         try:
             return str(file_path.relative_to(self.project_root))
@@ -96,6 +100,7 @@ class LSPAnalyzer:
 
         Returns:
             A tuple of (line, column) with 0-based indexing.
+
         """
         # LSP uses 0-based line numbers, while Location uses 1-based
         line = location.start_line - 1
@@ -110,6 +115,7 @@ class LSPAnalyzer:
 
         Returns:
             LSP metadata containing semantic information.
+
         """
         language = chunk.metadata.language
         file_path = chunk.metadata.location.file_path
@@ -233,6 +239,7 @@ class LSPAnalyzer:
 
         Returns:
             Dictionary mapping chunk full names to their LSP metadata.
+
         """
         results: dict[str, LSPMetadata] = {}
 
@@ -256,6 +263,7 @@ class LSPAnalyzer:
 
         Returns:
             LSP metadata for the chunk or an empty metadata object if analysis fails.
+
         """
         try:
             return self.analyze_chunk(chunk)

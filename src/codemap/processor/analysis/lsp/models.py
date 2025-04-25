@@ -42,16 +42,19 @@ class LSPMetadata:
     """LSP-related metadata for a code chunk."""
 
     symbol_references: list[LSPReference] = field(default_factory=list)
-    """References to other symbols found in this chunk (function calls, class usage, etc.)."""
+    """References to other symbols found in this chunk (function calls, class
+    usage, etc.)."""
 
     type_info: LSPTypeInfo | None = None
     """Type information for this chunk, if applicable."""
 
     hover_text: str | None = None
-    """Hover information provided by LSP (can include type hints, docstrings, etc.)."""
+    """Hover information provided by LSP (can include type hints, docstrings,
+    etc.)."""
 
     definition_uri: str | None = None
-    """URI to the definition of this symbol, if this chunk references another symbol."""
+    """URI to the definition of this symbol, if this chunk references another
+    symbol."""
 
     is_definition: bool = True
     """Whether this chunk is a definition (vs a reference)."""
