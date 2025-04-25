@@ -1,6 +1,8 @@
 """Tree-sitter based code analysis.
 
-This module provides functionality for analyzing source code using tree-sitter.
+This module provides functionality for analyzing source code using tree-
+sitter.
+
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ def get_language_by_extension(file_path: Path) -> str | None:
 
     Returns:
         Language name if supported, None otherwise
+
     """
     ext = file_path.suffix
     for lang, config in LANGUAGE_CONFIGS.items():
@@ -56,8 +59,11 @@ class TreeSitterAnalyzer:
     def _load_parsers(self) -> None:
         """Load tree-sitter parsers for supported languages.
 
-        This method attempts to load parsers for all configured languages using tree-sitter-language-pack.
-        If a language fails to load, it will be logged but won't prevent other languages from loading.
+        This method attempts to load parsers for all configured
+        languages using tree-sitter-language-pack. If a language fails
+        to load, it will be logged but won't prevent other languages
+        from loading.
+
         """
         self.parsers: dict[str, Parser] = {}
         failed_languages: list[tuple[str, str]] = []
@@ -93,6 +99,7 @@ class TreeSitterAnalyzer:
 
         Returns:
             A tree-sitter parser or None if not supported
+
         """
         return self.parsers.get(language)
 
@@ -107,6 +114,7 @@ class TreeSitterAnalyzer:
         Returns:
             A tuple containing the parse tree root node (or None if parsing failed)
             and the determined language
+
         """
         # Determine language if not provided
         if not language:
@@ -138,6 +146,7 @@ class TreeSitterAnalyzer:
 
         Returns:
             A syntax handler or None if not supported
+
         """
         handler_class = LANGUAGE_HANDLERS.get(language)
         if not handler_class:
@@ -165,6 +174,7 @@ class TreeSitterAnalyzer:
 
         Returns:
             Dict with node analysis information
+
         """
         # Check if we should skip this node
         if handler.should_skip_node(node):
@@ -246,6 +256,7 @@ class TreeSitterAnalyzer:
 
         Returns:
             Dict with file analysis information
+
         """
         # Parse the file
         root_node, determined_language = self.parse_file(file_path, content, language)

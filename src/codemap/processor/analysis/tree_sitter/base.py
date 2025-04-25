@@ -5,6 +5,7 @@ It provides:
 - Entity type definitions for tree-sitter nodes
 - Metadata structures for tree-sitter nodes.
 - Base tree-sitter analysis interface
+
 """
 
 from __future__ import annotations
