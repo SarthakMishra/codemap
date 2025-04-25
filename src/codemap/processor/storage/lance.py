@@ -35,6 +35,7 @@ class LanceDBStorage(StorageBackend):
 
     This backend uses LanceDB for storing and retrieving code chunks,
     metadata, and embeddings.
+
     """
 
     # Table names
@@ -48,6 +49,7 @@ class LanceDBStorage(StorageBackend):
 
         Args:
             config: Configuration for the storage backend
+
         """
         super().__init__(config)
         self._db = None
@@ -56,7 +58,9 @@ class LanceDBStorage(StorageBackend):
     def initialize(self) -> None:
         """Initialize the LanceDB storage backend.
 
-        This method connects to LanceDB and creates necessary tables if they don't exist.
+        This method connects to LanceDB and creates necessary tables if
+        they don't exist.
+
         """
         if self._connection_initialized:
             return
@@ -170,6 +174,7 @@ class LanceDBStorage(StorageBackend):
         Args:
             table: LanceDB table
             columns: List of columns to create indices on
+
         """
         # Create indices for all columns without having try-except in the loop
         for column in columns:
@@ -180,6 +185,7 @@ class LanceDBStorage(StorageBackend):
 
         Args:
             table: LanceDB table containing embeddings
+
         """
         try:
             # Create vector index for fast similarity search
@@ -205,6 +211,7 @@ class LanceDBStorage(StorageBackend):
         Args:
             chunks: List of chunks to store
             commit_id: Optional Git commit ID to associate with the chunks
+
         """
         if not chunks:
             return
@@ -247,6 +254,7 @@ class LanceDBStorage(StorageBackend):
             lsp_metadata: Dictionary mapping chunk full names to LSP metadata
             chunks: The chunks that the LSP metadata belongs to
             commit_id: Optional Git commit ID
+
         """
         if not lsp_metadata or not chunks:
             return
@@ -338,6 +346,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             LSP metadata if found, None otherwise
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -411,6 +420,7 @@ class LanceDBStorage(StorageBackend):
 
         Args:
             embeddings: Sequence of embedding results to store
+
         """
         if not embeddings:
             return
@@ -468,6 +478,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             The chunk if found, None otherwise
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -501,6 +512,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             List of chunks for the file
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -548,6 +560,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -592,6 +605,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -651,6 +665,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -802,6 +817,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -872,6 +888,7 @@ class LanceDBStorage(StorageBackend):
         Args:
             chunks: The chunks being stored
             commit_id: Optional Git commit ID
+
         """
         if not self._db:
             return
@@ -909,6 +926,7 @@ class LanceDBStorage(StorageBackend):
 
         Args:
             file_path: Path to the file to delete
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -957,6 +975,7 @@ class LanceDBStorage(StorageBackend):
 
         Args:
             file_path: Path to the file
+
         """
         if not self._db:
             return
@@ -985,6 +1004,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             List of (timestamp, commit_id) tuples, sorted by timestamp (newest first)
+
         """
         if not self._connection_initialized:
             self.initialize()
@@ -1024,6 +1044,7 @@ class LanceDBStorage(StorageBackend):
 
         Args:
             chunks: List of chunks to process
+
         """
         # Create lookup dictionaries by both ID and full name
         chunk_dict_by_name = {chunk.full_name: chunk for chunk in chunks}
@@ -1069,6 +1090,7 @@ class LanceDBStorage(StorageBackend):
 
         Returns:
             A unique chunk ID
+
         """
         location = getattr(chunk.metadata, "location", None)
         if not location:
@@ -1091,6 +1113,7 @@ def try_create_index(table: Table, column: str) -> None:
     Args:
         table: LanceDB table
         column: Column to create index on
+
     """
     try:
         # Create index for the column

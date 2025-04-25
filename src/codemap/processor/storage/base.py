@@ -21,8 +21,10 @@ logger = logging.getLogger(__name__)
 class StorageConfig:
     """Configuration for storage backends.
 
-    Contains settings for connecting to and configuring storage backends.
-    Different backends may use different subset of these settings.
+    Contains settings for connecting to and configuring storage
+    backends. Different backends may use different subset of these
+    settings.
+
     """
 
     uri: str
@@ -55,6 +57,7 @@ class StorageBackend(abc.ABC):
     - Code chunks and their metadata
     - Vector embeddings for semantic search
     - Historical versions of code chunks
+
     """
 
     def __init__(self, config: StorageConfig) -> None:
@@ -62,6 +65,7 @@ class StorageBackend(abc.ABC):
 
         Args:
             config: Configuration for the storage backend
+
         """
         self.config = config
 
@@ -70,6 +74,7 @@ class StorageBackend(abc.ABC):
         """Initialize the storage backend.
 
         This method should set up any necessary tables, indices, etc.
+
         """
 
     @abc.abstractmethod
@@ -77,6 +82,7 @@ class StorageBackend(abc.ABC):
         """Close the storage backend.
 
         This method should release any resources held by the backend.
+
         """
 
     @abc.abstractmethod
@@ -86,6 +92,7 @@ class StorageBackend(abc.ABC):
         Args:
             chunks: Sequence of code chunks to store
             commit_id: Optional Git commit ID to associate with the chunks
+
         """
 
     @abc.abstractmethod
@@ -94,6 +101,7 @@ class StorageBackend(abc.ABC):
 
         Args:
             embeddings: Sequence of embedding results to store
+
         """
 
     @abc.abstractmethod
@@ -105,6 +113,7 @@ class StorageBackend(abc.ABC):
 
         Returns:
             The chunk if found, None otherwise
+
         """
 
     @abc.abstractmethod
@@ -117,6 +126,7 @@ class StorageBackend(abc.ABC):
 
         Returns:
             List of chunks for the file
+
         """
 
     @abc.abstractmethod
@@ -131,6 +141,7 @@ class StorageBackend(abc.ABC):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
 
     @abc.abstractmethod
@@ -143,6 +154,7 @@ class StorageBackend(abc.ABC):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
 
     @abc.abstractmethod
@@ -159,6 +171,7 @@ class StorageBackend(abc.ABC):
 
         Returns:
             List of (chunk, score) tuples, sorted by score (highest first)
+
         """
 
     @abc.abstractmethod
@@ -167,6 +180,7 @@ class StorageBackend(abc.ABC):
 
         Args:
             file_path: Path to the file
+
         """
 
     @abc.abstractmethod
@@ -178,4 +192,5 @@ class StorageBackend(abc.ABC):
 
         Returns:
             List of (timestamp, commit_id) tuples, sorted by timestamp (newest first)
+
         """

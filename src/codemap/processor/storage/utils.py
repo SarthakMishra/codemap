@@ -26,6 +26,7 @@ class CodeMapJSONEncoder(json.JSONEncoder):
 
         Returns:
             JSON-serializable representation
+
         """
         if isinstance(o, EntityType):
             return o.name
@@ -41,6 +42,7 @@ def chunk_to_dict(chunk: Chunk, commit_id: str | None = None) -> dict[str, Any]:
 
     Returns:
         Dictionary representation of the chunk
+
     """
     # Build unique ID that includes file path and entity name to ensure uniqueness
     # If a commit_id is provided, include it as well
@@ -96,6 +98,7 @@ def dict_to_chunk(data: dict[str, Any]) -> Chunk:
 
     Returns:
         Reconstructed Chunk object
+
     """
     # Parse location
     location_dict = json.loads(data["location"]) if isinstance(data["location"], str) else data["location"]
@@ -158,6 +161,7 @@ def embedding_to_dict(embedding: EmbeddingResult, chunk_id: str) -> dict[str, An
 
     Returns:
         Dictionary representation of the embedding
+
     """
     # Generate a unique ID for the embedding
     embedding_id = str(uuid.uuid4())
@@ -182,6 +186,7 @@ def create_pyarrow_schema_for_chunks() -> dict[str, list]:
 
     Returns:
         Dictionary with empty lists for each column
+
     """
     # Create an empty schema compatible with LanceDB/pandas
     return {
@@ -205,6 +210,7 @@ def create_pyarrow_schema_for_embeddings() -> dict[str, list]:
 
     Returns:
         Dictionary with empty lists for each column
+
     """
     # Create an empty schema compatible with LanceDB/pandas
     return {

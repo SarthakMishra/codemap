@@ -4,6 +4,7 @@ This module provides an abstraction layer for storing and retrieving:
 - Code chunks and their metadata
 - Vector embeddings for semantic search
 - Historical versions of code chunks
+
 """
 
 from codemap.processor.storage.base import StorageBackend, StorageConfig
