@@ -31,19 +31,22 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "isort>=6.0.1",
+    "docformatter>=1.7.5",
+    "interrogate>=1.7.0",
     "pylint>=3.3.6",
-    "pyright>=1.1.399",
+    "pyright>=1.1.400",
     "pytest>=8.3.5",
     "pytest-cov>=6.1.1",
     "pytest-mock>=3.14.0",
+    "pytest-sugar>=1.0.0",
     "pytest-xdist[psutil]>=3.6.1",
+    "radon>=6.0.1",
     "ruff>=0.11.6",
 ]
 
 [tool.pyright]
 # Define included and excluded directories
-include = ["src"]
+include = ["src", "tests"]
 exclude = [
     ".git",
     ".ruff_cache",
@@ -87,7 +90,7 @@ pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py38"
+target-version = "py312"
 
 # Exclude files/directories
 exclude = [
@@ -118,6 +121,11 @@ ignore = [
     "TRY300",  # Consider moving this statement to an `else` block
     "COM812",  # Use a constant for the message in a raise statement
     "TC001",  # Move application import into a type-checking block
+    "ERA001", # Found commented-out code
+    # Disable rules that conflict with tab indentation
+    "E101",  # Indentation contains mixed spaces and tabs
+    "W191",  # indentation contains tabs
+    "D206",  # indent with spaces, not tabs
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -135,3 +143,39 @@ max-statements = 50
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "tab"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.docformatter]
+recursive = true
+wrap-summaries = 120
+pre-summary-newline = true
+blank = true
+
+[tool.isort]
+profile = "black"
+line_length = 120
+multi_line_output = 3
+include_trailing_comma = true
+use_parentheses = true
+ensure_newline_before_comments = true
+skip_gitignore = true
+skip_glob = [
+    ".git",
+    ".ruff_cache",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "vendor"
+]
+sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
+known_first_party = ["codemap"]
+known_third_party = ["litellm", "numpy", "pygments", "dotenv", "yaml", "questionary", 
+                    "requests", "rich", "typer", "typing_extensions", "sentence_transformers", 
+                    "watchdog", "tree_sitter", "lancedb", "pandas", "multilspy"]

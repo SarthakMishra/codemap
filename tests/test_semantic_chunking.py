@@ -11,9 +11,22 @@ from codemap.git.diff_splitter import DiffSplitter
 from codemap.utils.git_utils import GitDiff
 
 
-def test_extract_code_from_diff() -> None:
-    """Test extracting code content from diff output."""
-    diff_content = """diff --git a/example.py b/example.py
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.processor
+@pytest.mark.chunking
+class TestDiffSplitterBasic:
+	"""Tests for basic functionality of DiffSplitter."""
+
+	def setup_method(self) -> None:
+		"""Set up test environment with a mock repo root."""
+		self.repo_root = Path("/mock/repo")
+		self.splitter = DiffSplitter(self.repo_root)
+
+	def test_extract_code_from_diff(self) -> None:
+		"""Test extracting code content from diff output."""
+		# Arrange
+		diff_content = """diff --git a/example.py b/example.py
 index 1234567..abcdefg 100644
 --- a/example.py
 +++ b/example.py
@@ -25,24 +38,33 @@ index 1234567..abcdefg 100644
 +def function3():
 +    return None"""
 
-    # Initialize diff splitter with a mock repo root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
+		# Act
+		old_code, new_code = self.splitter._extract_code_from_diff(diff_content)  # pylint: disable=protected-access
 
-    # Extract old and new code
-    old_code, new_code = splitter._extract_code_from_diff(diff_content)  # pylint: disable=protected-access
-
-    # Verify extracted content
-    assert "def function1()" in old_code
-    assert "def function2():" in old_code
-    assert "def function2(param=None):" in new_code
-    assert "def function3():" in new_code
-    assert "function3()" not in old_code
+		# Assert
+		assert "def function1()" in old_code
+		assert "def function2():" in old_code
+		assert "def function2(param=None):" in new_code
+		assert "def function3():" in new_code
+		assert "function3()" not in old_code
 
 
-def test_semantic_hunk_splitting_python() -> None:
-    """Test semantic hunk splitting for Python code."""
-    diff_content = """diff --git a/example.py b/example.py
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.processor
+@pytest.mark.chunking
+class TestSemanticHunkSplitting:
+	"""Tests for semantic hunk splitting functionality."""
+
+	def setup_method(self) -> None:
+		"""Set up test environment with a mock repo root."""
+		self.repo_root = Path("/mock/repo")
+		self.splitter = DiffSplitter(self.repo_root)
+
+	def test_semantic_hunk_splitting_python(self) -> None:
+		"""Test semantic hunk splitting for Python code."""
+		# Arrange
+		diff_content = """diff --git a/example.py b/example.py
 index 1234567..abcdefg 100644
 --- a/example.py
 +++ b/example.py
@@ -66,45 +88,41 @@ class Example:
 +if __name__ == "__main__":
 +    function1()"""
 
-    # Initialize diff splitter with a mock repo root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
+		# Act - Split the diff semantically
+		chunks = self.splitter._semantic_hunk_splitting("example.py", diff_content)  # pylint: disable=protected-access
 
-    # Split the diff semantically
-    chunks = splitter._semantic_hunk_splitting("example.py", diff_content)  # pylint: disable=protected-access
+		# Assert
+		assert len(chunks) >= 1  # Ensure we get at least one chunk
 
-    # Verify the chunking - implementation might return multiple chunks
-    assert len(chunks) >= 1  # Ensure we get at least one chunk
+		# If we have multiple chunks, check for specific content in them
+		if len(chunks) > 1:
+			# Check that imports, functions, and classes are in separate chunks
+			has_import = any("import" in c for c in chunks)
+			has_function = any("function1" in c or "function2" in c for c in chunks)
+			has_class = any("class Example" in c for c in chunks)
+			has_main = any("__main__" in c for c in chunks)
 
-    # If we have multiple chunks, check for specific content in them
-    if len(chunks) > 1:
-        # Check that imports, functions, and classes are in separate chunks
-        has_import = any("import" in c for c in chunks)
-        has_function = any("function1" in c or "function2" in c for c in chunks)
-        has_class = any("class Example" in c for c in chunks)
-        has_main = any("__main__" in c for c in chunks)
+			assert has_import
+			assert has_function
+			assert has_class
+			assert has_main
 
-        assert has_import
-        assert has_function
-        assert has_class
-        assert has_main
+		# Act - Apply the enhanced semantic split
+		diff = GitDiff(
+			files=["example.py"],
+			content=diff_content,
+			is_staged=False,
+		)
+		enhanced_chunks = self.splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
 
-    # Apply the enhanced semantic split to test the real feature
-    diff = GitDiff(
-        files=["example.py"],
-        content=diff_content,
-        is_staged=False,
-    )
-    enhanced_chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
+		# Assert
+		assert len(enhanced_chunks) >= 1
+		assert enhanced_chunks[0].files == ["example.py"]
 
-    # Verify the enhanced semantic chunking
-    assert len(enhanced_chunks) >= 1
-    assert enhanced_chunks[0].files == ["example.py"]
-
-
-def test_semantic_hunk_splitting_javascript() -> None:
-    """Test semantic hunk splitting for JavaScript code."""
-    diff_content = """diff --git a/example.js b/example.js
+	def test_semantic_hunk_splitting_javascript(self) -> None:
+		"""Test semantic hunk splitting for JavaScript code."""
+		# Arrange
+		diff_content = """diff --git a/example.js b/example.js
 index 1234567..abcdefg 100644
 --- a/example.js
 +++ b/example.js
@@ -132,47 +150,56 @@ class ShoppingCart {
 
 +export default ShoppingCart;"""
 
-    # Initialize diff splitter with a mock repo root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
+		# Act - Split the diff semantically
+		chunks = self.splitter._semantic_hunk_splitting("example.js", diff_content)  # pylint: disable=protected-access
 
-    # Split the diff semantically
-    chunks = splitter._semantic_hunk_splitting("example.js", diff_content)  # pylint: disable=protected-access
+		# Assert
+		assert len(chunks) >= 1  # Ensure we get at least one chunk
 
-    # Verify the chunking - implementation might return multiple chunks
-    assert len(chunks) >= 1  # Ensure we get at least one chunk
+		# If we have multiple chunks, check for specific content in them
+		if len(chunks) > 1:
+			# Check that imports, functions, and classes are in separate chunks
+			has_import = any("import React" in c for c in chunks)
+			has_function = any("function calculateTotal" in c for c in chunks)
+			has_class = any("class ShoppingCart" in c for c in chunks)
+			has_export = any("export default" in c for c in chunks)
 
-    # If we have multiple chunks, check for specific content in them
-    if len(chunks) > 1:
-        # Check that imports, functions, and classes are in separate chunks
-        has_import = any("import React" in c for c in chunks)
-        has_function = any("function calculateTotal" in c for c in chunks)
-        has_class = any("class ShoppingCart" in c for c in chunks)
-        has_export = any("export default" in c for c in chunks)
+			assert has_import
+			assert has_function
+			assert has_class
+			assert has_export
 
-        assert has_import
-        assert has_function
-        assert has_class
-        assert has_export
+		# Act - Apply the enhanced semantic split
+		diff = GitDiff(
+			files=["example.js"],
+			content=diff_content,
+			is_staged=False,
+		)
+		enhanced_chunks = self.splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
 
-    # Apply the enhanced semantic split to test the real feature
-    diff = GitDiff(
-        files=["example.js"],
-        content=diff_content,
-        is_staged=False,
-    )
-    enhanced_chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
-
-    # Verify the enhanced semantic chunking
-    assert len(enhanced_chunks) >= 1
-    assert enhanced_chunks[0].files == ["example.js"]
+		# Assert
+		assert len(enhanced_chunks) >= 1
+		assert enhanced_chunks[0].files == ["example.js"]
 
 
-def test_enhance_semantic_split() -> None:
-    """Test enhanced semantic splitting that considers code structure."""
-    diff = GitDiff(
-        files=["example.py", "utils.js"],
-        content="""diff --git a/example.py b/example.py
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.processor
+@pytest.mark.chunking
+class TestAdvancedSemanticSplitting:
+	"""Tests for advanced semantic splitting functionality."""
+
+	def setup_method(self) -> None:
+		"""Set up test environment with a mock repo root."""
+		self.repo_root = Path("/mock/repo")
+		self.splitter = DiffSplitter(self.repo_root)
+
+	def test_enhance_semantic_split(self) -> None:
+		"""Test enhanced semantic splitting that considers code structure."""
+		# Arrange
+		diff = GitDiff(
+			files=["example.py", "utils.js"],
+			content="""diff --git a/example.py b/example.py
 index 1234567..abcdefg 100644
 --- a/example.py
 +++ b/example.py
@@ -207,32 +234,28 @@ function formatPrice(price) {
 +export const calculateTotal = (items) => {
 +  return items.reduce((sum, item) => sum + item.price, 0);
 +};""",
-        is_staged=False,
-    )
+			is_staged=False,
+		)
 
-    # Initialize diff splitter with a mock repo root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
+		# Act
+		chunks = self.splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
 
-    # Apply enhanced semantic splitting
-    chunks = splitter._enhance_semantic_split(diff)  # pylint: disable=protected-access
+		# Assert
+		assert len(chunks) >= 2  # Should have at least one chunk per file
 
-    # Verify the chunking - should have at least one chunk per file
-    assert len(chunks) >= 2
+		# Verify that Python and JavaScript files were properly handled
+		py_chunks = [c for c in chunks if c.files[0] == "example.py"]
+		js_chunks = [c for c in chunks if c.files[0] == "utils.js"]
 
-    # Verify that Python and JavaScript files were properly handled
-    py_chunks = [c for c in chunks if c.files[0] == "example.py"]
-    js_chunks = [c for c in chunks if c.files[0] == "utils.js"]
+		assert len(py_chunks) >= 1  # Should have at least the Python file chunk
+		assert len(js_chunks) >= 1  # Should have at least the JavaScript file chunk
 
-    assert len(py_chunks) >= 1  # Should have at least the Python file chunk
-    assert len(js_chunks) >= 1  # Should have at least the JavaScript file chunk
-
-
-def test_end_to_end_semantic_strategy() -> None:
-    """Test the semantic strategy end-to-end with real-world examples."""
-    diff = GitDiff(
-        files=["models.py", "views.py", "tests/test_models.py"],
-        content="""diff --git a/models.py b/models.py
+	def test_end_to_end_semantic_strategy(self) -> None:
+		"""Test the semantic strategy end-to-end with real-world examples."""
+		# Arrange
+		diff = GitDiff(
+			files=["models.py", "views.py", "tests/test_models.py"],
+			content="""diff --git a/models.py b/models.py
 index 1234567..abcdefg 100644
 --- a/models.py
 +++ b/models.py
@@ -292,136 +315,132 @@ from ..models import User, Product
 +        product = Product.objects.create(name="Test Product", price=19.99)
 +        self.assertEqual(product.name, "Test Product")
 +        self.assertEqual(float(product.price), 19.99)""",
-        is_staged=False,
-    )
+			is_staged=False,
+		)
 
-    # Initialize diff splitter with a mock repo root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
+		# Act
+		chunks = self.splitter.split_diff(diff)
 
-    # Apply semantic strategy splitting
-    chunks = splitter.split_diff(diff)
+		# Assert
+		assert len(chunks) >= 2  # Should have grouped related changes
 
-    # Verify semantic grouping results
-    assert len(chunks) >= 2  # Should have grouped related changes
+		# Find chunk with User model changes
+		user_chunk = next((c for c in chunks if any(f == "models.py" for f in c.files)), None)
+		assert user_chunk is not None
+		assert "created_at" in user_chunk.content
 
-    # Find chunk with User model changes
-    user_chunk = next((c for c in chunks if any(f == "models.py" for f in c.files)), None)
-    assert user_chunk is not None
-    assert "created_at" in user_chunk.content
-
-    # Find chunk with view changes
-    view_chunk = next((c for c in chunks if any(f == "views.py" for f in c.files)), None)
-    assert view_chunk is not None
-    assert "JsonResponse" in view_chunk.content
+		# Find chunk with view changes
+		view_chunk = next((c for c in chunks if any(f == "views.py" for f in c.files)), None)
+		assert view_chunk is not None
+		assert "JsonResponse" in view_chunk.content
 
 
-def test_embedding_similarity() -> None:
-    """Test semantic similarity between code fragments."""
-    # Skip this test if sentence-transformers isn't installed
-    try:
-        import sentence_transformers  # type: ignore[import] # noqa: F401
-    except ImportError:
-        pytest.skip("sentence-transformers not installed")
+@pytest.mark.unit
+@pytest.mark.git
+@pytest.mark.processor
+@pytest.mark.chunking
+@pytest.mark.llm
+class TestEmbeddingSimilarity:
+	"""Tests for embedding-based semantic similarity functionality."""
 
-    # Save original class-level availability flags
-    # pylint: disable=protected-access
-    original_st_available = DiffSplitter._sentence_transformers_available
-    original_model_available = DiffSplitter._model_available
+	def setup_method(self) -> None:
+		"""Set up test environment."""
+		# Save original class-level availability flags
+		# pylint: disable=protected-access
+		self.original_st_available = DiffSplitter._sentence_transformers_available
+		self.original_model_available = DiffSplitter._model_available
 
-    # Initialize diff splitter with a mock repo root
-    repo_root = Path("/mock/repo")
-    splitter = DiffSplitter(repo_root)
+		# Initialize diff splitter with a mock repo root
+		self.repo_root = Path("/mock/repo")
+		self.splitter = DiffSplitter(self.repo_root)
 
-    try:
-        # Force the embeddings to return meaningful values for testing
-        # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = True
-        DiffSplitter._model_available = True
+	def teardown_method(self) -> None:
+		"""Restore original settings after test."""
+		# Restore original class-level availability flags
+		# pylint: disable=protected-access
+		DiffSplitter._sentence_transformers_available = self.original_st_available
+		DiffSplitter._model_available = self.original_model_available
 
-        # Mock the embedding function to return predictable values
-        with patch.object(splitter, "_get_code_embedding") as mock_embedding:
-            # Set up mock to return different embeddings for different code
-            def fake_embedding(code: str) -> list[float]:
-                if "calculate_total" in code or "compute_sum" in code:
-                    # Similar functions should have similar embeddings
-                    return [0.1, 0.2, 0.3] if "calculate_total" in code else [0.15, 0.25, 0.35]
-                # Different function should have a different embedding
-                return [0.9, 0.8, 0.7]
+	def test_embedding_similarity(self) -> None:
+		"""Test semantic similarity between code fragments."""
+		# Skip this test if sentence-transformers isn't installed
+		try:
+			import sentence_transformers  # type: ignore[import] # noqa: F401
+		except ImportError:
+			pytest.skip("sentence-transformers not installed")
 
-            mock_embedding.side_effect = fake_embedding
+		# Arrange
+		# Force the embeddings to return meaningful values for testing
+		# pylint: disable=protected-access
+		DiffSplitter._sentence_transformers_available = True
+		DiffSplitter._model_available = True
 
-            # Test code samples with different semantics
-            code1 = """
+		# Mock the embedding function to return predictable values
+		with patch.object(self.splitter, "_get_code_embedding") as mock_embedding:
+			# Set up mock to return different embeddings for different code
+			def fake_embedding(code: str) -> list[float]:
+				if "calculate_total" in code or "compute_sum" in code:
+					# Similar functions should have similar embeddings
+					return [0.1, 0.2, 0.3] if "calculate_total" in code else [0.15, 0.25, 0.35]
+				# Different function should have a different embedding
+				return [0.9, 0.8, 0.7]
+
+			mock_embedding.side_effect = fake_embedding
+
+			# Test code samples with different semantics
+			code1 = """
             def calculate_total(items):
                 return sum(item.price for item in items)
             """
 
-            code2 = """
+			code2 = """
             def compute_sum(products):
                 return sum(product.price for product in products)
             """
 
-            code3 = """
+			code3 = """
             def get_user_info(user_id):
                 return User.objects.get(id=user_id)
             """
 
-            # Calculate similarities with mocked embeddings
-            sim1_2 = splitter._calculate_semantic_similarity(code1, code2)  # pylint: disable=protected-access
-            sim1_3 = splitter._calculate_semantic_similarity(code1, code3)  # pylint: disable=protected-access
+			# Act
+			sim1_2 = self.splitter._calculate_semantic_similarity(code1, code2)  # pylint: disable=protected-access
+			sim1_3 = self.splitter._calculate_semantic_similarity(code1, code3)  # pylint: disable=protected-access
 
-            # Functions doing similar things should have higher similarity
-            assert sim1_2 > sim1_3
-    finally:
-        # Restore original class-level availability flags
-        # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = original_st_available
-        DiffSplitter._model_available = original_model_available
+			# Assert
+			assert sim1_2 > sim1_3  # Functions doing similar things should have higher similarity
 
+	def test_sentence_transformers_availability(self) -> None:
+		"""Test the sentence-transformers availability check functions."""
+		# Arrange
+		# Reset class variables to force availability check
+		# pylint: disable=protected-access
+		DiffSplitter._sentence_transformers_available = None
+		DiffSplitter._model_available = None
 
-def test_sentence_transformers_availability() -> None:
-    """Test the sentence-transformers availability check functions."""
-    # Save original class-level availability flags
-    # pylint: disable=protected-access
-    original_st_available = DiffSplitter._sentence_transformers_available
-    original_model_available = DiffSplitter._model_available
+		# Act & Assert
+		with patch.object(DiffSplitter, "_check_sentence_transformers_availability") as mock_check:
+			mock_check.return_value = True
 
-    try:
-        # Reset class variables to force availability check
-        # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = None
-        DiffSplitter._model_available = None
+			# Try to initialize a new splitter which will trigger availability check
+			splitter = DiffSplitter(self.repo_root)
 
-        # We'll manually set the availability flags since the actual import may vary by environment
-        # pylint: disable=protected-access
-        with patch.object(DiffSplitter, "_check_sentence_transformers_availability") as mock_check:
-            mock_check.return_value = True
+			# Force the sentence_transformers_available flag to True for testing
+			# pylint: disable=protected-access
+			DiffSplitter._sentence_transformers_available = True
 
-            # Try to initialize a new splitter which will trigger availability check
-            repo_root = Path("/mock/repo")
-            splitter = DiffSplitter(repo_root)
+			# Check if sentence-transformers is now available in our mocked environment
+			# pylint: disable=protected-access
+			assert DiffSplitter._sentence_transformers_available is True
 
-            # Force the sentence_transformers_available flag to True for testing
-            DiffSplitter._sentence_transformers_available = True
+			# Test with get_code_embedding
+			with patch.object(splitter, "_get_code_embedding") as mock_embedding:
+				mock_embedding.return_value = [0.1, 0.2, 0.3]
 
-            # Check if sentence-transformers is now available in our mocked environment
-            assert DiffSplitter._sentence_transformers_available is True
+				# Test calculate_semantic_similarity with mocked embeddings
+				with patch.object(splitter, "_calculate_semantic_similarity") as mock_sim:
+					mock_sim.return_value = 0.75
 
-            # Test with get_code_embedding
-            with patch.object(splitter, "_get_code_embedding") as mock_embedding:
-                mock_embedding.return_value = [0.1, 0.2, 0.3]
-
-                # Test calculate_semantic_similarity with mocked embeddings
-                with patch.object(splitter, "_calculate_semantic_similarity") as mock_sim:
-                    mock_sim.return_value = 0.75
-
-                    # Now check a similarity calculation would give the expected result
-                    result = mock_sim("code1", "code2")
-                    assert result == 0.75
-
-    finally:
-        # Restore original class-level availability flags
-        # pylint: disable=protected-access
-        DiffSplitter._sentence_transformers_available = original_st_available
-        DiffSplitter._model_available = original_model_available
+					# Now check a similarity calculation would give the expected result
+					result = mock_sim("code1", "code2")
+					assert result == 0.75

@@ -7,18 +7,18 @@ from codemap.processor.analysis.tree_sitter.languages.typescript import TYPESCRI
 
 # Map language names to their configs
 LANGUAGE_CONFIGS = {
-    "python": PYTHON_CONFIG,
-    "javascript": JAVASCRIPT_CONFIG,
-    "typescript": TYPESCRIPT_CONFIG,
-    # Add other languages when implemented
+	"python": PYTHON_CONFIG,
+	"javascript": JAVASCRIPT_CONFIG,
+	"typescript": TYPESCRIPT_CONFIG,
+	# Add other languages when implemented
 }
 
 # Map language names to their handler classes
 LANGUAGE_HANDLERS = {
-    "python": PythonSyntaxHandler,
-    "javascript": JavaScriptSyntaxHandler,
-    "typescript": TypeScriptSyntaxHandler,
-    # Add other language handlers when implemented
+	"python": PythonSyntaxHandler,
+	"javascript": JavaScriptSyntaxHandler,
+	"typescript": TypeScriptSyntaxHandler,
+	# Add other language handlers when implemented
 }
 
 __all__ = ["LANGUAGE_CONFIGS", "LANGUAGE_HANDLERS", "LanguageConfig", "LanguageSyntaxHandler"]
