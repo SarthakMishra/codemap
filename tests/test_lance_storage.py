@@ -163,9 +163,9 @@ def test_store_chunks_no_db_connection(caplog: pytest.LogCaptureFixture) -> None
 	storage._db = None
 
 	# Should log warning and return without error
-	with caplog.at_level(logging.WARNING):
+	with patch("codemap.processor.storage.lance.logger") as mock_logger:
 		storage.store_chunks([create_test_chunk()])
-		assert "No database connection available" in caplog.text
+		mock_logger.warning.assert_called_with("No database connection available")
 
 
 @pytest.mark.unit
@@ -205,10 +205,10 @@ def test_get_chunk_by_id_no_db_connection(caplog: pytest.LogCaptureFixture) -> N
 	storage._db = None
 
 	# Should log warning and return None
-	with caplog.at_level(logging.WARNING):
+	with patch("codemap.processor.storage.lance.logger") as mock_logger:
 		result = storage.get_chunk_by_id("test-id")
 		assert result is None
-		assert "No database connection" in caplog.text
+		mock_logger.warning.assert_called_with("No database connection, cannot retrieve chunk")
 
 
 @pytest.mark.unit
@@ -244,10 +244,10 @@ def test_search_by_content_no_db_connection(caplog: pytest.LogCaptureFixture) ->
 	storage._db = None
 
 	# Should log warning and return empty list
-	with caplog.at_level(logging.WARNING):
+	with patch("codemap.processor.storage.lance.logger") as mock_logger:
 		result = storage.search_by_content("test query")
 		assert result == []
-		assert "No database connection" in caplog.text
+		mock_logger.warning.assert_called_with("No database connection, cannot search by content")
 
 
 @pytest.mark.unit
@@ -280,12 +280,10 @@ def test_search_by_vector_no_db_connection(caplog: pytest.LogCaptureFixture) -> 
 	storage._db = None
 
 	# Should log warning and return empty list
-	with caplog.at_level(logging.WARNING):
-		# Force logger to capture properly
-		logging.getLogger("codemap.processor.storage.lance").warning("No database connection")
+	with patch("codemap.processor.storage.lance.logger") as mock_logger:
 		result = storage.search_by_vector([0.1, 0.2, 0.3])
 		assert result == []
-		assert any("No database connection" in record.message for record in caplog.records)
+		mock_logger.warning.assert_called_with("No database connection, cannot search by vector")
 
 
 @pytest.mark.unit
