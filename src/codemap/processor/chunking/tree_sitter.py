@@ -20,7 +20,8 @@ logger = logging.getLogger(__name__)
 
 
 class TreeSitterChunker(ChunkingStrategy):
-    """Chunking strategy based on syntax tree analysis using language-specific handlers."""
+    """Chunking strategy based on syntax tree analysis using language-specific
+    handlers."""
 
     def __init__(self) -> None:
         """Initialize the syntax chunker."""
@@ -44,6 +45,7 @@ class TreeSitterChunker(ChunkingStrategy):
 
         Returns:
             A sequence of chunks
+
         """
         # Determine the language if not provided
         if not language:
@@ -86,6 +88,7 @@ class TreeSitterChunker(ChunkingStrategy):
 
         Returns:
             List of chunks
+
         """
         # Create metadata for this chunk
         try:
@@ -176,6 +179,7 @@ class TreeSitterChunker(ChunkingStrategy):
 
         Returns:
             A sequence of merged chunks
+
         """
         # This is a placeholder - actual implementation would be more sophisticated
         return [merge_fn(chunks)]
@@ -189,6 +193,7 @@ class TreeSitterChunker(ChunkingStrategy):
 
         Returns:
             A sequence of split chunks
+
         """
         # If the chunk is small enough, return it as is
         if len(chunk.content) <= max_size:

@@ -1,4 +1,5 @@
-"""Regular expression-based code chunking for fallback when tree-sitter is unavailable."""
+"""Regular expression-based code chunking for fallback when tree-sitter is
+unavailable."""
 
 from __future__ import annotations
 
@@ -19,11 +20,14 @@ MAX_DOCSTRING_OFFSET = 100  # Maximum line offset for considering a docstring at
 
 
 class RegExpChunker(ChunkingStrategy):
-    """Chunking strategy based on regular expressions for general-purpose code parsing.
+    """Chunking strategy based on regular expressions for general-purpose code
+    parsing.
 
-    This chunker serves as a fallback when more sophisticated parsing (like tree-sitter)
-    is unavailable or fails. It performs basic chunking based on common patterns
-    without attempting language-specific entity recognition.
+    This chunker serves as a fallback when more sophisticated parsing
+    (like tree-sitter) is unavailable or fails. It performs basic
+    chunking based on common patterns without attempting language-
+    specific entity recognition.
+
     """
 
     def __init__(self) -> None:
@@ -47,6 +51,7 @@ class RegExpChunker(ChunkingStrategy):
 
         Returns:
             A sequence of chunks
+
         """
         # Create a module-level chunk as the parent
         module_chunk = self._create_module_chunk(content, file_path, language, git_metadata)
@@ -73,6 +78,7 @@ class RegExpChunker(ChunkingStrategy):
 
         Returns:
             A Chunk object representing the module
+
         """
         # Try to extract a potential docstring using a very generic pattern
         docstring = None
@@ -121,6 +127,7 @@ class RegExpChunker(ChunkingStrategy):
 
         Returns:
             A list of child chunks
+
         """
         chunks = []
         lines = content.splitlines()
@@ -198,6 +205,7 @@ class RegExpChunker(ChunkingStrategy):
 
         Returns:
             A name for the block if one can be inferred, None otherwise
+
         """
         if not block:
             return None
@@ -236,6 +244,7 @@ class RegExpChunker(ChunkingStrategy):
 
         Returns:
             A sequence of merged chunks
+
         """
         return [merge_fn(chunks)]
 
@@ -248,6 +257,7 @@ class RegExpChunker(ChunkingStrategy):
 
         Returns:
             A sequence of split chunks
+
         """
         if len(chunk.content) <= max_size:
             return [chunk]

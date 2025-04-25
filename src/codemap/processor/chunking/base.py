@@ -5,6 +5,7 @@ It provides:
 - Entity type definitions for code elements
 - Metadata structures for chunks and git information
 - Base chunking strategy interface
+
 """
 
 from __future__ import annotations
@@ -27,8 +28,10 @@ logger = logging.getLogger(__name__)
 class Location:
     """Location of a code chunk in a file.
 
-    This class represents the precise location of a code chunk within its source file,
-    including optional column information for exact positioning.
+    This class represents the precise location of a code chunk within
+    its source file, including optional column information for exact
+    positioning.
+
     """
 
     file_path: Path
@@ -57,8 +60,9 @@ class Location:
 class ChunkMetadata:
     """Metadata for a code chunk.
 
-    Contains all contextual information about a code chunk, including its type,
-    location, and relationships to other code elements.
+    Contains all contextual information about a code chunk, including
+    its type, location, and relationships to other code elements.
+
     """
 
     entity_type: EntityType
@@ -66,7 +70,10 @@ class ChunkMetadata:
 
     name: str
     """Local name of the entity (e.g., class name, function name).
-    For qualified names including parent scope, use Chunk.full_name."""
+
+    For qualified names including parent scope, use Chunk.full_name.
+
+    """
 
     location: Location
     """Physical location of the chunk in the source code."""
@@ -82,16 +89,22 @@ class ChunkMetadata:
 
     dependencies: list[str] = field(default_factory=list)
     """List of fully-qualified names of chunks this chunk depends on.
-    These could be imported modules, parent classes, called functions, etc."""
+
+    These could be imported modules, parent classes, called functions,
+    etc.
+
+    """
 
     attributes: dict[str, Any] = field(default_factory=dict)
     """Additional language or tool-specific attributes.
+
     Common keys might include:
     - 'visibility': 'public'/'private'/'protected'
     - 'complexity': Cyclomatic complexity score
     - 'deprecated': bool
     - 'async': bool
     - 'static': bool
+
     """
 
 
@@ -103,6 +116,7 @@ class Chunk:
     - Its content and metadata
     - Its position in the code hierarchy (parent/children relationships)
     - Helper methods for common operations
+
     """
 
     content: str
@@ -133,6 +147,7 @@ class Chunk:
 
         Returns:
             Hash value based on content and full_name
+
         """
         return hash((self.content, self.full_name))
 
@@ -144,6 +159,7 @@ class Chunk:
 
         Returns:
             True if objects are equal, False otherwise
+
         """
         if not isinstance(other, Chunk):
             return False
@@ -156,6 +172,7 @@ class Chunk:
         Returns:
             Dot-separated path from root to this chunk
             (e.g., 'module.MyClass.my_method').
+
         """
         # Check if we have an original full_name from the database
         if self.original_full_name is not None:
@@ -172,6 +189,7 @@ class Chunk:
 
         Returns:
             Number of characters in the chunk's content.
+
         """
         return len(self.content)
 
@@ -181,6 +199,7 @@ class Chunk:
 
         Returns:
             Number of lines in the chunk's content.
+
         """
         return self.content.count("\n") + 1
 
@@ -192,6 +211,7 @@ class Chunk:
 
         Returns:
             The child chunk if found, None otherwise.
+
         """
         return next((child for child in self.children if child.metadata.name == name), None)
 
@@ -201,6 +221,7 @@ class Chunk:
 
         Returns:
             Original full name if available, None otherwise
+
         """
         return self._original_full_name
 
@@ -210,6 +231,7 @@ class Chunk:
 
         Returns:
             Parent full name if available, None otherwise
+
         """
         return self._parent_full_name
 
@@ -224,6 +246,7 @@ class ChunkingStrategy(abc.ABC):
 
     The only required method is `chunk`. The `merge` and `split` operations
     are optional and have default implementations.
+
     """
 
     @abc.abstractmethod
@@ -248,6 +271,7 @@ class ChunkingStrategy(abc.ABC):
 
         Raises:
             ValueError: If the language is not supported or cannot be determined.
+
         """
 
     def merge(self, chunks: Sequence[Chunk], merge_fn: Callable[[Sequence[Chunk]], Chunk]) -> Sequence[Chunk]:
@@ -264,6 +288,7 @@ class ChunkingStrategy(abc.ABC):
 
         Returns:
             A sequence of chunks, potentially after merging.
+
         """
         # Default implementation: no merging, but use merge_fn to satisfy linter
         _ = merge_fn
@@ -284,6 +309,7 @@ class ChunkingStrategy(abc.ABC):
         Returns:
             A sequence of chunks, where each is ideally <= max_size.
             The default implementation returns [chunk].
+
         """
         if chunk.size > max_size:
             logger.warning(
