@@ -129,16 +129,34 @@ def branch_exists(branch_name: str, include_remote: bool = True) -> bool:
 	    True if the branch exists, False otherwise
 
 	"""
-	try:
-		branches = run_git_command(["git", "branch", "--list", branch_name]).strip()
-		if branches:
-			return True
-
-		if include_remote:
-			remote_branches = run_git_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"]).strip()
-			return bool(remote_branches)
+	if not branch_name:
 		return False
-	except GitError:
+
+	try:
+		# First check local branches
+		try:
+			branches = run_git_command(["git", "branch", "--list", branch_name]).strip()
+			if branches:
+				return True
+		except GitError:
+			# If local check fails, don't fail immediately
+			pass
+
+		# Then check remote branches if requested
+		if include_remote:
+			try:
+				remote_branches = run_git_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"]).strip()
+				if remote_branches:
+					return True
+			except GitError:
+				# If remote check fails, don't fail immediately
+				pass
+
+		# If we get here, the branch doesn't exist or commands failed
+		return False
+	except GitError as e:
+		# Log the specific GitError
+		logger.warning("Error checking if branch exists: %s", e)
 		return False
 
 
@@ -787,12 +805,27 @@ def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
 	"""
 	try:
 		# Check if both branches exist
-		if not branch_exists(branch, include_remote=True) or not branch_exists(target_branch, include_remote=True):
+		branch_exists_local = branch_exists(branch, include_remote=False)
+		branch_exists_remote = not branch_exists_local and branch_exists(branch, include_remote=True)
+		target_exists_local = branch_exists(target_branch, include_remote=False)
+		target_exists_remote = not target_exists_local and branch_exists(target_branch, include_remote=True)
+
+		# If either branch doesn't exist anywhere, return default values
+		if not (branch_exists_local or branch_exists_remote) or not (target_exists_local or target_exists_remote):
 			logger.debug("One or both branches don't exist: %s, %s", branch, target_branch)
 			return (False, 0)
 
+		# Determine full ref names for branches based on where they exist
+		branch_ref = branch
+		if branch_exists_remote and not branch_exists_local:
+			branch_ref = f"origin/{branch}"
+
+		target_ref = target_branch
+		if target_exists_remote and not target_exists_local:
+			target_ref = f"origin/{target_branch}"
+
 		# Check if branch is an ancestor of target_branch
-		cmd = ["git", "merge-base", "--is-ancestor", branch, target_branch]
+		cmd = ["git", "merge-base", "--is-ancestor", branch_ref, target_ref]
 		try:
 			run_git_command(cmd)
 			is_ancestor = True
@@ -800,11 +833,16 @@ def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
 			is_ancestor = False
 
 		# Get commit count between branches
-		count_cmd = ["git", "rev-list", "--count", f"{branch}..{target_branch}"]
-		count = int(run_git_command(count_cmd).strip())
+		count_cmd = ["git", "rev-list", "--count", f"{branch_ref}..{target_ref}"]
+		try:
+			count = int(run_git_command(count_cmd).strip())
+		except GitError:
+			# If this fails, branches might be completely unrelated
+			count = 0
 
 		return (is_ancestor, count)
-	except GitError:
+	except GitError as e:
+		logger.warning("Error determining branch relation: %s", e)
 		return (False, 0)
 
 
