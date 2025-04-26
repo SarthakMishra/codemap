@@ -77,3 +77,44 @@ commit:
       rule: always
       # Use the types defined in convention section above
       value: ~
+
+# Pull request configuration
+pr:
+  # Default branch settings
+  defaults:
+    base_branch: main  # Default base branch if not specified
+    feature_prefix: "feature/"  # Default prefix for feature branches
+
+  # Git workflow strategy: github-flow, gitflow, trunk-based
+  strategy: "github-flow"  # Default workflow strategy
+
+  # Branch mapping for different PR types (used by GitFlow)
+  branch_mapping:
+    feature:
+      base: develop
+      prefix: "feature/"
+    release:
+      base: main
+      prefix: "release/"
+    hotfix:
+      base: main
+      prefix: "hotfix/"
+    bugfix:
+      base: develop
+      prefix: "bugfix/"
+
+  # Content generation settings
+  generate:
+    title_strategy: "commits"  # Options: commits, llm, branch-name
+    description_strategy: "llm"  # Options: commits, llm, template
+    
+    # Template for PR descriptions
+    description_template: |
+      ## Changes
+      {changes}
+      
+      ## Testing
+      {testing_instructions}
+      
+      ## Screenshots
+      {screenshots}

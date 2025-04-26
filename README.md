@@ -137,6 +137,28 @@ The commit command provides an interactive workflow that:
    - Skip the chunk
    - Exit the process
 
+### Commit Linting Feature
+
+CodeMap includes automatic commit message linting to ensure your commit messages follow conventions:
+
+1. **Automatic Validation**: Generated commit messages are automatically validated against conventional commit standards.
+2. **Linting Rules**:
+   - Type must be one of the allowed types (configurable in `.codemap.yml`)
+   - Type must be lowercase
+   - Subject must not end with a period
+   - Subject must be at least 10 characters long
+   - Header line should not exceed the configured maximum length (default: 72 characters)
+   - Scope must be in lowercase (if provided)
+   - Header must have a space after the colon
+   - Description must start with an imperative verb
+
+3. **Auto-remediation**: If a generated message fails linting, CodeMap will:
+   - Identify the specific issues with the message
+   - Automatically attempt to regenerate a compliant message (up to 3 attempts)
+   - Provide feedback during regeneration with a loading spinner
+
+4. **Fallback Mechanism**: If all regeneration attempts fail, the last message will be used, with linting status indicated.
+
 ### Commit Strategy
 
 The tool uses semantic analysis to group related changes together based on:
@@ -173,6 +195,9 @@ codemap commit -a --non-interactive
 
 # Commit with verbose logging
 codemap commit -v
+
+# Demonstrate automatic linting and regeneration
+codemap commit --verbose  # Will show linting feedback and regeneration attempts
 ```
 
 ## PR Command Feature
@@ -181,12 +206,15 @@ The `codemap pr` command helps you create and manage pull requests with ease. It
 
 ### PR Command Features
 
-- Create a new branch by analyzing your changes
-- Commit all changes using the pre-existing commit tools
-- Push changes to origin
-- Generate a PR with appropriate messages by analyzing commits
+- Create branches with intelligent naming based on your current changes
+- Support for multiple Git workflow strategies (GitHub Flow, GitFlow, Trunk-Based)
+- Rich branch visualization with metadata and relationships
+- Smart base branch selection based on branch type
+- Automatic content generation for different PR types (feature, release, hotfix)
+- **Workflow-specific PR templates based on branch type**
+- Interactive PR content editing with previews
 - Update existing PRs with new commits
-- Interactive workflow with helpful prompts
+- Configurable via `.codemap.yml` for team-wide settings
 
 ### PR Command Requirements
 
@@ -200,77 +228,142 @@ The `codemap pr` command helps you create and manage pull requests with ease. It
 codemap pr create [PATH] [OPTIONS]
 ```
 
-**Arguments:**
-- `PATH`: Path to the repository (defaults to current directory)
-
 **Options:**
-- `--branch`, `-b`: Branch name to use (will be created if it doesn't exist)
-- `--base`: Base branch for the PR (default: main or master)
-- `--title`, `-t`: PR title (generated from commits if not provided)
-- `--description`, `-d`: PR description (generated from commits if not provided)
-- `--no-commit`: Don't commit changes before creating PR
-- `--force-push`, `-f`: Force push branch to remote
+- `--branch`, `-b`: Target branch name
+- `--type`, `-t`: Branch type (feature, release, hotfix, bugfix)
+- `--base`: Base branch for the PR (defaults to repo default)
+- `--title`: Pull request title
+- `--desc`, `-d`: Pull request description (file path or text)
+- `--no-commit`: Skip the commit process before creating PR
+- `--force-push`, `-f`: Force push the branch
+- `--workflow`, `-w`: Git workflow strategy (github-flow, gitflow, trunk-based)
 - `--non-interactive`: Run in non-interactive mode
-- `--model`, `-m`: LLM model to use for commit message generation
-- `--api-key`: API key for LLM provider
+- `--model`, `-m`: LLM model for content generation
+- `--verbose`, `-v`: Enable verbose logging
 
 ### Updating a PR
 
 ```bash
-codemap pr update [PR_NUMBER] [OPTIONS]
+codemap pr update [PATH] [OPTIONS]
 ```
-
-**Arguments:**
-- `PR_NUMBER`: PR number to update (if not provided, will try to find PR for current branch)
 
 **Options:**
-- `--path`, `-p`: Path to repository
-- `--title`, `-t`: New PR title
-- `--description`, `-d`: New PR description
-- `--no-commit`: Don't commit changes before updating PR
-- `--force-push`, `-f`: Force push branch to remote
+- `--pr`: PR number to update
+- `--title`: New PR title
+- `--desc`, `-d`: New PR description
+- `--no-commit`: Skip the commit process before updating PR
+- `--force-push`, `-f`: Force push the branch
 - `--non-interactive`: Run in non-interactive mode
-- `--model`, `-m`: LLM model to use for commit message generation
-- `--api-key`: API key for LLM provider
+- `--verbose`, `-v`: Enable verbose logging
 
-### PR Examples
+### Git Workflow Strategies
 
-```bash
-# Interactive mode (recommended)
-codemap pr create
+The PR command supports multiple Git workflow strategies:
 
-# Specify a branch name
-codemap pr create --branch feature-branch
+1. **GitHub Flow** (default)
+   - Simple, linear workflow
+   - Feature branches merge directly to main
+   
+2. **GitFlow**
+   - Feature branches → develop
+   - Release branches → main
+   - Hotfix branches → main (with back-merge to develop)
+   
+3. **Trunk-Based Development**
+   - Short-lived feature branches
+   - Emphasizes small, frequent PRs
 
-# Create PR with custom title and description
-codemap pr create --title "My Feature" --description "This PR adds a new feature"
+### PR Template System
 
-# Create PR without committing changes
-codemap pr create --no-commit
+CodeMap includes a robust PR template system that automatically generates appropriate titles and descriptions based on:
+1. The selected workflow strategy (GitHub Flow, GitFlow, Trunk-Based)
+2. The branch type (feature, release, hotfix, bugfix)
+3. The changes being made
 
-# Update PR by number
-codemap pr update 123
+#### Workflow-Specific Templates
 
-# Update PR for current branch
-codemap pr update
+Each Git workflow strategy provides specialized templates:
 
-# Update PR with new title
-codemap pr update --title "Updated Feature"
+**GitHub Flow Templates**
+- Simple, general-purpose templates
+- Focus on changes and testing
+- Example format: `{description}` for title, structured sections for description
+
+**GitFlow Templates**
+- Specialized templates for each branch type:
+  - **Feature**: Focus on new functionality with implementation details
+  - **Release**: Structured release notes with features, bug fixes, and breaking changes
+  - **Hotfix**: Emergency fix templates with impact analysis
+  - **Bugfix**: Templates focused on bug description, root cause, and testing
+
+**Trunk-Based Templates**
+- Concise templates for short-lived branches
+- Focus on quick implementation and rollout plans
+- Emphasis on testing and deployment strategies
+
+#### Template Configuration
+
+In your `.codemap.yml`, you can configure how templates are used:
+
+```yaml
+pr:
+  # Content generation settings
+  generate:
+    title_strategy: "template"  # Options: commits, llm, template
+    description_strategy: "template"  # Options: commits, llm, template
+    use_workflow_templates: true  # Use workflow-specific templates (default: true)
+    
+    # Custom template (used when use_workflow_templates is false)
+    description_template: |
+      ## Changes
+      {description}
+      
+      ## Testing
+      - [ ] Unit tests
+      - [ ] Integration tests
+      
+      ## Additional Notes
+      
+      ## Related Issues
+      Closes #
 ```
 
-### PR Workflow
+**Configuration Options:**
+- `title_strategy`: How PR titles are generated
+  - `commits`: Generate from commit messages
+  - `llm`: Use AI to generate titles
+  - `template`: Use workflow-specific templates
+  
+- `description_strategy`: How PR descriptions are generated
+  - `commits`: Generate structured content from commit messages
+  - `llm`: Use AI to generate descriptions
+  - `template`: Use workflow-specific templates
+  
+- `use_workflow_templates`: Whether to use built-in templates for each workflow strategy
+  - When `true`: Uses the appropriate template based on workflow and branch type
+  - When `false`: Uses the custom template defined in `description_template`
 
-The typical workflow with the `codemap pr` command is:
+- `description_template`: Custom template with placeholder variables
+  - `{description}`: Brief description of changes
+  - `{changes}`: List of changes from commits
+  - `{user}`: Current Git user
+  - Supports any Markdown formatting
 
-1. Make changes to your code
-2. Run `codemap pr create`
-3. Follow the interactive prompts to:
-   - Create or select a branch
-   - Commit your changes
-   - Push to remote
-   - Create a PR with generated title and description
-4. Make additional changes
-5. Run `codemap pr update` to add new commits and update the PR
+### Examples
+
+```bash
+# Create PR using workflow-specific templates (GitFlow)
+codemap pr create --workflow gitflow --type feature
+
+# Create PR with custom title but workflow-based description
+codemap pr create --title "My Custom Title" --workflow trunk-based
+
+# Override both the workflow template and use custom description
+codemap pr create --desc "Custom description with **markdown** support"
+
+# Non-interactive PR creation with defined template usage
+codemap pr create --non-interactive --workflow gitflow --type release
+```
 
 ## LLM Provider Support
 
@@ -331,6 +424,54 @@ commit:
 
     # Maximum length for commit message subject line
     max_length: 72
+    
+    # Commit linting configuration (optional)
+    linting:
+      enabled: true                # Enable/disable commit message linting (default: true)
+      auto_fix: true               # Attempt to fix non-compliant messages (default: true)
+      max_regeneration_attempts: 3 # Maximum attempts to regenerate a compliant message (default: 3)
+      rules:
+        subject_min_length: 10     # Minimum length for commit subject (default: 10)
+        imperative_subject: true   # Enforce imperative mood in subject (default: true)
+        no_subject_period: true    # No period at the end of subject (default: true)
+        scope_lowercase: true      # Enforce lowercase scope (default: true)
+        type_in_allowed: true      # Type must be in allowed types list (default: true)
+
+# Pull Request Configuration
+pr:
+  # Default branch settings
+  defaults:
+    base_branch: main
+    feature_prefix: "feature/"
+    
+  # Git workflow strategy
+  strategy: "github-flow"  # Options: github-flow, gitflow, trunk-based
+  
+  # Branch mapping for different PR types
+  branch_mapping:
+    feature:
+      base: develop
+      prefix: "feature/"
+    bugfix:
+      base: develop
+      prefix: "bugfix/"
+    release:
+      base: main
+      prefix: "release/"
+    hotfix:
+      base: main
+      prefix: "hotfix/"
+      
+  # Content generation
+  generate:
+    title_strategy: "commits"  # Options: commits, llm, branch-name
+    description_strategy: "llm"  # Options: commits, llm, template
+    template:
+      sections:
+        - title: "Changes"
+          content: "{changes}"
+        - title: "Testing"
+          content: "Tested by: {user}"
 ```
 
 ### Configuration Priority
@@ -378,6 +519,21 @@ ANTHROPIC_API_BASE=your_custom_url
    - Add custom commit types to match your workflow
    - Adjust `max_length` to enforce commit message style
    - Define scopes to categorize changes
+   - Commit linter automatically validates messages against convention rules
+   - Configure custom linting rules in the `.codemap.yml` convention section
+   - Control linting behavior with the `linting` configuration:
+     - Enable/disable linting with `enabled: true|false`
+     - Set auto-fixing of non-compliant messages with `auto_fix: true|false`
+     - Control regeneration attempts with `max_regeneration_attempts`
+     - Fine-tune specific rules in the `rules` subsection
+
+5. **PR Workflow Settings**
+   - Choose from different Git workflow strategies (`github-flow`, `gitflow`, `trunk-based`)
+   - Configure default base branches for different PR types
+   - Set branch prefixes for consistent naming (`feature/`, `bugfix/`, etc.)
+   - Customize PR content generation with different strategies
+   - Define PR description templates with custom sections
+   - Control PR creation and update behavior
 
 ### Output Structure
 
