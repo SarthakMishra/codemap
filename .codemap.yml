@@ -97,7 +97,7 @@ pr:
       base: main
       prefix: "release/"
     hotfix:
-      base: main
+      base: dev
       prefix: "fix/"
     bugfix:
       base: dev
