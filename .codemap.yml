@@ -82,7 +82,7 @@ commit:
 pr:
   # Default branch settings
   defaults:
-    base_branch: None  # Default base branch if not specified
+    base_branch: dev  # Default base branch if not specified
     feature_prefix: "feat/"  # Default prefix for feature branches
 
   # Git workflow strategy: github-flow, gitflow, trunk-based
