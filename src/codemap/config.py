@@ -38,4 +38,51 @@ DEFAULT_CONFIG = {
 			"max_length": 72,
 		},
 	},
+	# Pull request configuration
+	"pr": {
+		# Default branch settings
+		"defaults": {
+			"base_branch": None,  # Defaults to repo default if None
+			"feature_prefix": "feature/",
+		},
+		# Git workflow strategy: github-flow, gitflow, trunk-based
+		"strategy": "github-flow",
+		# Branch mapping for different PR types (used by GitFlow)
+		"branch_mapping": {
+			"feature": {
+				"base": "develop",
+				"prefix": "feature/",
+			},
+			"release": {
+				"base": "main",
+				"prefix": "release/",
+			},
+			"hotfix": {
+				"base": "main",
+				"prefix": "hotfix/",
+			},
+			"bugfix": {
+				"base": "develop",
+				"prefix": "bugfix/",
+			},
+		},
+		# Content generation settings
+		"generate": {
+			"title_strategy": "commits",  # Options: commits, llm, template
+			"description_strategy": "commits",  # Options: commits, llm, template
+			# Template for PR descriptions (used with description_strategy: "template")
+			"description_template": """
+## Changes
+{changes}
+
+## Testing
+{testing_instructions}
+
+## Screenshots
+{screenshots}
+""",
+			# Whether to use PR templates from workflow strategies
+			"use_workflow_templates": True,
+		},
+	},
 }
