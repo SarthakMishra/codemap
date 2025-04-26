@@ -376,6 +376,139 @@ class TestMessageGenerator(LLMTestBase):
 			assert used_llm is True
 			assert message == "docs(readme): add new section with feature documentation"
 
+	def test_message_linting_valid(self) -> None:
+		"""
+		Test message generation with linting - valid message case.
+
+		Verifies that a valid message passes linting without regeneration.
+		"""
+		# Arrange: Set up repo and environment
+		repo_root = Path("/mock/repo")
+
+		with patch.dict(os.environ, {"OPENAI_API_KEY": "mock-key"}):
+			generator = MessageGenerator(repo_root, model="gpt-4o-mini")
+			# Set provider manually for testing
+			generator.provider = "openai"
+
+			# Mock the linter to indicate the message is valid
+			mock_lint_result = (True, [])
+
+			# Create test data using DiffChunkData
+			chunk_data = DiffChunkData(
+				files=["src/feature.py"],
+				content=(
+					"diff --git a/src/feature.py b/src/feature.py\n"
+					"@@ -1,5 +1,7 @@\n"
+					"+def new_feature():\n"
+					"+    return True"
+				),
+			)
+
+			# Act: Generate a message with linting
+			with (
+				patch.object(generator, "_lint_commit_message", return_value=mock_lint_result),
+				patch.object(generator, "_call_llm_api", return_value="feat(core): add new feature function"),
+				patch.object(generator, "_extract_file_info", return_value={}),
+			):
+				message, used_llm, is_valid = generator.generate_message_with_linting(chunk_data)
+
+			# Assert: Verify the message and that linting passed
+			assert used_llm is True
+			assert is_valid is True
+			assert message == "feat(core): add new feature function"
+
+	def test_message_linting_invalid_with_regeneration(self) -> None:
+		"""
+		Test message generation with linting - invalid message that is regenerated successfully.
+
+		Verifies that an invalid message is regenerated and the new valid message is returned.
+		"""
+		# Arrange: Set up repo and environment
+		repo_root = Path("/mock/repo")
+
+		with patch.dict(os.environ, {"OPENAI_API_KEY": "mock-key"}):
+			generator = MessageGenerator(repo_root, model="gpt-4o-mini")
+			# Set provider manually for testing
+			generator.provider = "openai"
+
+			# Mock the linter to indicate the first message is invalid, then valid
+			mock_lint_results = [(False, ["Invalid type 'feature'. Must be one of: feat, fix, docs, etc."]), (True, [])]
+
+			# Create test data using DiffChunkData
+			chunk_data = DiffChunkData(
+				files=["src/feature.py"],
+				content=(
+					"diff --git a/src/feature.py b/src/feature.py\n"
+					"@@ -1,5 +1,7 @@\n"
+					"+def new_feature():\n"
+					"+    return True"
+				),
+			)
+
+			# Act: Generate a message with linting
+			with (
+				patch.object(generator, "_lint_commit_message", side_effect=mock_lint_results),
+				patch.object(
+					generator,
+					"_call_llm_api",
+					side_effect=[
+						"feature(core): add new feature function",  # Invalid type
+						"feat(core): add new feature function",  # Valid regeneration
+					],
+				),
+				patch.object(generator, "_extract_file_info", return_value={}),
+				patch("codemap.git.message_generator.loading_spinner", return_value=MagicMock().__enter__.return_value),
+			):
+				message, used_llm, is_valid = generator.generate_message_with_linting(chunk_data)
+
+			# Assert: Verify the regenerated message and that linting passed
+			assert used_llm is True
+			assert is_valid is True
+			assert message == "feat(core): add new feature function"
+
+	def test_message_linting_max_retries_exhausted(self) -> None:
+		"""
+		Test message generation with linting - max retries exhausted.
+
+		Verifies that when max retries are exhausted, the last generated message is returned
+		with is_valid=False.
+		"""
+		# Arrange: Set up repo and environment
+		repo_root = Path("/mock/repo")
+
+		with patch.dict(os.environ, {"OPENAI_API_KEY": "mock-key"}):
+			generator = MessageGenerator(repo_root, model="gpt-4o-mini")
+			# Set provider manually for testing
+			generator.provider = "openai"
+
+			# Mock the linter to always indicate the message is invalid
+			mock_lint_result = (False, ["Invalid type 'feature'. Must be one of: feat, fix, docs, etc."])
+
+			# Create test data using DiffChunkData
+			chunk_data = DiffChunkData(
+				files=["src/feature.py"],
+				content=(
+					"diff --git a/src/feature.py b/src/feature.py\n"
+					"@@ -1,5 +1,7 @@\n"
+					"+def new_feature():\n"
+					"+    return True"
+				),
+			)
+
+			# Act: Generate a message with linting but only allow 2 retries
+			with (
+				patch.object(generator, "_lint_commit_message", return_value=mock_lint_result),
+				patch.object(generator, "_call_llm_api", return_value="feature(core): add new feature function"),
+				patch.object(generator, "_extract_file_info", return_value={}),
+				patch("codemap.git.message_generator.loading_spinner", return_value=MagicMock().__enter__.return_value),
+			):
+				message, used_llm, is_valid = generator.generate_message_with_linting(chunk_data, max_retries=2)
+
+			# Assert: Verify the message and that linting failed
+			assert used_llm is True
+			assert is_valid is False
+			assert message == "feature(core): add new feature function"
+
 
 @pytest.mark.unit
 @pytest.mark.git

@@ -228,18 +228,23 @@ class TestGenerateCommitMessage:
 		mock_diff_chunk.files = ["file1.py"]
 		mock_diff_chunk.content = "test diff content"
 
-		# Instead of mocking generate_message, we'll mock the underlying behavior
-		mock_generator.generate_message.return_value = ("feat: Add new function", True)
+		# Mock the generate_message function from llm_utils
+		with (
+			patch("codemap.cli.commit_cmd.logger"),
+			patch("codemap.utils.llm_utils.generate_message") as mock_gen_message,
+		):
+			# Configure the mock to return the expected values
+			mock_gen_message.return_value = ("feat: Add new function", True)
 
-		with patch("codemap.cli.commit_cmd.logger"):
 			message, used_llm = generate_commit_message(mock_diff_chunk, mock_generator, GenerationMode.SMART)
 
 			assert message == "feat: Add new function"
 			assert used_llm is True
-			# Verify the generator's generate_message method was called
-			# Instead of looking for generate_message (which may be a utility function),
-			# we look for the method call on the generator
-			assert mock_generator.generate_message.called
+			# Verify the generate_message function was called with correct parameters
+			# Use keyword arguments to match the actual implementation
+			mock_gen_message.assert_called_once_with(
+				chunk=mock_diff_chunk, message_generator=mock_generator, use_simple_mode=False, enable_linting=True
+			)
 
 	def test_generate_commit_message_simple_mode(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test generating message in simple mode."""
