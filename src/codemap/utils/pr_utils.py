@@ -786,6 +786,11 @@ def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
 
 	"""
 	try:
+		# Check if both branches exist
+		if not branch_exists(branch, include_remote=True) or not branch_exists(target_branch, include_remote=True):
+			logger.debug("One or both branches don't exist: %s, %s", branch, target_branch)
+			return (False, 0)
+
 		# Check if branch is an ancestor of target_branch
 		cmd = ["git", "merge-base", "--is-ancestor", branch, target_branch]
 		try:
