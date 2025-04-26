@@ -638,15 +638,28 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 				continue
 
 			meta = workflow.get_branch_metadata(b)
-			relation, commit_count = get_branch_relation(b, branch_name)
-			relation_str = "ancestor" if relation else "unrelated"
+			try:
+				logger.debug("Testing branch relation between %s and %s", b, branch_name)
+				relation, commit_count = get_branch_relation(b, branch_name)
+				relation_str = "ancestor" if relation else "unrelated"
 
-			branch_choices.append(
-				{
-					"name": f"{b} ({meta.get('last_commit_date', 'unknown')}, {relation_str}, {commit_count} commits)",
-					"value": b,
-				}
-			)
+				branch_choices.append(
+					{
+						"name": (
+							f"{b} ({meta.get('last_commit_date', 'unknown')}, {relation_str}, {commit_count} commits)"
+						),
+						"value": b,
+					}
+				)
+			except GitError as e:
+				logger.warning("Error checking branch relation for %s: %s", b, e)
+				# Still add the branch but mark relation as unknown
+				branch_choices.append(
+					{
+						"name": f"{b} ({meta.get('last_commit_date', 'unknown')}, relation unknown)",
+						"value": b,
+					}
+				)
 
 		# Sort choices by relation
 		branch_choices.sort(key=lambda x: "0" if "ancestor" in x["name"] else "1" + x["name"])
@@ -684,14 +697,30 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 
 		# Ask for base branch
 		if branch_choices:
-			selected_base = questionary.select(
-				"Select base branch:",
-				choices=branch_choices,
-				default=base_branch if base_branch in [c["value"] for c in branch_choices] else default,
-				qmark="🔀",
-			).ask()
+			try:
+				# Set a safe default value that exists in the choices
+				safe_default = None
+				if base_branch in [c["value"] for c in branch_choices]:
+					safe_default = base_branch
+				elif default in [c["value"] for c in branch_choices]:
+					safe_default = default
+				elif branch_choices:
+					safe_default = branch_choices[0]["value"]
 
-			base_branch = selected_base
+				selected_base = questionary.select(
+					"Select base branch:",
+					choices=branch_choices,
+					default=safe_default,
+					qmark="🔀",
+				).ask()
+
+				base_branch = selected_base
+			except (ValueError, TypeError) as e:
+				logger.warning("Error displaying branch selection: %s", e)
+				# If selection fails, use the first available branch or keep existing
+				if branch_choices:
+					base_branch = branch_choices[0]["value"]
+				logger.info("Using %s as the base branch after error", base_branch)
 		else:
 			# If no branch choices are available, use the default branch or current branch as fallback
 			console.print(f"[yellow]No valid branches found for a PR. Using '{base_branch}' as base branch.[/yellow]")
