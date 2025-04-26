@@ -23,21 +23,35 @@ class GitError(Exception):
 	"""Custom exception for Git-related errors."""
 
 
-def run_git_command(command: list[str], cwd: Path | None = None) -> str:
+def run_git_command(command: list[str], cwd: Path | str | None = None, check: bool = True) -> str:
 	"""
-	Run a Git command and return its output.
+	Run a git command and return its output.
 
 	Args:
-	    command: Git command to run
-	    cwd: Working directory (optional)
+	    command: Git command as a list of strings
+	    cwd: Working directory
+	    check: Whether to check for errors
 
 	Returns:
-	    Command output as string
+	    Command output as a string
 
 	Raises:
-	    GitError: If the command fails
+	    GitError: If the command fails and check is True
 
 	"""
+	# Constants to avoid magic numbers
+	min_cmd_len_for_merge_base = 3
+	merge_base_index = 1
+	is_ancestor_index = 2
+
+	# Check if command contains 'merge-base --is-ancestor' which is expected to sometimes fail
+	# without it being a true error condition
+	is_ancestor_check = (
+		len(command) >= min_cmd_len_for_merge_base
+		and command[merge_base_index] == "merge-base"
+		and command[is_ancestor_index] == "--is-ancestor"
+	)
+
 	try:
 		# Using subprocess.run with a list of arguments is safe since we're not using shell=True
 		# and the command is not being built from untrusted input
@@ -46,14 +60,28 @@ def run_git_command(command: list[str], cwd: Path | None = None) -> str:
 			cwd=cwd,
 			capture_output=True,
 			text=True,
-			check=True,
+			check=check,
 		)
-	except subprocess.CalledProcessError as e:
-		error_msg = f"Git command failed: {' '.join(command)}\nError: {e.stderr}"
-		logger.exception(error_msg)
-		raise GitError(error_msg) from e
-	else:
 		return result.stdout
+	except subprocess.CalledProcessError as e:
+		stderr = e.stderr.strip() if e.stderr else ""
+		stdout = e.stdout.strip() if e.stdout else ""
+
+		# For merge-base --is-ancestor checks, log at debug level as this is expected to fail sometimes
+		if is_ancestor_check:
+			logger.debug("Git command completed with non-zero status (expected for relationship check): %s", command)
+			if check:
+				error_message = f"Git command failed with exit code {e.returncode}: {stderr or stdout}"
+				raise GitError(error_message) from e
+		else:
+			# For other commands, log the exception
+			logger.exception("Git command failed: %s", " ".join(command))
+			if check:
+				error_msg = f"Git command failed: {stderr or stdout}"
+				raise GitError(error_msg) from e
+
+		# If we're not checking for errors, return an empty string
+		return ""
 
 
 def get_repo_root(path: Path | None = None) -> Path:
