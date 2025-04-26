@@ -82,8 +82,8 @@ commit:
 pr:
   # Default branch settings
   defaults:
-    base_branch: main  # Default base branch if not specified
-    feature_prefix: "feature/"  # Default prefix for feature branches
+    base_branch: dev  # Default base branch if not specified
+    feature_prefix: "feat/"  # Default prefix for feature branches
 
   # Git workflow strategy: github-flow, gitflow, trunk-based
   strategy: "github-flow"  # Default workflow strategy
@@ -91,16 +91,16 @@ pr:
   # Branch mapping for different PR types (used by GitFlow)
   branch_mapping:
     feature:
-      base: develop
-      prefix: "feature/"
+      base: dev
+      prefix: "feat/"
     release:
       base: main
       prefix: "release/"
     hotfix:
       base: main
-      prefix: "hotfix/"
+      prefix: "fix/"
     bugfix:
-      base: develop
+      base: dev
       prefix: "bugfix/"
 
   # Content generation settings
