@@ -33,3 +33,47 @@ commit:
 
     # Maximum length for commit message subject line
     max_length: 72
+  
+  # Commit lint rules to match .commitlintrc
+  lint:
+    body_leading_blank:
+      level: WARNING
+      rule: always
+    body_max_line_length:
+      level: ERROR
+      rule: always
+      value: 100
+    footer_leading_blank:
+      level: WARNING
+      rule: always
+    footer_max_line_length:
+      level: ERROR
+      rule: always
+      value: 100
+    header_max_length:
+      level: ERROR
+      rule: always
+      value: 100
+    subject_case:
+      level: ERROR
+      rule: never
+      value: ["sentence-case", "start-case", "pascal-case", "upper-case"]
+    subject_empty:
+      level: ERROR
+      rule: never
+    subject_full_stop:
+      level: ERROR
+      rule: never
+      value: "."
+    type_case:
+      level: ERROR
+      rule: always
+      value: "lower-case"
+    type_empty:
+      level: ERROR
+      rule: never
+    type_enum:
+      level: ERROR
+      rule: always
+      # Use the types defined in convention section above
+      value: ~
