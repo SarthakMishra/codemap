@@ -10,7 +10,7 @@ from typing import Protocol, TypeVar, runtime_checkable
 from rich.console import Console
 
 # Import the MessageGenerator class - avoid circular imports
-from codemap.git.message_generator import DiffChunkData, LLMError, MessageGenerator
+from codemap.git.message_generator import LLMError, MessageGenerator
 
 console = Console()
 logger = logging.getLogger(__name__)
@@ -141,25 +141,26 @@ def generate_message(
 	chunk: DiffChunkLike,
 	message_generator: MessageGenerator,
 	use_simple_mode: bool = False,
+	enable_linting: bool = True,
 ) -> tuple[str, bool]:
 	"""
-	Generate a message for the given chunk.
-
-	This universal function can be used by both commit.py and pr.py.
+	Generate a commit message for a diff chunk.
 
 	Args:
-	    chunk: DiffChunk or other object to generate message for
-	    message_generator: Configured MessageGenerator instance
-	    use_simple_mode: If True, use simple generation mode without LLM
+	    chunk: The diff chunk to generate a message for
+	    message_generator: The generator to use
+	    use_simple_mode: Whether to use simple mode (faster, less detailed)
+	    enable_linting: Whether to enable linting of the generated message
 
 	Returns:
 	    Tuple of (message, whether LLM was used)
 
 	"""
-	# Create a safe dictionary representation of chunk for fallback
 	try:
-		# Use getattr with default values to safely extract attributes from DiffChunkLike
-		chunk_dict = DiffChunkData(files=getattr(chunk, "files", []), content=getattr(chunk, "content", ""))
+		from codemap.git.message_generator import DiffChunkData
+
+		# Create a safe dictionary representation of chunk
+		chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
 
 		# Add description if it exists
 		description = getattr(chunk, "description", None)
@@ -167,19 +168,21 @@ def generate_message(
 			chunk_dict["description"] = description
 
 		if use_simple_mode:
-			# Use fallback generation without LLM
+			# Use simple rule-based generation
 			message = message_generator.fallback_generation(chunk_dict)
 			return message, False
-
-		# Try LLM-based generation first - using converted dict instead of original chunk
+		# Use full LLM-based generation with or without linting
+		if enable_linting:
+			message, used_llm, _ = message_generator.generate_message_with_linting(chunk_dict)
+			return message, used_llm
 		message, used_llm = message_generator.generate_message(chunk_dict)
 		return message, used_llm
-	except LLMError as e:
-		# If LLM generation fails, log and use fallback
-		logger.warning("LLM message generation failed: %s", str(e))
-		# Create a safe dictionary representation of chunk for fallback
-		chunk_dict = DiffChunkData(files=getattr(chunk, "files", []), content=getattr(chunk, "content", ""))
 
+	except LLMError:
+		# Handle LLM errors by using fallback generation
+		from codemap.git.message_generator import DiffChunkData
+
+		chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
 		# Add description if it exists
 		description = getattr(chunk, "description", None)
 		if description is not None:
