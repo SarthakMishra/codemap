@@ -15,8 +15,12 @@ from codemap.utils.pr_utils import (
 	checkout_branch,
 	create_branch,
 	create_pull_request,
+	generate_pr_content_from_template,
 	generate_pr_description_from_commits,
+	generate_pr_description_with_llm,
 	generate_pr_title_from_commits,
+	generate_pr_title_with_llm,
+	generate_release_pr_content,
 	get_commit_messages,
 	get_current_branch,
 	get_default_branch,
@@ -51,6 +55,13 @@ def mock_git_version_check(mock_subprocess_run: MagicMock) -> MagicMock:
 	mock_version_process.returncode = 0
 	mock_subprocess_run.return_value = mock_version_process
 	return mock_subprocess_run
+
+
+@pytest.fixture
+def mock_create_strategy() -> Generator[MagicMock, None, None]:
+	"""Mock the create_strategy function."""
+	with patch("codemap.utils.pr_utils.create_strategy") as mock:
+		yield mock
 
 
 class TestBranchOperations:
@@ -279,28 +290,164 @@ class TestCommitOperations:
 		assert "### Other" in result
 		assert "- Update dependencies" in result
 
+	def test_generate_pr_title_with_llm(self) -> None:
+		"""Test generate_pr_title_with_llm function."""
+		with patch("codemap.utils.llm_utils.generate_text_with_llm", return_value="AI Generated Title"):
+			result = generate_pr_title_with_llm(
+				["feat: Add new feature"], model="gpt-4", api_key="test-key", api_base="https://api.example.com"
+			)
+			assert result == "AI Generated Title"
+
+	def test_generate_pr_description_with_llm(self) -> None:
+		"""Test generate_pr_description_with_llm function."""
+		with patch("codemap.utils.llm_utils.generate_text_with_llm", return_value="AI Generated Description"):
+			result = generate_pr_description_with_llm(
+				["feat: Add new feature"], model="gpt-4", api_key="test-key", api_base="https://api.example.com"
+			)
+			assert result == "AI Generated Description"
+
 	def test_suggest_branch_name(self) -> None:
 		"""Test suggest_branch_name function."""
-		commits = ["feat(api): Add new endpoint"]
+		commit_message = "feat(api): Add new endpoint"
 
-		result = suggest_branch_name(commits)
+		result = suggest_branch_name(commit_message, "github-flow")
 
-		assert result.startswith("feat-api-add-new-endpoint")
+		assert result == "feature/api-endpoint"
 
 	def test_suggest_branch_name_empty(self) -> None:
 		"""Test suggest_branch_name function with empty commits."""
-		with patch("codemap.utils.pr_utils.get_timestamp") as mock_get_timestamp:
+		with (
+			patch("codemap.utils.pr_utils.get_timestamp") as mock_get_timestamp,
+			patch("codemap.utils.pr_utils.create_strategy") as mock_create_strategy,
+		):
 			mock_get_timestamp.return_value = "20250421-123456"
+			mock_strategy = MagicMock()
+			mock_strategy.suggest_branch_name.return_value = "feature/empty-20250421-123456"
+			mock_create_strategy.return_value = mock_strategy
 
-			result = suggest_branch_name([])
+			result = suggest_branch_name("", "github-flow")
 
-			assert result == "update-20250421-123456"
+			# Mock should produce a non-empty result
+			assert result == "feature/empty-20250421-123456"
 
 	def test_suggest_branch_name_non_conventional(self) -> None:
 		"""Test suggest_branch_name function with non-conventional commit."""
-		result = suggest_branch_name(["Update documentation and fix typos"])
+		result = suggest_branch_name("Update documentation and fix typos", "github-flow")
 
-		assert result == "update-update-documentation-and"
+		assert result == "docs/update-fix-typos"
+
+	def test_suggest_branch_name_with_workflow_strategy(self) -> None:
+		"""Test suggest_branch_name function with workflow strategy."""
+		with patch("codemap.utils.pr_utils.create_strategy") as mock_create_strategy:
+			mock_strategy = MagicMock()
+			mock_strategy.suggest_branch_name.return_value = "feature/custom-branch-name"
+			mock_create_strategy.return_value = mock_strategy
+
+			result = suggest_branch_name("feat: Add new feature", "github-flow")
+
+			assert result == "feature/custom-branch-name"
+			mock_strategy.suggest_branch_name.assert_called_once_with("feature", "Add new feature")
+
+	def test_generate_pr_content_from_template(self, mock_create_strategy: MagicMock) -> None:
+		"""Test generate_pr_content_from_template function."""
+		# Mock strategy and its methods
+		mock_strategy = MagicMock()
+		mock_strategy.get_pr_templates.return_value = {
+			"title": "Test: {description}",
+			"description": "Test description: {description}",
+		}
+		mock_create_strategy.return_value = mock_strategy
+
+		result = generate_pr_content_from_template(
+			branch_name="feature/test-branch",
+			description="This is a test",
+			strategy_name="github-flow",
+		)
+
+		assert result["title"] == "Test: This is a test"
+		assert result["description"] == "Test description: This is a test"
+		mock_strategy.get_pr_templates.assert_called_once()
+
+	def test_generate_pr_content_from_template_with_branch_type(self, mock_create_strategy: MagicMock) -> None:
+		"""Test generate_pr_content_from_template function with branch type detection."""
+		# Mock strategy and its methods
+		mock_strategy = MagicMock()
+		mock_strategy.detect_branch_type.return_value = "feature"
+		mock_strategy.get_pr_templates.return_value = {
+			"title": "Feature: {description}",
+			"description": "Feature description: {description}",
+		}
+		mock_create_strategy.return_value = mock_strategy
+
+		result = generate_pr_content_from_template(
+			branch_name="feature/test-branch",
+			description="This is a test",
+			strategy_name="gitflow",
+		)
+
+		assert result["title"] == "Feature: This is a test"
+		assert result["description"] == "Feature description: This is a test"
+		mock_strategy.detect_branch_type.assert_called_once_with("feature/test-branch")
+
+	def test_generate_release_pr_content(self) -> None:
+		"""Test generate_release_pr_content function."""
+		with (
+			patch("codemap.utils.pr_utils.get_merged_prs_since_last_release") as mock_get_merged_prs,
+			patch("codemap.utils.pr_utils.suggest_version_from_changes") as mock_suggest_version,
+			patch("codemap.utils.pr_utils.categorize_prs") as mock_categorize,
+			patch("codemap.utils.pr_utils.generate_release_notes") as mock_release_notes,
+		):
+			# Setup mocks
+			mock_get_merged_prs.return_value = [
+				{"number": "1", "title": "feat: Add new feature", "url": "https://example.com/1"},
+				{"number": "2", "title": "fix: Fix bug", "url": "https://example.com/2"},
+			]
+			mock_suggest_version.return_value = "1.0.0"
+			mock_categorize.return_value = {
+				"features": [{"number": "1", "title": "feat: Add new feature", "url": "https://example.com/1"}],
+				"fixes": [{"number": "2", "title": "fix: Fix bug", "url": "https://example.com/2"}],
+				"docs": [],
+				"refactoring": [],
+				"other": [],
+			}
+			mock_release_notes.return_value = "## Release Notes\n\nThis is a test release."
+
+			result = generate_release_pr_content("main", "release/1.0.0")
+
+			assert "title" in result
+			assert "description" in result
+			assert "Release" in result["title"]
+			assert "Release Notes" in result["description"]
+			mock_get_merged_prs.assert_called_once()
+
+	def test_generate_release_pr_content_with_version(self) -> None:
+		"""Test generate_release_pr_content function with version in branch name."""
+		with (
+			patch("codemap.utils.pr_utils.get_merged_prs_since_last_release") as mock_get_merged_prs,
+			patch("codemap.utils.pr_utils.suggest_version_from_changes") as mock_suggest_version,
+			patch("codemap.utils.pr_utils.categorize_prs") as mock_categorize,
+			patch("codemap.utils.pr_utils.generate_release_notes") as mock_release_notes,
+		):
+			# Setup mocks
+			mock_get_merged_prs.return_value = [
+				{"number": "1", "title": "feat: Add new feature", "url": "https://example.com/1"},
+				{"number": "2", "title": "fix: Fix bug", "url": "https://example.com/2"},
+			]
+			mock_suggest_version.return_value = "1.2.3"
+			mock_categorize.return_value = {
+				"features": [{"number": "1", "title": "feat: Add new feature", "url": "https://example.com/1"}],
+				"fixes": [{"number": "2", "title": "fix: Fix bug", "url": "https://example.com/2"}],
+				"docs": [],
+				"refactoring": [],
+				"other": [],
+			}
+			mock_release_notes.return_value = "## Release Notes for 1.2.3\n\nThis is release 1.2.3."
+
+			result = generate_release_pr_content("main", "release/1.2.3")
+
+			assert result["title"] == "Release 1.2.3"
+			assert "1.2.3" in result["description"]
+			mock_get_merged_prs.assert_called_once()
 
 
 class TestPullRequestOperations:

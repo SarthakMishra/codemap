@@ -198,15 +198,6 @@ Given a Git diff, please generate a concise and descriptive commit message follo
    Focus on *what* was changed and *why*.
 5. The optional body should be a multi-paragraph summary of the changes, focusing on the *why* and *how* of the changes.
 6. The optional footer(s) should be a list of one or more footers, each with a token and a value.
-7. Your response must ONLY contain the commit message string, formatted as:
-	```
-	<type>[optional scope]: <description>
-
-	[optional body]
-
-	[optional footer(s)]
-	```
-   with absolutely no other text, explanation, or surrounding characters (like quotes or markdown).
 
 ## Commit Linting Rules
 Your generated commit message will be validated against the following rules:
@@ -229,8 +220,12 @@ Analyze the following diff and respond with ONLY the commit message string:
 
 ---
 IMPORTANT:
-- Strictly follow the format <type>[optional scope]: <description>
+- Strictly follow the format and instructions above.
 - Do not include any other text, explanation, or surrounding characters (like quotes or markdown).
+- Strictly do not include any `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED` footers.
+- Strictly follow the JSON schema provided while generating output in JSON format:
+
+{schema}
 """
 
 
@@ -650,6 +645,7 @@ class MessageGenerator:
 			"diff": diff_content,
 			"files": file_info,
 			"convention": convention,
+			"schema": COMMIT_MESSAGE_SCHEMA,
 		}
 		try:
 			return self.prompt_template.format(**context)
@@ -839,18 +835,32 @@ class MessageGenerator:
 				message_parts.append("")  # Empty line between header and body
 				message_parts.append(body)
 
-			# Add footers if provided
-			if footers:
+			# Filter footers - only allow BREAKING CHANGE
+			# TODO: This implementation will be improved in the future to support  # noqa: FIX002, TD002, TD003
+			# automatic tracking of related GitHub issues and linking them to commits,
+			# along with other useful footer types. For now, we only allow BREAKING CHANGE
+			# footers to avoid unwanted references like "Related Issues: #123".
+			breaking_change_footers = []
+			for footer in footers:
+				token = footer.get("token", "")
+				value = footer.get("value", "")
+				if token and value:
+					if token.upper() == "BREAKING CHANGE" or token.upper() == "BREAKING-CHANGE":
+						breaking_change_footers.append(footer)
+					else:
+						logger.debug("Filtering out non-breaking-change footer token: %s", token)
+
+			# Add breaking change footers if provided
+			if breaking_change_footers:
 				if not body:
 					message_parts.append("")  # Empty line before footers if no body
 				else:
 					message_parts.append("")  # Empty line between body and footers
 
-				for footer in footers:
+				for footer in breaking_change_footers:
 					token = footer.get("token", "")
 					value = footer.get("value", "")
-					if token and value:
-						message_parts.append(f"{token}: {value}")
+					message_parts.append(f"{token}: {value}")
 
 			return "\n".join(message_parts)
 
@@ -1119,6 +1129,7 @@ class MessageGenerator:
 			"diff": diff_content,
 			"files": file_info,
 			"convention": convention,
+			"schema": COMMIT_MESSAGE_SCHEMA,
 			"lint_feedback": lint_feedback,
 		}
 
@@ -1171,6 +1182,10 @@ Analyze the following diff and respond with ONLY the commit message string:
 IMPORTANT:
 - Strictly follow the format <type>[optional scope]: <description>
 - Do not include any other text, explanation, or surrounding characters (like quotes or markdown).
+- Strictly do not include any `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED` footers.
+- Strictly follow the JSON schema provided while generating output in JSON format:
+
+{schema}
 """
 
 		# Get the conventional commits spec from the DEFAULT_PROMPT_TEMPLATE

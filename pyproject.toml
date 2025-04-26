@@ -140,6 +140,7 @@ ignore = [
 "__init__.py" = ["F401"]
 "tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
+"src/codemap/utils/pr_strategies.py" = ["ARG002"]  # Allow unused arguments in strategy interface methods
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
