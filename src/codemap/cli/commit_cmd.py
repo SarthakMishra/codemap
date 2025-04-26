@@ -196,7 +196,7 @@ def generate_commit_message(
 	mode: GenerationMode,
 ) -> tuple[str, bool]:
 	"""
-	Generate a commit message for the given chunk.
+	Generate a commit message for a diff chunk.
 
 	Args:
 	    chunk: Diff chunk to generate message for
@@ -209,12 +209,16 @@ def generate_commit_message(
 	"""
 	# Use the universal generate_message function from llm_utils
 	use_simple_mode = mode == GenerationMode.SIMPLE
+	# Enable linting only in SMART mode
+	enable_linting = mode == GenerationMode.SMART
 
 	try:
 		# Import at function level to avoid circular imports
 		from codemap.utils.llm_utils import generate_message as llm_utils_generate_message
 
-		message, used_llm = llm_utils_generate_message(chunk, generator, use_simple_mode)
+		message, used_llm = llm_utils_generate_message(
+			chunk=chunk, message_generator=generator, use_simple_mode=use_simple_mode, enable_linting=enable_linting
+		)
 		return message, used_llm
 	except (ValueError, RuntimeError, LLMError) as e:
 		console.print(f"[red]Error generating message:[/red] {e}")
