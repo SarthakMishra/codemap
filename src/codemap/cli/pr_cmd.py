@@ -640,7 +640,11 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 			meta = workflow.get_branch_metadata(b)
 			try:
 				logger.debug("Testing branch relation between %s and %s", b, branch_name)
-				relation, commit_count = get_branch_relation(b, branch_name)
+
+				# Show a subtle loading indicator for branch analysis
+				with loading_spinner(f"Analyzing relationship with branch '{b}'"):
+					relation, commit_count = get_branch_relation(b, branch_name)
+
 				relation_str = "ancestor" if relation else "unrelated"
 
 				branch_choices.append(
