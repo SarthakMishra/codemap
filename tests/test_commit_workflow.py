@@ -69,7 +69,7 @@ class TestCommitWorkflow(GitTestBase):
 		# Assert: Verify results
 		assert self.mock_chunk.description == "Test commit message"
 		assert self.mock_chunk.is_llm_generated
-		mock_generate_message.assert_called_once_with(self.mock_chunk, self.mock_message_generator)
+		mock_generate_message.assert_called_once_with(self.mock_chunk, self.mock_message_generator, enable_linting=True)
 
 	@patch("codemap.git.command.run_git_command")
 	@patch("codemap.git.command.stage_files")

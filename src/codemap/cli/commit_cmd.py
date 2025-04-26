@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Annotated
 import questionary
 import typer
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.padding import Padding
 from rich.panel import Panel
 from rich.text import Text
@@ -36,6 +37,7 @@ from codemap.git.command import CommitCommand
 from codemap.git.message_generator import LLMError
 from codemap.utils import validate_repo_path
 from codemap.utils.cli_utils import console, loading_spinner, setup_logging
+from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.git_utils import (
 	GitError,
 	commit_only_files,
@@ -194,7 +196,7 @@ def generate_commit_message(
 	mode: GenerationMode,
 ) -> tuple[str, bool]:
 	"""
-	Generate a commit message for the given chunk.
+	Generate a commit message for a diff chunk.
 
 	Args:
 	    chunk: Diff chunk to generate message for
@@ -207,12 +209,16 @@ def generate_commit_message(
 	"""
 	# Use the universal generate_message function from llm_utils
 	use_simple_mode = mode == GenerationMode.SIMPLE
+	# Enable linting only in SMART mode
+	enable_linting = mode == GenerationMode.SMART
 
 	try:
 		# Import at function level to avoid circular imports
 		from codemap.utils.llm_utils import generate_message as llm_utils_generate_message
 
-		message, used_llm = llm_utils_generate_message(chunk, generator, use_simple_mode)
+		message, used_llm = llm_utils_generate_message(
+			chunk=chunk, message_generator=generator, use_simple_mode=use_simple_mode, enable_linting=enable_linting
+		)
 		return message, used_llm
 	except (ValueError, RuntimeError, LLMError) as e:
 		console.print(f"[red]Error generating message:[/red] {e}")
@@ -414,6 +420,34 @@ def _commit_changes(
 			logger.warning("There are %d other staged files that weren't included in this commit", len(other_staged))
 
 		return True
+	except GitError as e:
+		logger.exception("Failed to create commit due to Git error")
+
+		# Format Git error message in a nice panel
+		error_message = str(e)
+		if "\n" in error_message:
+			# Format multiline errors in a panel
+			from rich.panel import Panel
+
+			# Extract Git error details if available
+			if "Git Error Output:" in error_message:
+				parts = error_message.split("Git Error Output:", 1)
+				main_error = parts[0].strip()
+				git_output = parts[1].strip()
+
+				# Display the main error message
+				console.print(f"[red]Error:[/red] {escape(main_error)}")
+
+				# Display Git error details in a red panel
+				console.print(Panel(escape(git_output), title="Git Command Output", border_style="red", padding=(1, 2)))
+			else:
+				# Just display the whole error in a panel
+				console.print(Panel(escape(error_message), title="Git Error", border_style="red", padding=(1, 2)))
+		else:
+			# For simple one-line errors
+			console.print(f"[red]Error:[/red] {escape(error_message)}")
+
+		return False
 	except Exception as e:
 		logger.exception("Failed to create commit")
 		# Add explicit error message to console output to help pass tests
@@ -652,6 +686,7 @@ class RunConfig:
 	commit: bool = True
 	prompt_template: str | None = None
 	staged_only: bool = False  # Only process staged changes
+	bypass_hooks: bool = False  # Whether to bypass git hooks (--no-verify)
 
 
 DEFAULT_RUN_CONFIG = RunConfig()
@@ -677,6 +712,12 @@ def _run_commit_command(config: RunConfig) -> int:
 	except ValueError as e:
 		console.print(f"[red]Error:[/red] {e!s}")
 		return 1
+
+	# Load configuration from .codemap.yml if it exists
+	config_loader = ConfigLoader(repo_root=repo_path)
+	# Override bypass_hooks from config file if not explicitly set
+	if repo_path and not hasattr(config, "_bypass_hooks_set"):
+		config.bypass_hooks = config_loader.get_commit_hooks()
 
 	# Show welcome message
 	console.print(
@@ -757,6 +798,7 @@ def validate_and_process_commit(
 	path: Path | None,
 	all_files: bool = False,
 	model: str = "gpt-4o-mini",
+	bypass_hooks: bool = False,
 ) -> None:
 	"""
 	Validate repository path and process commit.
@@ -765,13 +807,23 @@ def validate_and_process_commit(
 	    path: Path to repository
 	    all_files: Whether to commit all files
 	    model: Model to use for generation
+	    bypass_hooks: Whether to bypass git hooks with --no-verify
 
 	"""
 	try:
+		# Load configuration from .codemap.yml if it exists
+		repo_path = validate_repo_path(path)
+		if repo_path:
+			config_loader = ConfigLoader(repo_root=repo_path)
+			# Get bypass_hooks from config if not explicitly set
+			if not hasattr(bypass_hooks, "_set_explicitly"):
+				bypass_hooks = config_loader.get_commit_hooks()
+
 		# Create the CommitCommand instance
 		command = CommitCommand(
 			path=path,
 			model=model,
+			bypass_hooks=bypass_hooks,
 		)
 
 		# Stage files if all_files flag is set
@@ -814,6 +866,7 @@ def commit_command(
 	] = "gpt-4o-mini",
 	strategy: Annotated[str, typer.Option("--strategy", "-s", help="Strategy for splitting diffs")] = "semantic",
 	non_interactive: Annotated[bool, typer.Option("--non-interactive", help="Run in non-interactive mode")] = False,
+	bypass_hooks: Annotated[bool, typer.Option("--bypass-hooks", help="Bypass git hooks with --no-verify")] = False,
 	is_verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging")] = False,
 ) -> None:
 	"""
@@ -838,6 +891,7 @@ def commit_command(
 		logger.debug("Message: %s", message)
 		logger.debug("Strategy: %s", strategy)
 		logger.debug("Non-interactive mode: %s", non_interactive)
+		logger.debug("Bypass git hooks: %s", bypass_hooks)
 
 		# Check sentence_transformers
 		try:
@@ -862,4 +916,5 @@ def commit_command(
 		path=path,
 		all_files=all_files,
 		model=model,
+		bypass_hooks=bypass_hooks,
 	)

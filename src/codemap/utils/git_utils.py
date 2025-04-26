@@ -481,14 +481,26 @@ def commit_only_files(
 				shell=False,  # Explicitly set shell=False for security
 			)
 			logger.info("Created commit with message: %s", message)
-		except subprocess.CalledProcessError:
-			logger.exception("Failed to create commit")
-			raise
+		except subprocess.CalledProcessError as e:
+			# Capture stderr and stdout for better error reporting
+			error_msg = f"Git commit command failed. Command: '{' '.join(commit_cmd)}'"
+
+			if e.stderr:
+				error_msg += f"\n\nGit Error Output:\n{e.stderr.strip()}"
+			if e.stdout:
+				error_msg += f"\n\nCommand Output:\n{e.stdout.strip()}"
+
+			logger.exception("Failed to create commit: %s", error_msg)
+			raise GitError(error_msg) from e
 
 		return other_staged
-	except Exception:
-		logger.exception("Error in commit_only_files")
+	except GitError:
+		# Re-raise GitErrors directly
 		raise
+	except Exception as e:
+		error_msg = f"Error in commit_only_files: {e!s}"
+		logger.exception(error_msg)
+		raise GitError(error_msg) from e
 
 
 def get_untracked_files() -> list[str]:

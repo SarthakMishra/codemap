@@ -201,6 +201,7 @@ dependencies = [
 dev = [
     { name = "docformatter" },
     { name = "interrogate" },
+    { name = "isort" },
     { name = "pre-commit" },
     { name = "pylint" },
     { name = "pyright" },
@@ -240,6 +241,7 @@ requires-dist = [
 dev = [
     { name = "docformatter", specifier = ">=1.7.5" },
     { name = "interrogate", specifier = ">=1.7.0" },
+    { name = "isort", specifier = ">=6.0.1" },
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pylint", specifier = ">=3.3.6" },
     { name = "pyright", specifier = ">=1.1.400" },

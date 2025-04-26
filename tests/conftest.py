@@ -164,6 +164,8 @@ def mock_message_generator() -> MagicMock:
 	generator = MagicMock(spec=MessageGenerator)
 	# Mock the generate_message method
 	generator.generate_message.return_value = ("feat: Test commit message", True)
+	# Mock the generate_message_with_linting method
+	generator.generate_message_with_linting.return_value = ("feat: Test commit message", True, True)
 	# Mock the fallback_generation method
 	generator.fallback_generation.return_value = "test: Fallback message"
 	# Set resolved_provider

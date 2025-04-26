@@ -1,7 +1,9 @@
 """Tests for configuration loading and validation."""
 
 import os
+from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import Mock, mock_open, patch
 
 import pytest
 import yaml
@@ -10,6 +12,13 @@ from codemap.config import DEFAULT_CONFIG
 from codemap.utils.config_loader import ConfigError, ConfigLoader
 from tests.base import FileSystemTestBase
 from tests.helpers import create_file_content
+
+
+@pytest.fixture
+def mock_yaml_loader() -> Generator[Mock, None, None]:
+	"""Return a mock for the YAML safe_load function to use in config loader tests."""
+	with patch("codemap.utils.config_loader.yaml.safe_load") as mock_loader:
+		yield mock_loader
 
 
 @pytest.mark.unit
@@ -107,3 +116,64 @@ class TestConfigLoader(FileSystemTestBase):
 
 		with pytest.raises(yaml.YAMLError, match="mapping values are not allowed here"):
 			ConfigLoader(str(self.config_file))
+
+	def test_get_commit_hooks(self, mock_yaml_loader: Mock, tmp_path: Path) -> None:
+		"""Test loading commit hooks configuration."""
+		# Create a config file
+		config_file = tmp_path / ".codemap.yml"
+		config_content = """
+token_limit: 5000
+commit:
+  bypass_hooks: true
+"""
+		config_file.write_text(config_content)
+
+		# Setup YAML data for the mock to return
+		yaml_data = {"token_limit": 5000, "commit": {"bypass_hooks": True}}
+		mock_yaml_loader.return_value = yaml_data
+
+		# Create loader with mocked yaml loader
+		with patch("builtins.open", mock_open(read_data=config_content)):
+			loader = ConfigLoader(config_file=str(config_file))
+			# Test get_commit_hooks returns the configured value
+			assert loader.get_commit_hooks() is True
+
+		# Test with bypass_hooks explicitly set to false
+		yaml_data = {"token_limit": 5000, "commit": {"bypass_hooks": False}}
+		mock_yaml_loader.return_value = yaml_data
+
+		config_content = """
+token_limit: 5000
+commit:
+  bypass_hooks: false
+"""
+		config_file.write_text(config_content)
+		with patch("builtins.open", mock_open(read_data=config_content)):
+			loader = ConfigLoader(config_file=str(config_file))
+			assert loader.get_commit_hooks() is False
+
+		# Test with commit section but no bypass_hooks (should default to False)
+		yaml_data = {"token_limit": 5000, "commit": {"strategy": "semantic"}}
+		mock_yaml_loader.return_value = yaml_data
+
+		config_content = """
+token_limit: 5000
+commit:
+  strategy: semantic
+"""
+		config_file.write_text(config_content)
+		with patch("builtins.open", mock_open(read_data=config_content)):
+			loader = ConfigLoader(config_file=str(config_file))
+			assert loader.get_commit_hooks() is False
+
+		# Test with no commit section (should default to False)
+		yaml_data = {"token_limit": 5000}
+		mock_yaml_loader.return_value = yaml_data
+
+		config_content = """
+token_limit: 5000
+"""
+		config_file.write_text(config_content)
+		with patch("builtins.open", mock_open(read_data=config_content)):
+			loader = ConfigLoader(config_file=str(config_file))
+			assert loader.get_commit_hooks() is False

@@ -90,8 +90,6 @@ codemap generate -v
 Create intelligent Git commits with AI-assisted message generation. The tool analyzes your changes, splits them into logical chunks, and generates meaningful commit messages using LLMs.
 
 > [!Warning]
-> By default, `codemap commit` uses the `--no-verify` Git flag. This is done to prevent potential instability when interacting with Git pre-commit hooks. While this behavior can be disabled in the configuration file (`.codemap.yml`), doing so may lead to unexpected issues with certain hook setups. If you encounter problems related to Git hooks, please [open an issue](https://github.com/SarthakMishra/codemap/issues).
->
 > **Known Issue:** The commit command may sometimes incorrectly identify test files containing diff code as actual diff files, causing Git commit operations to fail. If you encounter this error, simply re-run the command or use standard Git commit as a workaround. This issue will be fixed in an upcoming release.
 
 ### Basic Usage
