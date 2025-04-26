@@ -651,8 +651,14 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		# Sort choices by relation
 		branch_choices.sort(key=lambda x: "0" if "ancestor" in x["name"] else "1" + x["name"])
 
-		# Add default branch at the top if it exists
-		default = get_default_branch()
+		# Get default branch from config instead of git
+		config_default = config_loader.get_default_branch()  # This will get 'dev' from config
+		git_default = get_default_branch()  # This might return 'main'
+
+		# Use config default if it exists, otherwise fall back to git default
+		default = config_default or git_default
+		logger.debug("Using default branch from config: %s (git default: %s)", default, git_default)
+
 		branch_choices = [c for c in branch_choices if c["value"] != default]
 
 		# Only add default branch to choices if it actually exists in the repository
@@ -662,7 +668,9 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		elif len(branch_choices) > 0:
 			# If default doesn't exist but we have other branches, use the first one as fallback
 			default = branch_choices[0]["value"]
-			logger.warning("Default branch '%s' doesn't exist. Using '%s' as fallback.", get_default_branch(), default)
+			logger.warning(
+				"Default branch '%s' doesn't exist. Using '%s' as fallback.", config_default or git_default, default
+			)
 
 		# Ask for base branch
 		selected_base = questionary.select(
