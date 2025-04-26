@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 # Import the actual DEFAULT_CONFIG from the config module
 from codemap.config import DEFAULT_CONFIG
@@ -237,6 +237,86 @@ class ConfigLoader:
 
 		return bypass_hooks
 
+	def get_pr_config(self) -> dict[str, Any]:
+		"""
+		Get pull request configuration.
+
+		Returns:
+		    Dictionary with PR configuration values
+
+		"""
+		# Start with default PR config
+		default_pr_config = DEFAULT_CONFIG["pr"].copy()
+
+		# Check if PR section exists in config
+		if "pr" in self._config and isinstance(self._config["pr"], dict):
+			pr_config = self._config["pr"]
+
+			# Deep merge the configuration
+			if "defaults" in pr_config and isinstance(pr_config["defaults"], dict):
+				default_pr_config["defaults"].update(pr_config["defaults"])
+
+			if "strategy" in pr_config:
+				default_pr_config["strategy"] = pr_config["strategy"]
+
+			if "branch_mapping" in pr_config and isinstance(pr_config["branch_mapping"], dict):
+				# For each branch type in the mapping
+				for branch_type, mapping in pr_config["branch_mapping"].items():
+					if branch_type in default_pr_config["branch_mapping"]:
+						default_pr_config["branch_mapping"][branch_type].update(mapping)
+					else:
+						default_pr_config["branch_mapping"][branch_type] = mapping
+
+			if "generate" in pr_config and isinstance(pr_config["generate"], dict):
+				default_pr_config["generate"].update(pr_config["generate"])
+
+		return default_pr_config
+
+	def get_workflow_strategy(self) -> Literal["github-flow", "gitflow", "trunk-based"]:
+		"""
+		Get the configured git workflow strategy.
+
+		Returns:
+		    String identifying the workflow strategy
+
+		"""
+		pr_config = self.get_pr_config()
+		return pr_config["strategy"]
+
+	def get_branch_mapping(self, branch_type: str) -> dict[str, str]:
+		"""
+		Get base branch and prefix for a specific branch type.
+
+		Args:
+		    branch_type: Type of branch (feature, release, hotfix, etc.)
+
+		Returns:
+		    Dictionary with base branch and prefix
+
+		"""
+		pr_config = self.get_pr_config()
+
+		# Check if the branch type exists in the mapping
+		if branch_type in pr_config["branch_mapping"]:
+			return pr_config["branch_mapping"][branch_type]
+
+		# Return default mapping
+		return {
+			"base": pr_config["defaults"].get("base_branch") or "main",
+			"prefix": pr_config["defaults"].get("feature_prefix") or "",
+		}
+
+	def get_content_generation_config(self) -> dict[str, Any]:
+		"""
+		Get configuration for PR content generation.
+
+		Returns:
+		    Dictionary with content generation settings
+
+		"""
+		pr_config = self.get_pr_config()
+		return pr_config["generate"]
+
 
 def get_config(config_file: str | None = None, repo_root: Path | None = None) -> dict[str, Any]:
 	"""
@@ -250,5 +330,5 @@ def get_config(config_file: str | None = None, repo_root: Path | None = None) ->
 	    Configuration dictionary
 
 	"""
-	loader = ConfigLoader(config_file=config_file, repo_root=repo_root)
+	loader = ConfigLoader(config_file, repo_root)
 	return loader.config
