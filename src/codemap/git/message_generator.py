@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-import re
 from typing import TYPE_CHECKING, Any, TypedDict, cast
 
 from codemap.git.commit_linter import CommitLinter
@@ -245,6 +245,53 @@ class DiffChunkData(TypedDict, total=False):
 
 class LLMError(Exception):
 	"""Custom exception for LLM-related errors."""
+
+
+# Define a schema for structured commit message output
+COMMIT_MESSAGE_SCHEMA = {
+	"type": "object",
+	"properties": {
+		"type": {
+			"type": "string",
+			"description": "The type of change (e.g., feat, fix, docs, style, refactor, perf, test, chore)",
+		},
+		"scope": {"type": ["string", "null"], "description": "The scope of the change (e.g., component affected)"},
+		"description": {"type": "string", "description": "A short, imperative-tense description of the change"},
+		"body": {
+			"type": ["string", "null"],
+			"description": "A longer description of the changes, explaining why and how",
+		},
+		"breaking": {"type": "boolean", "description": "Whether this is a breaking change", "default": False},
+		"footers": {
+			"type": "array",
+			"items": {
+				"type": "object",
+				"properties": {
+					"token": {
+						"type": "string",
+						"description": "Footer token (e.g., 'BREAKING CHANGE', 'Fixes', 'Refs')",
+					},
+					"value": {"type": "string", "description": "Footer value"},
+				},
+				"required": ["token", "value"],
+			},
+			"default": [],
+		},
+	},
+	"required": ["type", "description"],
+}
+
+
+# Define a class to represent structured commit messages
+class CommitMessageSchema(TypedDict):
+	"""TypedDict representing the structured commit message output."""
+
+	type: str
+	scope: str | None
+	description: str
+	body: str | None
+	breaking: bool
+	footers: list[dict[str, str]]
 
 
 class MessageGenerator:
@@ -687,81 +734,130 @@ class MessageGenerator:
 		)
 
 		try:
-			response = litellm.completion(
-				model=model_to_use,
-				messages=[{"role": "user", "content": prompt}],
-				api_key=api_key,
-				api_base=api_base_to_use,
-				max_retries=2,
-				timeout=30,
-			)
+			# Check if model supports response_format and json_schema
+			supports_json_format = False
+			try:
+				# Try to query model capabilities, but don't fail if it doesn't work
+				# Just assume the model supports JSON format and let LiteLLM handle it
+				supports_json_format = True
+				logger.debug("Attempting to use JSON format with model %s", model_to_use)
+			except (AttributeError, ImportError, ValueError, TypeError) as e:
+				logger.warning("Could not check model capabilities, will try JSON format anyway: %s", e)
+				supports_json_format = True  # Attempt it, LiteLLM will handle if not supported
 
-			# Safely extract content from LiteLLM response
+			# Set up request parameters
+			request_params = {
+				"model": model_to_use,
+				"messages": [{"role": "user", "content": prompt}],
+				"api_key": api_key,
+				"api_base": api_base_to_use,
+				"max_retries": 2,
+				"timeout": 30,
+			}
+
+			# Add response_format for JSON if supported
+			if supports_json_format:
+				request_params["response_format"] = {"type": "json_object", "schema": COMMIT_MESSAGE_SCHEMA}
+				# Enable schema validation (client-side fallback)
+				litellm.enable_json_schema_validation = True
+
+			response = litellm.completion(**request_params)
+
+			# Extract content from the response
 			content = ""
 
-			# Handle response as a dictionary first (for flexibility)
-			if isinstance(response, dict):
-				choices = response.get("choices", [])
-				if choices and isinstance(choices, list) and len(choices) > 0:
-					# Try to get message content directly from dictionary structure
-					first_choice = choices[0]
-					if isinstance(first_choice, dict):
-						message = first_choice.get("message", {})
-						if isinstance(message, dict):
-							content = message.get("content", "")
-
-			# Handle response as an object with attributes
-			if not content and hasattr(response, "choices"):
-				choices = getattr(response, "choices", None)
-				if choices and isinstance(choices, list) and len(choices) > 0:
-					first_choice = choices[0]
-					if hasattr(first_choice, "message"):
-						message = getattr(first_choice, "message", None)
-						if message and hasattr(message, "content"):
-							content = message.content or ""
-
-			# Fallbacks for older LiteLLM versions or unexpected structures
-			if not content:
-				# Try direct content attribute (older versions)
-				if hasattr(response, "content"):
-					content = getattr(response, "content", "") or ""
-				# Try text attribute in choices (some models/providers)
-				elif (
-					hasattr(response, "choices")
-					and getattr(response, "choices", None)
-					and len(getattr(response, "choices", [])) > 0
-					and hasattr(getattr(response, "choices", [])[0], "text")
-				):
+			try:
+				# Handle different response formats safely
+				if isinstance(response, object) and hasattr(response, "choices"):
 					choices = getattr(response, "choices", [])
-					content = getattr(choices[0], "text", "") or ""
-				# Last resort: stringify the entire response
-				elif hasattr(response, "__str__"):
-					content = str(response)
+					if choices and len(choices) > 0:
+						first_choice = choices[0]
+						if hasattr(first_choice, "message") and hasattr(first_choice.message, "content"):
+							content = getattr(first_choice.message, "content", "")
 
-			content = content.strip()
-			logger.debug("LLM API call successful, message length: %d chars", len(content))
-			return content
+				# Then try as dictionary if the above failed
+				if not content and isinstance(response, dict):
+					choices = response.get("choices", [])
+					if choices and len(choices) > 0:
+						first_choice = choices[0]
+						if isinstance(first_choice, dict):
+							message = first_choice.get("message", {})
+							if isinstance(message, dict):
+								content = message.get("content", "")
+			except (AttributeError, IndexError, TypeError) as extract_error:
+				logger.warning("Error extracting content from response: %s", extract_error)
 
-		except litellm.exceptions.AuthenticationError as e:
-			error_msg = f"LiteLLM Authentication Error for provider {provider_to_use}. Check API key."
-			logger.exception("%s", error_msg)
-			raise LLMError(error_msg) from e
-		except litellm.exceptions.RateLimitError as e:
-			error_msg = f"LiteLLM Rate Limit Error for provider {provider_to_use}."
-			logger.exception("%s", error_msg)
-			raise LLMError(error_msg) from e
-		except litellm.exceptions.APIError as e:
-			error_msg = f"LiteLLM API Error for provider {provider_to_use}."
-			logger.exception(error_msg)  # Log full trace for generic API errors
-			full_error_msg = f"{error_msg} Details: {e}"
-			raise LLMError(full_error_msg) from e
-		except litellm.exceptions.Timeout as e:
-			error_msg = f"LiteLLM request timed out for provider {provider_to_use}."
-			raise LLMError(error_msg) from e
+			if not content:
+				logger.error("Could not extract content from LLM response")
+				error_message = "Failed to extract content from LLM response"
+				raise LLMError(error_message)  # noqa: TRY301
+
+			# Parse and format the commit message
+			return self._format_structured_message(content)
+
 		except Exception as e:
-			error_msg = f"Unexpected error during LiteLLM API call for provider {provider_to_use}."
-			logger.exception(error_msg)
-			raise LLMError(error_msg) from e
+			error_msg = "LLM API call failed: %s"
+			logger.exception(error_msg)  # The exception info is already included in logger.exception
+			raise LLMError(error_msg % e) from e
+
+	def _format_structured_message(self, content: str) -> str:
+		"""
+		Format a structured JSON response into a conventional commit message.
+
+		Args:
+		        content: JSON content string from LLM response
+
+		Returns:
+		        Formatted commit message string
+
+		"""
+		try:
+			# Try to parse the content as JSON
+			message_data = json.loads(content)
+
+			# Extract components
+			commit_type = message_data.get("type", "chore")
+			scope = message_data.get("scope")
+			description = message_data.get("description", "")
+			body = message_data.get("body")
+			is_breaking = message_data.get("breaking", False)
+			footers = message_data.get("footers", [])
+
+			# Format the header
+			header = f"{commit_type}"
+			if scope:
+				header += f"({scope})"
+			if is_breaking:
+				header += "!"
+			header += f": {description}"
+
+			# Build the complete message
+			message_parts = [header]
+
+			# Add body if provided
+			if body:
+				message_parts.append("")  # Empty line between header and body
+				message_parts.append(body)
+
+			# Add footers if provided
+			if footers:
+				if not body:
+					message_parts.append("")  # Empty line before footers if no body
+				else:
+					message_parts.append("")  # Empty line between body and footers
+
+				for footer in footers:
+					token = footer.get("token", "")
+					value = footer.get("value", "")
+					if token and value:
+						message_parts.append(f"{token}: {value}")
+
+			return "\n".join(message_parts)
+
+		except (json.JSONDecodeError, TypeError, AttributeError) as e:
+			# If parsing fails, return the content as-is (might be a plaintext response)
+			logger.warning("Could not parse JSON response, using raw content: %s", e)
+			return content.strip()
 
 	# Helper to read llm config section again (used in _call_llm_api for generic key)
 	def _get_llm_config_from_yaml(self) -> dict:
@@ -773,57 +869,6 @@ class MessageGenerator:
 
 		"""
 		return self._config_loader.get_llm_config()
-
-	def _format_message(self, message: str) -> str:
-		"""
-		Format and clean the generated commit message.
-
-		(Unchanged, but added sanitization call).
-
-		"""
-		message = message.strip().replace("```", "").replace("`", "")
-		prefixes_to_remove = ["commit message:", "message:", "response:"]
-		for prefix in prefixes_to_remove:
-			if message.lower().startswith(prefix):
-				message = message[len(prefix) :].strip()
-
-		scope_pattern = r"^([a-z]+)\(([^)]+)\):"
-		match = re.match(scope_pattern, message)
-		if match:
-			commit_type, scope = match.group(1), match.group(2)
-			description = message[match.end() :].strip()
-			message = f"{commit_type}({scope}): {description}"
-
-		convention = self._get_commit_convention()
-		max_length = convention.get("max_length", 72)
-
-		if len(message) > max_length:
-			scope_match = re.match(scope_pattern, message)
-			if scope_match:
-				commit_type, scope = scope_match.group(1), scope_match.group(2)
-				prefix = f"{commit_type}({scope}): "
-				avail_len = max_length - len(prefix)
-				if avail_len > MIN_DESCRIPTION_LENGTH:
-					description = message[scope_match.end() :].strip()
-					truncated_desc = description[: avail_len - 3].rstrip(" .") + "..."
-					message = f"{prefix}{truncated_desc}"
-				elif len(scope) > MIN_SCOPE_LENGTH:
-					scope = scope[: MIN_SCOPE_LENGTH - 2] + ".."  # Shorten scope more aggressively
-					prefix = f"{commit_type}({scope}): "
-					avail_len = max_length - len(prefix)
-					if avail_len > MIN_DESCRIPTION_LENGTH:
-						description = message[scope_match.end() :].strip()
-						truncated_desc = description[: avail_len - 3].rstrip(" .") + "..."
-						message = f"{prefix}{truncated_desc}"
-					else:  # Still too long, just truncate whole message
-						message = message[: max_length - 3].rstrip(" .") + "..."
-				else:
-					message = message[: max_length - 3].rstrip(" .") + "..."
-			else:
-				message = message[: max_length - 3].rstrip(" .") + "..."
-
-		message = " ".join(message.splitlines())
-		return self._sanitize_commit_message(message)  # Ensure sanitization is called
 
 	def fallback_generation(self, chunk: DiffChunk | DiffChunkData) -> str:
 		"""
@@ -880,13 +925,13 @@ class MessageGenerator:
 					description = f"update {len(string_files)} files"
 
 		message = f"{commit_type}: {description}"
-		# Ensure fallback also respects max length and sanitization
+		# Ensure fallback follows length constraints without the old formatting methods
 		convention = self._get_commit_convention()
 		max_length = convention.get("max_length", 72)
 		if len(message) > max_length:
-			message = message[: max_length - 3] + "..."
+			message = message[:max_length]
 
-		return self._sanitize_commit_message(message)  # Ensure sanitization
+		return message
 
 	def _verify_api_key_availability(self) -> bool:
 		"""Verify that the API key for the resolved provider is available."""
@@ -984,6 +1029,19 @@ class MessageGenerator:
 			logger.debug("Message was not generated by LLM, skipping linting.")
 			return message, used_llm, True
 
+		# Clean the message before linting (basic cleaning that was in _format_message)
+		message = message.strip()
+		# Remove markdown code blocks and inline code that might come from LLM
+		message = message.replace("```", "").replace("`", "")
+		# Remove common prefixes the LLM might add
+		prefixes_to_remove = ["commit message:", "message:", "response:"]
+		for prefix in prefixes_to_remove:
+			if message.lower().startswith(prefix):
+				message = message[len(prefix) :].strip()
+
+		# Remove multi-line formatting by joining lines (keep message in single paragraph)
+		message = " ".join(message.splitlines())
+
 		# Lint the message
 		is_valid, lint_messages = self._lint_commit_message(message)
 
@@ -1012,7 +1070,6 @@ class MessageGenerator:
 				# Use a loading spinner to show regeneration progress
 				with loading_spinner(f"Commit message failed linting, regenerating (attempts left: {retries_left})..."):
 					regenerated_message = self._call_llm_api(enhanced_prompt)
-					regenerated_message = self._format_message(regenerated_message)
 
 				# Lint the regenerated message
 				is_valid, lint_messages = self._lint_commit_message(regenerated_message)
@@ -1206,12 +1263,11 @@ IMPORTANT:
 			with loading_spinner("Generating commit message..."):
 				message = self._call_llm_api(prompt)
 
-			formatted_message = self._format_message(message)
-			logger.debug("LLM generated message: '%s'", formatted_message)
+			logger.debug("LLM generated message: '%s'", message)
 			# Mark the chunk if possible (requires chunk to be mutable or return new object)
 			if isinstance(chunk, DiffChunk):
 				chunk.is_llm_generated = True  # Mark original object if it's the class type
-			return formatted_message, True
+			return message, True
 
 		except LLMError:
 			# Handle specific LLM errors (API key, rate limit, etc.) gracefully
@@ -1219,23 +1275,11 @@ IMPORTANT:
 			logger.info("Falling back to simple message generation.")
 			message = self.fallback_generation(chunk_dict)
 			return message, False
-		except Exception as e:
+		except Exception:
 			# Catch other unexpected errors during the process
 			logger.exception("Unexpected error during message generation")
-			error_msg = f"Failed to generate commit message due to unexpected error: {e}"
+			error_msg = "Failed to generate commit message due to unexpected error: %s"
 			# Decide whether to raise or fallback
 			logger.info("Falling back to simple message generation due to unexpected error.")
 			message = self.fallback_generation(chunk_dict)
 			return message, False
-
-	def _sanitize_commit_message(self, message: str) -> str:
-		"""
-		Sanitize a commit message to comply with commitlint standards.
-
-		(Unchanged).
-
-		"""
-		# Remove trailing period
-		message = message.removesuffix(".")
-		# Potentially add more sanitization rules here if needed
-		return message.strip()  # Ensure no leading/trailing whitespace
