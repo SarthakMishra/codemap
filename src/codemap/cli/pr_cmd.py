@@ -655,32 +655,47 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		config_default = config_loader.get_default_branch()  # This will get 'dev' from config
 		git_default = get_default_branch()  # This might return 'main'
 
-		# Use config default if it exists, otherwise fall back to git default
-		default = config_default or git_default
-		logger.debug("Using default branch from config: %s (git default: %s)", default, git_default)
+		# Check if the branches actually exist in the repository
+		config_default_exists = branch_exists(config_default, include_remote=True)
+		git_default_exists = branch_exists(git_default, include_remote=True)
 
+		# Choose the first available default branch
+		if config_default_exists:
+			default = config_default
+		elif git_default_exists:
+			default = git_default
+		elif len(branch_choices) > 0:
+			# If neither default exists but we have other branches, use the first one
+			default = branch_choices[0]["value"]
+		else:
+			# Fallback to use the config default even if it doesn't exist (will show appropriate error later)
+			default = config_default or git_default
+
+		logger.debug(
+			"Using default branch: %s (config default: %s, git default: %s)", default, config_default, git_default
+		)
+
+		# Filter out the default branch from choices (we'll add it at the top)
 		branch_choices = [c for c in branch_choices if c["value"] != default]
 
-		# Only add default branch to choices if it actually exists in the repository
-		default_exists = branch_exists(default, include_remote=True)
-		if default_exists:
+		# Add default branch to choices if it exists
+		if config_default_exists or git_default_exists:
 			branch_choices.insert(0, {"name": f"{default} (default branch)", "value": default})
-		elif len(branch_choices) > 0:
-			# If default doesn't exist but we have other branches, use the first one as fallback
-			default = branch_choices[0]["value"]
-			logger.warning(
-				"Default branch '%s' doesn't exist. Using '%s' as fallback.", config_default or git_default, default
-			)
 
 		# Ask for base branch
-		selected_base = questionary.select(
-			"Select base branch:",
-			choices=branch_choices,
-			default=base_branch if base_branch in [c["value"] for c in branch_choices] else default,
-			qmark="🔀",
-		).ask()
+		if branch_choices:
+			selected_base = questionary.select(
+				"Select base branch:",
+				choices=branch_choices,
+				default=base_branch if base_branch in [c["value"] for c in branch_choices] else default,
+				qmark="🔀",
+			).ask()
 
-		base_branch = selected_base
+			base_branch = selected_base
+		else:
+			# If no branch choices are available, use the default branch or current branch as fallback
+			console.print(f"[yellow]No valid branches found for a PR. Using '{base_branch}' as base branch.[/yellow]")
+			# No need to update base_branch here as it's already set to a reasonable default
 
 	# Check if PR already exists
 	existing_pr = get_existing_pr(branch_name)
