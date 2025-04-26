@@ -127,9 +127,9 @@ class CommitCommand:
 		logger.debug("Starting commit message generation for %s", chunk.files)
 		try:
 			with loading_spinner("Generating commit message using LLM..."):
-				# Use the universal message generator
-				logger.debug("Calling generate_message")
-				message, is_llm = generate_message(chunk, self.message_generator)
+				# Use the universal message generator with linting enabled
+				logger.debug("Calling generate_message with linting enabled")
+				message, is_llm = generate_message(chunk, self.message_generator, enable_linting=True)
 
 				logger.debug(
 					"Got response - is_llm=%s, message=%s",
