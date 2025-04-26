@@ -48,6 +48,8 @@ def mock_message_generator() -> MagicMock:
 	generator = MagicMock(spec=MessageGenerator)
 	# Mock the generate_message method
 	generator.generate_message.return_value = ("feat: Test commit message", True)
+	# Mock the generate_message_with_linting method
+	generator.generate_message_with_linting.return_value = ("feat: Test commit message", True, True)
 	# Mock the fallback_generation method
 	generator.fallback_generation.return_value = "test: Fallback message"
 	# Set resolved_provider
@@ -226,13 +228,20 @@ class TestMessageGeneration:
 		# Create a mock chunk
 		chunk = MockDiffChunk(files=["test.py"], content="def test(): pass")
 
+		# Ensure the mock is properly set up for generate_message_with_linting
+		mock_message_generator.generate_message_with_linting.return_value = (
+			"feat: Test commit message",
+			True,  # used_llm
+			True,  # is_valid
+		)
+
 		# Generate a message
 		message, used_llm = generate_message(chunk, mock_message_generator)
 
 		# Verify the message generator was called correctly
-		mock_message_generator.generate_message.assert_called_once()
+		mock_message_generator.generate_message_with_linting.assert_called_once()
 		# Check the passed argument has the expected structure
-		args, _ = mock_message_generator.generate_message.call_args
+		args, _ = mock_message_generator.generate_message_with_linting.call_args
 		arg = args[0]
 		# Use dict access instead of checking type directly
 		assert arg["files"] == chunk.files
@@ -247,13 +256,20 @@ class TestMessageGeneration:
 		# Create a mock chunk with a description
 		chunk = MockDiffChunk(files=["test.py"], content="def test(): pass", description="Test description")
 
+		# Ensure the mock is properly set up for generate_message_with_linting
+		mock_message_generator.generate_message_with_linting.return_value = (
+			"feat: Test commit message",
+			True,  # used_llm
+			True,  # is_valid
+		)
+
 		# Generate a message
 		message, used_llm = generate_message(chunk, mock_message_generator)
 
 		# Verify the message generator was called correctly
-		mock_message_generator.generate_message.assert_called_once()
+		mock_message_generator.generate_message_with_linting.assert_called_once()
 		# Check the passed argument contains the description
-		args, _ = mock_message_generator.generate_message.call_args
+		args, _ = mock_message_generator.generate_message_with_linting.call_args
 		arg = args[0]
 		assert arg["description"] == "Test description"
 
@@ -272,6 +288,7 @@ class TestMessageGeneration:
 		# Verify the fallback generation was used
 		mock_message_generator.fallback_generation.assert_called_once()
 		mock_message_generator.generate_message.assert_not_called()
+		mock_message_generator.generate_message_with_linting.assert_not_called()
 
 		# Verify the returned values
 		assert message == "test: Fallback message"
@@ -282,8 +299,8 @@ class TestMessageGeneration:
 		# Create a mock chunk
 		chunk = MockDiffChunk(files=["test.py"], content="def test(): pass")
 
-		# Make the generate_message method raise an LLMError
-		mock_message_generator.generate_message.side_effect = LLMError("Test LLM error")
+		# Make the generate_message_with_linting method raise an LLMError
+		mock_message_generator.generate_message_with_linting.side_effect = LLMError("Test LLM error")
 
 		# Generate a message
 		message, used_llm = generate_message(chunk, mock_message_generator)
@@ -294,6 +311,72 @@ class TestMessageGeneration:
 		# Verify the returned values
 		assert message == "test: Fallback message"
 		assert used_llm is False
+
+	def test_generate_message_with_linting_enabled(self, mock_message_generator: MagicMock) -> None:
+		"""Test generating a message with linting enabled."""
+		# Create a mock chunk
+		chunk = MockDiffChunk(files=["test.py"], content="def test(): pass")
+
+		# Configure mock_message_generator for linting
+		mock_message_generator.generate_message_with_linting.return_value = (
+			"feat: Test commit message",
+			True,  # used_llm
+			True,  # is_valid
+		)
+
+		# Generate a message with linting
+		message, used_llm = generate_message(chunk, mock_message_generator, use_simple_mode=False, enable_linting=True)
+
+		# Verify the linting method was called
+		mock_message_generator.generate_message_with_linting.assert_called_once()
+		# Check the passed argument has the expected structure
+		args, _ = mock_message_generator.generate_message_with_linting.call_args
+		arg = args[0]
+		# Use dict access instead of checking type directly
+		assert arg["files"] == chunk.files
+		assert arg["content"] == chunk.content
+
+		# Verify the returned values
+		assert message == "feat: Test commit message"
+		assert used_llm is True
+
+	def test_generate_message_with_linting_failed(self, mock_message_generator: MagicMock) -> None:
+		"""Test generating a message when linting fails but still returns a message."""
+		# Create a mock chunk
+		chunk = MockDiffChunk(files=["test.py"], content="def test(): pass")
+
+		# Configure mock_message_generator for failed linting
+		mock_message_generator.generate_message_with_linting.return_value = (
+			"feature: Test commit message",  # Invalid type, but still returned
+			True,  # used_llm
+			False,  # is_valid - linting failed
+		)
+
+		# Generate a message with linting
+		message, used_llm = generate_message(chunk, mock_message_generator, use_simple_mode=False, enable_linting=True)
+
+		# Verify the linting method was called
+		mock_message_generator.generate_message_with_linting.assert_called_once()
+
+		# Verify the returned values (should still return the message even if invalid)
+		assert message == "feature: Test commit message"
+		assert used_llm is True
+
+	def test_generate_message_with_linting_disabled(self, mock_message_generator: MagicMock) -> None:
+		"""Test generating a message with linting explicitly disabled."""
+		# Create a mock chunk
+		chunk = MockDiffChunk(files=["test.py"], content="def test(): pass")
+
+		# Generate a message with linting disabled
+		message, used_llm = generate_message(chunk, mock_message_generator, use_simple_mode=False, enable_linting=False)
+
+		# Verify the regular generate_message was called
+		mock_message_generator.generate_message.assert_called_once()
+		mock_message_generator.generate_message_with_linting.assert_not_called()
+
+		# Verify the returned values
+		assert message == "feat: Test commit message"
+		assert used_llm is True
 
 
 class TestUniversalGenerator:
