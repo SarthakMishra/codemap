@@ -830,7 +830,22 @@ def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
 			run_git_command(cmd)
 			is_ancestor = True
 		except GitError:
+			# If the command fails, it typically means branch is not an ancestor of target_branch
+			# This is normal and not an error condition
 			is_ancestor = False
+			logger.debug("Branch %s is not an ancestor of %s", branch_ref, target_ref)
+
+		# Try the reverse check as well to determine relationship
+		try:
+			reverse_cmd = ["git", "merge-base", "--is-ancestor", target_ref, branch_ref]
+			run_git_command(reverse_cmd)
+			# If we get here, target is an ancestor of branch (target is older)
+			if not is_ancestor:
+				logger.debug("Branch %s is newer than %s", branch_ref, target_ref)
+		except GitError:
+			# If both checks fail, the branches have no common ancestor
+			if not is_ancestor:
+				logger.debug("Branches %s and %s have no common history", branch_ref, target_ref)
 
 		# Get commit count between branches
 		count_cmd = ["git", "rev-list", "--count", f"{branch_ref}..{target_ref}"]
