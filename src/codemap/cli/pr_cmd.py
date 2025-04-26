@@ -35,6 +35,7 @@ from codemap.utils.llm_utils import create_universal_generator, generate_message
 from codemap.utils.pr_strategies import create_strategy
 from codemap.utils.pr_utils import (
 	PullRequest,
+	branch_exists,
 	checkout_branch,
 	create_branch,
 	create_pull_request,
@@ -650,10 +651,18 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		# Sort choices by relation
 		branch_choices.sort(key=lambda x: "0" if "ancestor" in x["name"] else "1" + x["name"])
 
-		# Add default branch at the top
+		# Add default branch at the top if it exists
 		default = get_default_branch()
 		branch_choices = [c for c in branch_choices if c["value"] != default]
-		branch_choices.insert(0, {"name": f"{default} (default branch)", "value": default})
+
+		# Only add default branch to choices if it actually exists in the repository
+		default_exists = branch_exists(default, include_remote=True)
+		if default_exists:
+			branch_choices.insert(0, {"name": f"{default} (default branch)", "value": default})
+		elif len(branch_choices) > 0:
+			# If default doesn't exist but we have other branches, use the first one as fallback
+			default = branch_choices[0]["value"]
+			logger.warning("Default branch '%s' doesn't exist. Using '%s' as fallback.", get_default_branch(), default)
 
 		# Ask for base branch
 		selected_base = questionary.select(
