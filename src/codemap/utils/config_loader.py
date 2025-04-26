@@ -306,6 +306,17 @@ class ConfigLoader:
 			"prefix": pr_config["defaults"].get("feature_prefix") or "",
 		}
 
+	def get_default_branch(self) -> str:
+		"""
+		Get the default base branch from the PR configuration.
+
+		Returns:
+		    String containing the default branch name
+
+		"""
+		pr_config = self.get_pr_config()
+		return pr_config["defaults"].get("base_branch") or "main"
+
 	def get_content_generation_config(self) -> dict[str, Any]:
 		"""
 		Get configuration for PR content generation.
