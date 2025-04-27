@@ -997,16 +997,16 @@ def pr_command(
 					if prefix and not options.branch_name.startswith(prefix):
 						options.branch_name = f"{prefix}{options.branch_name}"
 
-			# Handle commits if needed
+			# Handle branch creation/selection first
+			branch_name = _handle_branch_creation(options)
+			if not branch_name:
+				return
+
+			# Handle commits if needed (after branch is created/selected)
 			if options.commit_first:
 				commit_success = _handle_commits(options)
 				if not commit_success:
 					return
-
-			# Handle branch creation/selection
-			branch_name = _handle_branch_creation(options)
-			if not branch_name:
-				return
 
 			# Handle push
 			push_success = _handle_push(options, branch_name)
