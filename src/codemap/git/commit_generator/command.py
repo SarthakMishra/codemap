@@ -55,6 +55,14 @@ class CommitCommand:
 			self.ui: CommitUI = CommitUI()
 			self.splitter = DiffSplitter(self.repo_root)
 
+			# Store the current branch at initialization to ensure we don't switch branches unexpectedly
+			try:
+				from codemap.git.pr_generator.utils import get_current_branch
+
+				self.original_branch = get_current_branch()
+			except (ImportError, GitError):
+				self.original_branch = None
+
 			# Create LLM client and configs
 			from codemap.llm import create_client
 			from codemap.utils.config_loader import ConfigLoader
@@ -429,4 +437,17 @@ class CommitCommand:
 			self.error_state = "failed"
 			return False
 		else:
+			# Check if we need to restore the original branch
+			if self.original_branch:
+				try:
+					from codemap.git.pr_generator.utils import checkout_branch, get_current_branch
+
+					current_branch = get_current_branch()
+					if current_branch != self.original_branch:
+						self.ui.show_success(f"Restoring original branch: {self.original_branch}")
+						checkout_branch(self.original_branch)
+				except (ImportError, GitError) as e:
+					# Log but don't fail if we can't restore the branch
+					logger.warning("Failed to restore original branch: %s", str(e))
+
 			return True
