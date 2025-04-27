@@ -2,27 +2,38 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
-import os
 import re
-import subprocess
-import tempfile
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import questionary
 import typer
-from rich.panel import Panel
 
 from codemap.git import DiffSplitter, SplitStrategy
-from codemap.git.command import CommitCommand
-from codemap.utils import validate_repo_path
-from codemap.utils.cli_utils import console, loading_spinner, setup_logging
-from codemap.utils.config_loader import ConfigLoader
-from codemap.utils.git_utils import (
+from codemap.git.commit_generator import CommitMessageGenerator
+from codemap.git.commit_generator.command import CommitCommand
+from codemap.git.diff_splitter import DiffChunk
+from codemap.git.pr_generator import (
+	PRGenerator,
+	PullRequest,
+	checkout_branch,
+	create_branch,
+	generate_pr_description_from_commits,
+	generate_pr_description_with_llm,
+	generate_pr_title_from_commits,
+	generate_pr_title_with_llm,
+	get_commit_messages,
+	get_current_branch,
+	get_default_branch,
+	get_existing_pr,
+	push_branch,
+	suggest_branch_name,
+)
+from codemap.git.pr_generator.strategies import create_strategy
+from codemap.git.utils import (
 	GitDiff,
 	GitError,
 	get_repo_root,
@@ -30,30 +41,72 @@ from codemap.utils.git_utils import (
 	get_unstaged_diff,
 	get_untracked_files,
 	run_git_command,
+	validate_repo_path,
 )
-from codemap.utils.llm_utils import create_universal_generator, generate_message
-from codemap.utils.pr_strategies import create_strategy
-from codemap.utils.pr_utils import (
-	PullRequest,
-	branch_exists,
-	checkout_branch,
-	create_branch,
-	create_pull_request,
-	generate_pr_content_from_template,
-	generate_pr_description_from_commits,
-	generate_pr_description_with_llm,
-	generate_pr_title_from_commits,
-	generate_pr_title_with_llm,
-	generate_release_pr_content,
-	get_branch_relation,
-	get_commit_messages,
-	get_current_branch,
-	get_default_branch,
-	get_existing_pr,
-	push_branch,
-	suggest_branch_name,
-	update_pull_request,
-)
+from codemap.llm import create_client
+from codemap.utils.cli_utils import console, loading_spinner, setup_logging
+from codemap.utils.config_loader import ConfigLoader
+
+
+# Forward declarations for functions not directly imported
+# These would need to be imported or implemented
+def create_universal_generator(
+	repo_path: Path, model: str | None = None, api_key: str | None = None, api_base: str | None = None
+) -> CommitMessageGenerator:
+	"""
+	Create a universal message generator.
+
+	This is a placeholder and should be properly imported from the
+	appropriate module.
+
+	"""
+	llm_client = create_client(repo_path=repo_path, model=model, api_key=api_key, api_base=api_base)
+	return CommitMessageGenerator(
+		llm_client=llm_client,
+		repo_root=repo_path,
+		prompt_template="",  # Use default
+		config_loader=ConfigLoader(repo_root=repo_path),  # Use default
+	)
+
+
+def generate_message(
+	chunk: DiffChunk, generator: CommitMessageGenerator, use_simple_mode: bool = False
+) -> tuple[str, bool]:
+	"""
+	Generate a commit message for a diff chunk.
+
+	This is a placeholder and should be properly imported from the
+	appropriate module.
+
+	"""
+	if hasattr(generator, "generate_message_with_linting") and not use_simple_mode:
+		message, used_llm, _ = generator.generate_message_with_linting(chunk)
+	else:
+		message, used_llm = generator.generate_message(chunk)
+	return message, used_llm
+
+
+def generate_release_pr_content(base_branch: str, branch_name: str) -> dict[str, str]:
+	"""
+	Generate PR content for a release.
+
+	This is a placeholder and should be properly imported from the appropriate module.
+
+	Args:
+	        base_branch: The branch to merge into (e.g. main)
+	        branch_name: The release branch name (e.g. release/1.0.0)
+
+	Returns:
+	        Dictionary with title and description
+
+	"""
+	# Extract version from branch name
+	version = branch_name.replace("release/", "")
+	title = f"Release {version}"
+	# Include base branch information in the description
+	description = f"# Release {version}\n\nThis pull request merges release {version} into {base_branch}."
+	return {"title": title, "description": description}
+
 
 logger = logging.getLogger(__name__)
 
@@ -194,40 +247,41 @@ def _handle_branch_creation(options: PROptions) -> str | None:
 			# Return an empty diff in case of error
 			diff = GitDiff(files=[], content="", is_staged=False)
 
+		# Use the diff splitter to get semantic chunks
+		if diff.files and options.repo_path is not None:
+			splitter = DiffSplitter(repo_root=options.repo_path)
+			chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
+		else:
+			# Initialize empty chunks list to avoid "possibly unbound" error
+			chunks = []
+
 		# Generate a suggested branch name based on the changes
 		suggested_name = ""
-		if diff.files:
-			# Use the diff splitter to get semantic chunks
-			splitter = DiffSplitter(options.repo_path)
-			chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
+		if chunks:
+			# Ensure repo_path is not None before passing it, as required by create_universal_generator
+			if options.repo_path is None:
+				# Handle the case where repo_path is None, maybe log an error or skip suggestion
+				logger.error("Repository path is required for generating branch name suggestion but was not provided.")
+				suggested_name = ""  # Fallback to empty suggestion
+			else:
+				# Set up message generator for the first chunk
+				generator = create_universal_generator(
+					repo_path=options.repo_path,  # Now known to be Path
+					model=options.model,
+					api_key=options.api_key,
+					api_base=options.api_base,
+				)
 
-			if chunks:
-				# Ensure repo_path is not None before passing it, as required by create_universal_generator
-				if options.repo_path is None:
-					# Handle the case where repo_path is None, maybe log an error or skip suggestion
-					logger.error(
-						"Repository path is required for generating branch name suggestion but was not provided."
-					)
-					suggested_name = ""  # Fallback to empty suggestion
-				else:
-					# Set up message generator for the first chunk
-					generator = create_universal_generator(
-						repo_path=options.repo_path,  # Now known to be Path
-						model=options.model,
-						api_key=options.api_key,
-						api_base=options.api_base,
-					)
-
-					# Generate a commit message for the first chunk
-					try:
-						message, _ = generate_message(chunks[0], generator)
-						# Extract the first line as the commit message
-						first_line = message.split("\n")[0] if "\n" in message else message
-						suggested_name = suggest_branch_name(first_line, workflow_strategy_name)
-					except (ValueError, RuntimeError, ConnectionError) as e:
-						# Fallback to a simple branch name
-						logger.warning("Error generating branch name: %s", e)
-						suggested_name = suggest_branch_name(f"update-{chunks[0].files[0]}", workflow_strategy_name)
+				# Generate a commit message for the first chunk
+				try:
+					message, _ = generate_message(chunks[0], generator)
+					# Extract the first line as the commit message
+					first_line = message.split("\n")[0] if "\n" in message else message
+					suggested_name = suggest_branch_name(first_line, workflow_strategy_name)
+				except (ValueError, RuntimeError, ConnectionError) as e:
+					# Fallback to a simple branch name
+					logger.warning("Error generating branch name: %s", e)
+					suggested_name = suggest_branch_name(f"update-{chunks[0].files[0]}", workflow_strategy_name)
 
 		# Create formatted branch options for selection
 		branch_options = []
@@ -369,12 +423,26 @@ def _handle_commits(options: PROptions) -> bool:
 
 	# Use the commit command to commit changes
 	try:
+		# Initialize empty chunks
+		chunks = []
+
 		# Set up the splitter
-		splitter = DiffSplitter(options.repo_path)
-		chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
-		if not chunks:
-			console.print("[yellow]No changes to commit after filtering.[/yellow]")
-			return True
+		if options.repo_path is not None:
+			splitter = DiffSplitter(repo_root=options.repo_path)
+			chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
+			if not chunks:
+				console.print("[yellow]No changes to commit after filtering.[/yellow]")
+				return True
+		else:
+			# Handle None repo_path by using current directory
+			logger.warning("Repository path not provided, using current directory")
+			repo_path = Path.cwd()
+			try:
+				# Try to get repo root to validate it's a git repo
+				repo_path = get_repo_root(repo_path)
+			except GitError as e:
+				console.print(f"[red]Error: Not a valid git repository: {e}[/red]")
+				return False
 
 		# Set up message generator - we don't need to store it since
 		# CommitCommand will handle message generation internally
@@ -594,219 +662,90 @@ def _generate_description(
 
 def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequest | None:
 	"""
-	Handle PR creation.
+	Handle PR creation process.
 
 	Args:
-	    options: PR options
+	    options: PR command options
 	    branch_name: Branch name to create PR from
 
 	Returns:
-	    Created PR or None if cancelled
+	    PullRequest object if created successfully, None otherwise
 
 	"""
-	if branch_name is None:
-		return None
+	if not branch_name:
+		_exit_with_error("No branch name provided for PR creation.")
+		return None  # Added to satisfy type checker though _exit_with_error raises exception
 
-	# Load PR configuration
-	config_loader = ConfigLoader(repo_root=options.repo_path)
-	workflow_strategy_name = config_loader.get_workflow_strategy()
-	config_loader.get_pr_config()
-	content_config = config_loader.get_content_generation_config()
+	if not options.repo_path:
+		_exit_with_error("Repository path is required.")
+		return None  # Added to satisfy type checker
 
-	# Create workflow strategy
-	workflow = create_strategy(workflow_strategy_name)
-
-	# Detect branch type
-	branch_type = workflow.detect_branch_type(branch_name) or "feature"
-
-	# Determine base branch
-	if options.base_branch:
-		base_branch = options.base_branch
-	else:
-		# Get base branch from branch mapping
-		branch_mapping = config_loader.get_branch_mapping(branch_type)
-		base_branch = branch_mapping.get("base") or get_default_branch()
-
-	if options.interactive:
-		# Display a rich branch selector with relationships between branches
-		all_branches = set(workflow.get_local_branches() + workflow.get_remote_branches())
-
-		# Create formatted choices with branch metadata
-		branch_choices = []
-		for b in all_branches:
-			if b == branch_name:  # Skip current branch
-				continue
-
-			meta = workflow.get_branch_metadata(b)
-			try:
-				logger.debug("Testing branch relation between %s and %s", b, branch_name)
-
-				# Show a subtle loading indicator for branch analysis
-				with loading_spinner(f"Analyzing relationship with branch '{b}'"):
-					relation, commit_count = get_branch_relation(b, branch_name)
-
-				relation_str = "ancestor" if relation else "unrelated"
-
-				branch_choices.append(
-					{
-						"name": (
-							f"{b} ({meta.get('last_commit_date', 'unknown')}, {relation_str}, {commit_count} commits)"
-						),
-						"value": b,
-					}
-				)
-			except GitError as e:
-				logger.warning("Error checking branch relation for %s: %s", b, e)
-				# Still add the branch but mark relation as unknown
-				branch_choices.append(
-					{
-						"name": f"{b} ({meta.get('last_commit_date', 'unknown')}, relation unknown)",
-						"value": b,
-					}
-				)
-
-		# Sort choices by relation
-		branch_choices.sort(key=lambda x: "0" if "ancestor" in x["name"] else "1" + x["name"])
-
-		# Get default branch from config instead of git
-		config_default = config_loader.get_default_branch()  # This will get 'dev' from config
-		git_default = get_default_branch()  # This might return 'main'
-
-		# Check if the branches actually exist in the repository
-		config_default_exists = branch_exists(config_default, include_remote=True)
-		git_default_exists = branch_exists(git_default, include_remote=True)
-
-		# Choose the first available default branch
-		if config_default_exists:
-			default = config_default
-		elif git_default_exists:
-			default = git_default
-		elif len(branch_choices) > 0:
-			# If neither default exists but we have other branches, use the first one
-			default = branch_choices[0]["value"]
-		else:
-			# Fallback to use the config default even if it doesn't exist (will show appropriate error later)
-			default = config_default or git_default
-
-		logger.debug(
-			"Using default branch: %s (config default: %s, git default: %s)", default, config_default, git_default
+	try:
+		# Create LLM client for PR generation
+		llm_client = create_client(
+			model=options.model,
+			api_key=options.api_key,
+			api_base=options.api_base,
 		)
 
-		# Filter out the default branch from choices (we'll add it at the top)
-		branch_choices = [c for c in branch_choices if c["value"] != default]
+		# Create PR generator - ensure repo_path is not None
+		repo_path = cast("Path", options.repo_path)
+		pr_generator = PRGenerator(
+			repo_path=repo_path,
+			llm_client=llm_client,
+		)
 
-		# Add default branch to choices if it exists
-		if config_default_exists or git_default_exists:
-			branch_choices.insert(0, {"name": f"{default} (default branch)", "value": default})
+		# Load PR configuration
+		config_loader = ConfigLoader(repo_root=options.repo_path)
+		workflow_strategy_name = config_loader.get_workflow_strategy()
+		config_loader.get_pr_config()
+		content_config = config_loader.get_content_generation_config()
 
-		# Ask for base branch
-		if branch_choices:
-			try:
-				# Set a safe default value that exists in the choices
-				safe_default = None
-				if base_branch in [c["value"] for c in branch_choices]:
-					safe_default = base_branch
-				elif default in [c["value"] for c in branch_choices]:
-					safe_default = default
-				elif branch_choices:
-					safe_default = branch_choices[0]["value"]
+		# Create workflow strategy
+		workflow = create_strategy(workflow_strategy_name)
 
-				selected_base = questionary.select(
-					"Select base branch:",
-					choices=branch_choices,
-					default=safe_default,
-					qmark="🔀",
-				).ask()
+		# Detect branch type - ensure branch_name is not None
+		if branch_name is None:
+			_exit_with_error("Branch name cannot be None.")
 
-				base_branch = selected_base
-			except (ValueError, TypeError) as e:
-				logger.warning("Error displaying branch selection: %s", e)
-				# If selection fails, use the first available branch or keep existing
-				if branch_choices:
-					base_branch = branch_choices[0]["value"]
-				logger.info("Using %s as the base branch after error", base_branch)
-		else:
-			# If no branch choices are available, use the default branch or current branch as fallback
-			console.print(f"[yellow]No valid branches found for a PR. Using '{base_branch}' as base branch.[/yellow]")
-			# No need to update base_branch here as it's already set to a reasonable default
+		branch_type = workflow.detect_branch_type(branch_name) or "feature"
 
-	# Check if PR already exists
-	existing_pr = get_existing_pr(branch_name)
-	if existing_pr:
-		if options.interactive:
+		# Try to get default base branch for this branch type
+		base_branch = options.base_branch or workflow.get_default_base(branch_type)
+
+		# Check for existing PR
+		existing_pr = pr_generator.get_existing_pr(branch_name)
+
+		if existing_pr:
+			if not options.interactive:
+				return existing_pr
+
 			update_existing = questionary.confirm(
-				f"PR #{existing_pr.number} already exists for branch '{branch_name}'. Do you want to update it?",
-				default=True,
+				f"PR #{existing_pr.number} already exists for branch '{branch_name}'. Update it?",
+				default=False,
 			).ask()
+
 			if update_existing:
 				return _handle_pr_update(options, existing_pr)
+
+			console.print(f"[yellow]PR #{existing_pr.number} already exists for branch '{branch_name}'.[/yellow]")
 			return existing_pr
-		console.print(f"[yellow]PR #{existing_pr.number} already exists for branch '{branch_name}'.[/yellow]")
-		return existing_pr
 
-	# Get commit messages for content generation
-	commits = get_commit_messages(base_branch, branch_name)
+		# Get data for PR
+		title_strategy = content_config.get("title_strategy", "conventional")
+		description_strategy = content_config.get("description_strategy", "conventional")
 
-	# Generate PR title and description based on options and strategies
-	if options.title and options.description:
-		# User provided both title and description
+		# Get commits for title/description generation
+		commits = get_commit_messages(base_branch, branch_name)
+
+		# Generate title
 		title = options.title
-
-		# Check if the description is a file path or a string
-		desc_path = Path(options.description)
-		if desc_path.exists() and desc_path.is_file():
-			with desc_path.open("r", encoding="utf-8") as f:
-				description = f.read()
-		else:
-			description = options.description
-	else:
-		# Title and/or description need to be generated
-		title_strategy = content_config.get("title_strategy", "commits")
-		description_strategy = content_config.get("description_strategy", "commits")
-
-		# Determine PR content generation method
-		use_workflow_templates = content_config.get("use_workflow_templates", True)
-		if use_workflow_templates and (description_strategy == "template" or title_strategy == "template"):
-			# Get first commit message or generic description for template
-			commit_desc = commits[0] if commits else f"Update {branch_name}"
-			# Remove conventional commit prefix if present (e.g., feat(scope): message)
-			if commits:
-				commit_desc = re.sub(r"^[a-z]+(\([^)]+\))?:\s*", "", commit_desc)
-
-			# Use PR templates based on workflow strategy
-			pr_content = generate_pr_content_from_template(
-				branch_name=branch_name,
-				description=commit_desc,
-				strategy_name=workflow_strategy_name,
-			)
-
-			# Only use template-generated title if title_strategy is template
-			if title_strategy == "template":
-				title = options.title or pr_content["title"]
-			else:
-				# Generate title with other strategies
-				title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
-
-			# Only use template-generated description if description_strategy is template
-			if description_strategy == "template":
-				description = options.description or pr_content["description"]
-			else:
-				# Generate description with other strategies
-				description = _generate_description(
-					options,
-					description_strategy,
-					commits,
-					branch_name,
-					branch_type,
-					workflow_strategy_name,
-					base_branch,
-					content_config,
-				)
-		else:
-			# Generate title with fallbacks
+		if title is None:
 			title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
 
-			# Generate description with fallbacks
+		# Generate description
+		description = options.description
+		if description is None:
 			description = _generate_description(
 				options,
 				description_strategy,
@@ -818,56 +757,11 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 				content_config,
 			)
 
-	# Show preview and allow editing in interactive mode
-	if options.interactive:
-		# Show preview
-		console.print("\n[bold]Pull Request Preview:[/bold]")
-		console.print(Panel(f"[bold]Title:[/bold] {title}"))
-		console.print(Panel(f"[bold]Description:[/bold]\n\n{description}"))
-
-		# Allow editing
-		edit_pr = questionary.confirm("Do you want to edit the PR content?", default=False).ask()
-		if edit_pr:
-			# Edit title
-			new_title = questionary.text("Edit PR title:", default=title).ask()
-			if new_title:
-				title = new_title
-
-			# Edit description
-			with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as tmp:
-				tmp.write(description)
-				tmp_path = tmp.name
-
-			try:
-				editor = os.environ.get("EDITOR", "nano")
-				# Using subprocess.run with user input (editor) is considered safe in this context
-				# as it's using a system environment variable with a fallback to a known safe value
-				subprocess.run([editor, tmp_path], check=True)  # noqa: S603
-
-				# Replace open() with Path.open()
-				description = Path(tmp_path).read_text(encoding="utf-8")
-			except subprocess.SubprocessError:
-				console.print("[yellow]Failed to open editor. Using original description.[/yellow]")
-			finally:
-				with contextlib.suppress(OSError):
-					# Replace os.unlink with Path.unlink()
-					Path(tmp_path).unlink(missing_ok=True)
-
-	# Ask for confirmation in interactive mode
-	if options.interactive:
-		create_pr = questionary.confirm(
-			f"Create PR from '{branch_name}' to '{base_branch}'?",
-			default=True,
-		).ask()
-		if not create_pr:
-			return None
-
-	# Create PR
-	try:
+		# Create PR
 		with loading_spinner(f"Creating PR from '{branch_name}' to '{base_branch}'"):
-			pr = create_pull_request(base_branch, branch_name, title, description)
-		console.print(f"\n[green]Created PR #{pr.number}: {pr.title}[/green]")
-		console.print(f"[bold blue]URL:[/bold blue] {pr.url}")
+			pr = pr_generator.create_pr(base_branch, branch_name, title, description)
+
+		console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
 		return pr
 	except GitError as e:
 		console.print(f"[red]Error creating PR: {e}[/red]")
@@ -876,93 +770,140 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 
 def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest | None:
 	"""
-	Handle PR update.
+	Handle PR update process.
 
 	Args:
-	    options: PR options
-	    pr: Existing PR
+	    options: PR command options
+	    pr: Existing PR to update
 
 	Returns:
-	    Updated PR or None if cancelled
+	    Updated PullRequest object if successful, None otherwise
 
 	"""
-	# Ensure PR is not None
-	if pr is None:
-		console.print("[red]PR cannot be None.[/red]")
+	if not options.repo_path:
+		_exit_with_error("Repository path is required.")
 		return None
 
-	# Get base branch
-	base_branch = options.base_branch or get_default_branch()
+	if not pr:
+		# If PR number is provided but PR object is not, try to get the PR
+		if options.pr_number:
+			try:
+				pr_number = options.pr_number
+				current_branch = get_current_branch()
 
-	# Get commit messages
-	try:
-		commits = get_commit_messages(base_branch, pr.branch)
-	except GitError as e:
-		console.print(f"[red]Error getting commit messages: {e}[/red]")
-		commits = []
-
-	# Generate PR title and description with AI if possible
-	try:
-		# Display a spinner while generating PR content
-		with loading_spinner("Generating PR content with AI..."):
-			# Try AI-generated title and description first
-			title = options.title or pr.title
-			if not title:
-				title = generate_pr_title_with_llm(
-					commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+				# Create LLM client for PR generation
+				llm_client = create_client(
+					model=options.model,
+					api_key=options.api_key,
+					api_base=options.api_base,
 				)
 
-			description = options.description or pr.description
-			if not description:
-				description = generate_pr_description_with_llm(
-					commits, model=options.model, api_key=options.api_key, api_base=options.api_base
+				# Create PR generator
+				repo_path = cast("Path", options.repo_path)
+				pr_generator = PRGenerator(
+					repo_path=repo_path,
+					llm_client=llm_client,
 				)
-	except (ValueError, RuntimeError, ConnectionError) as e:
-		console.print(f"[yellow]AI generation failed: {e}[/yellow]")
-		console.print("[yellow]Falling back to rule-based PR generation...[/yellow]")
-		# Fallback to rule-based generation
-		title = options.title or pr.title or generate_pr_title_from_commits(commits)
-		description = options.description or pr.description or generate_pr_description_from_commits(commits)
 
-	# In interactive mode, allow editing title and description
-	if options.interactive:
-		title = questionary.text("PR title:", default=title).ask()
-		if not title:
-			console.print("[red]PR title cannot be empty.[/red]")
+				# Get the PR information directly from GitHub
+				logger.info("Attempting to update PR #%s", pr_number)
+
+				# For now, create a minimal PR object with just the needed fields
+				pr = PullRequest(
+					number=pr_number,
+					url=f"https://github.com/unknown/unknown/pull/{pr_number}",
+					title="",  # Will be updated soon
+					description="",  # Will be updated soon
+					branch=current_branch,
+				)
+			except Exception as e:
+				logger.exception("Error retrieving PR information")
+				_exit_with_error(f"Failed to retrieve PR information: {e}")
+				return None
+		else:
+			_exit_with_error("No PR provided for update.")
 			return None
 
-		# Show description preview
-		console.print("\nPR description preview:")
-		console.print(Panel(description, title="Description"))
-
-		edit_description = questionary.confirm("Edit description?", default=False).ask()
-		if edit_description:
-			# Use a temporary file for editing
-			with tempfile.NamedTemporaryFile(mode="w+", suffix=".md", delete=False) as temp:
-				temp.write(description)
-				temp_path = temp.name
-
-			try:
-				# Try to use the user's preferred editor
-				editor = os.environ.get("EDITOR", "nano")
-				subprocess.run([editor, temp_path], check=True)  # noqa: S603
-
-				with Path(temp_path).open() as temp:
-					description = temp.read()
-			except OSError as e:
-				console.print(f"[red]Error editing description: {e}[/red]")
-			finally:
-				Path(temp_path).unlink()
-
-	# Update PR
 	try:
-		updated_pr = update_pull_request(pr.number, title, description)
+		# Create LLM client for PR generation
+		llm_client = create_client(
+			model=options.model,
+			api_key=options.api_key,
+			api_base=options.api_base,
+		)
+
+		# Create PR generator
+		repo_path = cast("Path", options.repo_path)
+		pr_generator = PRGenerator(
+			repo_path=repo_path,
+			llm_client=llm_client,
+		)
+
+		# Get base branch
+		base_branch = get_default_branch()
+
+		# Get data for PR
+		config_loader = ConfigLoader(repo_root=options.repo_path)
+		content_config = config_loader.get_content_generation_config()
+		title_strategy = content_config.get("title_strategy", "conventional")
+		description_strategy = content_config.get("description_strategy", "conventional")
+
+		# Detect branch type using strategy
+		workflow_strategy_name = config_loader.get_workflow_strategy()
+		workflow = create_strategy(workflow_strategy_name)
+		branch_type = workflow.detect_branch_type(pr.branch) or "feature"
+
+		# Get commits for title/description generation
+		commits = get_commit_messages(base_branch, pr.branch)
+
+		# Generate title
+		title = options.title
+		if title is None:
+			# Use existing PR title if available
+			title = pr.title if pr.title else ""
+			if options.interactive:
+				update_title = questionary.confirm(f"Update title? (Current: {title})", default=False).ask()
+				if update_title:
+					title = _generate_title(options, title_strategy, commits, pr.branch, branch_type)
+
+		# Generate description
+		description = options.description
+		if description is None:
+			# Use existing PR description if available
+			current_desc = pr.description if pr.description else ""
+			if options.interactive:
+				show_limit = 100
+				description_preview = (
+					f"{current_desc[:show_limit]}..." if len(current_desc) > show_limit else current_desc
+				)
+				update_desc = questionary.confirm(
+					f"Update description? (Current: {description_preview})", default=False
+				).ask()
+				if update_desc:
+					description = _generate_description(
+						options,
+						description_strategy,
+						commits,
+						pr.branch,
+						branch_type,
+						workflow_strategy_name,
+						base_branch,
+						content_config,
+					)
+				else:
+					description = current_desc
+			else:
+				description = current_desc
+
+		# Update PR
+		with loading_spinner(f"Updating PR #{pr.number}"):
+			updated_pr = pr_generator.update_pr(cast("int", pr.number), title, description)
+
 		console.print(f"[green]Updated PR #{updated_pr.number}: {updated_pr.url}[/green]")
-	except GitError as e:
-		console.print(f"[red]Error updating PR: {e}[/red]")
-		return None
-	else:
 		return updated_pr
+	except GitError as e:
+		console.print(f"[red]Error in PR update: {e}[/red]")
+		return None
 
 
 def _load_llm_config(repo_path: Path | None) -> dict:

@@ -26,19 +26,15 @@ except ImportError:
 if TYPE_CHECKING:
 	from collections.abc import Sequence
 
-	from codemap.git.message_generator import MessageGenerator
+	from codemap.git.commit_generator import CommitMessageGenerator
 
 from codemap.git import (
 	DiffChunk,
 	DiffSplitter,
 	SplitStrategy,
 )
-from codemap.git.command import CommitCommand
-from codemap.git.message_generator import LLMError
-from codemap.utils import validate_repo_path
-from codemap.utils.cli_utils import console, loading_spinner, setup_logging
-from codemap.utils.config_loader import ConfigLoader
-from codemap.utils.git_utils import (
+from codemap.git.commit_generator.command import CommitCommand
+from codemap.git.utils import (
 	GitError,
 	commit_only_files,
 	get_other_staged_files,
@@ -46,8 +42,11 @@ from codemap.utils.git_utils import (
 	get_unstaged_diff,
 	get_untracked_files,
 	run_git_command,
+	validate_repo_path,
 )
-from codemap.utils.llm_utils import create_universal_generator
+from codemap.llm import LLMError
+from codemap.utils.cli_utils import console, loading_spinner, setup_logging
+from codemap.utils.config_loader import ConfigLoader
 
 # Truncate to maximum of 10 lines
 MAX_PREVIEW_LINES = 10
@@ -169,7 +168,58 @@ def _get_api_key_for_provider(provider: str) -> str | None:
 	return api_key
 
 
-def setup_message_generator(options: CommitOptions) -> MessageGenerator:
+def create_universal_generator(
+	repo_path: Path,
+	model: str | None = None,
+	api_key: str | None = None,
+	api_base: str | None = None,
+	prompt_template: str | None = None,
+) -> CommitMessageGenerator:
+	"""
+	Create a universal message generator with the provided options.
+
+	Args:
+	    repo_path: Repository path
+	    model: Model name to use
+	    api_key: API key to use
+	    api_base: API base URL to use
+	    prompt_template: Custom prompt template
+
+	Returns:
+	    Configured CommitMessageGenerator
+
+	"""
+	from codemap.git.commit_generator import CommitMessageGenerator
+	from codemap.llm import create_client
+	from codemap.utils.config_loader import ConfigLoader
+
+	# Create LLM client
+	llm_client = create_client(
+		repo_path=repo_path,
+		model=model,
+		api_key=api_key,
+		api_base=api_base,
+	)
+
+	# Create config loader
+	config_loader = ConfigLoader(repo_root=repo_path)
+
+	# Get default prompt template if not provided
+	if not prompt_template:
+		from codemap.git.commit_generator.prompts import DEFAULT_PROMPT_TEMPLATE
+
+		prompt_template = DEFAULT_PROMPT_TEMPLATE
+
+	# Create and return generator
+	return CommitMessageGenerator(
+		repo_root=repo_path,
+		llm_client=llm_client,
+		prompt_template=prompt_template,
+		config_loader=config_loader,
+	)
+
+
+def setup_message_generator(options: CommitOptions) -> CommitMessageGenerator:
 	"""
 	Set up a message generator with the provided options.
 
@@ -190,9 +240,49 @@ def setup_message_generator(options: CommitOptions) -> MessageGenerator:
 	)
 
 
+def generate_message(
+	chunk: DiffChunk,
+	message_generator: CommitMessageGenerator,
+	use_simple_mode: bool = False,
+	enable_linting: bool = True,
+) -> tuple[str, bool]:
+	"""
+	Generate a commit message for a diff chunk.
+
+	Args:
+	    chunk: Diff chunk to generate message for
+	    message_generator: Message generator to use
+	    use_simple_mode: Whether to use simple mode
+	    enable_linting: Whether to enable linting
+
+	Returns:
+	    Tuple of (message, whether LLM was used)
+
+	"""
+	if use_simple_mode:
+		# Use fallback generation without LLM
+		message = message_generator.fallback_generation(chunk)
+		return message, False
+
+	if enable_linting:
+		# Use lint-capable generation
+		from codemap.git.commit_generator.utils import generate_message_with_linting
+
+		message, used_llm, _ = generate_message_with_linting(
+			chunk=chunk,
+			generator=message_generator,
+			repo_root=message_generator.repo_root,
+		)
+		return message, used_llm
+
+	# Use regular generation without linting
+	message, used_llm = message_generator.generate_message(chunk)
+	return message, used_llm
+
+
 def generate_commit_message(
 	chunk: DiffChunk,
-	generator: MessageGenerator,
+	generator: CommitMessageGenerator,
 	mode: GenerationMode,
 ) -> tuple[str, bool]:
 	"""
@@ -207,31 +297,34 @@ def generate_commit_message(
 	    Tuple of (message, whether LLM was used)
 
 	"""
-	# Use the universal generate_message function from llm_utils
-	use_simple_mode = mode == GenerationMode.SIMPLE
-	# Enable linting only in SMART mode
-	enable_linting = mode == GenerationMode.SMART
+	# Handle simple mode directly
+	if mode == GenerationMode.SIMPLE:
+		from codemap.git.commit_generator.schemas import DiffChunkData
 
+		# Convert DiffChunk to DiffChunkData
+		chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
+		# Add description if it exists
+		if chunk.description is not None:
+			chunk_dict["description"] = chunk.description
+		message = generator.fallback_generation(chunk_dict)
+		return message, False
+
+	# Use the universal generate_message function for SMART mode
 	try:
-		# Import at function level to avoid circular imports
-		from codemap.utils.llm_utils import generate_message as llm_utils_generate_message
-
-		message, used_llm = llm_utils_generate_message(
-			chunk=chunk, message_generator=generator, use_simple_mode=use_simple_mode, enable_linting=enable_linting
+		message, used_llm = generate_message(
+			chunk=chunk, message_generator=generator, use_simple_mode=False, enable_linting=True
 		)
 		return message, used_llm
 	except (ValueError, RuntimeError, LLMError) as e:
 		console.print(f"[red]Error generating message:[/red] {e}")
 		# Still try to generate a fallback message
-		from codemap.git.message_generator import DiffChunkData
+		from codemap.git.commit_generator.schemas import DiffChunkData
 
 		# Convert DiffChunk to DiffChunkData
 		chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
-
 		# Add description if it exists
 		if chunk.description is not None:
 			chunk_dict["description"] = chunk.description
-
 		message = generator.fallback_generation(chunk_dict)
 		return message, False
 
@@ -543,7 +636,7 @@ class ChunkContext:
 	chunk: DiffChunk
 	index: int
 	total: int
-	generator: MessageGenerator
+	generator: CommitMessageGenerator
 	mode: GenerationMode
 
 
@@ -611,7 +704,7 @@ def process_chunk_interactively(context: ChunkContext) -> str:
 
 
 def display_suggested_messages(
-	options: CommitOptions, chunks: Sequence[DiffChunk], generator: MessageGenerator
+	options: CommitOptions, chunks: Sequence[DiffChunk], generator: CommitMessageGenerator
 ) -> None:
 	"""
 	Display suggested commit messages without committing.
@@ -644,7 +737,7 @@ def display_suggested_messages(
 def process_all_chunks(
 	options: CommitOptions,
 	chunks: Sequence[DiffChunk],
-	generator: MessageGenerator,
+	generator: CommitMessageGenerator,
 ) -> int:
 	"""
 	Process all chunks interactively.
