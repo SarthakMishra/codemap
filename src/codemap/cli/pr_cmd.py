@@ -30,9 +30,8 @@ from codemap.git.pr_generator import (
 	get_default_branch,
 	get_existing_pr,
 	push_branch,
-	suggest_branch_name,
 )
-from codemap.git.pr_generator.strategies import create_strategy
+from codemap.git.pr_generator.strategies import branch_exists, create_strategy
 from codemap.git.utils import (
 	GitDiff,
 	GitError,
@@ -178,7 +177,7 @@ def _handle_branch_creation(options: PROptions) -> str | None:
 	    options: PR options
 
 	Returns:
-	    Branch name or None if cancelled
+	    Branch name if successful, None otherwise
 
 	"""
 	# Load PR configuration
@@ -188,114 +187,65 @@ def _handle_branch_creation(options: PROptions) -> str | None:
 	# Create workflow strategy
 	workflow = create_strategy(workflow_strategy_name)
 
-	current_branch = get_current_branch()
-	default_branch = get_default_branch()
+	# If branch name is already provided, validate and use it
+	if options.branch_name:
+		if not _validate_branch_name(options.branch_name):
+			return None
+		# Ensure branch exists
+		if not branch_exists(options.branch_name):
+			# Create branch if it doesn't exist
+			try:
+				create_branch(options.branch_name)
+				console.print(f"[green]Created and switched to branch: {options.branch_name}[/green]")
+			except GitError as e:
+				console.print(f"[red]Error creating branch: {e}[/red]")
+				return None
+		else:
+			# Branch exists, make sure we're on it
+			try:
+				checkout_branch(options.branch_name)
+				console.print(f"[green]Switched to branch: {options.branch_name}[/green]")
+			except GitError as e:
+				console.print(f"[red]Error checking out branch: {e}[/red]")
+				return None
+		return options.branch_name
 
-	# If we're already on a feature branch (not the default branch), ask if we want to use it
-	if current_branch != default_branch and options.interactive:
-		branch_type = workflow.detect_branch_type(current_branch) or "feature"
+	# If interactive mode, let user select or create branch
+	if options.interactive:
+		# Get current branch
+		current_branch = get_current_branch()
+
+		# Ask if user wants to use current branch
 		use_current = questionary.confirm(
-			f"You are on branch '{current_branch}' ({branch_type}). Do you want to use this branch for the PR?",
+			f"Use current branch '{current_branch}' for PR?",
 			default=True,
 		).ask()
+
 		if use_current:
 			return current_branch
 
-	# If branch name is provided, use it
-	if options.branch_name:
-		branch_name = options.branch_name
-		if not _validate_branch_name(branch_name):
-			return None
-	elif options.interactive:
+		# Get default branch from repository
+		default_branch = get_default_branch()
+		if not default_branch:
+			default_branch = "main"  # Fallback
+
+		# Suggest a branch name based on PR type
+		suggested_name = "feature/new-feature"  # Default suggestion
+
 		# Get all branches with metadata
 		branches_with_metadata = workflow.get_all_branches_with_metadata()
+		branch_options = [{"name": "[Create new branch]", "value": "new"}]
 
-		# Group branches by type
-		grouped_branches = workflow.get_branches_by_type()
+		for branch, meta in branches_with_metadata.items():
+			# Skip default branch
+			if branch == default_branch:
+				continue
 
-		# Get appropriate branch types from workflow strategy
-		branch_types = workflow.get_branch_types()
+			# Get last commit and commit count
+			last_commit = meta.get("last_commit", "unknown")
+			commit_count = meta.get("commit_count", 0)
 
-		# Ask for branch type (feature, release, hotfix, etc.)
-		branch_type = questionary.select(
-			"Select branch type:",
-			choices=branch_types,
-			default=branch_types[0] if branch_types else "feature",
-			qmark="🔀",
-		).ask()
-
-		# Get existing branches of this type to show as options
-		branches_of_type = grouped_branches.get(branch_type, [])
-
-		# Get uncommitted changes to suggest a branch name if creating new branch
-		try:
-			# Get all changes
-			staged = get_staged_diff()
-			unstaged = get_unstaged_diff()
-			untracked_files = get_untracked_files()
-
-			# Combine into a single diff
-			all_files = list(set(staged.files + unstaged.files + untracked_files))
-			combined_content = staged.content + unstaged.content
-
-			diff = GitDiff(
-				files=all_files,
-				content=combined_content,
-				is_staged=False,  # Mixed staged/unstaged
-			)
-		except GitError:
-			# Return an empty diff in case of error
-			diff = GitDiff(files=[], content="", is_staged=False)
-
-		# Use the diff splitter to get semantic chunks
-		if diff.files and options.repo_path is not None:
-			splitter = DiffSplitter(repo_root=options.repo_path)
-			chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
-		else:
-			# Initialize empty chunks list to avoid "possibly unbound" error
-			chunks = []
-
-		# Generate a suggested branch name based on the changes
-		suggested_name = ""
-		if chunks:
-			# Ensure repo_path is not None before passing it, as required by create_universal_generator
-			if options.repo_path is None:
-				# Handle the case where repo_path is None, maybe log an error or skip suggestion
-				logger.error("Repository path is required for generating branch name suggestion but was not provided.")
-				suggested_name = ""  # Fallback to empty suggestion
-			else:
-				# Set up message generator for the first chunk
-				generator = create_universal_generator(
-					repo_path=options.repo_path,  # Now known to be Path
-					model=options.model,
-					api_key=options.api_key,
-					api_base=options.api_base,
-				)
-
-				# Generate a commit message for the first chunk
-				try:
-					message, _ = generate_message(chunks[0], generator)
-					# Extract the first line as the commit message
-					first_line = message.split("\n")[0] if "\n" in message else message
-					suggested_name = suggest_branch_name(first_line, workflow_strategy_name)
-				except (ValueError, RuntimeError, ConnectionError) as e:
-					# Fallback to a simple branch name
-					logger.warning("Error generating branch name: %s", e)
-					suggested_name = suggest_branch_name(f"update-{chunks[0].files[0]}", workflow_strategy_name)
-
-		# Create formatted branch options for selection
-		branch_options = []
-
-		# Add option to create a new branch
-		branch_options.append(
-			{"name": f"Create new branch: {suggested_name}" if suggested_name else "Create new branch", "value": "new"}
-		)
-
-		# Add existing branches of this type with metadata
-		for branch in branches_of_type:
-			meta = branches_with_metadata.get(branch, {})
-			last_commit = meta.get("last_commit_date", "unknown date")
-			commit_count = meta.get("commit_count", "0")
+			# Build location string (local, remote)
 			location = []
 			if meta.get("is_local", False):
 				location.append("local")
@@ -582,12 +532,8 @@ def _generate_title(
 		return f"{branch_type.capitalize()}: {clean_name.capitalize()}"
 	if title_strategy == "llm" and options.repo_path:
 		# Use LLM to generate title
-		return generate_pr_title_with_llm(
-			commits,
-			model=options.model,
-			api_key=options.api_key,
-			api_base=options.api_base,
-		)
+		client = create_client(model=options.model, api_key=options.api_key, api_base=options.api_base)
+		return generate_pr_title_with_llm(commits, llm_client=client)
 	# Use commit messages to generate title
 	return generate_pr_title_from_commits(commits)
 
@@ -638,12 +584,8 @@ def _generate_description(
 		return f"Changes in {branch_name}"
 	if description_strategy == "llm" and options.repo_path:
 		# Use LLM to generate description
-		return generate_pr_description_with_llm(
-			commits,
-			model=options.model,
-			api_key=options.api_key,
-			api_base=options.api_base,
-		)
+		client = create_client(model=options.model, api_key=options.api_key, api_base=options.api_base)
+		return generate_pr_description_with_llm(commits, llm_client=client)
 	if description_strategy == "template" and not content_config.get("use_workflow_templates", True):
 		# Use template from config
 		template = content_config.get("description_template", "")
@@ -926,10 +868,12 @@ def _load_llm_config(repo_path: Path | None) -> dict:
 
 def validate_workflow_strategy(value: str | None) -> str | None:
 	"""Validate workflow strategy."""
-	if value is not None and value not in ["github-flow", "gitflow", "trunk-based"]:
-		msg = "Workflow must be one of: github-flow, gitflow, trunk-based"
-		raise typer.BadParameter(msg)
-	return value
+	valid_strategies = ["github-flow", "gitflow", "trunk-based"]
+	if value is None or value in valid_strategies:
+		return value
+	console.print(f"[red]Invalid workflow strategy: {value}. Must be one of: {', '.join(valid_strategies)}[/red]")
+	msg = f"Must be one of: {', '.join(valid_strategies)}"
+	raise typer.BadParameter(msg)
 
 
 def pr_command(
