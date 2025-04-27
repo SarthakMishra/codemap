@@ -29,20 +29,21 @@ class ConfigError(TypeError):
 class ConfigLoader:
 	"""Configuration loader for the CodeMap tool."""
 
-	def __init__(self, config_file: str | None = None, repo_root: Path | None = None) -> None:
+	def __init__(self, config_file: str | None = None, repo_root: Path | str | None = None) -> None:
 		"""
-		Initialize the configuration loader.
+		Initialize ConfigLoader.
 
 		Args:
-		    config_file: Path to configuration file, None for default location
-		    repo_root: Repository root path, used for resolving relative paths
+		    config_file: Path to config file (if None, will search in standard locations)
+		    repo_root: Repository root path (if None, will use current directory)
 
 		Raises:
 		    FileNotFoundError: If config_file is specified but not found
 
 		"""
 		self.config_file = config_file
-		self.repo_root = repo_root
+		# Convert repo_root to Path if it's a string
+		self.repo_root = Path(repo_root) if repo_root is not None else None
 		self._config: dict[str, Any] = {}
 		self.load_config()
 		self._validate_config(self._config)
