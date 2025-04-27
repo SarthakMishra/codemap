@@ -17,6 +17,7 @@ from codemap.git.pr_generator.strategies import (
 	create_strategy,
 )
 from codemap.git.pr_generator.utils import (
+	PRCreationError,
 	checkout_branch,
 	create_branch,
 	create_pull_request,
@@ -47,6 +48,7 @@ __all__ = [
 	"GitHubFlowStrategy",
 	"PRContent",
 	# Classes
+	"PRCreationError",
 	"PRGenerator",
 	"PullRequest",
 	"TrunkBasedStrategy",

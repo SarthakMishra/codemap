@@ -21,6 +21,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+class PRCreationError(GitError):
+	"""Error raised when there's an issue creating or updating a pull request."""
+
+
 def get_current_branch() -> str:
 	"""
 	Get the name of the current branch.
@@ -376,7 +380,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 	    PullRequest object with PR details
 
 	Raises:
-	    GitError: If PR creation fails
+	    PRCreationError: If PR creation fails
 
 	"""
 	try:
@@ -385,7 +389,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
 		except (subprocess.CalledProcessError, FileNotFoundError) as e:
 			msg = "GitHub CLI (gh) is not installed or not in PATH. Please install it to create PRs."
-			raise GitError(msg) from e
+			raise PRCreationError(msg) from e
 
 		# Create PR using GitHub CLI
 		cmd = [
@@ -423,7 +427,7 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 		)
 	except subprocess.CalledProcessError as e:
 		msg = f"Failed to create PR: {e.stderr}"
-		raise GitError(msg) from e
+		raise PRCreationError(msg) from e
 
 
 def update_pull_request(pr_number: int | None, title: str, description: str) -> PullRequest:
@@ -439,12 +443,12 @@ def update_pull_request(pr_number: int | None, title: str, description: str) -> 
 	    Updated PullRequest object
 
 	Raises:
-	    GitError: If PR update fails
+	    PRCreationError: If PR update fails
 
 	"""
 	if pr_number is None:
 		msg = "PR number cannot be None"
-		raise GitError(msg)
+		raise PRCreationError(msg)
 
 	try:
 		# Check if gh CLI is installed
@@ -452,7 +456,7 @@ def update_pull_request(pr_number: int | None, title: str, description: str) -> 
 			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
 		except (subprocess.CalledProcessError, FileNotFoundError) as e:
 			msg = "GitHub CLI (gh) is not installed or not in PATH. Please install it to update PRs."
-			raise GitError(msg) from e
+			raise PRCreationError(msg) from e
 
 		# Get current branch
 		branch = get_current_branch()
@@ -485,7 +489,7 @@ def update_pull_request(pr_number: int | None, title: str, description: str) -> 
 		)
 	except subprocess.CalledProcessError as e:
 		msg = f"Failed to update PR: {e.stderr}"
-		raise GitError(msg) from e
+		raise PRCreationError(msg) from e
 
 
 def get_existing_pr(branch_name: str) -> PullRequest | None:
@@ -765,3 +769,42 @@ def detect_branch_type(branch_name: str, strategy_name: str = "github-flow") -> 
 	branch_type = strategy.detect_branch_type(branch_name)
 
 	return branch_type or "feature"  # Default to feature if not detected
+
+
+def list_branches() -> list[str]:
+	"""
+	Get a list of all branches (local and remote).
+
+	Returns:
+	        List of branch names
+
+	"""
+	try:
+		# Get local branches
+		local_branches_output = run_git_command(["git", "branch", "--list"]).strip()
+		local_branches = []
+		if local_branches_output:
+			for branch in local_branches_output.split("\n"):
+				# Remove the '*' from current branch and any whitespace
+				branch_clean = branch.strip().removeprefix("* ")
+				if branch_clean:
+					local_branches.append(branch_clean)
+
+		# Get remote branches
+		remote_branches_output = run_git_command(["git", "branch", "-r", "--list"]).strip()
+		remote_branches = []
+		if remote_branches_output:
+			for branch in remote_branches_output.split("\n"):
+				branch_clean = branch.strip()
+				if branch_clean.startswith("origin/"):
+					# Remove 'origin/' prefix
+					branch_name = branch_clean[7:]
+					# Exclude HEAD reference
+					if not branch_name.startswith("HEAD"):
+						remote_branches.append(branch_name)
+
+		# Combine and remove duplicates
+		return list(set(local_branches + remote_branches))
+	except GitError:
+		logger.debug("Error listing branches")
+		return []
