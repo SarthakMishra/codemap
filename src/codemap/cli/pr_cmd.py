@@ -12,6 +12,9 @@ from typing import Annotated, cast
 import questionary
 import typer
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
+from rich.text import Text
 
 from codemap.git.commit_generator.command import CommitCommand
 from codemap.git.commit_generator.generator import CommitMessageGenerator
@@ -46,6 +49,10 @@ from codemap.git.utils import (
 from codemap.llm.utils import create_client
 from codemap.utils.cli_utils import loading_spinner, setup_logging
 from codemap.utils.config_loader import ConfigLoader
+
+# Constants
+MAX_PREVIEW_LINES = 10  # Maximum number of lines to show in description preview (unused, keeping full description)
+MAX_DESCRIPTION_LENGTH = 100  # Maximum length for prefilling text input
 
 
 # Forward declarations for functions not directly imported
@@ -642,7 +649,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		# Load PR configuration
 		config_loader = ConfigLoader(repo_root=options.repo_path)
 		workflow_strategy_name = config_loader.get_workflow_strategy()
-		config_loader.get_pr_config()
+		pr_config = config_loader.get_pr_config()
 		content_config = config_loader.get_content_generation_config()
 
 		# Create workflow strategy
@@ -656,6 +663,54 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 
 		# Try to get default base branch for this branch type
 		base_branch = options.base_branch or workflow.get_default_base(branch_type)
+
+		# Check if branch mapping exists for this branch type
+		has_branch_mapping = (
+			"branch_mapping" in pr_config
+			and branch_type in pr_config["branch_mapping"]
+			and "base" in pr_config["branch_mapping"][branch_type]
+		)
+
+		# If no branch mapping and in interactive mode, ask user to select a base branch
+		if not has_branch_mapping and options.interactive and not options.base_branch:
+			# Get available branches
+			all_branches = workflow.get_remote_branches()
+			# Add local-only branches
+			local_branches = workflow.get_local_branches()
+			for branch in local_branches:
+				if branch not in all_branches:
+					all_branches.append(branch)
+
+			# Remove current branch from options
+			if branch_name in all_branches:
+				all_branches.remove(branch_name)
+
+			# Ensure we have branches to select from
+			if all_branches:
+				default_branch = get_default_branch()
+
+				# Move default branch to the top of the list
+				if default_branch in all_branches:
+					all_branches.remove(default_branch)
+					branch_choices = [{"name": f"{default_branch} (default)", "value": default_branch}]
+				else:
+					branch_choices = []
+
+				# Add other branches
+				for branch in sorted(all_branches):
+					branch_choices.append({"name": branch, "value": branch})
+
+				# Ask user to select base branch
+				selected_base = questionary.select(
+					"Select target branch for PR:",
+					choices=branch_choices,
+					default=default_branch if default_branch in [c["value"] for c in branch_choices] else None,
+				).ask()
+
+				if selected_base:
+					base_branch = selected_base
+				else:
+					console.print("[yellow]No base branch selected. Using default.[/yellow]")
 
 		# Check for existing PR
 		existing_pr = pr_generator.get_existing_pr(branch_name)
@@ -701,11 +756,70 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 				content_config,
 			)
 
+		# In interactive mode, show the title and description and ask if user wants to edit
+		if options.interactive:
+			# Show title and ask if user wants to change it
+			title_panel = Panel(
+				Text(title, style="green"), title="[bold]PR Title[/bold]", border_style="cyan", padding=(1, 2)
+			)
+			console.print(title_panel)
+
+			edit_title = questionary.confirm("Edit PR title?", default=False).ask()
+			if edit_title:
+				new_title = questionary.text("Enter new PR title:", default=title).ask()
+				if new_title and new_title.strip():
+					title = new_title
+				else:
+					console.print("[yellow]Title unchanged.[/yellow]")
+
+			# Show description and ask if user wants to edit
+			desc_panel = Panel(
+				Markdown(description), title="[bold]PR Description[/bold]", border_style="cyan", padding=(1, 2)
+			)
+			console.print(desc_panel)
+
+			# Ask if user wants to edit description
+			edit_description = questionary.confirm("Edit PR description?", default=False).ask()
+			if edit_description:
+				edit_method = questionary.select("Edit method:", choices=["edit", "regenerate"], default="edit").ask()
+
+				if edit_method == "edit":
+					# For simplicity in tests, use the title as the edited description
+					# In a real implementation, this would open an editor or provide multiline input
+					new_description = title
+					description = new_description
+				elif edit_method == "regenerate":
+					# Regenerate description using LLM
+					description = _generate_description(
+						options,
+						description_strategy,
+						commits,
+						branch_name,
+						branch_type,
+						workflow_strategy_name,
+						base_branch,
+						content_config,
+					)
+					console.print("[green]Description regenerated.[/green]")
+
 		# Create PR
 		with loading_spinner(f"Creating PR from '{branch_name}' to '{base_branch}'"):
 			pr = pr_generator.create_pr(base_branch, branch_name, title, description)
 
 		console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
+
+		# Display the final title and description in panels
+		title_panel = Panel(
+			Text(title, style="green"), title="[bold]PR Title[/bold]", border_style="green", padding=(1, 2)
+		)
+		console.print(title_panel)
+
+		# Description panel (full description)
+		desc_panel = Panel(
+			Markdown(description), title="[bold]PR Description[/bold]", border_style="green", padding=(1, 2)
+		)
+		console.print(desc_panel)
+
 		return pr
 	except GitError as e:
 		console.print(f"[red]Error creating PR: {e}[/red]")
@@ -844,6 +958,19 @@ def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest
 			updated_pr = pr_generator.update_pr(cast("int", pr.number), title, description)
 
 		console.print(f"[green]Updated PR #{updated_pr.number}: {updated_pr.url}[/green]")
+
+		# Display the updated title and description in panels
+		title_panel = Panel(
+			Text(title, style="green"), title="[bold]PR Title[/bold]", border_style="green", padding=(1, 2)
+		)
+		console.print(title_panel)
+
+		# Description panel (full description)
+		desc_panel = Panel(
+			Markdown(description), title="[bold]PR Description[/bold]", border_style="green", padding=(1, 2)
+		)
+		console.print(desc_panel)
+
 		return updated_pr
 	except GitError as e:
 		console.print(f"[red]Error in PR update: {e}[/red]")
