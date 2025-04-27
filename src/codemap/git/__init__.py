@@ -1,23 +1,17 @@
-"""Git functionality for CodeMap."""
+"""Git utilities for CodeMap."""
 
-from .command import CommitCommand
-from .commit_linter import CommitLintConfig, CommitLinter, Rule, RuleLevel
-from .diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
-from .interactive import ChunkAction, ChunkResult, CommitUI
-from .message_generator import LLMError, MessageGenerator
+# Import core git types/utils
+# Import diff_splitter
+from codemap.git.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
+from codemap.git.utils import GitDiff, GitError, run_git_command
 
 __all__ = [
-	"ChunkAction",
-	"ChunkResult",
-	"CommitCommand",
-	"CommitLintConfig",
-	"CommitLinter",
-	"CommitUI",
+	# Diff splitting
 	"DiffChunk",
 	"DiffSplitter",
-	"LLMError",
-	"MessageGenerator",
-	"Rule",
-	"RuleLevel",
+	# Git core types/utils
+	"GitDiff",
+	"GitError",
 	"SplitStrategy",
+	"run_git_command",
 ]

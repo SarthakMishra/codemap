@@ -11,9 +11,9 @@ from unittest.mock import MagicMock, Mock, patch
 import pytest
 from rich.console import Console
 
+from codemap.git.commit_generator import CommitMessageGenerator
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
-from codemap.git.message_generator import MessageGenerator
-from codemap.utils.git_utils import GitDiff
+from codemap.git.utils import GitDiff
 
 if TYPE_CHECKING:
 	from collections.abc import Generator
@@ -111,10 +111,10 @@ index 2345678..bcdefgh 100644
 def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 	"""Create a standardized mock for git utilities."""
 	with (
-		patch("codemap.utils.git_utils.get_staged_diff") as mock_staged,
-		patch("codemap.utils.git_utils.get_unstaged_diff") as mock_unstaged,
-		patch("codemap.utils.git_utils.get_untracked_files") as mock_untracked,
-		patch("codemap.utils.git_utils.commit_only_files") as mock_commit,
+		patch("codemap.git.utils.get_staged_diff") as mock_staged,
+		patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged,
+		patch("codemap.git.utils.get_untracked_files") as mock_untracked,
+		patch("codemap.git.utils.commit_only_files") as mock_commit,
 	):
 		# Mock the staged diff
 		staged_diff = GitDiff(
@@ -161,7 +161,7 @@ def mock_diff_splitter() -> Mock:
 @pytest.fixture
 def mock_message_generator() -> MagicMock:
 	"""Create a standardized mock MessageGenerator."""
-	generator = MagicMock(spec=MessageGenerator)
+	generator = MagicMock(spec=CommitMessageGenerator)
 	# Mock the generate_message method
 	generator.generate_message.return_value = ("feat: Test commit message", True)
 	# Mock the generate_message_with_linting method
