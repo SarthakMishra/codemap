@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 	from collections.abc import Generator
 
 # Get app from the CLI module
-from codemap import cli_app
+from codemap import cli
 
-app = cli_app.app
+app = cli.app
 
 
 @pytest.fixture
