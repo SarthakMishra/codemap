@@ -31,6 +31,7 @@ from codemap.processor.embedding.models import EmbeddingConfig
 from codemap.processor.storage.base import StorageConfig
 from codemap.processor.storage.lance import LanceDBStorage
 from codemap.processor.watcher import FileWatcher
+from codemap.utils.directory_manager import get_directory_manager
 from codemap.utils.file_utils import read_file_content
 
 if TYPE_CHECKING:
@@ -121,16 +122,25 @@ class ProcessingPipeline:
 		self.enable_lsp = enable_lsp
 		self.lsp_analyzer = LSPAnalyzer(repo_path) if enable_lsp else None
 
-		# Initialize embedding generator
-		self.embedding_generator = EmbeddingGenerator(embedding_config)
+		# Set up directory manager and register the project
+		dir_manager = get_directory_manager()
+		dir_manager.set_project_dir(repo_path)
 
-		# Initialize storage
+		# Create cache directories
+		project_cache = dir_manager.get_project_cache_dir(create=True)
+
+		# Initialize embedding generator with proper cache directory
+		embedding_cache_dir = None
+		if project_cache:
+			embedding_cache_dir = project_cache / "embeddings"
+		self.embedding_generator = EmbeddingGenerator(config=embedding_config, cache_dir=embedding_cache_dir)
+
+		# Initialize storage with proper directory
 		if storage_config is None:
-			# Default to a local LanceDB database in the repo
-			storage_dir = repo_path / ".codemap" / "storage"
-			storage_config = StorageConfig(uri=str(storage_dir))
-
-		self.storage = LanceDBStorage(storage_config)
+			# Use the storage configuration from the directory manager
+			self.storage = LanceDBStorage.create_default()
+		else:
+			self.storage = LanceDBStorage(storage_config)
 
 		# Try to initialize storage early to catch any issues
 		try:
