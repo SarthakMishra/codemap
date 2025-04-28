@@ -1,5 +1,7 @@
 """Default configuration settings for the codemap tool."""
 
+from textwrap import dedent
+
 DEFAULT_CONFIG = {
 	# Maximum number of tokens to include (0 for unlimited)
 	"token_limit": 10000,
@@ -71,18 +73,46 @@ DEFAULT_CONFIG = {
 			"title_strategy": "commits",  # Options: commits, llm, template
 			"description_strategy": "commits",  # Options: commits, llm, template
 			# Template for PR descriptions (used with description_strategy: "template")
-			"description_template": """
-## Changes
-{changes}
+			"description_template": dedent("""\
+			## Changes
+			{changes}
 
-## Testing
-{testing_instructions}
+			## Testing
+			{testing_instructions}
 
-## Screenshots
-{screenshots}
-""",
+			## Screenshots
+			{screenshots}
+			"""),
 			# Whether to use PR templates from workflow strategies
 			"use_workflow_templates": True,
 		},
+	},
+	# Server configuration - covers both daemon and API server
+	"server": {
+		# Network settings
+		"host": "127.0.0.1",
+		"port": 8765,
+		# CORS settings
+		"allow_cors": True,
+		"cors_origins": ["*"],
+		# Performance
+		"max_connections": 10,
+		# Daemon specific
+		"log_level": "info",
+		"pid_file": "~/.codemap/daemon.pid",
+		"log_file": "~/.codemap/daemon.log",
+		"auto_start": False,
+	},
+	# Processing configuration
+	"processing": {
+		"num_workers": 2,
+		"timeout": 300,
+		"chunk_size": 4096,
+	},
+	# Storage configuration
+	"storage": {
+		"data_dir": "~/.codemap/data",
+		"use_cache": True,
+		"cache_size_mb": 512,
 	},
 }
