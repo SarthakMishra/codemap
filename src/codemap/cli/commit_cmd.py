@@ -810,7 +810,7 @@ def _run_commit_command(config: RunConfig) -> int:
 	config_loader = ConfigLoader(repo_root=repo_path)
 	# Override bypass_hooks from config file if not explicitly set
 	if repo_path and not hasattr(config, "_bypass_hooks_set"):
-		config.bypass_hooks = config_loader.get_commit_hooks()
+		config.bypass_hooks = config_loader.get_bypass_hooks()
 
 	# Show welcome message
 	console.print(
@@ -910,7 +910,7 @@ def validate_and_process_commit(
 			config_loader = ConfigLoader(repo_root=repo_path)
 			# Get bypass_hooks from config if not explicitly set
 			if not hasattr(bypass_hooks, "_set_explicitly"):
-				bypass_hooks = config_loader.get_commit_hooks()
+				bypass_hooks = config_loader.get_bypass_hooks()
 
 		# Create the CommitCommand instance
 		command = CommitCommand(
