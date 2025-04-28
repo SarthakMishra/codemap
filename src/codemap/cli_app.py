@@ -26,7 +26,7 @@ except ImportError:
 	pass  # dotenv not installed, skip loading
 
 from .cli.commit_cmd import commit_command
-from .cli.daemon_cmd import daemon_command
+from .cli.daemon_cmd import daemon_cmd
 from .cli.generate_cmd import generate_command
 from .cli.init_cmd import init_command
 from .cli.pr_cmd import pr_command
@@ -44,7 +44,7 @@ app.command(name="init")(init_command)
 app.command(name="generate")(generate_command)
 app.command(name="commit")(commit_command)
 app.command(name="pr")(pr_command)
-app.command(name="daemon")(daemon_command)
+app.add_typer(daemon_cmd)
 
 
 def main() -> int:
