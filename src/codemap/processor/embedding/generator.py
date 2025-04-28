@@ -13,9 +13,11 @@ import numpy as np
 from codemap.processor.chunking import Chunk
 from codemap.processor.embedding.models import EmbeddingConfig, EmbeddingProvider, EmbeddingResult
 from codemap.utils.config_loader import ConfigError, ConfigLoader
+from codemap.utils.directory_manager import get_directory_manager
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
+	from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +25,34 @@ logger = logging.getLogger(__name__)
 class EmbeddingGenerator:
 	"""Generator for code embeddings using LiteLLM."""
 
-	def __init__(self, config: EmbeddingConfig | None = None) -> None:
+	def __init__(self, config: EmbeddingConfig | None = None, cache_dir: Path | None = None) -> None:
 		"""
 		Initialize the embedding generator.
 
 		Args:
 		    config: Configuration for the embedding generator. If None, a default
 		           configuration is created using environment variables.
+		    cache_dir: Directory to cache embeddings. If None, the default cache
+		               directory from directory_manager will be used.
 
 		"""
 		self.config = config or self._create_default_config()
+
+		# Set up cache directory
+		self.cache_dir = cache_dir
+		if self.cache_dir is None:
+			dir_manager = get_directory_manager()
+			project_cache = dir_manager.get_project_cache_dir(create=True)
+			if project_cache is not None:
+				self.cache_dir = project_cache / "embeddings"
+			else:
+				self.cache_dir = dir_manager.cache_dir / "embeddings"
+
+		# Ensure the cache directory exists
+		self.cache_dir.mkdir(parents=True, exist_ok=True)
+		logger.debug("Using embedding cache directory: %s", self.cache_dir)
+
+		# Configure LiteLLM
 		self._setup_litellm()
 
 	@staticmethod
@@ -85,6 +105,12 @@ class EmbeddingGenerator:
 		if self.config.api_base and self.config.provider == EmbeddingProvider.OPENAI:
 			os.environ["OPENAI_API_BASE"] = self.config.api_base
 			# Add other providers as needed
+
+		# Configure caching settings
+		if self.cache_dir:
+			# Configure cache environment as used by LiteLLM
+			os.environ["LITELLM_CACHE_DIRECTORY"] = str(self.cache_dir)
+			os.environ["LITELLM_CACHE_ENABLED"] = "true"
 
 	def _get_model_string(self) -> str:
 		"""
