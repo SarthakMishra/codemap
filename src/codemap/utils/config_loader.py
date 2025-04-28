@@ -209,9 +209,11 @@ class ConfigLoader:
 		"""Resolve and expand any paths in the configuration."""
 		# Define paths that need resolution
 		path_keys = [
-			("daemon", "pid_file"),
-			("daemon", "log_file"),
+			("server", "pid_file"),
+			("server", "log_file"),
+			("server", "socket_file"),
 			("storage", "data_dir"),
+			("storage", "cache_dir"),
 		]
 
 		for section, key in path_keys:
@@ -429,9 +431,11 @@ class ConfigLoader:
 			"host": server_config.get("host", "127.0.0.1"),
 			"port": server_config.get("port", 8765),
 			"log_level": server_config.get("log_level", "info"),
-			"pid_file": server_config.get("pid_file", "~/.codemap/daemon.pid"),
-			"log_file": server_config.get("log_file", "~/.codemap/daemon.log"),
+			"pid_file": server_config.get("pid_file", "~/.codemap/run/daemon.pid"),
+			"log_file": server_config.get("log_file", "~/.codemap/logs/daemon.log"),
 			"auto_start": server_config.get("auto_start", False),
+			"use_socket": server_config.get("use_socket", False),
+			"socket_file": server_config.get("socket_file", "~/.codemap/run/daemon.sock"),
 		}
 
 	def get_api_config(self) -> dict[str, Any]:
@@ -451,4 +455,6 @@ class ConfigLoader:
 			"allow_cors": server_config.get("allow_cors", True),
 			"cors_origins": server_config.get("cors_origins", ["*"]),
 			"max_connections": server_config.get("max_connections", 10),
+			"use_socket": server_config.get("use_socket", False),
+			"socket_file": server_config.get("socket_file", "~/.codemap/run/daemon.sock"),
 		}

@@ -8,18 +8,27 @@ import platform
 import re
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
+import pkg_resources
 import requests
 from packaging import version
 
 from codemap import __version__
 from codemap.utils.cli_utils import console
 
+if TYPE_CHECKING:
+	from rich.console import Console
+
 logger = logging.getLogger(__name__)
 
 GITHUB_REPO = "SarthakMishra/codemap"
 GITHUB_API_URL = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 HTTP_OK = 200  # Status code for successful HTTP request
+
+# PyPI package name
+PACKAGE_NAME = "codemap"
+PYPI_URL = f"https://pypi.org/pypi/{PACKAGE_NAME}/json"
 
 
 def get_current_version() -> str:
@@ -128,19 +137,59 @@ def uninstall_package() -> bool:
 		return False
 
 
-def check_for_updates_and_notify() -> None:
-	"""Check for updates and notify the user if an update is available."""
+def check_for_updates() -> tuple[bool, str | None]:
+	"""
+	Check if a newer version of CodeMap is available.
+
+	Returns:
+	        tuple: (is_latest, latest_version)
+	        - is_latest (bool): True if current version is the latest
+	        - latest_version (str | None): Latest version string or None if check failed
+
+	"""
 	try:
-		update_available, latest_version, release_url = is_update_available()
-		if update_available and latest_version:
-			console.print(f"[yellow]Update available: v{latest_version} (current: v{get_current_version()})[/]")
-			console.print("[yellow]Run 'codemap update' to update to the latest version.[/]")
-			if release_url:
-				console.print(f"[blue]Release notes: {release_url}[/]")
-	except Exception as e:  # noqa: BLE001
-		# Don't let update checking interfere with normal operation
-		# This is intentionally catching all exceptions to avoid disrupting the main program flow
-		logger.debug("Error checking for updates: %s", str(e))
+		current_version = get_current_version()
+		pypi_url = "https://pypi.org/pypi/codemap/json"
+
+		# Fetch PyPI data
+		response = requests.get(pypi_url, timeout=5)
+		response.raise_for_status()
+
+		data = response.json()
+		latest_version = data["info"]["version"]
+
+		# Compare versions
+		current_parsed = pkg_resources.parse_version(current_version)
+		latest_parsed = pkg_resources.parse_version(latest_version)
+
+		is_latest = current_parsed >= latest_parsed
+		return is_latest, latest_version
+	except (requests.RequestException, ValueError, KeyError, pkg_resources.ResolutionError):
+		logger.warning("Failed to check for updates")
+		return True, None  # Assume current is latest on failure
+
+
+def notify_update_available(custom_console: Console | None = None) -> None:
+	"""
+	Check for updates and notify the user if a newer version is available.
+
+	Args:
+	        custom_console: Optional console to print notification to
+
+	"""
+	try:
+		is_latest, latest_version = check_for_updates()
+		# Use provided console or default to the imported one
+		output_console = custom_console or console
+		if not is_latest and latest_version:
+			current_version = get_current_version()
+			output_console.print(
+				f"[yellow]Update available:[/yellow] {current_version} → {latest_version}\n"
+				f"[yellow]Run 'uv pip install --upgrade codemap' to update.[/yellow]\n"
+			)
+	except (requests.RequestException, ValueError, KeyError, pkg_resources.ResolutionError):  # More specific exceptions
+		logger.debug("Failed to check for updates")
+		# Silently ignore errors in notification to not disrupt user
 
 
 def get_system_info() -> dict:
