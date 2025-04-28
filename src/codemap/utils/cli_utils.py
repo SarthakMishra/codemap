@@ -12,7 +12,7 @@ from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
 if TYPE_CHECKING:
-	from collections.abc import Iterator
+	from collections.abc import Callable, Iterator
 	from pathlib import Path
 
 console = Console()
@@ -144,3 +144,88 @@ def ensure_directory_exists(directory_path: Path) -> None:
 	except (PermissionError, OSError) as e:
 		console.print(f"[red]Unable to create directory {directory_path}: {e!s}")
 		raise
+
+
+@contextlib.contextmanager
+def progress_indicator(
+	message: str,
+	style: str = "spinner",
+	total: int | None = None,
+	transient: bool = False,
+) -> Iterator[Callable[[int], None]]:
+	"""
+	Standardized progress indicator that supports different styles uniformly.
+
+	Args:
+	    message: The message to display with the progress indicator
+	    style: The style of progress indicator - options:
+	           - "spinner": Shows an indeterminate spinner
+	           - "progress": Shows a determinate progress bar
+	           - "step": Shows simple step-by-step progress
+	    total: For determinate progress, the total units of work
+	    transient: Whether the progress indicator should disappear after completion
+
+	Yields:
+	    A callable that accepts an integer amount to advance the progress
+
+	"""
+	# Skip visual indicators in testing/CI environments
+	if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
+		# Return a no-op advance function
+		yield lambda _: None
+		return
+
+	# Check if a spinner is already active
+	spinner_state = SpinnerState()
+	if spinner_state.is_active and style == "spinner":
+		# If there's already an active spinner, don't create a new one for spinner style
+		yield lambda _: None
+		return
+
+	try:
+		# Mark spinner as active if using spinner style
+		if style == "spinner":
+			spinner_state.is_active = True
+
+		# Handle different progress styles
+		if style == "spinner":
+			# Indeterminate spinner using console.status
+			with console.status(message):
+				# Return a no-op advance function since spinners don't advance
+				yield lambda _: None
+
+		elif style == "progress":
+			# Determinate progress bar using rich.progress.Progress
+			progress = Progress(
+				SpinnerColumn(),
+				TextColumn("[progress.description]{task.description}"),
+				transient=transient,
+			)
+			with progress:
+				task_id = progress.add_task(message, total=total or 1)
+				# Return a function that advances the progress
+				yield lambda amount=1: progress.update(task_id, advance=amount)
+
+		elif style == "step":
+			# Simple step progress like typer.progressbar
+			steps_completed = 0
+			total_steps = total or 1
+
+			console.print(f"{message} [0/{total_steps}]")
+
+			# Function to advance and display steps
+			def advance_step(amount: int = 1) -> None:
+				nonlocal steps_completed
+				steps_completed += amount
+				steps_completed = min(steps_completed, total_steps)
+				console.print(f"{message} [{steps_completed}/{total_steps}]")
+
+			yield advance_step
+
+			# Print completion if not transient
+			if not transient and steps_completed >= total_steps:
+				console.print(f"{message} [green]Complete![/green]")
+	finally:
+		# Reset spinner state if we were using spinner style
+		if style == "spinner":
+			spinner_state.is_active = False
