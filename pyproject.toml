@@ -96,7 +96,7 @@ venv = ".venv"
 extraPaths = ["src"]
 
 [project.scripts]
-codemap = "codemap.cli_app:main"
+codemap = "codemap.cli:main"
 
 [tool.pytest]
 testpaths = ["tests"]
