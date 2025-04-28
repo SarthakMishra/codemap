@@ -24,7 +24,7 @@
 3.  **Basic Dependency Extraction (Syntax-based in `processor/chunking/tree_sitter.py`):**
     *   [X] Implement logic to identify import statements (`import_` types).
     *   [X] Extract imported names and populate `ChunkMetadata.dependencies`.
-    *   [ ] Mapping dependencies, inheritance, function calls/usage, different entity usage/relationships.
+    *   [X] Mapping dependencies, inheritance, function calls/usage, different entity usage/relationships.
 
 **Phase 2: Git Integration**
 
@@ -41,20 +41,20 @@
 5.  **Handling Branches:**
     *   [X] Design the pipeline entry point to accept a branch/commit.
     *   [X] Ensure Git operations in `processor/analysis/git/` respect the target branch/commit.
-    *   [ ] Define strategy for storing/managing chunks from different branches in the chosen storage solution.
+    *   [X] Define strategy for storing/managing chunks from different branches in the chosen storage solution.
 
 **Phase 3: Semantic Analysis with LSP**
 
 6.  **Integrate Language Server Protocol (`processor/analysis/lsp/`, using `multilspy`):**
-    *   [ ] Set up `multilspy` for supported languages.
-    *   [ ] Implement LSP interaction logic, likely within `processor/analysis/lsp/`.
-    *   [ ] Modify the pipeline to invoke LSP analysis *after* syntax chunking.
-    *   [ ] Use LSP results to enhance `ChunkMetadata`:
-        *   [ ] Refined Dependencies (function calls, variable usage).
-        *   [ ] Symbol Resolution/Verification.
-        *   [ ] Scope Analysis.
-        *   [ ] Richer Docstring/Hover Info.
-    *   **Challenge:** Correlate LSP information with `Chunk` objects / `tree-sitter` nodes.
+    *   [X] Set up `multilspy` for supported languages.
+    *   [X] Implement LSP interaction logic, likely within `processor/analysis/lsp/`.
+    *   [X] Modify the pipeline to invoke LSP analysis *after* syntax chunking.
+    *   [X] Use LSP results to enhance `ChunkMetadata`:
+        *   [X] Refined Dependencies (function calls, variable usage).
+        *   [X] Symbol Resolution/Verification.
+        *   [X] Scope Analysis.
+        *   [X] Richer Docstring/Hover Info.
+    *   [X] **Challenge:** Correlate LSP information with `Chunk` objects / `tree-sitter` nodes.
 
 **Phase 4: Pipeline Orchestration & Data Management**
 
@@ -96,7 +96,7 @@
     *   [X] Connect chunking, embedding, and storage components in a coherent flow.
     *   [X] Add robust error handling throughout the pipeline.
     *   [X] Implement search capabilities (vector and text-based) in the pipeline.
-    *   [ ] Implement optimization logic (process only changed files/chunks). This might involve diffing or comparing against stored versions.
+    *   [X] Implement optimization logic (process only changed files/chunks). This might involve diffing or comparing against stored versions.
 
 **Phase 5: Testing & Robustness**
 
@@ -121,8 +121,76 @@
     *   [X] Resolve exception handling patterns (avoid blind exception catching).
     *   [X] Optimize performance-critical code sections.
 
+**Phase 7: Background Processing & Deployment**
+
+15. **Background Processing Implementation:**
+    *   [ ] Design and implement background processing architecture for the processor component.
+    *   [ ] Create a daemon service that runs the processor in the background.
+    *   [ ] Implement proper signal handling for graceful shutdown.
+    *   [ ] Add startup/shutdown scripts for service management.
+    *   [ ] Implement status reporting and health checks.
+    *   [ ] Add support for processing optimization (batch jobs, prioritization).
+    *   [ ] Improve error recovery and resilience for long-running jobs.
+
+16. **Daemon Integration:**
+    *   [ ] Create `daemon/` module within the existing codebase structure.
+    *   [ ] Add HTTP API server for client-daemon communication.
+    *   [ ] Extend `ProcessingPipeline` with methods to support daemon operations.
+    *   [ ] Implement `CodeMapDaemon` class for daemon lifecycle management.
+    *   [ ] Implement job tracking and querying functionality.
+    *   [ ] Add WebSocket support for real-time updates and notifications.
+    *   [ ] Implement authentication and authorization for API access.
+
+17. **CLI Integration:**
+    *   [ ] Add daemon-specific commands to the CLI (`daemon start`, `daemon stop`, etc.).
+    *   [ ] Implement job management commands (`daemon jobs`).
+    *   [ ] Add status reporting and monitoring.
+    *   [ ] Create user-friendly output formatting for daemon operations.
+    *   [ ] Add support for daemon configuration through CLI.
+
+18. **Configuration & Deployment:**
+    *   [ ] Extend configuration system to support daemon settings.
+    *   [ ] Implement logging configuration with proper rotation.
+    *   [ ] Create systemd service unit files for Linux platforms.
+    *   [ ] Add supervisor configuration templates.
+    *   [ ] Create Docker container for easy deployment.
+    *   [ ] Add installation guides for different platforms.
+
+19. **User Experience:**
+    *   [ ] Implement clear status output for background services.
+    *   [ ] Add color-coded terminal output for error/warning/info messages.
+    *   [ ] Implement job status reporting for long-running operations.
+    *   [ ] Create interactive configuration wizard for first-time setup.
+    *   [ ] Add progress indicators for repository processing.
+
+**Future Work & Enhancements:**
+
+20. **Performance Optimizations:**
+    *   [ ] Implement parallel processing for LSP analysis across multiple files.
+    *   [ ] Add caching for frequently accessed embeddings.
+    *   [ ] Optimize memory usage for large repositories.
+    *   [ ] Implement incremental updating based on git diff.
+    *   [ ] Add resource limiting and throttling for daemon operations.
+
+21. **Additional Daemon Features:**
+    *   [ ] Implement scheduled processing tasks.
+    *   [ ] Add multi-repository support in daemon mode.
+    *   [ ] Create centralized logging and monitoring dashboard.
+    *   [ ] Implement remote API access for distributed setups.
+    *   [ ] Add support for clustering and load balancing.
+
+22. **Web Interface:**
+    *   [ ] Design and implement React-based web interface.
+    *   [ ] Create dashboard for monitoring daemon status and jobs.
+    *   [ ] Add visual codebase explorer with syntax highlighting.
+    *   [ ] Implement LLM chat interface.
+    *   [ ] Add vector database visualization tools.
+    *   [ ] Create user management and authentication system.
+
 **Future Considerations (Keep in Mind During Design):**
 
 *   **Scalability:** Parallel processing, asynchronous operations (especially for IO-bound tasks like LSP, embedding APIs, storage).
 *   **Extensibility:** Adding languages, metadata extractors, embedding models.
 *   **Downstream API/Query Interface:** How will `cli/`, `generators/`, etc., access the processed data?
+*   **Daemon Architecture:** Plan for eventual migration to full modular architecture with separate packages.
+*   **Integration Points:** Ensure clean interfaces for adding web UI and other clients in the future.

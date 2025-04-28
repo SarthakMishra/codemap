@@ -18,7 +18,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from codemap.processor.analysis.git.analyzer import GitMetadataAnalyzer
 from codemap.processor.analysis.git.models import GitMetadata
@@ -449,3 +449,66 @@ class ProcessingPipeline:
 
 		# Fallback to text search or if use_vector is False
 		return self.storage.search_by_text(query, limit)
+
+	def get_active_jobs(self) -> list[dict[str, Any]]:
+		"""
+		Return a list of active jobs.
+
+		Returns:
+		        list[dict[str, Any]]: List of job information dictionaries
+
+		"""
+		return []  # Implement job tracking in actual implementation
+
+	def get_completed_jobs(self) -> list[dict[str, Any]]:
+		"""
+		Return a list of completed jobs.
+
+		Returns:
+		        list[dict[str, Any]]: List of job information dictionaries
+
+		"""
+		return []  # Implement job tracking in actual implementation
+
+	def get_failed_jobs(self) -> list[dict[str, Any]]:
+		"""
+		Return a list of failed jobs.
+
+		Returns:
+		        list[dict[str, Any]]: List of job information dictionaries
+
+		"""
+		return []  # Implement job tracking in actual implementation
+
+	def get_job(self, _job_id: str) -> dict[str, Any] | None:
+		"""
+		Get a specific job by ID.
+
+		Args:
+		        _job_id: The ID of the job to retrieve
+
+		Returns:
+		        Dict[str, Any] or None: Job information or None if not found
+
+		"""
+		# This is a stub implementation that would be replaced with actual
+		# job tracking functionality in a real implementation
+		return None  # Implement job tracking in actual implementation
+
+	def process_repository(self, repo_path: Path) -> str:
+		"""
+		Process an entire repository.
+
+		Args:
+		        repo_path: Path to the repository to process
+
+		Returns:
+		        str: Job ID for tracking the processing task
+
+		"""
+		job_id = f"repo-{int(time.time())}"
+
+		# Simplified implementation for now
+		self.batch_process([repo_path])
+
+		return job_id
