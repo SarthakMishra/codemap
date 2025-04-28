@@ -32,6 +32,12 @@ dependencies = [
     "pandas>=2.2.3",
     "multilspy>=0.0.15",
     "pytest-mock>=3.14.0",
+    "python-daemon>=3.1.2",
+    "lockfile>=0.12.2",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "pydantic>=2.7.0",
+    "pyxdg>=0.28",
 ]
 
 [dependency-groups]
