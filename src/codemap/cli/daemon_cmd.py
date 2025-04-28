@@ -7,10 +7,9 @@ from pathlib import Path  # noqa: TC003
 from typing import Any
 
 import typer
-from rich.progress import Progress
 
 from codemap.daemon.command import list_or_show_jobs, show_daemon_logs, show_daemon_status, start_daemon, stop_daemon
-from codemap.utils.cli_utils import console, create_spinner_progress, setup_logging
+from codemap.utils.cli_utils import console, progress_indicator, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
@@ -60,12 +59,11 @@ def start_daemon_process(config_path: Path | None, foreground: bool, timeout: in
 	        Exit code (0 for success)
 
 	"""
-	with create_spinner_progress() as progress:
-		task = progress.add_task("Starting daemon...", total=1)
+	with progress_indicator("Starting daemon", style="progress", total=1) as advance:
 		try:
 			load_config(config_path)
 			result = start_daemon(config_path=config_path, foreground=foreground, timeout=timeout)
-			progress.update(task, advance=1)
+			advance(1)
 
 			if result == 0:
 				console.print("[green]Daemon started successfully")
@@ -74,11 +72,11 @@ def start_daemon_process(config_path: Path | None, foreground: bool, timeout: in
 
 			return result
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]File system error when starting daemon: {e!s}")
 			return 1
 		except ValueError as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]Configuration error when starting daemon: {e!s}")
 			return 1
 
@@ -95,12 +93,11 @@ def stop_daemon_process(config_path: Path | None, timeout: int) -> int:
 	        Exit code (0 for success)
 
 	"""
-	with create_spinner_progress() as progress:
-		task = progress.add_task("Stopping daemon...", total=1)
+	with progress_indicator("Stopping daemon", style="progress", total=1) as advance:
 		try:
 			load_config(config_path)
 			result = stop_daemon(config_path=config_path, timeout=timeout)
-			progress.update(task, advance=1)
+			advance(1)
 
 			if result == 0:
 				console.print("[green]Daemon stopped successfully")
@@ -109,11 +106,11 @@ def stop_daemon_process(config_path: Path | None, timeout: int) -> int:
 
 			return result
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]File system error when stopping daemon: {e!s}")
 			return 1
 		except ValueError as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]Configuration error when stopping daemon: {e!s}")
 			return 1
 
@@ -131,20 +128,19 @@ def get_daemon_status(config_path: Path | None, detailed: bool, output_json: boo
 	        Exit code (0 for success)
 
 	"""
-	with create_spinner_progress() as progress:
-		task = progress.add_task("Fetching daemon status...", total=1)
+	with progress_indicator("Fetching daemon status", style="progress", total=1) as advance:
 		try:
 			load_config(config_path)
-			progress.update(task, advance=1)
+			advance(1)
 			console.print()
 			return show_daemon_status(config_path=config_path, detailed=detailed, output_json=output_json)
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print()
 			console.print(f"[red]File system error when fetching daemon status: {e!s}")
 			return 1
 		except ValueError as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print()
 			console.print(f"[red]Configuration error when fetching daemon status: {e!s}")
 			return 1
@@ -166,21 +162,20 @@ def fetch_jobs_information(
 	        Exit code (0 for success)
 
 	"""
-	with create_spinner_progress() as progress:
-		task = progress.add_task("Fetching jobs...", total=1)
+	with progress_indicator("Fetching jobs", style="progress", total=1) as advance:
 		try:
 			load_config(config_path)
 			result = list_or_show_jobs(
 				job_id=job_id, config_path=config_path, status_filter=status_filter, output_json=output_json
 			)
-			progress.update(task, advance=1)
+			advance(1)
 			return result
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]File system error when fetching jobs information: {e!s}")
 			return 1
 		except ValueError as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]Configuration error when fetching jobs information: {e!s}")
 			return 1
 
@@ -197,14 +192,13 @@ def restart_daemon_process(config_path: Path | None, timeout: int) -> int:
 	        Exit code (0 for success)
 
 	"""
-	with Progress() as progress:
-		task = progress.add_task("Restarting daemon...", total=2)
+	with progress_indicator("Restarting daemon", style="progress", total=2) as advance:
 		try:
 			load_config(config_path)
 
 			# Stop the daemon
 			stop_result = stop_daemon(config_path=config_path, timeout=timeout)
-			progress.update(task, advance=1)
+			advance(1)
 
 			if stop_result != 0:
 				console.print("[red]Failed to stop daemon during restart")
@@ -212,7 +206,7 @@ def restart_daemon_process(config_path: Path | None, timeout: int) -> int:
 
 			# Start the daemon
 			start_result = start_daemon(config_path=config_path, foreground=False, timeout=timeout)
-			progress.update(task, advance=1)
+			advance(1)
 
 			if start_result == 0:
 				console.print("[green]Daemon restarted successfully")
@@ -221,38 +215,38 @@ def restart_daemon_process(config_path: Path | None, timeout: int) -> int:
 
 			return start_result
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]File system error when restarting daemon: {e!s}")
 			return 1
 		except ValueError as e:
-			progress.update(task, advance=1)
+			advance(1)
 			console.print(f"[red]Configuration error when restarting daemon: {e!s}")
 			return 1
 
 
-def show_logs(config_path: Path | None, tail: int, follow: bool) -> int:
+def fetch_daemon_logs(config_path: Path | None, lines: int, follow: bool = False) -> int:
 	"""
-	Show daemon logs.
+	Fetch and display daemon logs.
 
 	Args:
 	        config_path: Path to configuration file
-	        tail: Number of lines to show
-	        follow: Whether to follow the log output
+	        lines: Number of lines to show
+	        follow: Whether to follow log output
 
 	Returns:
 	        Exit code (0 for success)
 
 	"""
-	try:
-		load_config(config_path)
-		console.print(f"[blue]Showing last {tail} log lines{' (follow mode)' if follow else ''}...")
-		return show_daemon_logs(config_path=config_path, tail=tail, follow=follow)
-	except (FileNotFoundError, PermissionError, OSError) as e:
-		console.print(f"[red]File system error when viewing logs: {e!s}")
-		return 1
-	except ValueError as e:
-		console.print(f"[red]Configuration error when viewing logs: {e!s}")
-		return 1
+	with progress_indicator("Fetching daemon logs", style="spinner"):
+		try:
+			load_config(config_path)
+			return show_daemon_logs(config_path=config_path, tail=lines, follow=follow)
+		except (FileNotFoundError, PermissionError, OSError) as e:
+			console.print(f"[red]File system error when fetching daemon logs: {e!s}")
+			return 1
+		except ValueError as e:
+			console.print(f"[red]Configuration error when fetching daemon logs: {e!s}")
+			return 1
 
 
 @daemon_cmd.command(name="start", help="Start the daemon")
@@ -325,4 +319,4 @@ def daemon_logs(
 ) -> int:
 	"""View the daemon logs."""
 	setup_logging(is_verbose=is_verbose)
-	return show_logs(config_path=config, tail=tail, follow=follow)
+	return fetch_daemon_logs(config_path=config, lines=tail, follow=follow)

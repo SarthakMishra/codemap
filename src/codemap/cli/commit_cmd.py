@@ -45,7 +45,7 @@ from codemap.git.utils import (
 	validate_repo_path,
 )
 from codemap.llm import LLMError
-from codemap.utils.cli_utils import console, loading_spinner, setup_logging
+from codemap.utils.cli_utils import console, progress_indicator, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 
 # Truncate to maximum of 10 lines
@@ -833,7 +833,7 @@ def _run_commit_command(config: RunConfig) -> int:
 
 	try:
 		# Check if there are any changes
-		with loading_spinner("Checking for changes..."):
+		with progress_indicator("Checking for changes", style="spinner"):
 			try:
 				staged = get_staged_diff()
 				unstaged = get_unstaged_diff()
@@ -847,11 +847,11 @@ def _run_commit_command(config: RunConfig) -> int:
 			return 0
 
 		# Set up message generator
-		with loading_spinner("Setting up message generator..."):
+		with progress_indicator("Setting up message generator", style="spinner"):
 			generator = setup_message_generator(options)
 
 		# Get staged and unstaged changes
-		with loading_spinner("Analyzing repository changes..."):
+		with progress_indicator("Analyzing repository changes", style="spinner"):
 			# Get changes from Git
 			splitter = DiffSplitter(repo_path)  # Now guaranteed to be a Path, not None
 			chunks = []

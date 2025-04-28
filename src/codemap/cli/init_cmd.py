@@ -12,7 +12,7 @@ import yaml
 
 from codemap.analyzer.tree_parser import CodeParser
 from codemap.config import DEFAULT_CONFIG
-from codemap.utils.cli_utils import console, setup_logging
+from codemap.utils.cli_utils import console, progress_indicator, setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -64,24 +64,20 @@ def init_command(
 			console.print("[yellow]Use --force to overwrite.")
 			raise typer.Exit(1)
 
-		with typer.progressbar(
-			range(3),
-			label="Initializing CodeMap...",
-			show_pos=True,
-		) as progress:
+		with progress_indicator("Initializing CodeMap", style="step", total=3) as advance:
 			# Create .codemap.yml
 			config_file.write_text(yaml.dump(DEFAULT_CONFIG, sort_keys=False))
-			next(progress)
+			advance(1)
 
 			# Create documentation directory
 			if docs_dir.exists() and force_flag:
 				shutil.rmtree(docs_dir)
 			docs_dir.mkdir(exist_ok=True, parents=True)
-			next(progress)
+			advance(1)
 
 			# Initialize parser to check it's working
 			CodeParser()  # Just initialize without assigning to a variable
-			next(progress)
+			advance(1)
 
 		console.print("\n✨ CodeMap initialized successfully!")
 		console.print(f"[green]Created config file: {config_file}")

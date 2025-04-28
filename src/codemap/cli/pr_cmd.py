@@ -16,6 +16,7 @@ from rich.markdown import Markdown
 from rich.panel import Panel
 from rich.text import Text
 
+from codemap.cli.commit_cmd import create_universal_generator
 from codemap.git.commit_generator.command import CommitCommand
 from codemap.git.commit_generator.generator import CommitMessageGenerator
 from codemap.git.diff_splitter.schemas import DiffChunk
@@ -47,33 +48,12 @@ from codemap.git.utils import (
 	validate_repo_path,
 )
 from codemap.llm.utils import create_client
-from codemap.utils.cli_utils import loading_spinner, setup_logging
+from codemap.utils.cli_utils import progress_indicator, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 
 # Constants
 MAX_PREVIEW_LINES = 10  # Maximum number of lines to show in description preview (unused, keeping full description)
 MAX_DESCRIPTION_LENGTH = 100  # Maximum length for prefilling text input
-
-
-# Forward declarations for functions not directly imported
-# These would need to be imported or implemented
-def create_universal_generator(
-	repo_path: Path, model: str | None = None, api_key: str | None = None, api_base: str | None = None
-) -> CommitMessageGenerator:
-	"""
-	Create a universal message generator.
-
-	This is a placeholder and should be properly imported from the
-	appropriate module.
-
-	"""
-	llm_client = create_client(repo_path=repo_path, model=model, api_key=api_key, api_base=api_base)
-	return CommitMessageGenerator(
-		llm_client=llm_client,
-		repo_root=repo_path,
-		prompt_template="",  # Use default
-		config_loader=ConfigLoader(repo_root=repo_path),  # Use default
-	)
 
 
 def generate_message(
@@ -419,6 +399,9 @@ def _handle_commits(options: PROptions) -> bool:
 		else:
 			repo_path = options.repo_path
 
+		# Create the universal generator
+		# Note: We don't actually use this directly, but it's called to ensure CommitCommand
+		# has access to the initialized generator
 		create_universal_generator(
 			repo_path=repo_path,  # Now guaranteed to be a valid Path
 			model=options.model,
@@ -429,7 +412,7 @@ def _handle_commits(options: PROptions) -> bool:
 		# Make sure to stage all files before analyzing
 		try:
 			# Use git add . to stage all files for analysis
-			with loading_spinner("Staging files for analysis..."):
+			with progress_indicator("Staging files for analysis", style="spinner"):
 				run_git_command(["git", "add", "."])
 		except GitError as e:
 			logger.warning("Failed to stage all changes: %s", e)
@@ -438,8 +421,8 @@ def _handle_commits(options: PROptions) -> bool:
 		# Process all chunks using the CommitCommand
 		command = CommitCommand(path=options.repo_path, model=options.model or "gpt-4o-mini")
 
-		# Explicitly initialize the sentence transformers model with proper loading spinners
-		with loading_spinner("Checking semantic analysis capabilities..."):
+		# Explicitly initialize the sentence transformers model with proper progress indication
+		with progress_indicator("Checking semantic analysis capabilities", style="spinner"):
 			model_available = command.splitter._check_sentence_transformers_availability()  # noqa: SLF001
 
 		if not model_available:
@@ -449,8 +432,8 @@ def _handle_commits(options: PROptions) -> bool:
 			)
 
 		if command.splitter._sentence_transformers_available:  # noqa: SLF001
-			with loading_spinner(
-				"Loading embedding model for semantic analysis (first use may download model files)..."
+			with progress_indicator(
+				"Loading embedding model for semantic analysis (first use may download model files)", style="spinner"
 			):
 				model_loaded = command.splitter._check_model_availability()  # noqa: SLF001
 
@@ -803,7 +786,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 					console.print("[green]Description regenerated.[/green]")
 
 		# Create PR
-		with loading_spinner(f"Creating PR from '{branch_name}' to '{base_branch}'"):
+		with progress_indicator(f"Creating PR from '{branch_name}' to '{base_branch}'", style="spinner"):
 			pr = pr_generator.create_pr(base_branch, branch_name, title, description)
 
 		console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
@@ -954,7 +937,7 @@ def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest
 				description = current_desc
 
 		# Update PR
-		with loading_spinner(f"Updating PR #{pr.number}"):
+		with progress_indicator(f"Updating PR #{pr.number}", style="spinner"):
 			updated_pr = pr_generator.update_pr(cast("int", pr.number), title, description)
 
 		console.print(f"[green]Updated PR #{updated_pr.number}: {updated_pr.url}[/green]")
