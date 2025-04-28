@@ -245,30 +245,41 @@ class APIServer:
 
 	"""
 
-	def __init__(self, host: str, port: int, pipeline: ProcessingPipeline, config: dict[str, Any]) -> None:
+	def __init__(
+		self,
+		host: str,
+		port: int,
+		pipeline: ProcessingPipeline,
+		config_loader: ConfigLoader,
+		socket_path: str | None = None,
+	) -> None:
 		"""
 		Initialize the API server.
 
 		Args:
 		    host: Hostname or IP address to bind to
-		    port: Port number to listen on
-		    pipeline: The ProcessingPipeline instance to expose
-		    config: Configuration dictionary
+		    port: Port number to bind to
+		    pipeline: Processing pipeline instance
+		    config_loader: Configuration loader instance
+		    socket_path: Optional Unix socket path for IPC
 
 		"""
 		self.host = host
 		self.port = port
+		self.socket_path = socket_path
 		self.pipeline = pipeline
-		self.config = config
+		self.config = config_loader.config
+		self.config_loader = config_loader
 		self.logger = logging.getLogger("codemap.daemon.api")
+		self.running = False
+		self.server = None
+		self.server_thread = None
 
-		# Set up API key manager
-		self.key_manager = APIKeyManager(config)
+		# Initialize API key manager
+		self.key_manager = APIKeyManager(self.config)
 
-		# Set up FastAPI
+		# Create FastAPI app
 		self.app = self._create_app()
-		self.server: uvicorn.Server | None = None
-		self.server_thread: threading.Thread | None = None
 
 	def get_api_key(self, api_key_header: str = Security(API_KEY_HEADER)) -> str:
 		"""
@@ -652,32 +663,44 @@ class APIServer:
 		return app
 
 	def start(self) -> None:
-		"""
-		Start the API server in a background thread.
+		"""Start the API server in a background thread."""
+		if self.running:
+			self.logger.warning("API server is already running")
+			return
 
-		Raises:
-		        RuntimeError: If the server is already started
-
-		"""
-		if self.server_thread and self.server_thread.is_alive():
-			msg = "API server is already running"
-			raise RuntimeError(msg)
-
-		self.logger.info("Starting API server on %s:%d", self.host, self.port)
-
+		# Configure Uvicorn server
 		config = uvicorn.Config(
 			app=self.app,
 			host=self.host,
 			port=self.port,
 			log_level="info",
+			loop="asyncio",
+			lifespan="on",
 		)
+
+		# Configure Unix socket if provided
+		if self.socket_path:
+			self.logger.info("Using Unix socket for API server: %s", self.socket_path)
+			config.uds = self.socket_path
+
 		self.server = uvicorn.Server(config)
 
-		# Start the server in a background thread
-		self.server_thread = threading.Thread(target=self.server.run, daemon=True)
+		# Start server in a background thread
+		self.server_thread = threading.Thread(target=self._run_server, daemon=True)
 		self.server_thread.start()
 
-		self.logger.info("API server started, waiting for requests")
+		# Mark as running
+		self.running = True
+		self.logger.info("API server started in background thread")
+
+	def _run_server(self) -> None:
+		"""Run the server (called in background thread)."""
+		self.logger.info("Starting API server on %s:%d", self.host, self.port)
+		if self.server is not None:
+			self.server.run()
+		else:
+			self.logger.error("Server not initialized properly")
+			self.running = False
 
 	def stop(self) -> None:
 		"""

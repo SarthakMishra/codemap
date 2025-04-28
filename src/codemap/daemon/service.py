@@ -53,15 +53,24 @@ class CodeMapDaemon:
 		# Get daemon-specific config with defaults
 		daemon_config = self.config_loader.get_daemon_config()
 
-		# Set up daemon paths
-		self.daemon_dir = Path.home() / ".codemap"
-		self.pid_file = Path(daemon_config.get("pid_file", str(self.daemon_dir / "daemon.pid")))
-		self.log_file = Path(daemon_config.get("log_file", str(self.daemon_dir / "daemon.log")))
+		# Set up daemon paths using the proper directory structure
+		self.base_dir = Path.home() / ".codemap"
+
+		# Create structured directories
+		self.logs_dir = self.base_dir / "logs"
+		self.run_dir = self.base_dir / "run"
+		self.data_dir = Path(self.config.get("storage", {}).get("data_dir", str(self.base_dir / "data"))).expanduser()
+
+		# Set file paths
+		self.pid_file = Path(daemon_config.get("pid_file", str(self.run_dir / "daemon.pid")))
+		self.log_file = Path(daemon_config.get("log_file", str(self.logs_dir / "daemon.log")))
+		self.socket_file = self.run_dir / "daemon.sock"
 
 		# Ensure directories exist
-		self.daemon_dir.mkdir(parents=True, exist_ok=True)
-		self.pid_file.parent.mkdir(parents=True, exist_ok=True)
-		self.log_file.parent.mkdir(parents=True, exist_ok=True)
+		self.base_dir.mkdir(parents=True, exist_ok=True)
+		self.logs_dir.mkdir(parents=True, exist_ok=True)
+		self.run_dir.mkdir(parents=True, exist_ok=True)
+		self.data_dir.mkdir(parents=True, exist_ok=True)
 
 		# Components
 		self.pipeline: ProcessingPipeline | None = None
@@ -232,10 +241,6 @@ class CodeMapDaemon:
 	def _initialize_components(self) -> None:
 		"""Initialize daemon components."""
 		try:
-			# Create data directory if it doesn't exist
-			data_dir = Path(self.config.get("storage", {}).get("data_dir", "~/.codemap/data")).expanduser()
-			data_dir.mkdir(parents=True, exist_ok=True)
-
 			# Initialize processing pipeline
 			# Use the current working directory as the repository path
 			repo_path = Path.cwd()
@@ -248,11 +253,36 @@ class CodeMapDaemon:
 			api_config = self.config_loader.get_api_config()
 			host = api_config.get("host", "127.0.0.1")
 			port = api_config.get("port", 8765)
-			self.api_server = APIServer(host, port, self.pipeline, self.config)
-			self.api_server.start()
 
+			# Use socket file for IPC when appropriate
+			use_socket = api_config.get("use_socket", False)
+			socket_path = str(self.socket_file) if use_socket else None
+
+			# Create API server with configuration
+			self.api_server = APIServer(
+				host=host,
+				port=port,
+				socket_path=socket_path,
+				pipeline=self.pipeline,
+				config_loader=self.config_loader,
+			)
+
+			# Start the API server
+			self.api_server.start()
 			self.running = True
-			self.logger.info("Daemon initialized successfully")
+
+			self.logger.info(
+				"Daemon initialized with PID file: %s, Log file: %s, Data dir: %s",
+				self.pid_file,
+				self.log_file,
+				self.data_dir,
+			)
+
+			if socket_path:
+				self.logger.info("Using socket for IPC: %s", socket_path)
+			else:
+				self.logger.info("API server listening on %s:%s", host, port)
+
 		except Exception:
 			self.logger.exception("Failed to initialize daemon components")
 			raise
