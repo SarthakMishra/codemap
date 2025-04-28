@@ -1,0 +1,21 @@
+[Unit]
+Description=CodeMap Daemon Service
+After=network.target
+
+[Service]
+Type=simple
+User=%u
+Group=%u
+ExecStart=/usr/bin/python -m codemap daemon start --foreground
+WorkingDirectory=%h/projects/code-map
+Restart=on-failure
+RestartSec=5s
+StandardOutput=journal
+StandardError=journal
+# Make sure the service has enough time to shutdown
+TimeoutStopSec=30s
+# Environment variables (if needed)
+# Environment=OPENAI_API_KEY=
+
+[Install]
+WantedBy=default.target 
