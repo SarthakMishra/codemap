@@ -12,7 +12,7 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-import codemap.cli_app
+import codemap.cli
 from codemap.config import DEFAULT_CONFIG
 from codemap.utils.file_utils import get_output_path as _get_output_path
 from tests.base import FileSystemTestBase
@@ -20,7 +20,7 @@ from tests.base import FileSystemTestBase
 if TYPE_CHECKING:
 	from collections.abc import Generator
 
-app = codemap.cli_app.app
+app = codemap.cli.app
 
 runner = CliRunner()
 T = TypeVar("T")  # Generic type for return value of Path.open

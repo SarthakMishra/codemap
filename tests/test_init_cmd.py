@@ -224,17 +224,17 @@ class TestInitCommand:
 		mock_console.print.assert_called_with("[red]Configuration error: Parser error")
 
 	@pytest.mark.usefixtures("mock_console")
-	def test_init_command_integration_with_cli_app(self) -> None:
+	def test_init_command_integration_with_cli(self) -> None:
 		"""Test init command through the CLI interface."""
 		# Setup
 		parser_patcher = patch("codemap.cli.init_cmd.CodeParser")
 		parser_patcher.start()
 
 		try:
-			import codemap.cli_app
+			import codemap.cli
 
 			# Execute
-			result = self.runner.invoke(codemap.cli_app.app, ["init", str(self.repo_root), "--force"])
+			result = self.runner.invoke(codemap.cli.app, ["init", str(self.repo_root), "--force"])
 
 			# Verify
 			assert result.exit_code == 0

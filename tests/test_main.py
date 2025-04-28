@@ -14,7 +14,7 @@ class TestMainModule:
 
 	def test_main_module_execution(self) -> None:
 		"""Test that running the module as __main__ calls the app."""
-		with patch("codemap.cli_app.app") as mock_app:
+		with patch("codemap.cli.app") as mock_app:
 			# Use runpy to run the module as __main__
 			runpy.run_module("codemap.__main__", run_name="__main__")
 
@@ -23,7 +23,7 @@ class TestMainModule:
 
 	def test_main_import_no_execution(self) -> None:
 		"""Test that importing the module doesn't execute the app function."""
-		with patch("codemap.cli_app.app") as mock_app:
+		with patch("codemap.cli.app") as mock_app:
 			# Import the module normally
 			try:
 				# Use importlib to ensure fresh import

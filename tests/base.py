@@ -97,9 +97,9 @@ class CLITestBase:
 		    Command result
 
 		"""
-		import codemap.cli_app
+		import codemap.cli
 
-		return self.runner.invoke(codemap.cli_app.app, command, input=input_text)
+		return self.runner.invoke(codemap.cli.app, command, input=input_text)
 
 
 class FileSystemTestBase:
