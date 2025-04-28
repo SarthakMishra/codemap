@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import logging
-import os
 import shutil
 from pathlib import Path
 from typing import Annotated, Any
 
 import questionary
 import typer
-import yaml
 from rich.panel import Panel
 
 from codemap.analyzer.tree_parser import CodeParser
-from codemap.config import DEFAULT_CONFIG
-from codemap.utils.cli_utils import console, progress_indicator, setup_logging
+from codemap.utils.cli_utils import console, progress_indicator
+from codemap.utils.config_manager import get_config_manager
+from codemap.utils.directory_manager import get_directory_manager
+from codemap.utils.log_setup import setup_logging
 
 logger = logging.getLogger(__name__)
 
@@ -70,24 +70,39 @@ def init_command(
 	"""
 	setup_logging(is_verbose=is_verbose)
 	try:
+		# Get directory and config managers
+		dir_manager = get_directory_manager()
+		config_manager = get_config_manager()
+
+		# Ensure global directories exist
+		dir_manager.ensure_directories()
+
+		# Set up the repository
 		repo_root = path.resolve()
+		dir_manager.set_project_dir(repo_root)
+		config_manager.set_project(repo_root)
+
+		# Check for project files
 		config_file = repo_root / ".codemap.yml"
-		docs_dir = repo_root / str(DEFAULT_CONFIG["output_dir"])
-		global_config_file = Path.home() / ".codemap" / "config.yml"
+		docs_dir = repo_root / "documentation"
+		project_cache_dir = repo_root / ".codemap_cache"
 
 		# Determine if this is first run or if full setup is requested
-		is_first_run = not global_config_file.exists()
+		global_config_path = dir_manager.config_dir / "settings.yml"
+		is_first_run = not global_config_path.exists()
 		needs_full_setup = is_first_run or full_setup
 
 		# Build configuration
-		config = DEFAULT_CONFIG.copy()
+		config = config_manager.get_config(scope="default").copy()
 
 		# Check if files/directories already exist
 		existing_files = []
 		if config_file.exists():
 			existing_files.append(config_file)
-		if docs_dir.exists():
+		if docs_dir.exists() and (list(docs_dir.iterdir()) if docs_dir.is_dir() else True):
 			existing_files.append(docs_dir)
+		if project_cache_dir.exists():
+			existing_files.append(project_cache_dir)
 
 		if not force_flag and existing_files and not wizard_only:
 			console.print("[yellow]CodeMap files already exist:")
@@ -108,7 +123,7 @@ def init_command(
 			)
 
 			# Global configurations
-			if run_global_config_wizard(global_config_file, force_flag):
+			if run_global_config_wizard(global_config_path, force_flag):
 				console.print("[green]Global configuration completed.[/]")
 
 			# Repository configuration is always needed
@@ -127,15 +142,19 @@ def init_command(
 			console.print("[green]Configuration wizard completed. No files were modified.[/]")
 			return
 
-		with progress_indicator("Initializing CodeMap", style="step", total=3) as advance:
+		with progress_indicator("Initializing CodeMap", style="step", total=4) as advance:
 			# Create .codemap.yml
-			config_file.write_text(yaml.dump(config, sort_keys=False))
+			config_manager.initialize_project_config(config)
 			advance(1)
 
 			# Create documentation directory
 			if docs_dir.exists() and force_flag:
 				shutil.rmtree(docs_dir)
 			docs_dir.mkdir(exist_ok=True, parents=True)
+			advance(1)
+
+			# Ensure project cache directory
+			dir_manager.get_project_cache_dir(create=True)
 			advance(1)
 
 			# Initialize parser to check it's working
@@ -145,6 +164,7 @@ def init_command(
 		console.print("\n✨ CodeMap initialized successfully!")
 		console.print(f"[green]Created config file: {config_file}")
 		console.print(f"[green]Created documentation directory: {docs_dir}")
+		console.print(f"[green]Set up cache directory: {project_cache_dir}")
 		console.print("\nNext steps:")
 		console.print("1. Review and customize .codemap.yml if needed")
 		console.print("2. Run 'codemap generate' to create documentation")
@@ -158,59 +178,68 @@ def init_command(
 		raise typer.Exit(1) from e
 
 
-def run_global_config_wizard(global_config_path: Path, force: bool = False) -> bool:
+def run_global_config_wizard(config_path: Path, force: bool = False) -> bool:
 	"""
-	Run wizard for global configurations (daemon, LLM, storage).
+	Run wizard for global configurations.
 
 	Args:
-	        global_config_path: Path to the global configuration file
-	        force: Whether to force overwrite existing configuration
+	        config_path: Path to the global config file
+	        force: Force overwrite existing config
 
 	Returns:
-	        True if configuration was successful, False otherwise
+	        True if configuration was completed, False otherwise
 
 	"""
-	if global_config_path.exists() and not force:
-		use_existing = questionary.confirm(
-			f"Global configuration already exists at {global_config_path}. Reconfigure?",
+	# Handle existing config
+	if config_path.exists() and not force:
+		should_reconfigure = questionary.confirm(
+			"Global configuration already exists. Reconfigure?",
 			default=False,
 		).ask()
 
-		if not use_existing:
+		if not should_reconfigure:
 			return False
 
-	# Create empty or starter config
-	global_config = {}
+	# Get directory manager for correct paths
+	dir_manager = get_directory_manager()
 
-	# Configure daemon
-	console.print("\n[bold blue]Daemon Configuration[/]")
-	daemon_config = configure_daemon_settings({})
-	if daemon_config:
-		global_config["server"] = daemon_config
+	# Begin configuration
+	console.print("[bold blue]Global CodeMap Configuration[/]")
 
-	# Configure LLM API
-	console.print("\n[bold blue]LLM API Configuration[/]")
-	llm_config = configure_llm_settings()
-	if llm_config:
-		global_config["llm"] = llm_config
+	# Get API configuration
+	provider = questionary.select(
+		"Select primary LLM provider:",
+		choices=[
+			"OpenAI",
+			"Anthropic",
+			"Groq",
+			"Mistral",
+			"Cohere",
+			"Together AI",
+			"OpenRouter",
+			"Other/Custom",
+		],
+		default="OpenAI",
+	).ask()
 
-	# Configure storage
-	console.print("\n[bold blue]Storage Configuration[/]")
-	storage_config = configure_storage_settings({})
-	if storage_config:
-		global_config["storage"] = storage_config
+	# Update global config
+	global_config: dict[str, Any] = {
+		"llm": {
+			"provider": provider.lower(),
+		},
+		"directories": {
+			"data": str(dir_manager.user_data_dir),
+			"config": str(dir_manager.user_config_dir),
+			"cache": str(dir_manager.user_cache_dir),
+			"logs": str(dir_manager.user_log_dir),
+		},
+	}
 
-	# Save global configuration
-	try:
-		global_config_path.parent.mkdir(parents=True, exist_ok=True)
-		with global_config_path.open("w", encoding="utf-8") as f:
-			yaml.dump(global_config, f, default_flow_style=False)
-		console.print(f"[green]Global configuration saved to {global_config_path}[/]")
-		return True
-	except Exception as e:
-		console.print(f"[red]Error saving global configuration: {e!s}[/]")
-		logger.exception("Error saving global configuration")
-		return False
+	# Save configuration
+	config_manager = get_config_manager()
+	config_manager.update_config("global", global_config)
+
+	return True
 
 
 def run_repo_config_wizard(repo_path: Path) -> dict[str, Any]:
@@ -258,247 +287,44 @@ def configure_repository_settings(repo_path: Path | None = None) -> dict[str, An
 		default=True,
 	).ask()
 
-	return {
+	token_limit = questionary.text(
+		"Maximum token limit for documentation (0 for unlimited):",
+		default="10000",
+		validate=lambda text: text.isdigit(),
+	).ask()
+
+	# Processor options
+	enable_processor = questionary.confirm(
+		"Enable code processing pipeline?",
+		default=True,
+	).ask()
+
+	max_workers = (
+		questionary.select(
+			"Number of worker threads for processing:",
+			choices=["1", "2", "4", "8", "16"],
+			default="4",
+		).ask()
+		if enable_processor
+		else "4"
+	)
+
+	# Build configuration
+	config = {
 		"repo_path": str(repo_path_obj),
 		"repo_name": repo_name,
 		"file_extensions": extensions.split(","),
 		"use_gitignore": use_gitignore,
+		"token_limit": int(token_limit),
+		"output_dir": "documentation",
 	}
 
-
-def configure_daemon_settings(current_config: dict[str, Any]) -> dict[str, Any]:
-	"""
-	Configure daemon-related settings.
-
-	Args:
-	        current_config: Current daemon configuration
-
-	Returns:
-	        Dictionary of updated daemon configuration settings
-
-	"""
-	# Start with current config
-	daemon_config = current_config.copy()
-
-	# Get host and port
-	host = questionary.text(
-		"Enter daemon host address:",
-		default=daemon_config.get("host", "127.0.0.1"),
-	).ask()
-
-	port = questionary.text(
-		"Enter daemon port:",
-		default=str(daemon_config.get("port", 8765)),
-	).ask()
-
-	try:
-		port = int(port)
-	except ValueError:
-		console.print("[yellow]Invalid port number, using default (8765)[/]")
-		port = 8765
-
-	# Get log level
-	log_level_choices = ["debug", "info", "warning", "error"]
-	log_level = questionary.select(
-		"Select log level:",
-		choices=log_level_choices,
-		default=daemon_config.get("log_level", "info"),
-	).ask()
-
-	# Get daemon settings
-	auto_start = questionary.confirm(
-		"Start daemon automatically when needed?",
-		default=daemon_config.get("auto_start", False),
-	).ask()
-
-	# Update config
-	daemon_config.update(
-		{
-			"host": host,
-			"port": port,
-			"log_level": log_level,
-			"auto_start": auto_start,
+	# Add processor configuration
+	if enable_processor:
+		config["processor"] = {
+			"enabled": True,
+			"max_workers": int(max_workers),
+			"cache_dir": ".codemap_cache",
 		}
-	)
 
-	return daemon_config
-
-
-def configure_llm_settings() -> dict[str, Any]:
-	"""
-	Configure LLM API settings.
-
-	Returns:
-	        Dictionary of LLM configuration settings
-
-	"""
-	# Get provider
-	provider_choices = [
-		{
-			"name": "OpenAI (ChatGPT, GPT-4)",
-			"value": "openai",
-		},
-		{
-			"name": "Anthropic (Claude)",
-			"value": "anthropic",
-		},
-		{
-			"name": "Azure OpenAI",
-			"value": "azure",
-		},
-		{
-			"name": "Mistral AI",
-			"value": "mistral",
-		},
-		{
-			"name": "Cohere",
-			"value": "cohere",
-		},
-		{
-			"name": "Ollama (local)",
-			"value": "ollama",
-		},
-	]
-
-	provider = questionary.select(
-		"Select your preferred LLM provider:",
-		choices=provider_choices,
-	).ask()
-
-	# Get model
-	default_model = get_default_model(provider)
-	model = questionary.text(
-		"Enter the model name:",
-		default=default_model,
-	).ask()
-
-	# Get API key
-	api_key_env_var = get_api_key_env_var(provider)
-	current_key = os.environ.get(api_key_env_var, "")
-
-	if current_key:
-		use_existing_key = questionary.confirm(
-			f"Use existing {api_key_env_var} from environment?",
-			default=True,
-		).ask()
-
-		if not use_existing_key:
-			api_key = questionary.password(
-				f"Enter your {provider} API key (will not be displayed):",
-			).ask()
-		else:
-			api_key = current_key
-	else:
-		api_key = questionary.password(
-			f"Enter your {provider} API key (will not be displayed):",
-		).ask()
-
-	# Get API base URL for custom endpoints
-	custom_api_base = questionary.confirm(
-		"Do you use a custom API endpoint URL?",
-		default=False,
-	).ask()
-
-	api_base = None
-	if custom_api_base:
-		api_base = questionary.text(
-			"Enter the API base URL:",
-			default=get_default_api_base(provider),
-		).ask()
-
-	return {
-		"provider": provider,
-		"model": model,
-		"api_key": api_key,
-		"api_base": api_base,
-	}
-
-
-def configure_storage_settings(current_config: dict[str, Any]) -> dict[str, Any]:
-	"""
-	Configure storage-related settings.
-
-	Args:
-	        current_config: Current storage configuration
-
-	Returns:
-	        Dictionary of updated storage configuration settings
-
-	"""
-	# Start with current config
-	storage_config = current_config.copy()
-
-	# Get data directory
-	data_dir = questionary.text(
-		"Enter directory to store CodeMap data:",
-		default=str(Path(storage_config.get("data_dir", "~/.codemap/data")).expanduser()),
-	).ask()
-
-	# Get cache settings
-	use_cache = questionary.confirm(
-		"Enable caching for better performance?",
-		default=storage_config.get("use_cache", True),
-	).ask()
-
-	cache_size_mb = storage_config.get("cache_size_mb", 512)
-	if use_cache:
-		cache_size = questionary.text(
-			"Enter cache size (MB):",
-			default=str(cache_size_mb),
-		).ask()
-
-		try:
-			cache_size_mb = int(cache_size)
-		except ValueError:
-			console.print("[yellow]Invalid cache size, using default (512 MB)[/]")
-			cache_size_mb = 512
-
-	# Update config
-	storage_config.update(
-		{
-			"data_dir": data_dir,
-			"use_cache": use_cache,
-			"cache_size_mb": cache_size_mb,
-		}
-	)
-
-	return storage_config
-
-
-def get_default_model(provider: str) -> str:
-	"""Get the default model name for a given provider."""
-	defaults = {
-		"openai": "gpt-4o-mini",
-		"anthropic": "claude-3-haiku-20240307",
-		"azure": "gpt-4",
-		"mistral": "mistral-large-latest",
-		"cohere": "command-r-plus",
-		"ollama": "llama3",
-	}
-	return defaults.get(provider, "gpt-4o-mini")
-
-
-def get_api_key_env_var(provider: str) -> str:
-	"""Get the environment variable name for a provider's API key."""
-	env_vars = {
-		"openai": "OPENAI_API_KEY",
-		"anthropic": "ANTHROPIC_API_KEY",
-		"azure": "AZURE_API_KEY",
-		"mistral": "MISTRAL_API_KEY",
-		"cohere": "COHERE_API_KEY",
-		"ollama": "OLLAMA_API_KEY",
-	}
-	return env_vars.get(provider, "OPENAI_API_KEY")
-
-
-def get_default_api_base(provider: str) -> str:
-	"""Get the default API base URL for a given provider."""
-	defaults = {
-		"openai": "https://api.openai.com/v1",
-		"anthropic": "https://api.anthropic.com/v1",
-		"azure": "https://<your-resource-name>.openai.azure.com",
-		"mistral": "https://api.mistral.ai/v1",
-		"cohere": "https://api.cohere.ai/v1",
-		"ollama": "http://localhost:11434",
-	}
-	return defaults.get(provider, "")
+	return config

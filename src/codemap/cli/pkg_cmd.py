@@ -3,147 +3,189 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+import platform
 
 import typer
-from rich.panel import Panel
+from rich.console import Console
 from rich.table import Table
 
-from codemap.utils.cli_utils import console, setup_logging
-from codemap.utils.package_utils import (
-	get_current_version,
-	get_system_info,
-	is_update_available,
-	uninstall_package,
-	update_package,
-)
+from codemap import __version__
+from codemap.utils.config_manager import get_config_manager
+from codemap.utils.directory_manager import get_directory_manager
+from codemap.utils.log_setup import log_environment_info, setup_logging
+from codemap.utils.package_utils import check_for_updates
 
+# Configure logger
 logger = logging.getLogger(__name__)
+console = Console()
 
-# Create package command group
+# Create package management subcommand
 pkg_cmd = typer.Typer(
-	help="Package management commands for CodeMap.",
 	name="pkg",
+	help="Package management commands for CodeMap.",
 )
 
 
-@pkg_cmd.command(name="update", help="Update CodeMap to the latest version")
-def update_command(
-	check_only: Annotated[
-		bool,
-		typer.Option(
-			"--check-only",
-			help="Only check for updates without updating",
-		),
-	] = False,
-	is_verbose: Annotated[
-		bool,
-		typer.Option(
-			"--verbose",
-			"-v",
-			help="Enable verbose logging",
-		),
-	] = False,
-) -> int:
-	"""Update CodeMap to the latest version."""
-	setup_logging(is_verbose=is_verbose)
-
-	current_version = get_current_version()
-	console.print(f"[bold]Current version:[/] v{current_version}")
-
-	update_available, latest_version, release_url = is_update_available()
-
-	if update_available and latest_version:
-		console.print(f"[green]Update available:[/] v{latest_version}")
-		if release_url:
-			console.print(f"[blue]Release notes:[/] {release_url}")
-
-		if check_only:
-			console.print("[yellow]Run 'codemap pkg update' to update to the latest version.[/]")
-			return 0
-
-		# Confirm update
-		if typer.confirm("Do you want to update now?", default=True):
-			if update_package():
-				console.print(f"[green]Successfully updated to v{latest_version}[/]")
-				return 0
-			console.print("[red]Update failed. Please try again or update manually with pip.[/]")
-			return 1
-		console.print("[yellow]Update cancelled.[/]")
-		return 0
-	console.print("[green]You are already using the latest version.[/]")
-	return 0
-
-
-@pkg_cmd.command(name="version", help="Show version information")
+@pkg_cmd.command(name="version")
 def version_command(
-	check_updates: Annotated[
-		bool,
-		typer.Option(
-			"--check-updates",
-			help="Check for updates",
-		),
-	] = True,
+	check_updates: bool = typer.Option(default=False, help="Check for updates"),
 ) -> None:
-	"""Show version information and optionally check for updates."""
-	current_version = get_current_version()
+	"""Show CodeMap version information."""
+	# Get platform and Python version
+	py_version = platform.python_version()
+	platform_info = platform.platform()
 
-	# Create a table for version info
-	table = Table(show_header=False, box=None)
-	table.add_row("[bold]CodeMap version:[/]", f"v{current_version}")
+	# Create version info table
+	table = Table(title="CodeMap Version Information")
+	table.add_column("", style="green")
+	table.add_column("", style="white")
 
-	# Add system info
-	info = get_system_info()
-	table.add_row("[bold]Python version:[/]", info["python_version"])
-	table.add_row("[bold]Platform:[/]", info["platform"])
+	table.add_row("CodeMap version:", f"v{__version__}")
+	table.add_row("Python version:", py_version)
+	table.add_row("Platform:", platform_info)
 
-	if "pip_version" in info:
-		table.add_row("[bold]Pip version:[/]", info["pip_version"])
-
-	# Show in a panel
-	console.print(Panel(table, title="CodeMap Version Information", border_style="blue"))
+	console.print(table)
 
 	# Check for updates if requested
 	if check_updates:
-		update_available, latest_version, release_url = is_update_available()
-		if update_available and latest_version:
-			console.print(f"[yellow]Update available:[/] v{latest_version}")
-			console.print("[yellow]Run 'codemap pkg update' to update to the latest version.[/]")
-			if release_url:
-				console.print(f"[blue]Release notes:[/] {release_url}")
+		is_latest, latest_version = check_for_updates()
+		if is_latest:
+			console.print("You are using the latest version.")
 		else:
-			console.print("[green]You are using the latest version.[/]")
+			console.print(
+				f"[yellow]A new version is available: {latest_version}[/yellow]\n"
+				f"[yellow]Run 'uv pip install --upgrade codemap' to update.[/yellow]"
+			)
 
 
-@pkg_cmd.command(name="uninstall", help="Uninstall CodeMap")
-def uninstall_command() -> int:
-	"""Uninstall CodeMap from your system."""
-	console.print("[yellow]This will uninstall CodeMap from your system.[/]")
-	console.print("[yellow]Your configuration files will not be removed.[/]")
+@pkg_cmd.command(name="dirs")
+def dirs_command(
+	is_verbose: bool = typer.Option(default=False, help="Show detailed directory information"),
+) -> None:
+	"""Display CodeMap directory structure information."""
+	setup_logging(is_verbose=is_verbose)
+	dir_manager = get_directory_manager()
+	dir_manager.ensure_directories()
 
-	# Confirm uninstallation
-	if typer.confirm("Are you sure you want to uninstall CodeMap?", default=False):
-		if uninstall_package():
-			console.print("[green]CodeMap has been uninstalled successfully.[/]")
-			return 0
-		console.print("[red]Uninstallation failed. Please try uninstalling manually with pip.[/]")
-		return 1
-	console.print("[yellow]Uninstallation cancelled.[/]")
-	return 0
+	# Create directory info table
+	table = Table(title="CodeMap Directory Information")
+	table.add_column("Directory Type", style="green")
+	table.add_column("Path", style="white")
+	table.add_column("Status", style="cyan")
+
+	# Add main directories
+	directories = [
+		("User Data", dir_manager.user_data_dir),
+		("User Config", dir_manager.user_config_dir),
+		("User Cache", dir_manager.user_cache_dir),
+		("User Logs", dir_manager.user_log_dir),
+	]
+
+	if is_verbose:
+		# Add subdirectories in verbose mode
+		directories.extend(
+			[
+				("Config Files", dir_manager.config_dir),
+				("Vector Database", dir_manager.vector_db_dir),
+				("SQLite Database", dir_manager.sqlite_db_dir),
+				("Key-Value Store", dir_manager.kv_db_dir),
+				("Daemon Logs", dir_manager.daemon_logs_dir),
+				("CLI Logs", dir_manager.cli_logs_dir),
+				("Error Logs", dir_manager.error_logs_dir),
+				("Model Cache", dir_manager.models_cache_dir),
+				("Provider Cache", dir_manager.providers_cache_dir),
+			]
+		)
+
+	# Check directory status and add to table
+	for dir_type, dir_path in directories:
+		status = "✅ Exists" if dir_path.exists() else "❌ Missing"
+		table.add_row(dir_type, str(dir_path), status)
+
+	console.print(table)
+
+	# Log details about the environment
+	log_environment_info()
 
 
-@pkg_cmd.command(name="info", help="Show system information for debugging")
-def info_command() -> None:
-	"""Display system information for debugging purposes."""
-	info = get_system_info()
+@pkg_cmd.command(name="clean")
+def clean_command(
+	cache: bool = typer.Option(default=True, help="Clean cache directories"),
+	logs: bool = typer.Option(default=False, help="Clean log files"),
+	force: bool = typer.Option(default=False, help="Don't ask for confirmation"),
+) -> None:
+	"""Clean CodeMap directories and files."""
+	dir_manager = get_directory_manager()
 
-	# Create a table for system info
-	table = Table(show_header=False, box=None)
+	if not force:
+		if cache:
+			console.print("[yellow]This will delete all cached data.[/yellow]")
+		if logs:
+			console.print("[yellow]This will delete all log files.[/yellow]")
 
-	for key, value in info.items():
-		# Format key with underscores to spaces and title case
-		formatted_key = key.replace("_", " ").title()
-		table.add_row(f"[bold]{formatted_key}:[/]", str(value))
+		confirm = typer.confirm("Do you want to continue?")
+		if not confirm:
+			console.print("Operation cancelled.")
+			return
 
-	# Show in a panel
-	console.print(Panel(table, title="CodeMap System Information", border_style="blue"))
+	try:
+		if cache:
+			dir_manager.clear_cache("all")
+			console.print("[green]✅ Cleaned cache directories[/green]")
+
+		if logs:
+			# Clear log directories
+			for log_dir in [dir_manager.daemon_logs_dir, dir_manager.cli_logs_dir, dir_manager.error_logs_dir]:
+				if log_dir.exists():
+					for log_file in log_dir.glob("*.log*"):
+						log_file.unlink()
+			console.print("[green]✅ Cleaned log files[/green]")
+
+	except Exception as e:
+		console.print(f"[red]Error cleaning directories: {e!s}[/red]")
+		logger.exception("Error during clean operation")
+		raise typer.Exit(1) from e
+
+
+@pkg_cmd.command(name="setup")
+def setup_command(
+	force: bool = typer.Option(default=False, help="Force setup even if directories already exist"),
+) -> None:
+	"""Set up the CodeMap directory structure."""
+	try:
+		# Get managers
+		dir_manager = get_directory_manager()
+		config_manager = get_config_manager()
+
+		# Check if directories already exist
+		if not force and all(
+			[
+				dir_manager.user_data_dir.exists(),
+				dir_manager.user_config_dir.exists(),
+				dir_manager.user_cache_dir.exists(),
+				dir_manager.user_log_dir.exists(),
+			]
+		):
+			console.print("[yellow]CodeMap directory structure already exists.[/yellow]")
+			console.print("[yellow]Use --force to recreate the directory structure.[/yellow]")
+			console.print("[yellow]Note: This will not delete any existing data.[/yellow]")
+			return
+
+		# Create directories
+		with console.status("Setting up CodeMap directory structure..."):
+			dir_manager.ensure_directories()
+
+			# Initialize empty global config if it doesn't exist
+			if not (dir_manager.config_dir / "settings.yml").exists():
+				config_manager.update_config("global", {})
+
+		console.print("[green]✅ CodeMap directory structure has been set up.[/green]")
+		console.print(f"[green]User data directory: {dir_manager.user_data_dir}[/green]")
+		console.print(f"[green]User config directory: {dir_manager.user_config_dir}[/green]")
+		console.print(f"[green]User cache directory: {dir_manager.user_cache_dir}[/green]")
+		console.print(f"[green]User logs directory: {dir_manager.user_log_dir}[/green]")
+
+	except Exception as e:
+		console.print(f"[red]Error setting up directories: {e!s}[/red]")
+		logger.exception("Error during setup operation")
+		raise typer.Exit(1) from e

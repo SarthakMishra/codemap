@@ -32,7 +32,7 @@ from codemap.cli.generate_cmd import generate_command
 from codemap.cli.init_cmd import init_command
 from codemap.cli.pkg_cmd import pkg_cmd
 from codemap.cli.pr_cmd import pr_command
-from codemap.utils.package_utils import check_for_updates_and_notify
+from codemap.utils.package_utils import notify_update_available
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -72,7 +72,7 @@ def app_callback(
 		raise typer.Exit
 
 	# Check for updates (non-blocking, just notification)
-	check_for_updates_and_notify()
+	notify_update_available()
 
 
 def main() -> int:
