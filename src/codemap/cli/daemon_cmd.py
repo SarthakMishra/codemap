@@ -2,21 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+import logging
+from pathlib import Path  # noqa: TC003
+from typing import Any
 
 import typer
+from rich.progress import Progress
 
-from codemap.daemon.command import (
-	list_or_show_jobs,
-	restart_daemon,
-	show_daemon_logs,
-	show_daemon_status,
-	start_daemon,
-	stop_daemon,
-)
+from codemap.daemon.command import list_or_show_jobs, show_daemon_logs, show_daemon_status, start_daemon, stop_daemon
+from codemap.utils.cli_utils import console, create_spinner_progress, setup_logging
+from codemap.utils.config_loader import ConfigLoader
 
-if TYPE_CHECKING:
-	from pathlib import Path
+logger = logging.getLogger(__name__)
 
 # Define option defaults as module-level variables
 CONFIG_OPTION = typer.Option(default=None, help="Path to configuration file", show_default=False)
@@ -35,44 +32,250 @@ daemon_cmd = typer.Typer(
 )
 
 
+def load_config(config_path: Path | None) -> dict[str, Any]:
+	"""
+	Load configuration for the daemon.
+
+	Args:
+	        config_path: Path to the configuration file
+
+	Returns:
+	        Configuration data dictionary
+
+	"""
+	config_loader = ConfigLoader(str(config_path) if config_path else None)
+	return config_loader.config
+
+
+def start_daemon_process(config_path: Path | None, foreground: bool, timeout: int) -> int:
+	"""
+	Start the daemon process.
+
+	Args:
+	        config_path: Path to configuration file
+	        foreground: Whether to run in foreground
+	        timeout: Timeout for startup operation
+
+	Returns:
+	        Exit code (0 for success)
+
+	"""
+	with create_spinner_progress() as progress:
+		task = progress.add_task("Starting daemon...", total=1)
+		try:
+			load_config(config_path)
+			result = start_daemon(config_path=config_path, foreground=foreground, timeout=timeout)
+			progress.update(task, advance=1)
+
+			if result == 0:
+				console.print("[green]Daemon started successfully")
+			else:
+				console.print("[red]Failed to start daemon")
+
+			return result
+		except (FileNotFoundError, PermissionError, OSError) as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]File system error when starting daemon: {e!s}")
+			return 1
+		except ValueError as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]Configuration error when starting daemon: {e!s}")
+			return 1
+
+
+def stop_daemon_process(config_path: Path | None, timeout: int) -> int:
+	"""
+	Stop the daemon process.
+
+	Args:
+	        config_path: Path to configuration file
+	        timeout: Timeout for shutdown operation
+
+	Returns:
+	        Exit code (0 for success)
+
+	"""
+	with create_spinner_progress() as progress:
+		task = progress.add_task("Stopping daemon...", total=1)
+		try:
+			load_config(config_path)
+			result = stop_daemon(config_path=config_path, timeout=timeout)
+			progress.update(task, advance=1)
+
+			if result == 0:
+				console.print("[green]Daemon stopped successfully")
+			else:
+				console.print("[red]Failed to stop daemon")
+
+			return result
+		except (FileNotFoundError, PermissionError, OSError) as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]File system error when stopping daemon: {e!s}")
+			return 1
+		except ValueError as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]Configuration error when stopping daemon: {e!s}")
+			return 1
+
+
+def get_daemon_status(config_path: Path | None, detailed: bool, output_json: bool) -> int:
+	"""
+	Get and display the daemon status.
+
+	Args:
+	        config_path: Path to configuration file
+	        detailed: Whether to show detailed information
+	        output_json: Whether to output as JSON
+
+	Returns:
+	        Exit code (0 for success)
+
+	"""
+	with create_spinner_progress() as progress:
+		task = progress.add_task("Fetching daemon status...", total=1)
+		try:
+			load_config(config_path)
+			progress.update(task, advance=1)
+			console.print()
+			return show_daemon_status(config_path=config_path, detailed=detailed, output_json=output_json)
+		except (FileNotFoundError, PermissionError, OSError) as e:
+			progress.update(task, advance=1)
+			console.print()
+			console.print(f"[red]File system error when fetching daemon status: {e!s}")
+			return 1
+		except ValueError as e:
+			progress.update(task, advance=1)
+			console.print()
+			console.print(f"[red]Configuration error when fetching daemon status: {e!s}")
+			return 1
+
+
+def fetch_jobs_information(
+	job_id: str | None, config_path: Path | None, status_filter: str | None, output_json: bool
+) -> int:
+	"""
+	Fetch and display jobs information.
+
+	Args:
+	        job_id: ID of the job to show details for
+	        config_path: Path to configuration file
+	        status_filter: Filter jobs by status
+	        output_json: Whether to output as JSON
+
+	Returns:
+	        Exit code (0 for success)
+
+	"""
+	with create_spinner_progress() as progress:
+		task = progress.add_task("Fetching jobs...", total=1)
+		try:
+			load_config(config_path)
+			result = list_or_show_jobs(
+				job_id=job_id, config_path=config_path, status_filter=status_filter, output_json=output_json
+			)
+			progress.update(task, advance=1)
+			return result
+		except (FileNotFoundError, PermissionError, OSError) as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]File system error when fetching jobs information: {e!s}")
+			return 1
+		except ValueError as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]Configuration error when fetching jobs information: {e!s}")
+			return 1
+
+
+def restart_daemon_process(config_path: Path | None, timeout: int) -> int:
+	"""
+	Restart the daemon process.
+
+	Args:
+	        config_path: Path to configuration file
+	        timeout: Timeout for restart operation
+
+	Returns:
+	        Exit code (0 for success)
+
+	"""
+	with Progress() as progress:
+		task = progress.add_task("Restarting daemon...", total=2)
+		try:
+			load_config(config_path)
+
+			# Stop the daemon
+			stop_result = stop_daemon(config_path=config_path, timeout=timeout)
+			progress.update(task, advance=1)
+
+			if stop_result != 0:
+				console.print("[red]Failed to stop daemon during restart")
+				return stop_result
+
+			# Start the daemon
+			start_result = start_daemon(config_path=config_path, foreground=False, timeout=timeout)
+			progress.update(task, advance=1)
+
+			if start_result == 0:
+				console.print("[green]Daemon restarted successfully")
+			else:
+				console.print("[red]Failed to start daemon during restart")
+
+			return start_result
+		except (FileNotFoundError, PermissionError, OSError) as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]File system error when restarting daemon: {e!s}")
+			return 1
+		except ValueError as e:
+			progress.update(task, advance=1)
+			console.print(f"[red]Configuration error when restarting daemon: {e!s}")
+			return 1
+
+
+def show_logs(config_path: Path | None, tail: int, follow: bool) -> int:
+	"""
+	Show daemon logs.
+
+	Args:
+	        config_path: Path to configuration file
+	        tail: Number of lines to show
+	        follow: Whether to follow the log output
+
+	Returns:
+	        Exit code (0 for success)
+
+	"""
+	try:
+		load_config(config_path)
+		console.print(f"[blue]Showing last {tail} log lines{' (follow mode)' if follow else ''}...")
+		return show_daemon_logs(config_path=config_path, tail=tail, follow=follow)
+	except (FileNotFoundError, PermissionError, OSError) as e:
+		console.print(f"[red]File system error when viewing logs: {e!s}")
+		return 1
+	except ValueError as e:
+		console.print(f"[red]Configuration error when viewing logs: {e!s}")
+		return 1
+
+
 @daemon_cmd.command(name="start", help="Start the daemon")
 def daemon_start(
 	config: Path | None = CONFIG_OPTION,
 	foreground: bool = FOREGROUND_OPTION,
 	timeout: int = TIMEOUT_OPTION,
+	is_verbose: bool = typer.Option(default=False, help="Enable verbose logging"),
 ) -> int:
-	"""
-	Start the CodeMap daemon.
-
-	Args:
-	    config: Path to configuration file
-	    foreground: Run in foreground mode (for debugging)
-	    timeout: Timeout in seconds for daemon startup
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return start_daemon(config_path=config, foreground=foreground, timeout=timeout)
+	"""Start the CodeMap daemon."""
+	setup_logging(is_verbose=is_verbose)
+	return start_daemon_process(config_path=config, foreground=foreground, timeout=timeout)
 
 
 @daemon_cmd.command(name="stop", help="Stop the daemon")
 def daemon_stop(
 	config: Path | None = CONFIG_OPTION,
 	timeout: int = TIMEOUT_OPTION,
+	is_verbose: bool = typer.Option(default=False, help="Enable verbose logging"),
 ) -> int:
-	"""
-	Stop the CodeMap daemon.
-
-	Args:
-	    config: Path to configuration file
-	    timeout: Timeout in seconds for daemon shutdown
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return stop_daemon(config_path=config, timeout=timeout)
+	"""Stop the CodeMap daemon."""
+	setup_logging(is_verbose=is_verbose)
+	return stop_daemon_process(config_path=config, timeout=timeout)
 
 
 @daemon_cmd.command(name="status", help="Show daemon status")
@@ -80,20 +283,11 @@ def daemon_status(
 	config: Path | None = CONFIG_OPTION,
 	detailed: bool = DETAILED_OPTION,
 	output_json: bool = JSON_OPTION,
+	is_verbose: bool = typer.Option(default=False, help="Enable verbose logging"),
 ) -> int:
-	"""
-	Show the daemon status.
-
-	Args:
-	    config: Path to configuration file
-	    detailed: Show detailed status information
-	    output_json: Output status as JSON
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return show_daemon_status(config_path=config, detailed=detailed, output_json=output_json)
+	"""Show the daemon status."""
+	setup_logging(is_verbose=is_verbose)
+	return get_daemon_status(config_path=config, detailed=detailed, output_json=output_json)
 
 
 @daemon_cmd.command(name="jobs", help="List and manage jobs")
@@ -102,40 +296,24 @@ def daemon_jobs(
 	config: Path | None = CONFIG_OPTION,
 	status_filter: str | None = STATUS_FILTER_OPTION,
 	output_json: bool = JSON_OPTION,
+	is_verbose: bool = typer.Option(default=False, help="Enable verbose logging"),
 ) -> int:
-	"""
-	List or get info about processing jobs.
-
-	Args:
-	    job_id: ID of the job to show details for (optional)
-	    config: Path to configuration file
-	    status_filter: Filter jobs by status
-	    output_json: Output as JSON
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return list_or_show_jobs(job_id=job_id, config_path=config, status_filter=status_filter, output_json=output_json)
+	"""List or get info about processing jobs."""
+	setup_logging(is_verbose=is_verbose)
+	return fetch_jobs_information(
+		job_id=job_id, config_path=config, status_filter=status_filter, output_json=output_json
+	)
 
 
 @daemon_cmd.command(name="restart", help="Restart the daemon")
 def daemon_restart(
 	config: Path | None = CONFIG_OPTION,
 	timeout: int = TIMEOUT_OPTION,
+	is_verbose: bool = typer.Option(default=False, help="Enable verbose logging"),
 ) -> int:
-	"""
-	Restart the CodeMap daemon.
-
-	Args:
-	    config: Path to configuration file
-	    timeout: Timeout in seconds for daemon shutdown/startup
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return restart_daemon(config_path=config, timeout=timeout)
+	"""Restart the CodeMap daemon."""
+	setup_logging(is_verbose=is_verbose)
+	return restart_daemon_process(config_path=config, timeout=timeout)
 
 
 @daemon_cmd.command(name="logs", help="View daemon logs")
@@ -143,28 +321,8 @@ def daemon_logs(
 	config: Path | None = CONFIG_OPTION,
 	tail: int = typer.Option(default=10, help="Number of lines to show"),
 	follow: bool = typer.Option(default=False, help="Follow log output"),
+	is_verbose: bool = typer.Option(default=False, help="Enable verbose logging"),
 ) -> int:
-	"""
-	View the daemon logs.
-
-	Args:
-	    config: Path to configuration file
-	    tail: Number of log lines to show
-	    follow: Whether to follow the log output
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return show_daemon_logs(config_path=config, tail=tail, follow=follow)
-
-
-def daemon_command() -> int:
-	"""
-	Entry point for the daemon command in the main CLI app.
-
-	Returns:
-	    int: Exit code (0 for success, non-zero for failure)
-
-	"""
-	return daemon_cmd()
+	"""View the daemon logs."""
+	setup_logging(is_verbose=is_verbose)
+	return show_logs(config_path=config, tail=tail, follow=follow)
