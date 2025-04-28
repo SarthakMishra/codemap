@@ -99,9 +99,12 @@ DEFAULT_CONFIG = {
 		"max_connections": 10,
 		# Daemon specific
 		"log_level": "info",
-		"pid_file": "~/.codemap/daemon.pid",
-		"log_file": "~/.codemap/daemon.log",
+		"pid_file": "~/.codemap/run/daemon.pid",
+		"log_file": "~/.codemap/logs/daemon.log",
 		"auto_start": False,
+		# Socket connection
+		"use_socket": False,
+		"socket_file": "~/.codemap/run/daemon.sock",
 	},
 	# Processing configuration
 	"processing": {
@@ -114,5 +117,6 @@ DEFAULT_CONFIG = {
 		"data_dir": "~/.codemap/data",
 		"use_cache": True,
 		"cache_size_mb": 512,
+		"cache_dir": "~/.codemap/cache",
 	},
 }
