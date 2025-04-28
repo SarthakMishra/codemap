@@ -174,7 +174,7 @@ wheels = [
 
 [[package]]
 name = "codemap"
-version = "0.4.4"
+version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -183,6 +183,7 @@ dependencies = [
     { name = "lockfile" },
     { name = "multilspy" },
     { name = "numpy" },
+    { name = "packaging" },
     { name = "pandas" },
     { name = "pydantic" },
     { name = "pygments" },
@@ -229,6 +230,7 @@ requires-dist = [
     { name = "lockfile", specifier = ">=0.12.2" },
     { name = "multilspy", specifier = ">=0.0.15" },
     { name = "numpy", specifier = ">=2.2.5" },
+    { name = "packaging", specifier = ">=24.2" },
     { name = "pandas", specifier = ">=2.2.3" },
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pygments", specifier = ">=2.19.1" },

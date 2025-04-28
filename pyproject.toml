@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codemap"
-version = "0.4.4"
+version = "0.1.0"
 description = "CLI tool that generates optimized markdown docs and streamline Git workflows"
 readme = "README.md"
 authors = [
@@ -38,6 +38,7 @@ dependencies = [
     "uvicorn>=0.29.0",
     "pydantic>=2.7.0",
     "pyxdg>=0.28",
+    "packaging>=24.2",
 ]
 
 [dependency-groups]

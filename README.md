@@ -31,12 +31,53 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 > [!Important]
 > CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
 
-```bash
-# Install with pipx
-pipx install git+https://github.com/SarthakMishra/codemap.git
+### Easy Install (Recommended)
 
-# Upgrade
-pipx upgrade codemap
+```bash
+# One-line installer (downloads and runs install.sh)
+curl -sSL https://raw.githubusercontent.com/SarthakMishra/codemap/main/install.sh | bash
+
+# Or download and run manually
+curl -sSL -o install.sh https://raw.githubusercontent.com/SarthakMishra/codemap/main/install.sh
+chmod +x install.sh
+./install.sh
+```
+
+### Manual Installation
+
+If you prefer to install manually:
+
+```bash
+# Install with pip (user installation)
+pip install --user git+https://github.com/SarthakMishra/codemap.git
+
+# Make sure your PATH includes the user bin directory
+# Usually this is ~/.local/bin on Linux or ~/Library/Python/X.Y/bin on macOS
+```
+
+### Updating CodeMap
+
+CodeMap automatically checks for updates and will notify you when a new version is available.
+
+```bash
+# Check for updates
+codemap version
+
+# Update to the latest version
+codemap update
+
+# Alternatively, use the package management commands
+codemap pkg update
+```
+
+### Uninstalling
+
+```bash
+# Uninstall CodeMap
+codemap pkg uninstall
+
+# Or manually with pip
+pip uninstall codemap
 ```
 
 ## Generate Markdown Docs
