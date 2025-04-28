@@ -47,17 +47,38 @@ class LanceDBStorage(StorageBackend):
 	FILE_HISTORY_TABLE = "file_history"
 	LSP_METADATA_TABLE = "lsp_metadata"
 
-	def __init__(self, config: StorageConfig) -> None:
+	def __init__(self, config: StorageConfig | None = None) -> None:
 		"""
 		Initialize the LanceDB storage backend.
 
 		Args:
-		    config: Configuration for the storage backend
+		    config: Configuration for the storage backend. If None,
+		           a default configuration will be created using the
+		           application's configured directories.
 
 		"""
+		if config is None:
+			config = StorageConfig.from_config()
+
 		super().__init__(config)
 		self._db = None
 		self._connection_initialized = False
+
+	@classmethod
+	def create_default(cls, uri: str | None = None, cache_dir: Path | None = None) -> LanceDBStorage:
+		"""
+		Create a LanceDBStorage instance with default configuration.
+
+		Args:
+		    uri: Optional URI override for the database
+		    cache_dir: Optional cache directory override
+
+		Returns:
+		    Configured LanceDBStorage instance
+
+		"""
+		config = StorageConfig.from_config(uri=uri, cache_dir=cache_dir)
+		return cls(config)
 
 	def initialize(self) -> None:
 		"""
