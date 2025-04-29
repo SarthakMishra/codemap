@@ -40,6 +40,7 @@ dependencies = [
     "pyxdg>=0.28",
     "packaging>=24.2",
     "requests-unixsocket>=0.4.1",
+    "pathspec>=0.12.1",
 ]
 
 [dependency-groups]
