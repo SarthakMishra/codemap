@@ -178,14 +178,6 @@
     *   [ ] Implement remote API access for distributed setups.
     *   [ ] Add support for clustering and load balancing.
 
-22. **Web Interface:**
-    *   [ ] Design and implement React-based web interface.
-    *   [ ] Create dashboard for monitoring daemon status and jobs.
-    *   [ ] Add visual codebase explorer with syntax highlighting.
-    *   [ ] Implement LLM chat interface.
-    *   [ ] Add vector database visualization tools.
-    *   [ ] Create user management and authentication system.
-
 **Future Considerations (Keep in Mind During Design):**
 
 *   **Scalability:** Parallel processing, asynchronous operations (especially for IO-bound tasks like LSP, embedding APIs, storage).
