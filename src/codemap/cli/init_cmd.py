@@ -17,7 +17,7 @@ from codemap.daemon.command import start_daemon
 from codemap.processor import ProcessingPipeline
 from codemap.processor.embedding.models import EmbeddingConfig
 from codemap.processor.storage.base import StorageConfig
-from codemap.utils.cli_utils import console, progress_indicator
+from codemap.utils.cli_utils import console, exit_with_error, progress_indicator, show_warning
 from codemap.utils.config_manager import get_config_manager
 from codemap.utils.directory_manager import get_directory_manager
 from codemap.utils.log_setup import setup_logging
@@ -124,10 +124,11 @@ def init_command(
 			existing_files.append(project_cache_dir)
 
 		if not force_flag and existing_files and not wizard_only:
-			console.print("[yellow]CodeMap files already exist:")
+			warning_message = "CodeMap files already exist:\n"
 			for f in existing_files:
-				console.print(f"[yellow]  - {f}")
-			console.print("[yellow]Use --force to overwrite.")
+				warning_message += f"  - {f}\n"
+			warning_message += "Use --force to overwrite."
+			show_warning(warning_message)
 			raise typer.Exit(1)
 
 		# Run appropriate wizard based on context
@@ -211,15 +212,12 @@ def init_command(
 						if result == 0:
 							console.print("[green]Started CodeMap daemon service[/green]")
 						else:
-							console.print(
-								"[yellow]Failed to start daemon service. "
-								"Try running 'codemap daemon start' manually.[/yellow]"
-							)
+							show_warning("Failed to start daemon service. Try running 'codemap daemon start' manually.")
 					except Exception as e:
-						console.print(f"[yellow]Error starting daemon: {e}[/yellow]")
+						show_warning(f"Error starting daemon: {e}")
 						logger.exception("Failed to start daemon")
 			except Exception as e:
-				console.print(f"[yellow]Warning: Could not initialize processor: {e}[/yellow]")
+				show_warning(f"Could not initialize processor: {e}")
 				logger.exception("Failed to initialize processor")
 
 		console.print("\nNext steps:")
@@ -229,11 +227,9 @@ def init_command(
 		console.print("4. Run 'codemap commit' to use AI-powered commit messages")
 
 	except (FileNotFoundError, PermissionError, OSError) as e:
-		console.print(f"[red]File system error: {e!s}")
-		raise typer.Exit(1) from e
+		exit_with_error(f"File system error: {e!s}", exception=e)
 	except ValueError as e:
-		console.print(f"[red]Configuration error: {e!s}")
-		raise typer.Exit(1) from e
+		exit_with_error(f"Configuration error: {e!s}", exception=e)
 
 
 def run_global_config_wizard(config_path: Path, force: bool = False) -> bool:

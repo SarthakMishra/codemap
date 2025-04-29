@@ -14,8 +14,10 @@ from codemap.generators.markdown_generator import MarkdownGenerator
 from codemap.utils.cli_utils import (
 	console,
 	ensure_directory_exists,
+	exit_with_error,
 	progress_indicator,
 	setup_logging,
+	show_error,
 )
 from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.file_utils import get_output_path
@@ -81,7 +83,7 @@ def write_documentation(output_path: Path, documentation: str) -> None:
 			console.print(f"[green]Documentation written to {output_path}")
 		except (PermissionError, OSError) as e:
 			advance(1)
-			console.print(f"[red]Error writing documentation to {output_path}: {e!s}")
+			show_error(f"Error writing documentation to {output_path}: {e!s}")
 			raise
 
 
@@ -183,8 +185,6 @@ def generate_command(
 		write_documentation(output_path, documentation)
 
 	except (FileNotFoundError, PermissionError, OSError) as e:
-		console.print(f"[red]File system error: {e!s}")
-		raise typer.Exit(1) from e
+		exit_with_error(f"File system error: {e!s}", exception=e)
 	except ValueError as e:
-		console.print(f"[red]Configuration error: {e!s}")
-		raise typer.Exit(1) from e
+		exit_with_error(f"Configuration error: {e!s}", exception=e)

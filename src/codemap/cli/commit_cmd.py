@@ -45,7 +45,14 @@ from codemap.git.utils import (
 	validate_repo_path,
 )
 from codemap.llm import LLMError
-from codemap.utils.cli_utils import console, progress_indicator, setup_logging
+from codemap.utils.cli_utils import (
+	console,
+	exit_with_error,
+	progress_indicator,
+	setup_logging,
+	show_error,
+	show_warning,
+)
 from codemap.utils.config_loader import ConfigLoader
 
 # Truncate to maximum of 10 lines
@@ -106,7 +113,7 @@ def _load_prompt_template(template_path: str | None) -> str | None:
 		with template_file.open("r") as f:
 			return f.read()
 	except OSError:
-		console.print(f"[yellow]Warning:[/yellow] Could not load prompt template: {template_path}")
+		show_warning(f"Could not load prompt template: {template_path}")
 		return None
 
 
@@ -316,7 +323,7 @@ def generate_commit_message(
 		)
 		return message, used_llm
 	except (ValueError, RuntimeError, LLMError) as e:
-		console.print(f"[red]Error generating message:[/red] {e}")
+		show_error(f"Error generating message: {e}")
 		# Still try to generate a fallback message
 		from codemap.git.commit_generator.schemas import DiffChunkData
 
@@ -404,14 +411,16 @@ def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bo
 
 	# Display warnings
 	if other_staged:
-		console.print("[yellow]Warning:[/yellow] The following files are also staged but not part of this commit:")
+		warning_message = "The following files are also staged but not part of this commit:\n"
 		for file in other_staged:
-			console.print(f"  - {file}")
+			warning_message += f"  - {file}\n"
+		show_warning(warning_message)
 
 	if other_untracked:
-		console.print("[yellow]Warning:[/yellow] The following new files are not included in this commit:")
+		warning_message = "The following new files are not included in this commit:\n"
 		for file in other_untracked:
-			console.print(f"  - {file}")
+			warning_message += f"  - {file}\n"
+		show_warning(warning_message)
 
 	return other_staged, other_untracked, has_warnings
 
@@ -600,7 +609,7 @@ def _commit_with_message(chunk: DiffChunk, message: str) -> None:
 	console.print("Committing changes...")
 	success = _perform_commit(chunk, message)
 	if not success:
-		console.print("[red]Failed to commit changes[/red]")
+		show_error("Failed to commit changes")
 
 
 def _commit_with_user_input(chunk: DiffChunk, generated_message: str) -> None:
@@ -619,14 +628,14 @@ def _commit_with_user_input(chunk: DiffChunk, generated_message: str) -> None:
 		if edited_message:
 			success = _perform_commit(chunk, edited_message)
 			if not success:
-				console.print("[red]Failed to commit changes[/red]")
+				show_error("Failed to commit changes")
 		else:
-			console.print("[yellow]Commit canceled - empty message[/yellow]")
+			show_warning("Commit canceled - empty message")
 	except KeyboardInterrupt:
-		console.print("[yellow]Commit canceled by user[/yellow]")
+		show_warning("Commit canceled by user")
 	except Exception:
 		logger.exception("Error during commit process")
-		console.print("[red]Error:[/red] An unexpected error occurred during the commit process")
+		show_error("An unexpected error occurred during the commit process")
 
 
 @dataclass
@@ -800,10 +809,10 @@ def _run_commit_command(config: RunConfig) -> int:
 	try:
 		repo_path = validate_repo_path(config.repo_path)
 		if repo_path is None:
-			console.print("[red]Error:[/red] Repository path is None")
+			show_error("Repository path is None")
 			return 1
 	except ValueError as e:
-		console.print(f"[red]Error:[/red] {e!s}")
+		show_error(str(e))
 		return 1
 
 	# Load configuration from .codemap.yml if it exists
@@ -877,7 +886,7 @@ def _run_commit_command(config: RunConfig) -> int:
 		# Process chunks
 		return process_all_chunks(options, chunks, generator)
 	except (ValueError, RuntimeError, TypeError) as e:
-		console.print(f"[red]Error:[/red] {e!s}")
+		show_error(str(e))
 		return 1
 
 
@@ -936,8 +945,7 @@ def validate_and_process_commit(
 		raise
 	except Exception as e:
 		logger.exception("Error processing commit")
-		console.print(f"[red]Error: {e}[/red]")
-		raise typer.Exit(1) from e
+		exit_with_error(f"Error: {e}", exception=e)
 
 
 def commit_command(

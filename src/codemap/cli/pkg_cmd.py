@@ -6,10 +6,10 @@ import logging
 import platform
 
 import typer
-from rich.console import Console
 from rich.table import Table
 
 from codemap import __version__
+from codemap.utils.cli_utils import console, exit_with_error, show_warning
 from codemap.utils.config_manager import get_config_manager
 from codemap.utils.directory_manager import get_directory_manager
 from codemap.utils.log_setup import log_environment_info, setup_logging
@@ -17,7 +17,6 @@ from codemap.utils.package_utils import check_for_updates
 
 # Configure logger
 logger = logging.getLogger(__name__)
-console = Console()
 
 # Create package management subcommand
 pkg_cmd = typer.Typer(
@@ -52,9 +51,8 @@ def version_command(
 		if is_latest:
 			console.print("You are using the latest version.")
 		else:
-			console.print(
-				f"[yellow]A new version is available: {latest_version}[/yellow]\n"
-				f"[yellow]Run 'uv pip install --upgrade codemap' to update.[/yellow]"
+			show_warning(
+				f"A new version is available: {latest_version}\nRun 'uv pip install --upgrade codemap' to update."
 			)
 
 
@@ -119,9 +117,9 @@ def clean_command(
 
 	if not force:
 		if cache:
-			console.print("[yellow]This will delete all cached data.[/yellow]")
+			show_warning("This will delete all cached data.")
 		if logs:
-			console.print("[yellow]This will delete all log files.[/yellow]")
+			show_warning("This will delete all log files.")
 
 		confirm = typer.confirm("Do you want to continue?")
 		if not confirm:
@@ -141,10 +139,8 @@ def clean_command(
 						log_file.unlink()
 			console.print("[green]✅ Cleaned log files[/green]")
 
-	except Exception as e:
-		console.print(f"[red]Error cleaning directories: {e!s}[/red]")
-		logger.exception("Error during clean operation")
-		raise typer.Exit(1) from e
+	except OSError as e:
+		exit_with_error(f"Error cleaning directories: {e!s}", exception=e)
 
 
 @pkg_cmd.command(name="setup")
@@ -166,9 +162,10 @@ def setup_command(
 				dir_manager.user_log_dir.exists(),
 			]
 		):
-			console.print("[yellow]CodeMap directory structure already exists.[/yellow]")
-			console.print("[yellow]Use --force to recreate the directory structure.[/yellow]")
-			console.print("[yellow]Note: This will not delete any existing data.[/yellow]")
+			warning_message = "CodeMap directory structure already exists.\n"
+			warning_message += "Use --force to recreate the directory structure.\n"
+			warning_message += "Note: This will not delete any existing data."
+			show_warning(warning_message)
 			return
 
 		# Create directories
@@ -185,7 +182,5 @@ def setup_command(
 		console.print(f"[green]User cache directory: {dir_manager.user_cache_dir}[/green]")
 		console.print(f"[green]User logs directory: {dir_manager.user_log_dir}[/green]")
 
-	except Exception as e:
-		console.print(f"[red]Error setting up directories: {e!s}[/red]")
-		logger.exception("Error during setup operation")
-		raise typer.Exit(1) from e
+	except OSError as e:
+		exit_with_error(f"Error setting up directories: {e!s}", exception=e)

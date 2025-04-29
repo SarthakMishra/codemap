@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from codemap.daemon.command import list_or_show_jobs, show_daemon_logs, show_daemon_status, start_daemon, stop_daemon
-from codemap.utils.cli_utils import console, progress_indicator, setup_logging
+from codemap.utils.cli_utils import console, progress_indicator, setup_logging, show_error
 from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
@@ -68,16 +68,16 @@ def start_daemon_process(config_path: Path | None, foreground: bool, timeout: in
 			if result == 0:
 				console.print("[green]Daemon started successfully")
 			else:
-				console.print("[red]Failed to start daemon")
+				show_error("Failed to start daemon")
 
 			return result
 		except (FileNotFoundError, PermissionError, OSError) as e:
 			advance(1)
-			console.print(f"[red]File system error when starting daemon: {e!s}")
+			show_error(f"File system error when starting daemon: {e!s}")
 			return 1
 		except ValueError as e:
 			advance(1)
-			console.print(f"[red]Configuration error when starting daemon: {e!s}")
+			show_error(f"Configuration error when starting daemon: {e!s}")
 			return 1
 
 
@@ -102,16 +102,16 @@ def stop_daemon_process(config_path: Path | None, timeout: int) -> int:
 			if result == 0:
 				console.print("[green]Daemon stopped successfully")
 			else:
-				console.print("[red]Failed to stop daemon")
+				show_error("Failed to stop daemon")
 
 			return result
 		except (FileNotFoundError, PermissionError, OSError) as e:
 			advance(1)
-			console.print(f"[red]File system error when stopping daemon: {e!s}")
+			show_error(f"File system error when stopping daemon: {e!s}")
 			return 1
 		except ValueError as e:
 			advance(1)
-			console.print(f"[red]Configuration error when stopping daemon: {e!s}")
+			show_error(f"Configuration error when stopping daemon: {e!s}")
 			return 1
 
 
@@ -137,12 +137,12 @@ def get_daemon_status(config_path: Path | None, detailed: bool, output_json: boo
 		except (FileNotFoundError, PermissionError, OSError) as e:
 			advance(1)
 			console.print()
-			console.print(f"[red]File system error when fetching daemon status: {e!s}")
+			show_error(f"File system error when fetching daemon status: {e!s}")
 			return 1
 		except ValueError as e:
 			advance(1)
 			console.print()
-			console.print(f"[red]Configuration error when fetching daemon status: {e!s}")
+			show_error(f"Configuration error when fetching daemon status: {e!s}")
 			return 1
 
 
@@ -172,11 +172,11 @@ def fetch_jobs_information(
 			return result
 		except (FileNotFoundError, PermissionError, OSError) as e:
 			advance(1)
-			console.print(f"[red]File system error when fetching jobs information: {e!s}")
+			show_error(f"File system error when fetching jobs information: {e!s}")
 			return 1
 		except ValueError as e:
 			advance(1)
-			console.print(f"[red]Configuration error when fetching jobs information: {e!s}")
+			show_error(f"Configuration error when fetching jobs information: {e!s}")
 			return 1
 
 
@@ -201,7 +201,7 @@ def restart_daemon_process(config_path: Path | None, timeout: int) -> int:
 			advance(1)
 
 			if stop_result != 0:
-				console.print("[red]Failed to stop daemon during restart")
+				show_error("Failed to stop daemon during restart")
 				return stop_result
 
 			# Start the daemon
@@ -211,16 +211,16 @@ def restart_daemon_process(config_path: Path | None, timeout: int) -> int:
 			if start_result == 0:
 				console.print("[green]Daemon restarted successfully")
 			else:
-				console.print("[red]Failed to start daemon during restart")
+				show_error("Failed to start daemon during restart")
 
 			return start_result
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			advance(1)
-			console.print(f"[red]File system error when restarting daemon: {e!s}")
+			advance(2)  # Complete the progress
+			show_error(f"File system error when restarting daemon: {e!s}")
 			return 1
 		except ValueError as e:
-			advance(1)
-			console.print(f"[red]Configuration error when restarting daemon: {e!s}")
+			advance(2)  # Complete the progress
+			show_error(f"Configuration error when restarting daemon: {e!s}")
 			return 1
 
 
@@ -242,10 +242,10 @@ def fetch_daemon_logs(config_path: Path | None, lines: int, follow: bool = False
 			load_config(config_path)
 			return show_daemon_logs(config_path=config_path, tail=lines, follow=follow)
 		except (FileNotFoundError, PermissionError, OSError) as e:
-			console.print(f"[red]File system error when fetching daemon logs: {e!s}")
+			show_error(f"File system error when fetching daemon logs: {e!s}")
 			return 1
 		except ValueError as e:
-			console.print(f"[red]Configuration error when fetching daemon logs: {e!s}")
+			show_error(f"Configuration error when fetching daemon logs: {e!s}")
 			return 1
 
 
