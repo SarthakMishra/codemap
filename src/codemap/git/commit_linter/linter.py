@@ -4,12 +4,16 @@ import re
 from pathlib import Path
 from typing import Any
 
+from codemap.config import DEFAULT_CONFIG
 from codemap.utils.config_loader import ConfigLoader
 
 from .config import CommitLintConfig, Rule, RuleLevel
-from .constants import ASCII_MAX_VALUE, BODY_MAX_LENGTH, BREAKING_CHANGE, DEFAULT_TYPES
+from .constants import ASCII_MAX_VALUE, BREAKING_CHANGE
 from .parser import CommitParser
 from .validators import CommitValidators
+
+# Get default body max line length from config for use in validation methods
+BODY_MAX_LINE_LENGTH = DEFAULT_CONFIG["commit"]["lint"]["body_max_line_length"]["value"]
 
 
 class CommitLinter:
@@ -30,7 +34,9 @@ class CommitLinter:
 		    config_path (str, optional): Path to a configuration file (.codemap.yml).
 
 		"""
-		self.allowed_types = {t.lower() for t in (allowed_types or DEFAULT_TYPES)}
+		# Get default types from central config
+		default_types = DEFAULT_CONFIG["commit"]["convention"]["types"]
+		self.allowed_types = {t.lower() for t in (allowed_types or default_types)}
 		self.parser = CommitParser()
 
 		# Load configuration
@@ -534,7 +540,7 @@ class CommitLinter:
 		rule = self.config.body_max_line_length
 		if rule.level != RuleLevel.DISABLED and body:
 			if isinstance(rule.value, float) and rule.value == float("inf"):
-				max_line_length = BODY_MAX_LENGTH  # Use default BODY_MAX_LENGTH for infinity
+				max_line_length = BODY_MAX_LINE_LENGTH  # Use default BODY_MAX_LINE_LENGTH for infinity
 			else:
 				max_line_length = int(rule.value)
 			invalid_lines = CommitValidators.validate_line_length(body, max_line_length)
@@ -662,7 +668,7 @@ class CommitLinter:
 		rule = self.config.footer_max_line_length
 		if footers_str and rule.level != RuleLevel.DISABLED:
 			if isinstance(rule.value, float) and rule.value == float("inf"):
-				max_line_length = BODY_MAX_LENGTH  # Use default BODY_MAX_LENGTH for infinity
+				max_line_length = BODY_MAX_LINE_LENGTH  # Use default BODY_MAX_LINE_LENGTH for infinity
 			else:
 				max_line_length = int(rule.value)
 			invalid_lines = CommitValidators.validate_line_length(footers_str, max_line_length)

@@ -2,27 +2,18 @@
 
 import re
 
-# Default message types
-DEFAULT_TYPES = [
-	"feat",
-	"fix",
-	"build",
-	"chore",
-	"ci",
-	"docs",
-	"style",
-	"refactor",
-	"test",
-	"perf",
-]
+from codemap.config import DEFAULT_CONFIG
 
-# Default limits
-HEADER_MAX_LENGTH = 72
-BODY_MAX_LENGTH = 100
+# Get default values from the central config
+DEFAULT_TYPES = DEFAULT_CONFIG["commit"]["convention"]["types"]
+HEADER_MAX_LENGTH = DEFAULT_CONFIG["commit"]["convention"]["max_length"]
+BODY_MAX_LENGTH = DEFAULT_CONFIG["commit"]["lint"]["body_max_line_length"]["value"]
+
+# Parsing constants
+FOOTER_DETECTION_MIN_LINES = 2  # Minimum number of lines needed for footer detection
 FOOTER_MIN_LINE_INDEX = 2  # Minimum line index for footers (after header and blank line)
 MIN_BODY_LINE_INDEX = 2  # Minimum line index for body (after header and blank line)
 ASCII_MAX_VALUE = 127  # Maximum ASCII character value
-FOOTER_DETECTION_MIN_LINES = 2  # Minimum number of lines needed for footer detection
 
 # Regex constants
 # Regex to parse the commit message structure

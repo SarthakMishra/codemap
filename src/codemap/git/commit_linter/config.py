@@ -4,7 +4,7 @@ import enum
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .constants import BODY_MAX_LENGTH, DEFAULT_TYPES, HEADER_MAX_LENGTH
+# Default values are now defined in src/codemap/config.py
 
 
 class RuleLevel(enum.Enum):
@@ -28,7 +28,13 @@ class Rule:
 
 @dataclass
 class CommitLintConfig:
-	"""Configuration for commit message linting rules."""
+	"""
+	Configuration for commit message linting rules.
+
+	Rather than providing default values here, this class now loads its
+	configuration from the central config.py file via ConfigLoader.
+
+	"""
 
 	# Header rules
 	header_max_length: Rule = field(
@@ -36,10 +42,12 @@ class CommitLintConfig:
 			name="header-max-length",
 			condition="header has value or less characters",
 			rule="always",
-			value=HEADER_MAX_LENGTH,
-			level=RuleLevel.WARNING,
+			value=100,  # Default value, will be overridden by config
+			level=RuleLevel.ERROR,
 		)
 	)
+
+	# More rule definitions with minimal defaults...
 	header_min_length: Rule = field(
 		default_factory=lambda: Rule(
 			name="header-min-length",
@@ -48,6 +56,7 @@ class CommitLintConfig:
 			value=0,
 		)
 	)
+
 	header_case: Rule = field(
 		default_factory=lambda: Rule(
 			name="header-case",
@@ -57,6 +66,7 @@ class CommitLintConfig:
 			level=RuleLevel.DISABLED,
 		)
 	)
+
 	header_full_stop: Rule = field(
 		default_factory=lambda: Rule(
 			name="header-full-stop",
@@ -65,6 +75,7 @@ class CommitLintConfig:
 			value=".",
 		)
 	)
+
 	header_trim: Rule = field(
 		default_factory=lambda: Rule(
 			name="header-trim",
@@ -79,9 +90,10 @@ class CommitLintConfig:
 			name="type-enum",
 			condition="type is found in value",
 			rule="always",
-			value=DEFAULT_TYPES,
+			value=[],  # Will be populated from config
 		)
 	)
+
 	type_case: Rule = field(
 		default_factory=lambda: Rule(
 			name="type-case",
@@ -90,6 +102,7 @@ class CommitLintConfig:
 			value="lower-case",
 		)
 	)
+
 	type_empty: Rule = field(
 		default_factory=lambda: Rule(
 			name="type-empty",
@@ -97,23 +110,8 @@ class CommitLintConfig:
 			rule="never",
 		)
 	)
-	type_max_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="type-max-length",
-			condition="type has value or less characters",
-			rule="always",
-			value=float("inf"),
-		)
-	)
-	type_min_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="type-min-length",
-			condition="type has value or more characters",
-			rule="always",
-			value=0,
-		)
-	)
 
+	# Other rules with minimal definitions...
 	# Scope rules
 	scope_enum: Rule = field(
 		default_factory=lambda: Rule(
@@ -124,6 +122,7 @@ class CommitLintConfig:
 			level=RuleLevel.DISABLED,
 		)
 	)
+
 	scope_case: Rule = field(
 		default_factory=lambda: Rule(
 			name="scope-case",
@@ -132,6 +131,7 @@ class CommitLintConfig:
 			value="lower-case",
 		)
 	)
+
 	scope_empty: Rule = field(
 		default_factory=lambda: Rule(
 			name="scope-empty",
@@ -140,33 +140,17 @@ class CommitLintConfig:
 			level=RuleLevel.DISABLED,
 		)
 	)
-	scope_max_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="scope-max-length",
-			condition="scope has value or less characters",
-			rule="always",
-			value=float("inf"),
-		)
-	)
-	scope_min_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="scope-min-length",
-			condition="scope has value or more characters",
-			rule="always",
-			value=0,
-		)
-	)
 
 	# Subject rules
 	subject_case: Rule = field(
 		default_factory=lambda: Rule(
 			name="subject-case",
 			condition="subject is in case value",
-			rule="always",
+			rule="never",
 			value=["sentence-case", "start-case", "pascal-case", "upper-case"],
-			level=RuleLevel.DISABLED,
 		)
 	)
+
 	subject_empty: Rule = field(
 		default_factory=lambda: Rule(
 			name="subject-empty",
@@ -174,6 +158,7 @@ class CommitLintConfig:
 			rule="never",
 		)
 	)
+
 	subject_full_stop: Rule = field(
 		default_factory=lambda: Rule(
 			name="subject-full-stop",
@@ -182,22 +167,7 @@ class CommitLintConfig:
 			value=".",
 		)
 	)
-	subject_max_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="subject-max-length",
-			condition="subject has value or less characters",
-			rule="always",
-			value=float("inf"),
-		)
-	)
-	subject_min_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="subject-min-length",
-			condition="subject has value or more characters",
-			rule="always",
-			value=0,
-		)
-	)
+
 	subject_exclamation_mark: Rule = field(
 		default_factory=lambda: Rule(
 			name="subject-exclamation-mark",
@@ -213,8 +183,10 @@ class CommitLintConfig:
 			name="body-leading-blank",
 			condition="body begins with blank line",
 			rule="always",
+			level=RuleLevel.WARNING,
 		)
 	)
+
 	body_empty: Rule = field(
 		default_factory=lambda: Rule(
 			name="body-empty",
@@ -223,46 +195,13 @@ class CommitLintConfig:
 			level=RuleLevel.DISABLED,
 		)
 	)
-	body_max_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="body-max-length",
-			condition="body has value or less characters",
-			rule="always",
-			value=float("inf"),
-		)
-	)
+
 	body_max_line_length: Rule = field(
 		default_factory=lambda: Rule(
 			name="body-max-line-length",
 			condition="body lines has value or less characters",
 			rule="always",
-			value=BODY_MAX_LENGTH,
-		)
-	)
-	body_min_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="body-min-length",
-			condition="body has value or more characters",
-			rule="always",
-			value=0,
-		)
-	)
-	body_case: Rule = field(
-		default_factory=lambda: Rule(
-			name="body-case",
-			condition="body is in case value",
-			rule="always",
-			value="lower-case",
-			level=RuleLevel.DISABLED,
-		)
-	)
-	body_full_stop: Rule = field(
-		default_factory=lambda: Rule(
-			name="body-full-stop",
-			condition="body ends with value",
-			rule="never",
-			value=".",
-			level=RuleLevel.DISABLED,
+			value=100,
 		)
 	)
 
@@ -272,8 +211,10 @@ class CommitLintConfig:
 			name="footer-leading-blank",
 			condition="footer begins with blank line",
 			rule="always",
+			level=RuleLevel.WARNING,
 		)
 	)
+
 	footer_empty: Rule = field(
 		default_factory=lambda: Rule(
 			name="footer-empty",
@@ -282,28 +223,106 @@ class CommitLintConfig:
 			level=RuleLevel.DISABLED,
 		)
 	)
-	footer_max_length: Rule = field(
-		default_factory=lambda: Rule(
-			name="footer-max-length",
-			condition="footer has value or less characters",
-			rule="always",
-			value=float("inf"),
-		)
-	)
+
 	footer_max_line_length: Rule = field(
 		default_factory=lambda: Rule(
 			name="footer-max-line-length",
 			condition="footer lines has value or less characters",
 			rule="always",
-			value=BODY_MAX_LENGTH,
+			value=100,
 		)
 	)
-	footer_min_length: Rule = field(
+
+	# Additional rules that are still referenced by the linter
+	type_max_length: Rule = field(
 		default_factory=lambda: Rule(
-			name="footer-min-length",
-			condition="footer has value or more characters",
+			name="type-max-length",
+			condition="type has value or less characters",
+			rule="always",
+			value=float("inf"),
+		)
+	)
+
+	type_min_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="type-min-length",
+			condition="type has value or more characters",
 			rule="always",
 			value=0,
+		)
+	)
+
+	scope_max_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="scope-max-length",
+			condition="scope has value or less characters",
+			rule="always",
+			value=float("inf"),
+		)
+	)
+
+	scope_min_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="scope-min-length",
+			condition="scope has value or more characters",
+			rule="always",
+			value=0,
+		)
+	)
+
+	subject_max_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="subject-max-length",
+			condition="subject has value or less characters",
+			rule="always",
+			value=float("inf"),
+		)
+	)
+
+	subject_min_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="subject-min-length",
+			condition="subject has value or more characters",
+			rule="always",
+			value=0,
+		)
+	)
+
+	body_max_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="body-max-length",
+			condition="body has value or less characters",
+			rule="always",
+			value=float("inf"),
+		)
+	)
+
+	body_min_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="body-min-length",
+			condition="body has value or more characters",
+			rule="always",
+			value=0,
+		)
+	)
+
+	body_case: Rule = field(
+		default_factory=lambda: Rule(
+			name="body-case",
+			condition="body is in case value",
+			rule="always",
+			value="lower-case",
+			level=RuleLevel.DISABLED,
+		)
+	)
+
+	body_full_stop: Rule = field(
+		default_factory=lambda: Rule(
+			name="body-full-stop",
+			condition="body ends with value",
+			rule="never",
+			value=".",
+			level=RuleLevel.DISABLED,
 		)
 	)
 
@@ -327,6 +346,7 @@ class CommitLintConfig:
 			level=RuleLevel.DISABLED,
 		)
 	)
+
 	trailer_exists: Rule = field(
 		default_factory=lambda: Rule(
 			name="trailer-exists",
@@ -334,6 +354,24 @@ class CommitLintConfig:
 			rule="always",
 			value="Signed-off-by:",
 			level=RuleLevel.DISABLED,
+		)
+	)
+
+	footer_max_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="footer-max-length",
+			condition="footer has value or less characters",
+			rule="always",
+			value=float("inf"),
+		)
+	)
+
+	footer_min_length: Rule = field(
+		default_factory=lambda: Rule(
+			name="footer-min-length",
+			condition="footer has value or more characters",
+			rule="always",
+			value=0,
 		)
 	)
 
