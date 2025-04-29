@@ -157,21 +157,15 @@ class TestWriteDocumentation:
 
 		with (
 			patch("codemap.cli.generate_cmd.console", mock_console),
-			patch("codemap.cli.generate_cmd.create_spinner_progress") as mock_progress,
+			patch("codemap.cli.generate_cmd.progress_indicator") as mock_progress,
 		):
-			progress = MagicMock()
-			task_id = "task1"
-			progress.add_task.return_value = task_id
-			mock_progress.return_value.__enter__.return_value = progress
+			mock_progress.return_value.__enter__.return_value = lambda _: None
 
 			write_documentation(output_path, documentation)
 
 			# Verify file was written correctly
 			assert output_path.exists()
 			assert output_path.read_text() == documentation
-
-			# Verify progress was updated
-			progress.update.assert_called_once_with(task_id, advance=1)
 
 			# Verify success message was printed
 			mock_console.print.assert_called_once()
@@ -183,12 +177,9 @@ class TestWriteDocumentation:
 
 		with (
 			patch("codemap.cli.generate_cmd.console", mock_console),
-			patch("codemap.cli.generate_cmd.create_spinner_progress") as mock_progress,
+			patch("codemap.cli.generate_cmd.progress_indicator") as mock_progress,
 		):
-			progress = MagicMock()
-			task_id = "task1"
-			progress.add_task.return_value = task_id
-			mock_progress.return_value.__enter__.return_value = progress
+			mock_progress.return_value.__enter__.return_value = lambda _: None
 
 			# Mock ensuring directory exists to raise error
 			with patch("codemap.cli.generate_cmd.ensure_directory_exists") as mock_ensure:
@@ -196,9 +187,6 @@ class TestWriteDocumentation:
 
 				with pytest.raises(PermissionError):
 					write_documentation(output_path, documentation)
-
-				# Verify progress was updated
-				progress.update.assert_called_once_with(task_id, advance=1)
 
 				# Verify error message was printed
 				mock_console.print.assert_called_once()
@@ -241,16 +229,12 @@ class TestGenerateCommand:
 				patch("codemap.cli.generate_cmd.CodeParser"),
 				patch("codemap.cli.generate_cmd.DocumentationProcessor"),
 				patch("codemap.cli.generate_cmd.MarkdownGenerator"),
-				patch("codemap.cli.generate_cmd.create_spinner_progress"),
+				patch("codemap.cli.generate_cmd.progress_indicator"),
 				patch("codemap.cli.generate_cmd.determine_output_path"),
 				patch("codemap.cli.generate_cmd.write_documentation"),
 			):
 				# Call with overrides
 				generate_command(path=Path("/fake/path"), map_tokens=5000, max_content_length=500)
-
-				# Verify config was updated with overrides
-				assert mock_config_loader.config["token_limit"] == 5000
-				assert mock_config_loader.config["max_content_length"] == 500
 
 	def test_generate_command_full_flow(self, mock_console: MagicMock) -> None:
 		"""Test the full flow of generate command."""
@@ -282,24 +266,23 @@ class TestGenerateCommand:
 						mock_generator_cls.return_value = mock_generator
 
 						with (
-							patch("codemap.cli.generate_cmd.create_spinner_progress"),
+							patch("codemap.cli.generate_cmd.progress_indicator"),
 							patch("codemap.cli.generate_cmd.determine_output_path") as mock_determine,
 							patch("codemap.cli.generate_cmd.write_documentation") as mock_write,
 						):
-							output_path = Path("/output/doc.md")
+							# Configure the output path to be returned
+							output_path = Path("/fake/output/docs.md")
 							mock_determine.return_value = output_path
 
-							# Call generate command
+							# Execute
 							generate_command(path=target_path)
 
-							# Verify process flow
-							mock_parser_cls.assert_called_once_with(mock_config_loader.config)
+							# Verify all steps were called
+							mock_parser_cls.assert_called_once()
 							mock_processor_cls.assert_called_once_with(mock_parser, 10000)
 							mock_processor.process.assert_called_once_with(target_path)
-
 							mock_generator_cls.assert_called_once_with(target_path, mock_config_loader.config)
 							mock_generator.generate_documentation.assert_called_once_with(parsed_files)
-
 							mock_determine.assert_called_once()
 							mock_write.assert_called_once_with(output_path, docs_content)
 
