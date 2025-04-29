@@ -136,7 +136,7 @@ tasks:
   pre-commit:
     desc: Run pre-commit hooks
     cmds:
-      - task: format
+      - task: format:ruff
   
   pre-push:
     desc: Run pre-push hooks
