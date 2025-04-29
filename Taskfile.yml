@@ -136,6 +136,7 @@ tasks:
   pre-commit:
     desc: Run pre-commit hooks
     cmds:
+      - task: lint:fix-unsafe
       - task: format:ruff
   
   pre-push:
