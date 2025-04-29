@@ -49,7 +49,13 @@ from codemap.git.utils import (
 	validate_repo_path,
 )
 from codemap.llm.utils import create_client
-from codemap.utils.cli_utils import exit_with_error, progress_indicator, setup_logging, show_error, show_warning
+from codemap.utils.cli_utils import (
+	exit_with_error,
+	progress_indicator,
+	setup_logging,
+	show_error,
+	show_warning,
+)
 from codemap.utils.config_loader import ConfigLoader
 
 # Constants
