@@ -116,10 +116,10 @@ APPROVED: Yes
 			footers = self.linter.parser.parse_footers(footers_str)
 			# Verify we parsed the footers correctly
 			assert len(footers) > 0
-			assert any(f["token"] == "ISSUE" for f in footers)  # noqa: S105
-			assert any(f["token"] == "REVIEWED-BY" for f in footers)  # noqa: S105
-			assert any(f["token"] == "TRACKING" for f in footers)  # noqa: S105
-			assert any(f["token"] == "APPROVED" for f in footers)  # noqa: S105
+			assert any(f["token"] == "ISSUE" for f in footers)
+			assert any(f["token"] == "REVIEWED-BY" for f in footers)
+			assert any(f["token"] == "TRACKING" for f in footers)
+			assert any(f["token"] == "APPROVED" for f in footers)
 
 	def test_special_characters(self) -> None:
 		"""Test with special characters in various parts of the commit message."""
