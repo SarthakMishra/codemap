@@ -89,8 +89,13 @@ class TestConfigLoader(FileSystemTestBase):
 
 		create_file_content(self.config_file, yaml.dump(invalid_config))
 
-		with pytest.raises(ConfigError, match="token_limit must be an integer"):
-			ConfigLoader(str(self.config_file))
+		# ConfigLoader no longer validates types during loading,
+		# it just merges the values as-is
+		config_loader = ConfigLoader(str(self.config_file))
+
+		# Verify that the "invalid" values were loaded as strings
+		assert config_loader.config["token_limit"] == "not_a_number"
+		assert config_loader.config["use_gitignore"] == "not_a_boolean"
 
 	def test_config_merging(self) -> None:
 		"""Test merging custom config with default config."""
@@ -107,14 +112,21 @@ class TestConfigLoader(FileSystemTestBase):
 
 	def test_nonexistent_config_file(self) -> None:
 		"""Test handling of nonexistent config file."""
-		with pytest.raises(FileNotFoundError, match="Config file not found:"):
-			ConfigLoader("/nonexistent/config.yml")
+		nonexistent_path = "/nonexistent/config.yml"
+
+		# During initialization, ConfigLoader now just warns about nonexistent files
+		# but doesn't raise exceptions
+		config_loader = ConfigLoader(nonexistent_path)
+
+		# Verify that default config was used
+		assert config_loader.config["token_limit"] == DEFAULT_CONFIG["token_limit"]
+		assert config_loader.config["use_gitignore"] == DEFAULT_CONFIG["use_gitignore"]
 
 	def test_invalid_yaml_config(self) -> None:
 		"""Test handling of invalid YAML in config file."""
 		create_file_content(self.config_file, "invalid: yaml: content: :")
 
-		with pytest.raises(yaml.YAMLError, match="mapping values are not allowed here"):
+		with pytest.raises(ConfigError, match="mapping values are not allowed here"):
 			ConfigLoader(str(self.config_file))
 
 	def test_get_commit_hooks(self, mock_yaml_loader: Mock, tmp_path: Path) -> None:
@@ -135,8 +147,8 @@ commit:
 		# Create loader with mocked yaml loader
 		with patch("builtins.open", mock_open(read_data=config_content)):
 			loader = ConfigLoader(config_file=str(config_file))
-			# Test get_commit_hooks returns the configured value
-			assert loader.get_commit_hooks() is True
+			# Test get_bypass_hooks returns the configured value
+			assert loader.get_bypass_hooks() is True
 
 		# Test with bypass_hooks explicitly set to false
 		yaml_data = {"token_limit": 5000, "commit": {"bypass_hooks": False}}
@@ -150,7 +162,7 @@ commit:
 		config_file.write_text(config_content)
 		with patch("builtins.open", mock_open(read_data=config_content)):
 			loader = ConfigLoader(config_file=str(config_file))
-			assert loader.get_commit_hooks() is False
+			assert loader.get_bypass_hooks() is False
 
 		# Test with commit section but no bypass_hooks (should default to False)
 		yaml_data = {"token_limit": 5000, "commit": {"strategy": "semantic"}}
@@ -164,7 +176,7 @@ commit:
 		config_file.write_text(config_content)
 		with patch("builtins.open", mock_open(read_data=config_content)):
 			loader = ConfigLoader(config_file=str(config_file))
-			assert loader.get_commit_hooks() is False
+			assert loader.get_bypass_hooks() is False
 
 		# Test with no commit section (should default to False)
 		yaml_data = {"token_limit": 5000}
@@ -176,4 +188,4 @@ token_limit: 5000
 		config_file.write_text(config_content)
 		with patch("builtins.open", mock_open(read_data=config_content)):
 			loader = ConfigLoader(config_file=str(config_file))
-			assert loader.get_commit_hooks() is False
+			assert loader.get_bypass_hooks() is False
