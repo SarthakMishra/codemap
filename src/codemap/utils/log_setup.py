@@ -13,6 +13,8 @@ import logging.handlers
 
 from rich.console import Console
 from rich.logging import RichHandler
+from rich.rule import Rule
+from rich.text import Text
 
 from codemap.utils.directory_manager import get_directory_manager
 
@@ -80,14 +82,14 @@ def setup_logging(
 			)
 
 			# More detailed formatting for file logs
-			file_formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+			file_formatter = logging.Formatter("\n%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 			file_handler.setFormatter(file_formatter)
 			file_handler.setLevel(log_level)
 			root_logger.addHandler(file_handler)
 
-			logging.getLogger(__name__).debug("Log file: {log_path}")
+			logging.getLogger(__name__).debug(f"Log file: {log_path}")
 		except (PermissionError, FileNotFoundError) as e:
-			console.print(f"[yellow]Warning: Could not set up file logging: {e}[/yellow]")
+			console.print(f"\n[yellow]Warning: Could not set up file logging: {e}[/yellow]")
 
 
 def setup_daemon_logging(log_name: str | None = None, is_verbose: bool = False) -> None:
@@ -131,3 +133,37 @@ def log_environment_info() -> None:
 
 	except Exception:
 		logger.exception("Error logging environment info: %s")
+
+
+def display_error_summary(error_message: str) -> None:
+	"""
+	Display an error summary with a divider and a title.
+
+	Args:
+	        error_message: The error message to display
+
+	"""
+	title = Text("Error Summary", style="bold red")
+
+	console.print()
+	console.print(Rule(title, style="red"))
+	console.print(f"\n{error_message}\n")
+	console.print(Rule(style="red"))
+	console.print()
+
+
+def display_warning_summary(warning_message: str) -> None:
+	"""
+	Display a warning summary with a divider and a title.
+
+	Args:
+	        warning_message: The warning message to display
+
+	"""
+	title = Text("Warning Summary", style="bold yellow")
+
+	console.print()
+	console.print(Rule(title, style="yellow"))
+	console.print(f"\n{warning_message}\n")
+	console.print(Rule(style="yellow"))
+	console.print()

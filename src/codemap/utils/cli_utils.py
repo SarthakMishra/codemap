@@ -7,9 +7,12 @@ import logging
 import os
 from typing import TYPE_CHECKING, Self
 
+import typer
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
+
+from codemap.utils.log_setup import display_error_summary, display_warning_summary
 
 if TYPE_CHECKING:
 	from collections.abc import Callable, Iterator
@@ -229,3 +232,47 @@ def progress_indicator(
 		# Reset spinner state if we were using spinner style
 		if style == "spinner":
 			spinner_state.is_active = False
+
+
+def show_error(message: str, exception: Exception | None = None) -> None:
+	"""
+	Display an error summary with standardized formatting.
+
+	Args:
+	        message: The error message to display
+	        exception: Optional exception that caused the error
+
+	"""
+	error_text = message
+	if exception:
+		error_text += f"\n\nDetails: {exception!s}"
+		logger.exception("Error occurred", exc_info=exception)
+
+	display_error_summary(error_text)
+
+
+def show_warning(message: str) -> None:
+	"""
+	Display a warning summary with standardized formatting.
+
+	Args:
+	        message: The warning message to display
+
+	"""
+	display_warning_summary(message)
+
+
+def exit_with_error(message: str, exit_code: int = 1, exception: Exception | None = None) -> None:
+	"""
+	Display an error message and exit.
+
+	Args:
+	        message: Error message to display
+	        exit_code: Exit code to use
+	        exception: Optional exception that caused the error
+
+	"""
+	show_error(message, exception)
+	if exception is None:
+		raise typer.Exit(exit_code)
+	raise typer.Exit(exit_code) from exception
