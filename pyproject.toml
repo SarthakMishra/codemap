@@ -138,6 +138,7 @@ ignore = [
     "COM812",  # Use a constant for the message in a raise statement
     "TC001",  # Move application import into a type-checking block
     "ERA001", # Found commented-out code
+    "G004", # Logging statement uses f-string
     # Disable rules that conflict with tab indentation
     "E101",  # Indentation contains mixed spaces and tabs
     "W191",  # indentation contains tabs
@@ -146,7 +147,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108"]
+"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 "src/codemap/utils/pr_strategies.py" = ["ARG002"]  # Allow unused arguments in strategy interface methods
 
