@@ -12,7 +12,6 @@ import questionary
 import typer
 from rich.panel import Panel
 
-from codemap.analyzer.tree_parser import CodeParser
 from codemap.daemon.command import start_daemon
 from codemap.processor import ProcessingPipeline
 from codemap.processor.embedding.models import EmbeddingConfig
@@ -179,10 +178,6 @@ def init_command(
 
 			# Ensure project cache directory
 			dir_manager.get_project_cache_dir(create=True)
-			advance(1)
-
-			# Initialize parser to check it's working
-			CodeParser()
 			advance(1)
 
 		console.print("\n✨ CodeMap initialized successfully!")
