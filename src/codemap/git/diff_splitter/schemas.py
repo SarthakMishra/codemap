@@ -1,16 +1,7 @@
 """Schema definitions for diff splitting."""
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Any
-
-
-class SplitStrategy(str, Enum):
-	"""Strategy for splitting diffs into logical chunks."""
-
-	FILE = "file"  # Split by file
-	HUNK = "hunk"  # Split by change hunk
-	SEMANTIC = "semantic"  # Split by semantic meaning
 
 
 @dataclass
@@ -21,6 +12,12 @@ class DiffChunk:
 	content: str
 	description: str | None = None
 	is_llm_generated: bool = False
+	filtered_files: list[str] | None = None
+
+	def __post_init__(self) -> None:
+		"""Initialize default values."""
+		if self.filtered_files is None:
+			self.filtered_files = []
 
 
 @dataclass
@@ -31,6 +28,7 @@ class DiffChunkData:
 	content: str
 	description: str | None = None
 	is_llm_generated: bool = False
+	filtered_files: list[str] | None = None
 
 	@classmethod
 	def from_chunk(cls, chunk: DiffChunk) -> "DiffChunkData":
@@ -40,12 +38,17 @@ class DiffChunkData:
 			content=chunk.content,
 			description=chunk.description,
 			is_llm_generated=chunk.is_llm_generated,
+			filtered_files=chunk.filtered_files,
 		)
 
 	def to_chunk(self) -> DiffChunk:
 		"""Convert DiffChunkData to a DiffChunk."""
 		return DiffChunk(
-			files=self.files, content=self.content, description=self.description, is_llm_generated=self.is_llm_generated
+			files=self.files,
+			content=self.content,
+			description=self.description,
+			is_llm_generated=self.is_llm_generated,
+			filtered_files=self.filtered_files,
 		)
 
 	def to_dict(self) -> dict[str, Any]:
@@ -55,4 +58,5 @@ class DiffChunkData:
 			"content": self.content,
 			"description": self.description,
 			"is_llm_generated": self.is_llm_generated,
+			"filtered_files": self.filtered_files,
 		}

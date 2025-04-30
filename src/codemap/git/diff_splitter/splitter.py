@@ -1,7 +1,6 @@
 """Diff splitting implementation for CodeMap."""
 
 import logging
-import os
 import re
 from pathlib import Path
 from typing import cast
@@ -11,11 +10,16 @@ import numpy as np
 from codemap.git.utils import GitDiff
 from codemap.utils.cli_utils import console, loading_spinner
 
-from .constants import MODEL_NAME
-from .schemas import DiffChunk, SplitStrategy
-from .strategies import EmbeddingModel, FileSplitStrategy, HunkSplitStrategy, SemanticSplitStrategy
+from .constants import MAX_FILE_SIZE_FOR_LLM, MAX_LOG_DIFF_SIZE, MODEL_NAME
+from .schemas import DiffChunk
+from .strategies import EmbeddingModel, SemanticSplitStrategy
+from .utils import (
+	calculate_semantic_similarity,
+	filter_valid_files,
+	get_language_specific_patterns,
+	is_test_environment,
+)
 from .utils import extract_code_from_diff as _extract_code_from_diff
-from .utils import filter_valid_files
 
 logger = logging.getLogger(__name__)
 
@@ -153,73 +157,85 @@ class DiffSplitter:
 			cls._model_available = False
 			return False
 
-	def split_diff(self, diff: GitDiff, strategy: str | SplitStrategy | None = None) -> list[DiffChunk]:
+	def split_diff(self, diff: GitDiff) -> tuple[list[DiffChunk], list[str]]:
 		"""
-		Split a diff into logical chunks.
+		Split a diff into logical chunks using semantic splitting.
 
 		Args:
 		    diff: GitDiff object to split
-		    strategy: Strategy to use for splitting (FILE, HUNK, or SEMANTIC)
 
 		Returns:
-		    List of DiffChunk objects
+		    Tuple of (List of DiffChunk objects based on semantic analysis, List of filtered large files)
+
+		Raises:
+		    ValueError: If semantic splitting is not available or fails
 
 		"""
-		if not diff.content and not diff.files:
-			return []
+		filtered_large_files = []
 
-		# Check if we're in a test environment
-		is_test_environment = "PYTEST_CURRENT_TEST" in os.environ
+		if not diff.content and not diff.files:
+			return [], filtered_large_files
+
+		# In test environments, log the diff content for debugging
+		if is_test_environment():
+			logger.debug("Processing diff in test environment with %d files", len(diff.files) if diff.files else 0)
+			if diff.content and len(diff.content) < MAX_LOG_DIFF_SIZE:  # Only log short diffs to avoid spamming logs
+				logger.debug("Diff content: %s", diff.content)
+
+		# Check for excessively large diff content and handle appropriately
+		if diff.content and len(diff.content) > MAX_FILE_SIZE_FOR_LLM:
+			logger.warning("Diff content is very large (%d bytes). Processing might be limited.", len(diff.content))
+
+			# Try to extract file names directly from the diff content for large diffs
+			file_list = re.findall(r"diff --git a/(.*?) b/(.*?)$", diff.content, re.MULTILINE)
+			if file_list:
+				logger.info("Extracted %d files from large diff content", len(file_list))
+				files_to_process = [f[1] for f in file_list]  # Use the "b" side of each diff
+
+				# Override diff.files with extracted file list to bypass content processing
+				diff.files = files_to_process
+
+				# Optional: Clear the content to avoid processing it
+				original_content_size = len(diff.content)
+				diff.content = ""
+				logger.info("Cleared %d bytes of diff content to avoid payload limits", original_content_size)
 
 		# Process files in the diff
 		if diff.files:
-			diff.files = filter_valid_files(diff.files, is_test_environment)
+			diff.files, large_files = filter_valid_files(diff.files, is_test_environment())
+			filtered_large_files.extend(large_files)
 
 		if not diff.files:
 			logger.warning("No valid files to process after filtering")
-			return []
+			return [], filtered_large_files
 
-		# Convert string strategy to enum if needed
-		if isinstance(strategy, str):
-			try:
-				strategy = SplitStrategy(strategy)
-			except ValueError:
-				logger.warning("Invalid strategy: %s. Using SEMANTIC instead.", strategy)
-				strategy = SplitStrategy.SEMANTIC
+		# Set up availability flags if not already set
+		cls = type(self)
+		cls._sentence_transformers_available = (
+			cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
+		)
 
-		# Use semantic strategy by default
-		if strategy is None:
-			strategy = SplitStrategy.SEMANTIC
-
-		# Apply the selected strategy
-		if strategy == SplitStrategy.FILE:
-			file_strategy = FileSplitStrategy()
-			return file_strategy.split(diff)
-
-		if strategy == SplitStrategy.HUNK:
-			hunk_strategy = HunkSplitStrategy()
-			return hunk_strategy.split(diff)
-
-		# SEMANTIC
-		# Check if we need to load the model for semantic strategy
-		if strategy == SplitStrategy.SEMANTIC:
-			# Set up availability flags if not already set
-			cls = type(self)
-			cls._sentence_transformers_available = (
-				cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
+		if not cls._sentence_transformers_available:
+			msg = (
+				"Semantic splitting is not available. sentence-transformers package is required. "
+				"Install with: pip install sentence-transformers numpy"
 			)
+			raise ValueError(msg)
 
-			if cls._sentence_transformers_available:
-				# Try to load the model if sentence-transformers is available
-				with loading_spinner("Loading embedding model..."):
-					cls._model_available = cls._model_available or cls._check_model_availability()
+		# Try to load the model
+		with loading_spinner("Loading embedding model..."):
+			cls._model_available = cls._model_available or cls._check_model_availability()
 
-			# Create the semantic strategy with the model if available
-			return self._split_semantic(diff)
+		if not cls._model_available:
+			msg = (
+				"Semantic splitting failed: embedding model could not be loaded. "
+				"Check logs for details or try a different model."
+			)
+			raise ValueError(msg)
 
-		# Fallback to file strategy if we somehow reach here
-		file_strategy = FileSplitStrategy()
-		return file_strategy.split(diff)
+		# Use semantic splitting
+		chunks = self._split_semantic(diff)
+		return chunks, filtered_large_files
 
 	def _extract_code_from_diff(self, diff_content: str) -> tuple[str, str]:
 		"""
@@ -248,7 +264,9 @@ class DiffSplitter:
 		"""
 		# Extract language-specific patterns
 		extension = Path(file_path).suffix.lower()
-		patterns = self._get_language_specific_patterns(extension)
+
+		# Get language-specific patterns
+		patterns = get_language_specific_patterns(extension.lstrip("."))
 
 		if not patterns:
 			logger.debug("No language patterns found for %s, using basic splitting", extension)
@@ -316,7 +334,7 @@ class DiffSplitter:
 		    diff: GitDiff object to split
 
 		Returns:
-		    List of DiffChunk objects
+		    List of DiffChunk objects based on code structure analysis
 
 		"""
 		if not diff.content or not diff.files:
@@ -325,19 +343,19 @@ class DiffSplitter:
 		file_path = diff.files[0] if len(diff.files) == 1 else None
 
 		if not file_path:
-			# If multiple files, use basic file-based splitting
-			logger.debug("Multiple files in diff, using file-based splitting")
-			file_strategy = FileSplitStrategy()
-			return file_strategy.split(diff)
+			# For multiple files, create a single chunk per file using list comprehension
+			logger.debug("Multiple files in diff, creating one chunk per file")
+			return [
+				DiffChunk(
+					files=[file],
+					content=f"File: {file}\n{diff.content}",
+					description=f"Changes in {file}",
+				)
+				for file in diff.files
+			]
 
 		# Try semantic splitting based on language structures
 		semantic_chunks = self._semantic_hunk_splitting(file_path, diff.content)
-
-		if len(semantic_chunks) <= 1:
-			# Fallback to hunk-based splitting if semantic splitting produced only one chunk
-			logger.debug("Semantic splitting produced only one chunk, using hunk-based splitting")
-			hunk_strategy = HunkSplitStrategy()
-			return hunk_strategy.split(diff)
 
 		# Create DiffChunk objects for each semantic chunk
 		diff_chunks = []
@@ -359,17 +377,19 @@ class DiffSplitter:
 		    diff: GitDiff object to split
 
 		Returns:
-		    List of DiffChunk objects
+		    List of DiffChunk objects based on semantic analysis
+
+		Raises:
+		    ValueError: If semantic splitting fails
 
 		"""
-		# First try basic semantic splitting
+		# Apply semantic splitting
 		semantic_strategy = SemanticSplitStrategy(embedding_model=cast("EmbeddingModel", self._embedding_model))
 		chunks = semantic_strategy.split(diff)
 
-		# If semantic strategy failed or produced only one chunk, try enhanced semantic splitting
-		if len(chunks) <= 1 and len(diff.files) == 1:
-			logger.debug("Basic semantic splitting produced only one chunk, trying enhanced semantic splitting")
-			return self._enhance_semantic_split(diff)
+		if not chunks:
+			msg = "Semantic splitting failed to produce any chunks. Check if the diff contains valid changes."
+			raise ValueError(msg)
 
 		return chunks
 
@@ -408,97 +428,12 @@ class DiffSplitter:
 			# Encode both texts
 			embeddings = cls._embedding_model.encode([text1, text2])
 
-			# Calculate cosine similarity
-			embedding1 = embeddings[0]
-			embedding2 = embeddings[1]
-
-			# Compute dot product
-			dot_product = np.dot(embedding1, embedding2)
-
-			# Compute magnitudes
-			magnitude1 = np.linalg.norm(embedding1)
-			magnitude2 = np.linalg.norm(embedding2)
-
-			# Compute cosine similarity
-			if magnitude1 > 0 and magnitude2 > 0:
-				similarity = dot_product / (magnitude1 * magnitude2)
-				return float(similarity)
-
-			return 0.0
+			# Calculate cosine similarity using utility function
+			return calculate_semantic_similarity(embeddings[0].tolist(), embeddings[1].tolist())
 
 		except (ValueError, TypeError, IndexError, RuntimeError) as e:
 			logger.warning("Error calculating semantic similarity: %s", e)
 			return 0.0
-
-	def _get_language_specific_patterns(self, extension: str) -> list[str]:
-		"""
-		Get regex patterns for semantic boundaries based on language.
-
-		Args:
-		    extension: File extension
-
-		Returns:
-		    List of regex patterns
-
-		"""
-		# Define language-specific patterns for semantic boundaries
-		patterns = {
-			".py": [
-				r"^import\s+.*",  # Import statements
-				r"^from\s+.*",  # From imports
-				r"^class\s+\w+",  # Class definitions
-				r"^def\s+\w+",  # Function definitions
-				r"^if\s+__name__\s*==\s*['\"]__main__['\"]",  # Main block
-			],
-			".js": [
-				r"^import\s+.*",  # ES6 imports
-				r"^const\s+\w+\s*=\s*require",  # CommonJS imports
-				r"^function\s+\w+",  # Function declarations
-				r"^const\s+\w+\s*=\s*function",  # Function expressions
-				r"^class\s+\w+",  # Class declarations
-				r"^export\s+",  # Exports
-			],
-			".java": [
-				r"^import\s+.*",  # Import statements
-				r"^public\s+class",  # Public class
-				r"^private\s+class",  # Private class
-				r"^(public|private|protected)(\s+static)?\s+\w+\s+\w+\(",  # Methods
-			],
-			".go": [
-				r"^import\s+",  # Import statements
-				r"^func\s+",  # Function definitions
-				r"^type\s+\w+\s+struct",  # Struct definitions
-			],
-			".rb": [
-				r"^require\s+",  # Requires
-				r"^class\s+",  # Class definitions
-				r"^def\s+",  # Method definitions
-				r"^module\s+",  # Module definitions
-			],
-			".php": [
-				r"^namespace\s+",  # Namespace declarations
-				r"^use\s+",  # Use statements
-				r"^class\s+",  # Class definitions
-				r"^(public|private|protected)\s+function",  # Methods
-			],
-			".ts": [
-				r"^import\s+.*",  # Imports
-				r"^export\s+",  # Exports
-				r"^interface\s+",  # Interfaces
-				r"^type\s+",  # Type definitions
-				r"^class\s+",  # Classes
-				r"^function\s+",  # Functions
-				r"^const\s+\w+\s*=\s*",  # Constants
-			],
-			".cs": [
-				r"^using\s+",  # Using directives
-				r"^namespace\s+",  # Namespace declarations
-				r"^(public|private|protected|internal)\s+class",  # Classes
-				r"^(public|private|protected|internal)(\s+static)?\s+\w+\s+\w+\(",  # Methods
-			],
-		}
-
-		return patterns.get(extension, [])
 
 	@classmethod
 	def encode_chunks(cls, chunks: list[str]) -> dict[str, np.ndarray]:
