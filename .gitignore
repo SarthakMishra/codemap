@@ -69,4 +69,4 @@ models/qodo_embed_m2v/model.safetensors
 models/qodo_embed_m2v/tokenizer.json
 
 # CodeMap cache
-.codemap_cache/
+.codemap_cache
