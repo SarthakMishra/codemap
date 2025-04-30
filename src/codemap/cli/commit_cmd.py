@@ -748,30 +748,52 @@ def process_all_chunks(
 	generator: CommitMessageGenerator,
 ) -> int:
 	"""
-	Process all chunks interactively.
+	Process all diff chunks.
 
 	Args:
 	    options: Commit options
 	    chunks: List of diff chunks
-	    generator: Message generator to use
+	    generator: CommitMessageGenerator instance
 
 	Returns:
-	    Exit code (0 for success)
+	    Exit code (0 for success, 1 for failure)
 
 	"""
-	for i, chunk in enumerate(chunks):
-		context = ChunkContext(
-			chunk=chunk,
-			index=i,
-			total=len(chunks),
-			generator=generator,
-			mode=options.generation_mode,
-		)
+	# Short circuit if there aren't any chunks
+	if not chunks:
+		logger.debug("No chunks to process")
+		return 0
 
-		if process_chunk_interactively(context) == "exit":
-			return 0
+	# If not interactive or we only have one chunk, process non-interactively
+	if len(chunks) == 1:
+		chunk = chunks[0]
+		print_chunk_summary(chunk, 0)
+		message, is_valid = generate_commit_message(chunk, generator, options.generation_mode)
 
-	console.print("[green]✓[/green] All changes committed!")
+		if not is_valid:
+			show_error("Generated commit message is not valid")
+			return 1
+
+		console.print(f"Generated message: {message}")
+
+		if options.commit:
+			_commit_with_message(chunk, message)
+		else:
+			console.print("[yellow]Skipping commit (commit=False)[/yellow]")
+	else:
+		# Process multiple chunks in interactive mode
+		for i, chunk in enumerate(chunks):
+			context = ChunkContext(
+				chunk=chunk,
+				index=i,
+				total=len(chunks),
+				generator=generator,
+				mode=options.generation_mode,
+			)
+
+			if process_chunk_interactively(context) == "exit":
+				return 0
+
 	return 0
 
 
@@ -863,27 +885,54 @@ def _run_commit_command(config: RunConfig) -> int:
 			# Get changes from Git
 			splitter = DiffSplitter(repo_path)  # Now guaranteed to be a Path, not None
 			chunks = []
+			all_filtered_files = []
 
 			# Process staged changes
 			staged_diff = get_staged_diff()
 			if staged_diff.files:
-				staged_chunks = splitter.split_diff(staged_diff)
+				staged_chunks, filtered_staged_files = splitter.split_diff(staged_diff)
 				chunks.extend(staged_chunks)
+				all_filtered_files.extend(filtered_staged_files)
 
 			# Process unstaged changes
 			if not chunks or not config.staged_only:
 				unstaged_diff = get_unstaged_diff()
 				if unstaged_diff.files:
-					unstaged_chunks = splitter.split_diff(unstaged_diff)
+					unstaged_chunks, filtered_unstaged_files = splitter.split_diff(unstaged_diff)
 					chunks.extend(unstaged_chunks)
+					all_filtered_files.extend(filtered_unstaged_files)
 
 		# Check if there are any chunks
-		if not chunks:
+		if not chunks and not all_filtered_files:
 			console.print("[yellow]No changes to commit[/yellow]")
 			return 0
 
+		# Report filtered files if any
+		if all_filtered_files:
+			console.print(
+				Panel(
+					f"[yellow]Some files were excluded from the commit due to their size:[/yellow]\n"
+					f"{chr(10).join('- ' + f for f in all_filtered_files)}",
+					title="⚠️ Warning: Large Files Excluded",
+					border_style="yellow",
+				)
+			)
+
+			# If we only had filtered files and no valid chunks, show error
+			if not chunks:
+				console.print("[red]All modified files were too large to process. No changes will be committed.[/red]")
+				return 1
+
 		# Process chunks
-		return process_all_chunks(options, chunks, generator)
+		exit_code = process_all_chunks(options, chunks, generator)
+
+		# If we successfully committed something but had filtered files, show a mixed success message
+		if exit_code == 0 and all_filtered_files:
+			console.print("[green]✓[/green] Changes committed, but some files were excluded (see warning above)")
+		elif exit_code == 0:
+			console.print("[green]✓[/green] All changes committed!")
+
+		return exit_code
 	except (ValueError, RuntimeError, TypeError) as e:
 		show_error(str(e))
 		return 1
