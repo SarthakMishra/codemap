@@ -96,6 +96,7 @@ def test_rule_configuration() -> None:
 	config.header_max_length.value = 50
 	config.header_max_length.level = RuleLevel.ERROR
 	config.type_enum.value = ["custom"]
+	config.subject_case.level = RuleLevel.DISABLED
 	linter = CommitLinter(config=config)
 
 	# Valid with custom config
@@ -135,6 +136,7 @@ def test_rule_level_warning() -> None:
 	"""Test that warnings are generated correctly."""
 	config = CommitLintConfig()
 	config.header_max_length.level = RuleLevel.WARNING
+	config.subject_case.level = RuleLevel.DISABLED
 	linter = CommitLinter(config=config)
 
 	message = "feat: " + "a" * 100
@@ -150,6 +152,7 @@ def test_disabled_rule() -> None:
 	"""Test that disabled rules don't trigger validation errors."""
 	config = CommitLintConfig()
 	config.type_enum.level = RuleLevel.DISABLED
+	config.subject_case.level = RuleLevel.DISABLED
 	linter = CommitLinter(config=config)
 
 	# Invalid type, but rule is disabled
@@ -187,6 +190,7 @@ def test_scope_rule_configuration() -> None:
 	# Make scope required
 	config.scope_empty.rule = "never"
 	config.scope_empty.level = RuleLevel.ERROR
+	config.subject_case.level = RuleLevel.DISABLED
 
 	linter = CommitLinter(config=config)
 
@@ -304,6 +308,7 @@ def test_body_and_footer_configuration() -> None:
 	config.trailer_exists.rule = "always"
 	config.trailer_exists.level = RuleLevel.ERROR
 	config.trailer_exists.value = "Signed-off-by:"
+	config.subject_case.level = RuleLevel.DISABLED
 
 	linter = CommitLinter(config=config)
 

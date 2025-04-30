@@ -95,9 +95,9 @@ class TestLoadPromptTemplate:
 
 	def test_load_prompt_template_not_exists(self) -> None:
 		"""Test loading a prompt template that doesn't exist."""
-		with patch("codemap.cli.commit_cmd.console") as mock_console:
+		with patch("codemap.cli.commit_cmd.show_warning") as mock_show_warning:
 			assert _load_prompt_template("/nonexistent/path.txt") is None
-			mock_console.print.assert_called_once()
+			mock_show_warning.assert_called_once()
 
 	def test_load_prompt_template_none(self) -> None:
 		"""Test loading with None path."""
@@ -177,9 +177,18 @@ class TestPerformCommit:
 	def test_perform_commit_with_file_checks(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit with file checks."""
 		# Directly mock _commit_changes which is actually called
-		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit:
-			# Configure mock for success
-			mock_commit.return_value = True
+		# Updated: Patch the functions called by the refactored _perform_commit
+		# Target the command module where _perform_commit is defined
+		with (
+			patch("codemap.git.commit_generator.command.stage_files") as mock_stage,
+			patch("codemap.git.commit_generator.command.commit_only_files") as mock_commit,
+			# Patch Path.exists to simulate files being present
+			patch("pathlib.Path.exists", return_value=True),
+			# Patch run_git_command used by stage_files (called within commit_only_files)
+			patch("codemap.git.utils.run_git_command"),
+		):
+			# Configure the mock for success
+			mock_commit.return_value = []  # Simulate successful commit
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -189,15 +198,25 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is True
-			mock_commit.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			mock_stage.assert_called_once_with(mock_diff_chunk.files)
+			mock_commit.assert_called_once_with(mock_diff_chunk.files, "feat: Test commit", ignore_hooks=False)
 
 	def test_perform_commit_with_other_files(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit when there are other files."""
 		# Modern implementation may not call _check_other_files or handle_other_files
 		# Directly mock _commit_changes which is actually called
-		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit:
+		# Updated: Patch the functions called by the refactored _perform_commit
+		# Target the command module where _perform_commit is defined
+		with (
+			patch("codemap.git.commit_generator.command.stage_files") as mock_stage,
+			patch("codemap.git.commit_generator.command.commit_only_files") as mock_commit,
+			# Patch Path.exists to simulate files being present
+			patch("pathlib.Path.exists", return_value=True),
+			# Patch run_git_command used by stage_files (called within commit_only_files)
+			patch("codemap.git.utils.run_git_command"),
+		):
 			# Configure the mock for success
-			mock_commit.return_value = True
+			mock_commit.return_value = []  # Simulate successful commit
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -207,15 +226,28 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is True
-			mock_commit.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			mock_stage.assert_called_once_with(mock_diff_chunk.files)
+			mock_commit.assert_called_once_with(mock_diff_chunk.files, "feat: Test commit", ignore_hooks=False)
 
 	def test_perform_commit_failure(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit failure."""
 		# Directly mock _commit_changes which is actually called
-		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit:
-			# Configure the mock for failure
-			mock_commit.return_value = False
+		# Updated: Patch the functions called by the refactored _perform_commit
+		# Simulate failure by having commit_only_files raise an exception
+		# Target the command module where _perform_commit is defined
+		from codemap.git.utils import GitError
 
+		with (
+			patch("codemap.git.commit_generator.command.stage_files") as mock_stage,
+			patch(
+				"codemap.git.commit_generator.command.commit_only_files", side_effect=GitError("Commit failed")
+			) as mock_commit,
+			patch("codemap.cli.commit_cmd.console.print") as mock_print,  # Patch console where error is printed
+			# Patch Path.exists to simulate files being present
+			patch("pathlib.Path.exists", return_value=True),
+			# Patch run_git_command used by stage_files (called within commit_only_files)
+			patch("codemap.git.utils.run_git_command"),
+		):
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
 
@@ -224,7 +256,13 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is False
-			mock_commit.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			mock_stage.assert_called_once_with(mock_diff_chunk.files)
+			mock_commit.assert_called_once_with(mock_diff_chunk.files, "feat: Test commit", ignore_hooks=False)
+			# Verify error message was printed (Error is printed within _perform_commit in the command module)
+			# The test setup might need adjustment if UI/console handling changed
+			# For now, assume the patched console.print is still relevant if the error propagates
+			mock_print.assert_called_once()
+			assert "Error during commit: Commit failed" in mock_print.call_args[0][0]
 
 
 @pytest.mark.unit
@@ -285,11 +323,11 @@ def test_load_prompt_template_success(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_prompt_template_nonexistent() -> None:
 	"""Test loading prompt template with nonexistent file."""
-	with patch("codemap.cli.commit_cmd.console") as mock_console:
+	with patch("codemap.cli.commit_cmd.show_warning") as mock_show_warning:
 		result = _load_prompt_template("/nonexistent/path.txt")
 		assert result is None
-		mock_console.print.assert_called_once()
-		assert "Warning" in mock_console.print.call_args[0][0]
+		mock_show_warning.assert_called_once()
+		assert "Could not load prompt template" in mock_show_warning.call_args[0][0]
 
 
 @pytest.mark.unit
