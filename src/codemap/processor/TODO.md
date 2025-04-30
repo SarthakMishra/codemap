@@ -1,0 +1,4 @@
+- let the commit command operate on git diffs as it's already doing. No need to integrate with processor
+- remove lsp entirely too complicated to maintain.
+- use tree-sitter to generate metadata on the file level not on the chunk level, cache this data and keep updating it every time any codemap cmd is called.
+- remove the git analysis to make the data even simpler.
