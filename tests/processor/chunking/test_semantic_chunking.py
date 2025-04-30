@@ -326,7 +326,7 @@ from ..models import User, Product
 			mock_git.return_value = ""
 
 			# Call split_diff which uses _split_semantic under the hood
-			chunks = self.splitter.split_diff(diff)
+			chunks, _ = self.splitter.split_diff(diff)
 
 			# Verify
 			assert mock_split.called
