@@ -47,7 +47,7 @@ class ConfigManager:
 				"enable_lsp": True,
 				"max_workers": 4,
 				"cache_dir": ".codemap_cache",
-				"embedding_model": "Qodo/Qodo-Embed-1-1.5B",
+				"embedding_model": "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
 				"batch_size": 32,
 				"ignored_patterns": [
 					"**/.git/**",
