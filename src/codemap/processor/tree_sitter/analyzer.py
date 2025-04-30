@@ -231,6 +231,20 @@ class TreeSitterAnalyzer:
 		if dependencies:
 			result["dependencies"] = dependencies
 
+		# Extract function calls if the entity is a function or method
+		calls = []
+		if entity_type in (EntityType.FUNCTION, EntityType.METHOD):
+			body_node = handler.get_body_node(node)
+			if body_node:
+				try:
+					calls = handler.extract_calls(body_node, content_bytes)
+				except (AttributeError, IndexError, UnicodeDecodeError, ValueError) as e:
+					logger.warning("Failed to extract calls for %s: %s", name or "<anonymous>", e)
+
+		# Add calls only if they exist
+		if calls:
+			result["calls"] = calls
+
 		# Process child nodes
 		body_node = handler.get_body_node(node)
 		children_to_process = handler.get_children_to_process(node, body_node)

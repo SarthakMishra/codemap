@@ -33,10 +33,10 @@ logger = logging.getLogger(__name__)
 class LODLevel(Enum):
 	"""Enumeration of Level of Detail levels."""
 
-	NAMES = 1  # Just entity names (classes, functions, etc.)
-	DOCS = 2  # Names with docstrings
-	SIGNATURES = 3  # Names, docstrings, and signatures
-	FULL = 4  # Complete implementation
+	SIGNATURES = 1  # Top-level entity names, docstrings, and signatures
+	STRUCTURE = 2  # All entity signatures, indented structure
+	DOCS = 3  # Level 2 + Docstrings for all entities
+	FULL = 4  # Level 3 + Full implementation content
 
 
 @dataclass
@@ -81,13 +81,13 @@ class LODGenerator:
 		"""Initialize the LOD generator."""
 		self.analyzer = TreeSitterAnalyzer()
 
-	def generate_lod(self, file_path: Path, level: LODLevel = LODLevel.NAMES) -> LODEntity | None:
+	def generate_lod(self, file_path: Path, level: LODLevel = LODLevel.STRUCTURE) -> LODEntity | None:
 		"""
 		Generate LOD representation for a file.
 
 		Args:
 		    file_path: Path to the file to analyze
-		    level: Level of detail to generate
+		    level: Level of detail to generate (default changed to STRUCTURE)
 
 		Returns:
 		    LODEntity representing the file, or None if analysis failed
@@ -105,16 +105,19 @@ class LODGenerator:
 			logger.warning(f"Failed to analyze {file_path}")
 			return None
 
-		# Convert analysis result to LOD
-		return self._convert_to_lod(analysis_result, level)
+		# Convert analysis result to LOD, passing the file_path
+		return self._convert_to_lod(analysis_result, level, file_path)
 
-	def _convert_to_lod(self, analysis_result: dict[str, Any], level: LODLevel) -> LODEntity:
+	def _convert_to_lod(
+		self, analysis_result: dict[str, Any], level: LODLevel, file_path: Path | None = None
+	) -> LODEntity:
 		"""
 		Convert tree-sitter analysis to LOD format.
 
 		Args:
 		    analysis_result: Tree-sitter analysis result
 		    level: Level of detail to generate
+		    file_path: Path to the file being analyzed
 
 		Returns:
 		    LODEntity representation
@@ -139,19 +142,25 @@ class LODGenerator:
 			language=analysis_result.get("language", ""),
 		)
 
-		# Add details based on LOD level
+		# Add file_path to metadata for top-level entities
+		if file_path:
+			entity.metadata["file_path"] = str(file_path)
+
+		# Add details based on LOD level (updated comparisons)
 		if level.value >= LODLevel.DOCS.value:
 			entity.docstring = analysis_result.get("docstring", "")
 
+		# Signature is needed for SIGNATURES (1), STRUCTURE (2), DOCS (3), FULL (4)
 		if level.value >= LODLevel.SIGNATURES.value:
 			# Extract signature from content if available
 			content = analysis_result.get("content", "")
 			entity.signature = self._extract_signature(content, entity_type, entity.language)
 
-		if level.value >= LODLevel.FULL.value:
+		# Content is needed for FULL (4)
+		if level.value >= LODLevel.FULL.value or entity_type == EntityType.COMMENT:
 			entity.content = analysis_result.get("content", "")
 
-		# Process children recursively
+		# Process children recursively (without passing file_path)
 		children = analysis_result.get("children", [])
 		for child in children:
 			child_entity = self._convert_to_lod(child, level)
@@ -160,6 +169,8 @@ class LODGenerator:
 		# Add any additional metadata
 		if "dependencies" in analysis_result:
 			entity.metadata["dependencies"] = analysis_result["dependencies"]
+		if "calls" in analysis_result:
+			entity.metadata["calls"] = analysis_result["calls"]
 
 		return entity
 

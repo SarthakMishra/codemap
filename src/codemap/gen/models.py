@@ -15,3 +15,4 @@ class GenConfig:
 	max_content_length: int
 	include_tree: bool
 	semantic_analysis: bool
+	include_entity_graph: bool = True

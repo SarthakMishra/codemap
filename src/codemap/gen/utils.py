@@ -18,45 +18,52 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 
 	Args:
 	    target_path: Root path
-	    filtered_paths: List of filtered paths
+	    filtered_paths: List of filtered **absolute** paths within target_path
 
 	Returns:
 	    Tree representation as string
 
 	"""
+	# Build a nested dictionary representing the file structure
+	tree = {}
+	for abs_path in filtered_paths:
+		# Ensure we only process paths within the target_path
+		try:
+			rel_path = abs_path.relative_to(target_path)
+		except ValueError:
+			continue  # Skip paths not under target_path
+
+		parts = rel_path.parts
+		current_level = tree
+		for i, part in enumerate(parts):
+			if i == len(parts) - 1:  # Last part (file or final directory)
+				current_level[part] = "file" if abs_path.is_file() else "dir"
+			else:
+				if part not in current_level:
+					current_level[part] = {}
+				current_level = current_level[part]
+				# Handle case where a file might exist with the same name as a directory part
+				if not isinstance(current_level, dict):
+					break  # Stop processing this path if structure is inconsistent
+
+	# Recursive function to generate formatted tree lines
 	tree_lines = []
 
-	# Get relative paths sorted by directory/file
-	rel_paths = [p.relative_to(target_path) for p in filtered_paths]
-	sorted_paths = sorted(rel_paths, key=lambda p: (p.parent, not p.parent.is_dir(), p.name))
+	def format_level(level: dict, prefix: str = "") -> None:
+		items = sorted(level.keys())
+		for i, name in enumerate(items):
+			connector = "└── " if i == len(items) - 1 else "├── "
+			item_type = level[name]
 
-	# Track current directory level
-	current_dirs = []
+			if isinstance(item_type, dict):  # It's a directory
+				tree_lines.append(f"{prefix}{connector}{name}/")
+				new_prefix = prefix + ("    " if i == len(items) - 1 else "│   ")
+				format_level(item_type, new_prefix)
+			else:  # It's a file
+				tree_lines.append(f"{prefix}{connector}{name}")
 
-	for path in sorted_paths:
-		# Get path components
-		parts = path.parts
-
-		# Determine depth of common parent
-		common_depth = 0
-		for depth, (current, part) in enumerate(zip(current_dirs, parts[:-1], strict=False)):
-			if current != part:
-				break
-			common_depth = depth + 1
-
-		# Remove directories not in current path
-		current_dirs = current_dirs[:common_depth]
-
-		# Add new directories
-		for new_dir in parts[common_depth:-1]:
-			indent = "  " * len(current_dirs)
-			tree_lines.append(f"{indent}└── {new_dir}/")
-			current_dirs.append(new_dir)
-
-		# Add file
-		if path.is_file():
-			indent = "  " * len(current_dirs)
-			tree_lines.append(f"{indent}└── {parts[-1]}")
+	# Start formatting from the root
+	format_level(tree)
 
 	return "\n".join(tree_lines)
 

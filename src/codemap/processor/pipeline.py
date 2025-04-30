@@ -184,12 +184,23 @@ class ProcessingPipeline:
 			# Store in cache
 			if lod_entity:
 				self.processed_files[file_path] = lod_entity
+				logger.debug("Successfully generated LOD entity for %s", file_path)
+			else:
+				logger.warning("LODGenerator returned None for %s (file might be unsupported or empty)", file_path)
 
 			return lod_entity
 
 		except Exception:
 			logger.exception("Error processing file %s", file_path)
 			return None
+		finally:
+			# Log final status (redundant with above but good for overview)
+			status = (
+				"succeeded (added to cache)"
+				if file_path in self.processed_files
+				else "failed or skipped (not in cache)"
+			)
+			logger.debug("Final processing status for %s: %s", file_path, status)
 
 	def batch_process(self, paths: list[str | Path], level: LODLevel | None = None) -> None:
 		"""
@@ -262,10 +273,6 @@ class ProcessingPipeline:
 			if requested_level == LODLevel.DOCS and existing_entity.docstring:
 				return existing_entity
 
-			# If level is NAMES, any entity will do
-			if requested_level == LODLevel.NAMES:
-				return existing_entity
-
 		# Process synchronously in this case
 		return self.process_file_sync(file_path, requested_level)
 
@@ -302,7 +309,7 @@ class ProcessingPipeline:
 		return len(all_files)
 
 	def get_repository_structure(
-		self, root_path: Path | None = None, level: LODLevel = LODLevel.NAMES
+		self, root_path: Path | None = None, level: LODLevel = LODLevel.STRUCTURE
 	) -> dict[str, Any]:
 		"""
 		Get a structured representation of the repository.
