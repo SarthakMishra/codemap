@@ -24,6 +24,14 @@ DEFAULT_CONFIG = {
 		"semantic_analysis": True,
 		# Level of Detail for code analysis (signatures, structure, docs, full)
 		"lod_level": "docs",
+		# Mermaid entities to include (lowercase EntityType names, e.g., module, class, function)
+		"mermaid_entities": ["module", "class", "function", "method", "constant", "variable", "import"],
+		# Mermaid relationships to include (declares, imports, calls)
+		"mermaid_relationships": ["declares", "imports", "calls"],
+		# Whether to show the legend in the Mermaid diagram
+		"mermaid_show_legend": True,
+		# Whether to remove nodes with no connections in the Mermaid diagram
+		"mermaid_remove_unconnected": False,
 	},
 	# Processor configuration
 	"processor": {

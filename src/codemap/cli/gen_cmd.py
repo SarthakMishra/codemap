@@ -101,6 +101,38 @@ LODLevelOpt = Annotated[
 	),
 ]
 
+MermaidEntitiesOpt = Annotated[
+	str | None,  # Comma-separated string
+	typer.Option(
+		"--mermaid-entities",
+		help="Comma-separated list of entity types to include in Mermaid graph (e.g., 'module,class,function')",
+	),
+]
+
+MermaidRelationshipsOpt = Annotated[
+	str | None,  # Comma-separated string
+	typer.Option(
+		"--mermaid-relationships",
+		help="Comma-separated list of relationship types to include in Mermaid graph (e.g., 'declares,imports,calls')",
+	),
+]
+
+MermaidLegendFlag = Annotated[
+	bool | None,
+	typer.Option(
+		"--mermaid-legend/--no-mermaid-legend",
+		help="Show/hide the legend in the Mermaid diagram",
+	),
+]
+
+MermaidUnconnectedFlag = Annotated[
+	bool | None,
+	typer.Option(
+		"--mermaid-unconnected/--no-mermaid-unconnected",
+		help="Remove/keep nodes with no connections in the Mermaid diagram",
+	),
+]
+
 
 def initialize_processor(repo_path: Path, config_data: dict) -> None:
 	"""
@@ -172,6 +204,10 @@ def gen_command(
 	] = False,
 	process: ProcessingFlag = True,
 	entity_graph: EntityGraphFlag = None,
+	mermaid_entities_str: MermaidEntitiesOpt = None,
+	mermaid_relationships_str: MermaidRelationshipsOpt = None,
+	mermaid_show_legend_flag: MermaidLegendFlag = None,
+	mermaid_remove_unconnected_flag: MermaidUnconnectedFlag = None,
 ) -> None:
 	"""
 	Generate code documentation.
@@ -242,6 +278,35 @@ def gen_command(
 				f"Invalid LOD level '{final_lod_str}'. Valid levels are: {', '.join(valid_names)}", exception=e
 			)
 
+		# Handle Mermaid config (CLI > Config > Default)
+		default_mermaid_entities = gen_config_data.get("mermaid_entities", [])
+		mermaid_entities = (
+			[e.strip().lower() for e in mermaid_entities_str.split(",")]
+			if mermaid_entities_str
+			else default_mermaid_entities
+		)
+
+		default_mermaid_relationships = gen_config_data.get("mermaid_relationships", [])
+		mermaid_relationships = (
+			[r.strip().lower() for r in mermaid_relationships_str.split(",")]
+			if mermaid_relationships_str
+			else default_mermaid_relationships
+		)
+
+		# Handle Mermaid legend visibility (CLI > Config > Default)
+		mermaid_show_legend = (
+			mermaid_show_legend_flag
+			if mermaid_show_legend_flag is not None
+			else gen_config_data.get("mermaid_show_legend", True)  # Default to True
+		)
+
+		# Handle Mermaid unconnected node removal (CLI > Config > Default)
+		mermaid_remove_unconnected = (
+			mermaid_remove_unconnected_flag
+			if mermaid_remove_unconnected_flag is not None
+			else gen_config_data.get("mermaid_remove_unconnected", False)  # Default to False
+		)
+
 		# Create generation config
 		gen_config = GenConfig(
 			lod_level=lod_level,
@@ -249,6 +314,12 @@ def gen_command(
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
 			include_entity_graph=include_entity_graph,
+			use_gitignore=gen_config_data.get("use_gitignore", True),
+			output_dir=Path(gen_config_data.get("output_dir", "documentation")),
+			mermaid_entities=mermaid_entities,
+			mermaid_relationships=mermaid_relationships,
+			mermaid_show_legend=mermaid_show_legend,
+			mermaid_remove_unconnected=mermaid_remove_unconnected,
 		)
 
 		# Determine output path
