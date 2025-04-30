@@ -24,7 +24,11 @@ from codemap.git.diff_splitter.schemas import DiffChunk
 from codemap.git.diff_splitter.splitter import DiffSplitter
 from codemap.git.pr_generator.generator import PRGenerator
 from codemap.git.pr_generator.schemas import PullRequest
-from codemap.git.pr_generator.strategies import branch_exists, create_strategy
+from codemap.git.pr_generator.strategies import (
+	WorkflowStrategy,
+	branch_exists,
+	create_strategy,
+)
 from codemap.git.pr_generator.utils import (
 	checkout_branch,
 	create_branch,
@@ -618,6 +622,11 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		show_error("Branch name cannot be None.")
 		return None
 
+	# Initialize base_branch before the try block
+	base_branch: str | None = None
+	# Workflow will be initialized after loading config
+	workflow: WorkflowStrategy | None = None
+
 	# Ask if user wants to create PR
 	if options.interactive:
 		create_pr = questionary.confirm(
@@ -634,35 +643,35 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 			config_loader = ConfigLoader(repo_root=options.repo_path)
 			pr_config = config_loader.config.get("pr", {})
 			workflow_strategy_name = config_loader.get_workflow_strategy()
+			# Assign the created strategy to the pre-initialized variable - MOVED LATER
+			# workflow = create_strategy(workflow_strategy_name)
 
-			# Determine base branch
-			base_branch = options.base_branch
+		# --- Create workflow strategy AFTER loading config ---
+		try:
+			workflow = create_strategy(workflow_strategy_name)
+		except ValueError as wf_exc:
+			# Exit if workflow strategy itself is invalid
+			_exit_with_error(f"Invalid workflow strategy '{workflow_strategy_name}': {wf_exc}", exception=wf_exc)
+			return None
+
+		# --- Now determine base branch using the guaranteed workflow object ---
+		base_branch = options.base_branch
+		if base_branch is None:
+			with contextlib.suppress(GitError):
+				base_branch = get_default_branch()
 			if base_branch is None:
-				with contextlib.suppress(GitError):
-					base_branch = get_default_branch()
-				if base_branch is None:
-					try:
-						# Create workflow strategy
-						workflow = create_strategy(workflow_strategy_name)
-						branch_type = ""
-						if "/" in branch_name:
-							branch_type = branch_name.split("/")[0]
-						base_branch = workflow.get_default_base(branch_type) or "main"
-					except Exception:
-						logger.exception("Failed to determine base branch from workflow strategy")
-						base_branch = "main"
+				# Fallback using workflow - workflow is guaranteed not None here
+				try:
+					branch_type = ""
+					if "/" in branch_name:
+						branch_type = branch_name.split("/")[0]
+					# Now safe to call get_default_base
+					base_branch = workflow.get_default_base(branch_type) or "main"
+				except Exception:  # Catch potential errors in get_default_base itself
+					logger.exception("Failed to determine base branch using workflow strategy")
+					base_branch = "main"
 
-		# ---> Add interactive base branch selection here <---
-		if options.interactive and not options.base_branch:  # Only ask if interactive and not provided via CLI
-			confirmed_base_branch = questionary.text(
-				"Enter the base branch for the PR:", default=base_branch, qmark="🎯"
-			).ask()
-
-			if not confirmed_base_branch:
-				show_error("Base branch selection cancelled.")
-				return None
-			base_branch = confirmed_base_branch
-		# <--- End interactive base branch selection --->
+		# ---> Moved interactive base branch selection inside the main try block <---
 
 		# Check for existing PR first
 		existing_pr = get_existing_pr(branch_name)
@@ -670,9 +679,39 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 			show_warning(f"PR #{existing_pr.number} already exists for this branch.")
 			return existing_pr
 
+		# ---> Interactive base branch selection moved here <---
+		if options.interactive and not options.base_branch:  # Only ask if interactive and not provided via CLI
+			remote_branches = workflow.get_remote_branches()
+			choices = []
+			if base_branch and base_branch in remote_branches:
+				# Add the detected/default branch first if it exists remotely
+				choices.append(base_branch)
+				remote_branches.remove(base_branch)  # Avoid duplication
+
+			choices.extend(sorted(remote_branches))  # Add remaining branches sorted
+
+			if not choices:
+				show_error("Could not find any remote branches to select as base.")
+				return None
+
+			selected_base_branch = questionary.select(
+				"Select the base branch for the PR:", choices=choices, qmark="🎯"
+			).ask()
+
+			if not selected_base_branch:
+				show_error("Base branch selection cancelled.")
+				return None
+			base_branch = selected_base_branch
+		# <--- End interactive base branch selection --->
+
 		# Get recent commits
 		try:
 			with progress_indicator("Fetching recent commits", style="spinner"):
+				# Ensure base_branch is a string before use
+				if base_branch is None:
+					# This case should ideally not be reached due to prior checks/defaults
+					msg = "Base branch could not be determined."
+					raise ValueError(msg)
 				commits = get_commit_messages(base_branch, branch_name)
 		except GitError as e:
 			show_error(f"Error fetching commits: {e}")
@@ -720,6 +759,10 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 					description = options.description
 			else:
 				# Generate description based on strategy
+				if base_branch is None:
+					# This case should ideally not be reached
+					msg = "Base branch could not be determined for description generation."
+					raise ValueError(msg)
 				description = _generate_description(
 					options,
 					description_strategy,
@@ -727,7 +770,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 					branch_name,
 					branch_type,
 					workflow_strategy_name,
-					base_branch,
+					base_branch,  # Now checked for None
 					content_config,
 				)
 
@@ -751,6 +794,10 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 			)
 
 			# Create the PR
+			if base_branch is None:
+				# This case should ideally not be reached
+				msg = "Base branch could not be determined for PR creation."
+				raise ValueError(msg)
 			pr = generator.create_pr(base_branch, branch_name, title, description)
 
 		# Show PR information
@@ -767,8 +814,29 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 
 		return pr
 	except GitError as e:
-		show_error(f"Error creating PR: {e}")
-		return None
+		error_message = str(e).lower()
+		# Use a placeholder if base_branch is None when formatting the error
+		display_base_branch = base_branch if base_branch is not None else "[unknown]"
+		# Check for specific error messages indicating unrelated histories
+		if "no history in common" in error_message or "unrelated histories" in error_message:
+			suggestion = (
+				f"\n[bold yellow]Suggestion:[/bold yellow]\n"
+				f"The branch '[cyan]{branch_name}[/cyan]' does not share "
+				f"a common history with the base branch '[cyan]{display_base_branch}[/cyan]'.\n"
+				f"To fix this, please rebase your branch onto '{display_base_branch}' manually:\n\n"
+				f"  1. `git checkout {display_base_branch}`\n"
+				f"  2. `git pull origin {display_base_branch}`\n"
+				f"  3. `git checkout {branch_name}`\n"
+				f"  4. `git rebase {display_base_branch}` (resolve any conflicts)\n"
+				f"  5. `git push --force-with-lease origin {branch_name}`\n\n"
+				f"After completing these steps, run 'codemap pr' again."
+			)
+			# Use exit_with_error but provide the suggestion as part of the message
+			_exit_with_error(f"Error creating PR: {e}{suggestion}", exception=e)
+		else:
+			# Handle other Git errors normally
+			show_error(f"Error creating PR: {e}")
+			return None  # Or re-raise depending on desired flow for other errors
 
 
 def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest | None:
