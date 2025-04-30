@@ -60,8 +60,8 @@ def test_lod_generator(sample_py_file: Path) -> None:
 	"""Test that LODGenerator can process a file at different levels."""
 	generator = LODGenerator()
 
-	# Test LOD level 1 (names only)
-	entity_l1 = generator.generate_lod(sample_py_file, LODLevel.NAMES)
+	# Test LOD level 1 (names/signatures)
+	entity_l1 = generator.generate_lod(sample_py_file, LODLevel.SIGNATURES)
 	assert entity_l1 is not None
 	assert entity_l1.entity_type == EntityType.MODULE
 	assert len(entity_l1.children) > 0

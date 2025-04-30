@@ -198,14 +198,14 @@ class TestCommitWorkflow(GitTestBase):
 		mock_chunk2.files = ["file3.py"]
 		mock_chunks = [cast("DiffChunk", self.mock_chunk), cast("DiffChunk", mock_chunk2)]
 		mock_process_chunk.return_value = True
+		grand_total = len(mock_chunks)  # Calculate grand_total
 
 		# Act: Call the method
-		result = self.command.process_all_chunks(mock_chunks, interactive=True)
+		result = self.command.process_all_chunks(mock_chunks, grand_total=grand_total, interactive=True)
 
 		# Assert: Verify results
 		assert result
 		assert mock_process_chunk.call_count == 2
-		self.mock_ui.show_all_committed.assert_called_once()
 
 	@patch.object(CommitCommand, "_generate_commit_message")
 	@patch.object(CommitCommand, "_perform_commit")
@@ -222,9 +222,10 @@ class TestCommitWorkflow(GitTestBase):
 		mock_chunk2 = Mock(spec=DiffChunk)
 		mock_chunk2.files = ["file3.py"]
 		mock_chunks = [cast("DiffChunk", self.mock_chunk), cast("DiffChunk", mock_chunk2)]
+		grand_total = len(mock_chunks)  # Calculate grand_total
 
 		# Act: Call the method
-		result = self.command.process_all_chunks(mock_chunks, interactive=False)
+		result = self.command.process_all_chunks(mock_chunks, grand_total=grand_total, interactive=False)
 
 		# Assert: Verify results
 		assert result

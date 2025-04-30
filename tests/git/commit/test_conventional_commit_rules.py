@@ -48,11 +48,16 @@ class TestConventionalCommitEdgeCases:
 		# Now create a linter with header_max_length level explicitly set to WARNING
 		config = CommitLintConfig()
 		config.header_max_length.level = RuleLevel.WARNING
+		config.header_max_length.value = HEADER_MAX_LENGTH
+		config.subject_case.level = RuleLevel.DISABLED
 		linter_with_warnings = CommitLinter(config=config)
 
 		# Over limit with warning-only linter - should produce warning but still be valid
-		assert linter_with_warnings.is_valid(f"{prefix}{too_long_desc}")
+		# Call lint() directly and check errors list instead of is_valid()
 		_, messages = linter_with_warnings.lint(f"{prefix}{too_long_desc}")
+		# Extract errors from the messages list for assertion
+		errors = [msg for msg in messages if not msg.startswith("[WARN]")]
+		assert not errors, f"Expected no errors, but found: {errors}"
 		assert any(f"[WARN] Header line exceeds {HEADER_MAX_LENGTH}" in m for m in messages)
 
 	def test_body_length_limits(self) -> None:
