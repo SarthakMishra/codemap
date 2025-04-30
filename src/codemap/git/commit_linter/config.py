@@ -146,7 +146,7 @@ class CommitLintConfig:
 		default_factory=lambda: Rule(
 			name="subject-case",
 			condition="subject is in case value",
-			rule="never",
+			rule="always",
 			value=["sentence-case", "start-case", "pascal-case", "upper-case"],
 		)
 	)

@@ -399,8 +399,10 @@ class CommitLinter:
 		# Check subject case
 		rule = self.config.subject_case
 		should_match = rule.rule == "always"
-		is_valid = CommitValidators.validate_case(subject, rule.value) == should_match
+		validation_result = CommitValidators.validate_case(subject, rule.value)
+		is_valid = validation_result == should_match
 		case_formats = rule.value if isinstance(rule.value, list) else [rule.value]
+
 		self._add_validation_message(
 			rule,
 			is_valid,

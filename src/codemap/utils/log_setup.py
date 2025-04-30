@@ -9,7 +9,6 @@ application, ensuring logs are stored in the appropriate directories.
 from __future__ import annotations
 
 import logging
-import logging.handlers
 
 from rich.console import Console
 from rich.logging import RichHandler
