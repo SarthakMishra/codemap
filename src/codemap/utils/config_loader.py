@@ -7,7 +7,6 @@ configuration settings.
 """
 
 import logging
-import os
 from pathlib import Path
 from typing import Any, TypeVar, cast
 
@@ -151,12 +150,6 @@ class ConfigLoader:
 				logger.exception(error_msg)
 				raise ConfigError(error_msg) from e
 
-		# Apply environment variable overrides
-		self._apply_env_overrides()
-
-		# Resolve any paths in the config
-		self._resolve_paths()
-
 		return self.config
 
 	def _merge_configs(self, base: dict[str, Any], override: dict[str, Any]) -> None:
@@ -173,55 +166,6 @@ class ConfigLoader:
 				self._merge_configs(base[key], value)
 			else:
 				base[key] = value
-
-	def _apply_env_overrides(self) -> None:
-		"""Apply environment variable overrides to configuration."""
-		# Look for environment variables in the form CODEMAP_SECTION_KEY
-		for env_var, value in os.environ.items():
-			if env_var.startswith("CODEMAP_"):
-				parts = env_var.lower().split("_")[1:]
-				if len(parts) >= MIN_ENV_VAR_PARTS:
-					section, key = parts[0], "_".join(parts[1:])
-
-					# Try to convert value to appropriate type
-					if value.lower() in ("true", "yes", "1"):
-						typed_value = True
-					elif value.lower() in ("false", "no", "0"):
-						typed_value = False
-					else:
-						try:
-							typed_value = int(value)
-						except ValueError:
-							try:
-								typed_value = float(value)
-							except ValueError:
-								typed_value = value
-
-					# Ensure section exists
-					if section not in self.config:
-						self.config[section] = {}
-
-					# Apply override
-					self.config[section][key] = typed_value
-					logger.debug("Applied environment override %s: %s", env_var, typed_value)
-
-	def _resolve_paths(self) -> None:
-		"""Resolve and expand any paths in the configuration."""
-		# Define paths that need resolution
-		path_keys = [
-			("server", "pid_file"),
-			("server", "log_file"),
-			("server", "socket_file"),
-			("storage", "data_dir"),
-			("storage", "cache_dir"),
-		]
-
-		for section, key in path_keys:
-			if section in self.config and key in self.config[section]:
-				path_str = self.config[section][key]
-				if isinstance(path_str, str):
-					resolved_path = Path(path_str).expanduser().resolve()
-					self.config[section][key] = str(resolved_path)
 
 	def get(self, key: str, default: T = None) -> T:
 		"""
@@ -312,17 +256,6 @@ class ConfigLoader:
 			logger.exception(error_msg)
 			raise ConfigError(error_msg) from e
 
-	# Helper methods for specific configuration sections
-	def get_commit_hooks(self) -> list[dict[str, Any]]:
-		"""
-		Get commit hooks configuration.
-
-		Returns:
-		        List[Dict[str, Any]]: List of commit hooks
-
-		"""
-		return self.get("git.commit_hooks", self.get("commit.hooks", []))
-
 	def get_bypass_hooks(self) -> bool:
 		"""
 		Get whether to bypass git hooks.
@@ -387,74 +320,27 @@ class ConfigLoader:
 		        Dict[str, Any]: LLM configuration
 
 		"""
-		# Check the standalone llm config first
+		# Get the LLM config from the top-level section
 		llm_config = self.get("llm", {})
 
-		# If no standalone config, check the nested commit.llm config
+		# If empty, use the default config
 		if not llm_config:
-			llm_config = self.get("commit.llm", {})
-
-		# If still empty, use the default config
-		if not llm_config:
-			llm_config = DEFAULT_CONFIG["commit"]["llm"]
+			llm_config = DEFAULT_CONFIG["llm"]
+			logger.debug("Using default LLM config from DEFAULT_CONFIG")
 
 		# Ensure we have the proper model format with a provider
-		model = llm_config.get("model", DEFAULT_CONFIG["commit"]["llm"]["model"])
-		if model and "/" not in model:
-			# Add openai/ prefix if provider is missing
-			llm_config["model"] = f"openai/{model}"
+		model = llm_config.get("model")
+		if model:
+			logger.debug("Using model from config: %s", model)
+			if "/" not in model:
+				# Add openai/ prefix if provider is missing
+				llm_config["model"] = f"openai/{model}"
+				logger.debug("Added openai/ prefix to model: %s", llm_config["model"])
+			else:
+				# Extract provider from model string to make it accessible in config
+				provider = model.split("/")[0].lower()
+				# Set provider explicitly in the config
+				llm_config["provider"] = provider
+				logger.debug("Extracted provider '%s' from model '%s'", provider, model)
 
 		return llm_config
-
-	def get_server_config(self) -> dict[str, Any]:
-		"""
-		Get consolidated server configuration.
-
-		Returns:
-		        dict[str, Any]: Server configuration
-
-		"""
-		return self.get("server", {})
-
-	def get_daemon_config(self) -> dict[str, Any]:
-		"""
-		Get daemon configuration from the server section.
-
-		Returns:
-		        dict[str, Any]: Daemon configuration
-
-		"""
-		server_config = self.get_server_config()
-
-		# Extract daemon-specific configuration from server
-		return {
-			"host": server_config.get("host", "127.0.0.1"),
-			"port": server_config.get("port", 8765),
-			"log_level": server_config.get("log_level", "info"),
-			"pid_file": server_config.get("pid_file", "~/.codemap/run/daemon.pid"),
-			"log_file": server_config.get("log_file", "~/.codemap/logs/daemon.log"),
-			"auto_start": server_config.get("auto_start", False),
-			"use_socket": server_config.get("use_socket", False),
-			"socket_file": server_config.get("socket_file", "~/.codemap/run/daemon.sock"),
-		}
-
-	def get_api_config(self) -> dict[str, Any]:
-		"""
-		Get API configuration from the server section.
-
-		Returns:
-		        dict[str, Any]: API configuration
-
-		"""
-		server_config = self.get_server_config()
-
-		# Extract API-specific configuration from server
-		return {
-			"host": server_config.get("host", "127.0.0.1"),
-			"port": server_config.get("port", 8765),
-			"allow_cors": server_config.get("allow_cors", True),
-			"cors_origins": server_config.get("cors_origins", ["*"]),
-			"max_connections": server_config.get("max_connections", 10),
-			"use_socket": server_config.get("use_socket", False),
-			"socket_file": server_config.get("socket_file", "~/.codemap/run/daemon.sock"),
-		}
