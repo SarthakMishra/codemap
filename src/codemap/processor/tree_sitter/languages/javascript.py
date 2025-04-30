@@ -451,3 +451,35 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 			logger.warning("Failed to decode JavaScript imports: %s", e)
 
 		return imported_names
+
+	def extract_calls(self, node: Node, content_bytes: bytes) -> list[str]:
+		"""
+		Extract names of functions/methods called within a JS node's scope.
+
+		Recursively searches for 'call_expression' nodes and extracts the function identifier.
+
+		Args:
+		    node: The tree-sitter node (e.g., function/method body)
+		    content_bytes: Source code content as bytes
+
+		Returns:
+		    List of called function/method names
+
+		"""
+		calls = []
+		for child in node.children:
+			if child.type == "call_expression":
+				function_node = child.child_by_field_name("function")
+				if function_node:
+					# Extract the identifier (e.g., funcName, obj.methodName)
+					try:
+						call_name = content_bytes[function_node.start_byte : function_node.end_byte].decode(
+							"utf-8", errors="ignore"
+						)
+						calls.append(call_name)
+					except UnicodeDecodeError:
+						pass  # Ignore decoding errors
+			# Recursively search deeper within non-call children
+			else:
+				calls.extend(self.extract_calls(child, content_bytes))
+		return list(set(calls))  # Return unique calls

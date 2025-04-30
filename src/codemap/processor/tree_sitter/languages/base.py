@@ -249,14 +249,28 @@ class LanguageSyntaxHandler(abc.ABC):
 	@abc.abstractmethod
 	def extract_imports(self, node: Node, content_bytes: bytes) -> list[str]:
 		"""
-		Extract imported module names from an import statement.
+		Extract imported dependency names from an import node.
 
 		Args:
-		    node: The tree-sitter node representing an import statement
+		    node: The tree-sitter node (should be an import type)
 		    content_bytes: Source code content as bytes
 
 		Returns:
-		    List of imported module names as strings
+		    List of imported names
+
+		"""
+
+	@abc.abstractmethod
+	def extract_calls(self, node: Node, content_bytes: bytes) -> list[str]:
+		"""
+		Extract names of functions/methods called within a node's scope.
+
+		Args:
+		    node: The tree-sitter node (e.g., function/method body)
+		    content_bytes: Source code content as bytes
+
+		Returns:
+		    List of called function/method names
 
 		"""
 
