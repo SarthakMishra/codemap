@@ -140,6 +140,8 @@ tasks:
         STAGED_FILES=$(git diff --name-only --cached --diff-filter=ACMR | grep -E '\.py$' | tr '\n' ' ')
         if [ -n "$STAGED_FILES" ]; then
           echo "Running checks on staged files: $STAGED_FILES"
+          uv run isort $STAGED_FILES
+          uv run docformatter $STAGED_FILES
           uv run ruff check --fix --unsafe-fixes $STAGED_FILES
           uv run ruff format $STAGED_FILES
           # Stage the files again in case they were modified
