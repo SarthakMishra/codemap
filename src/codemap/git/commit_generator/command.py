@@ -110,25 +110,34 @@ class CommitCommand:
 				logger.warning("Failed to stage all changes: %s", e)
 				# Continue with the process even if staging fails
 
-			# Get the staged diff which should now include all changes
-			staged = get_staged_diff()
+			# Get the list of staged files
+			staged_files_list = run_git_command(["git", "diff", "--cached", "--name-only"]).splitlines()
 
 			# If we have a lot of files, process them in smaller batches
 			# to avoid overwhelming the splitter
-			if len(staged.files) > MAX_FILES_BEFORE_BATCHING:
+			if len(staged_files_list) > MAX_FILES_BEFORE_BATCHING:
 				# Create smaller diffs with max 5-10 files each
-				logger.info("Processing %d files in smaller batches", len(staged.files))
-				for i in range(0, len(staged.files), 5):
-					batch_files = staged.files[i : i + 5]
+				logger.info("Processing %d files in smaller batches", len(staged_files_list))
+				# Use a smaller batch size, e.g., 5
+				batch_size = 5
+				for i in range(0, len(staged_files_list), batch_size):
+					batch_files = staged_files_list[i : i + batch_size]
+					if not batch_files:  # Skip empty batches
+						continue
+					# Get the specific diff content for this batch
+					batch_content = run_git_command(["git", "diff", "--cached", "--", *batch_files])
 					batch_diff = GitDiff(
 						files=batch_files,
-						content=staged.content,  # Keep same content for now
+						content=batch_content,  # Use batch-specific content
 						is_staged=True,
 					)
 					changes.append(batch_diff)
-			elif staged.files:
+			elif staged_files_list:
 				# If we have a reasonable number of files, process them as-is
-				changes.append(staged)
+				# Get the full staged diff content
+				full_staged_content = run_git_command(["git", "diff", "--cached"])
+				staged_diff = GitDiff(files=staged_files_list, content=full_staged_content, is_staged=True)
+				changes.append(staged_diff)
 
 			# We'll still check for any unstaged changes that might have been missed
 			unstaged = get_unstaged_diff()
@@ -374,12 +383,13 @@ class CommitCommand:
 				self.error_state = "failed"
 			return success
 
-	def process_all_chunks(self, chunks: list[DiffChunk], interactive: bool = True) -> bool:
+	def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
 		"""
 		Process all chunks interactively or automatically.
 
 		Args:
 		    chunks: List of diff chunks to process
+		    grand_total: The total number of chunks across all batches
 		    interactive: Whether to process interactively or automatically
 
 		Returns:
@@ -389,10 +399,13 @@ class CommitCommand:
 		i = 0
 		while i < len(chunks):
 			chunk = chunks[i]
+			# Calculate the absolute index based on the start of this list + current index
+			# Note: This assumes chunks are processed sequentially without modification to the list order
+			absolute_index = sum(len(c.files) for c in chunks[:i])  # Or a better way to track overall index
 
 			if interactive:
-				# Process chunk interactively
-				if not self._process_chunk(chunk, i, len(chunks)):
+				# Pass the grand_total for correct display
+				if not self._process_chunk(chunk, absolute_index + i, grand_total):
 					self.error_state = "aborted"
 					return False
 			else:
@@ -403,8 +416,8 @@ class CommitCommand:
 					return False
 
 			i += 1
-
-		self.ui.show_all_committed()
+		# Don't show "All changes committed" here, as it might be called per batch
+		# self.ui.show_all_committed()
 		return True
 
 	def run(self) -> bool:
@@ -419,41 +432,55 @@ class CommitCommand:
 
 		"""
 		try:
-			# Get all changes
+			# 1. Get all change groups (batches)
 			with loading_spinner("Analyzing repository changes..."):
-				changes = self._get_changes()
+				change_groups = self._get_changes()
 
-			if not changes:
+			if not change_groups:
 				self.ui.show_error("No changes to commit")
 				return False
 
-			# Process each change group (staged, unstaged, untracked)
-			for diff in changes:
-				# Check sentence-transformers availability first with a separate loading spinner
-				with loading_spinner("Checking semantic analysis capabilities..."):
-					# Force check of sentence-transformers availability
-					self.splitter._check_sentence_transformers_availability()  # noqa: SLF001
+			# 2. Generate all semantic chunks from all groups
+			all_semantic_chunks: list[DiffChunk] = []
+			all_filtered_files: list[str] = []
 
-				# Show a separate loading spinner for model loading if sentence-transformers is available
-				if self.splitter._sentence_transformers_available:  # noqa: SLF001
-					with loading_spinner("Loading embedding model..."):
-						# Force check of model availability which loads the model
-						self.splitter._check_model_availability()  # noqa: SLF001
+			with loading_spinner("Checking semantic analysis capabilities..."):
+				self.splitter._check_sentence_transformers_availability()  # noqa: SLF001
 
-				# Now proceed with organizing changes semantically
-				with loading_spinner("Organizing changes semantically..."):
-					chunks, filtered_large_files = self.splitter.split_diff(diff)
-					if filtered_large_files:
-						self.ui.show_error(
-							f"Skipped {len(filtered_large_files)} large files from analysis due to size limits."
-						)
+			if self.splitter._sentence_transformers_available:  # noqa: SLF001
+				with loading_spinner("Loading embedding model..."):
+					self.splitter._check_model_availability()  # noqa: SLF001
 
-				if not chunks:
-					continue
+			with loading_spinner("Organizing changes semantically..."):
+				for diff_group in change_groups:
+					chunks, filtered = self.splitter.split_diff(diff_group)
+					all_semantic_chunks.extend(chunks)
+					all_filtered_files.extend(filtered)
 
-				# Process all chunks
-				if not self.process_all_chunks(chunks):
+			# 3. Handle filtered files warning (only once)
+			if all_filtered_files:
+				self.ui.show_error(f"Skipped {len(all_filtered_files)} large files from analysis due to size limits.")
+
+			# 4. Check if there are any chunks to process
+			if not all_semantic_chunks:
+				if all_filtered_files:
+					self.ui.show_error("All files were too large or resulted in no processable chunks.")
+				else:
+					self.ui.show_error("No processable changes found.")  # Or a more specific message
+				return False
+
+			# 5. Process all collected semantic chunks together
+			grand_total = len(all_semantic_chunks)
+			i = 0
+			while i < grand_total:
+				chunk = all_semantic_chunks[i]
+				if not self._process_chunk(chunk, i, grand_total):
+					# _process_chunk handles setting error_state and returning False on abort/fail
 					return False
+				i += 1
+
+			# Show final success message only after all chunks are processed
+			self.ui.show_all_committed()
 
 		except typer.Exit:
 			# Make sure exit is marked as an intended abort

@@ -3,13 +3,13 @@
 from typing import Final
 
 # Chunk consolidation thresholds
-MIN_CHUNKS_FOR_CONSOLIDATION: Final = 4
-MAX_CHUNKS_BEFORE_CONSOLIDATION: Final = 8
+MIN_CHUNKS_FOR_CONSOLIDATION: Final = 2
+MAX_CHUNKS_BEFORE_CONSOLIDATION: Final = 20
 
 # Similarity thresholds
 MIN_NAME_LENGTH_FOR_SIMILARITY: Final = 3
-DEFAULT_SIMILARITY_THRESHOLD: Final = 0.7
-DIRECTORY_SIMILARITY_THRESHOLD: Final = 0.6
+DEFAULT_SIMILARITY_THRESHOLD: Final = 0.4
+DIRECTORY_SIMILARITY_THRESHOLD: Final = 0.3
 
 # Maximum size of diff content to log in debug mode
 MAX_LOG_DIFF_SIZE = 1000
@@ -51,4 +51,4 @@ DEFAULT_CODE_EXTENSIONS: Final = {
 EPSILON = 1e-10  # Small value for float comparisons
 
 # Group size limits
-MAX_FILES_PER_GROUP: Final = 5
+MAX_FILES_PER_GROUP: Final = 10

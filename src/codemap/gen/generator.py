@@ -4,22 +4,18 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from pathlib import Path
 
-from codemap.processor.analysis.tree_sitter.base import EntityType
-from codemap.processor.chunking.base import Chunk
+from codemap.processor.lod import LODEntity, LODLevel
+from codemap.processor.tree_sitter.base import EntityType
 
-from .compressor import SemanticCompressor
-from .models import DocFormat, GenConfig
-
-if TYPE_CHECKING:
-	from pathlib import Path
+from .models import GenConfig
 
 logger = logging.getLogger(__name__)
 
 
 class CodeMapGenerator:
-	"""Generates code documentation for LLM context or human-readable docs."""
+	"""Generates code documentation based on LOD (Level of Detail)."""
 
 	def __init__(self, config: GenConfig, output_path: Path) -> None:
 		"""
@@ -32,29 +28,28 @@ class CodeMapGenerator:
 		"""
 		self.config = config
 		self.output_path = output_path
-		self.compressor = SemanticCompressor(config.compression_strategy, config.mode)
 
-	def generate_llm_context(self, chunks: list[Chunk], metadata: dict) -> str:
+	def generate_documentation(self, entities: list[LODEntity], metadata: dict) -> str:
 		"""
-		Generate LLM-optimized context from the processed chunks.
+		Generate markdown documentation from the processed LOD entities.
 
 		Args:
-		    chunks: List of code chunks
+		    entities: List of LOD entities
 		    metadata: Repository metadata
 
 		Returns:
-		    Generated context as string
+		    Generated documentation as string
 
 		"""
-		# Compress chunks to fit within token limit
-		compressed_chunks = self.compressor.compress_chunks(chunks, self.config.token_limit)
-
-		# Generate markdown content for LLM consumption
 		content = []
 
-		# Add header with repository metadata
-		content.append("# Code Repository Documentation")
-		content.append(f"Generated on: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}")
+		# Add header with repository information
+		repo_name = metadata.get("name", "Repository")
+		content.append(f"# {repo_name} Documentation")
+		content.append(f"\nGenerated on: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}")
+
+		if "description" in metadata:
+			content.append("\n" + metadata.get("description", ""))
 
 		# Add repository statistics
 		if "stats" in metadata:
@@ -71,158 +66,76 @@ class CodeMapGenerator:
 			content.append(metadata["tree"])
 			content.append("```")
 
-		# Add code chunks
-		content.append("\n## Code Content")
-
-		for chunk in compressed_chunks:
-			location = chunk.metadata.location
-			content.append(f"\n### {chunk.full_name}")
-			content.append(f"File: {location.file_path}")
-			content.append(f"Lines: {location.start_line}-{location.end_line}")
-			content.append(f"Type: {chunk.metadata.entity_type.name}")
-
-			if chunk.metadata.description:
-				content.append(f"\nDescription: {chunk.metadata.description}")
-
-			content.append("\n```" + chunk.metadata.language)
-			content.append(chunk.content)
-			content.append("```")
-
-		return "\n".join(content)
-
-	def generate_human_docs(self, chunks: list[Chunk], metadata: dict) -> str:
-		"""
-		Generate human-readable documentation from the processed chunks.
-
-		Args:
-		    chunks: List of code chunks
-		    metadata: Repository metadata
-
-		Returns:
-		    Generated documentation as string
-
-		"""
-		# Generate documentation based on selected format
-		if self.config.doc_format == DocFormat.MARKDOWN:
-			return self._generate_markdown_docs(chunks, metadata)
-		if self.config.doc_format == DocFormat.MINTLIFY:
-			return self._generate_mintlify_docs()
-		if self.config.doc_format == DocFormat.MKDOCS:
-			return self._generate_mkdocs_docs()
-		if self.config.doc_format == DocFormat.MDX:
-			return self._generate_mdx_docs()
-
-		# Default to markdown if format not recognized
-		return self._generate_markdown_docs(chunks, metadata)
-
-	def _generate_markdown_docs(self, chunks: list[Chunk], metadata: dict) -> str:
-		"""
-		Generate markdown documentation.
-
-		Args:
-		    chunks: List of code chunks
-		    metadata: Repository metadata
-
-		Returns:
-		    Markdown documentation as string
-
-		"""
-		content = []
-
-		# Add header with repository information
-		repo_name = metadata.get("name", "Repository")
-		content.append(f"# {repo_name} Documentation")
-		content.append("\n" + metadata.get("description", ""))
-
 		# Add table of contents
 		content.append("\n## Table of Contents")
 
-		# Group chunks by file
-		files = {}
-		for chunk in chunks:
-			file_path = chunk.metadata.location.file_path
+		# Group entities by file
+		files: dict[Path, list[LODEntity]] = {}
+		for entity in entities:
+			file_path = Path(entity.metadata.get("file_path", ""))
+			if not file_path.name:
+				continue
+
 			if file_path not in files:
 				files[file_path] = []
-			files[file_path].append(chunk)
+			files[file_path].append(entity)
 
 		# Create TOC entries
 		for file_path in sorted(files.keys()):
 			rel_path = file_path.name
 			content.append(f"- [{rel_path}](#{rel_path.replace('.', '-')})")
 
-		# Add installation instructions if available
-		if "installation" in metadata:
-			content.append("\n## Installation")
-			content.append(metadata["installation"])
-
-		# Add usage instructions if available
-		if "usage" in metadata:
-			content.append("\n## Usage")
-			content.append(metadata["usage"])
-
 		# Add code documentation grouped by file
 		content.append("\n## Code Documentation")
 
-		for file_path, file_chunks in sorted(files.items()):
+		for file_path, file_entities in sorted(files.items()):
 			rel_path = file_path.name
 			content.append(f"\n### {rel_path}")
 
-			# Sort chunks by line number
-			sorted_chunks = sorted(file_chunks, key=lambda c: c.metadata.location.start_line)
+			# Sort entities by line number
+			sorted_entities = sorted(file_entities, key=lambda e: e.start_line)
 
-			for chunk in sorted_chunks:
-				if chunk.metadata.entity_type in (EntityType.CLASS, EntityType.FUNCTION, EntityType.METHOD):
-					content.append(f"\n#### {chunk.metadata.name}")
+			for entity in sorted_entities:
+				# Skip entities that aren't substantial code elements
+				if entity.entity_type not in (
+					EntityType.CLASS,
+					EntityType.FUNCTION,
+					EntityType.METHOD,
+					EntityType.MODULE,
+				):
+					continue
 
-					# Add description if available
-					if chunk.metadata.description:
-						content.append(f"\n{chunk.metadata.description}")
+				content.append(f"\n#### {entity.name}")
 
-					# Add code with syntax highlighting
-					content.append("\n```" + chunk.metadata.language)
-					content.append(chunk.content)
+				# Add description/docstring if available
+				if entity.docstring:
+					content.append(f"\n{entity.docstring}")
+
+				# Add signature if available (LOD level 3+)
+				if entity.signature:
+					content.append("\n```")
+					content.append(entity.signature)
 					content.append("```")
 
-		return "\n".join(content)
+				# Add implementation details based on LOD level
+				if self.config.lod_level == LODLevel.FULL and entity.content:
+					lang = entity.language or ""
+					content.append(f"\n```{lang}")
+					content.append(entity.content)
+					content.append("```")
 
-	def _generate_mintlify_docs(self) -> str:
-		"""
-		Generate Mintlify documentation.
+				# Process child entities if any
+				if entity.children:
+					for child in entity.children:
+						if child.entity_type in (EntityType.METHOD, EntityType.FUNCTION, EntityType.CLASS):
+							content.append(f"\n##### {child.name}")
 
-		Returns:
-		    Mintlify documentation as string
+							if child.docstring:
+								content.append(f"\n{child.docstring}")
 
-		"""
-		# Basic implementation, would be expanded in future
-		content = []
-		content.append("# Mintlify Documentation")
-		content.append("Support for Mintlify format will be implemented in a future release.")
-		return "\n".join(content)
+							if child.signature:
+								content.append("\n```")
+								content.append(child.signature)
+								content.append("```")
 
-	def _generate_mkdocs_docs(self) -> str:
-		"""
-		Generate MkDocs documentation.
-
-		Returns:
-		    MkDocs documentation as string
-
-		"""
-		# Basic implementation, would be expanded in future
-		content = []
-		content.append("# MkDocs Documentation")
-		content.append("Support for MkDocs format will be implemented in a future release.")
-		return "\n".join(content)
-
-	def _generate_mdx_docs(self) -> str:
-		"""
-		Generate MDX documentation.
-
-		Returns:
-		    MDX documentation as string
-
-		"""
-		# Basic implementation, would be expanded in future
-		content = []
-		content.append("# MDX Documentation")
-		content.append("Support for MDX format will be implemented in a future release.")
 		return "\n".join(content)
