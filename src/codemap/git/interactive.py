@@ -77,7 +77,7 @@ class CommitUI:
 		# Prepare diff content
 		panel_content = chunk.content
 		if not panel_content.strip():
-			panel_content = "[dim]No content diff available (e.g., new file or mode change)[/dim]"
+			panel_content = "No content diff available (e.g., new file or mode change)"
 
 		# Truncate to maximum of MAX_PREVIEW_LINES lines
 		content_lines = panel_content.splitlines()

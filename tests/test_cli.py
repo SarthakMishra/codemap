@@ -12,15 +12,15 @@ import pytest
 import yaml
 from typer.testing import CliRunner
 
-import codemap.cli_app
+import codemap.cli
 from codemap.config import DEFAULT_CONFIG
-from codemap.utils.file_utils import get_output_path as _get_output_path
+from codemap.gen.utils import determine_output_path as _determine_output_path
 from tests.base import FileSystemTestBase
 
 if TYPE_CHECKING:
 	from collections.abc import Generator
 
-app = codemap.cli_app.app
+app = codemap.cli.app
 
 runner = CliRunner()
 T = TypeVar("T")  # Generic type for return value of Path.open
@@ -252,11 +252,11 @@ class TestOutputPath(FileSystemTestBase):
 
 		# Act/Assert: Test with custom output path
 		custom_path = self.temp_dir / "custom/path.md"
-		assert _get_output_path(repo_root, custom_path, config) == custom_path
+		assert _determine_output_path(repo_root, custom_path, config) == custom_path
 
 		# Act/Assert: Test with config-based path - mock mkdir to avoid permission issues
 		with patch("pathlib.Path.mkdir") as mock_mkdir:
-			result = _get_output_path(repo_root, None, config)
+			result = _determine_output_path(repo_root, None, config)
 			assert result.parent == repo_root / "docs"
 			assert result.suffix == ".md"
 			assert "documentation_" in result.name  # Timestamp format
@@ -273,7 +273,7 @@ class TestOutputPath(FileSystemTestBase):
 		custom_path = sample_repo / "custom" / "docs.md"
 
 		# Act: Generate output path
-		result = _get_output_path(sample_repo, custom_path, DEFAULT_CONFIG)
+		result = _determine_output_path(sample_repo, custom_path, DEFAULT_CONFIG)
 
 		# Assert: Verify result matches custom path
 		assert result == custom_path
@@ -291,7 +291,7 @@ class TestOutputPath(FileSystemTestBase):
 		}
 
 		# Act: Generate output path
-		result = _get_output_path(sample_repo, None, config)
+		result = _determine_output_path(sample_repo, None, config)
 
 		# Assert: Verify directories were created
 		assert result.parent.exists()
@@ -315,7 +315,7 @@ class TestOutputPath(FileSystemTestBase):
 		with patch("codemap.utils.file_utils.datetime") as mock_datetime:
 			mock_datetime.now.return_value = current_time
 			mock_datetime.timezone = timezone  # Make sure timezone is accessible
-			result = _get_output_path(sample_repo, None, config)
+			result = _determine_output_path(sample_repo, None, config)
 
 			# Assert: Verify filename has correct timestamp
 			formatted_time = current_time.strftime("%Y%m%d_%H%M%S")

@@ -15,20 +15,21 @@ from codemap.git.diff_splitter.constants import (
 	MIN_NAME_LENGTH_FOR_SIMILARITY,
 	MODEL_NAME,
 )
-from codemap.git.diff_splitter.schemas import DiffChunk, DiffChunkData, SplitStrategy
+from codemap.git.diff_splitter.schemas import DiffChunk, DiffChunkData
 from codemap.git.diff_splitter.splitter import DiffSplitter
 from codemap.git.diff_splitter.strategies import (
 	BaseSplitStrategy,
 	FileSplitStrategy,
-	HunkSplitStrategy,
 	SemanticSplitStrategy,
 )
 from codemap.git.diff_splitter.utils import (
+	calculate_semantic_similarity,
 	create_chunk_description,
 	determine_commit_type,
 	extract_code_from_diff,
 	filter_valid_files,
 	get_language_specific_patterns,
+	is_test_environment,
 )
 
 __all__ = [
@@ -47,13 +48,13 @@ __all__ = [
 	"DiffChunkData",
 	"DiffSplitter",
 	"FileSplitStrategy",
-	"HunkSplitStrategy",
 	"SemanticSplitStrategy",
-	"SplitStrategy",
+	"calculate_semantic_similarity",
 	"create_chunk_description",
 	"determine_commit_type",
 	# Utility Functions
 	"extract_code_from_diff",
 	"filter_valid_files",
 	"get_language_specific_patterns",
+	"is_test_environment",
 ]

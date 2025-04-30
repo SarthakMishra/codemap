@@ -50,18 +50,35 @@ class LLMConfig:
 		# Extract provider from model if not explicitly provided
 		if not self.provider and "/" in self.model:
 			self.provider = self.model.split("/")[0].lower()
+			logger.debug("Extracted provider '%s' from model '%s'", self.provider, self.model)
 
 		# If provider is still not set, default to OpenAI
 		if not self.provider:
 			self.provider = "openai"
+			logger.debug("No provider found, defaulting to 'openai'")
 
 		# Load API keys from environment if not provided
 		if not self.api_keys:
 			self.api_keys = self._load_api_keys_from_env()
+			for provider in self.api_keys:
+				logger.debug("Loaded API key for provider: %s", provider)
 
 		# If specific api_key is provided, add it to api_keys
 		if self.api_key and self.provider:
 			self.api_keys[self.provider] = self.api_key
+			logger.debug("Added explicit API key for provider: %s", self.provider)
+
+		if self.provider:
+			env_var = ENV_VAR_MAP.get(self.provider)
+			logger.debug("Looking for API key in environment variable: %s", env_var)
+			if env_var:
+				key = os.environ.get(env_var)
+				if key:
+					logger.debug("Found API key in environment for provider: %s", self.provider)
+				else:
+					logger.warning(
+						"No API key found in environment for provider: %s (env var: %s)", self.provider, env_var
+					)
 
 	def _load_api_keys_from_env(self) -> dict[str, str]:
 		"""Load API keys from environment variables."""
@@ -79,17 +96,25 @@ class LLMConfig:
 	def get_api_key(self) -> str | None:
 		"""Get the API key for the configured provider."""
 		if not self.provider:
+			logger.warning("No provider configured, cannot get API key")
 			return None
 
 		# Try from loaded keys
 		if self.provider in self.api_keys:
+			logger.debug("Using API key from loaded keys for provider: %s", self.provider)
 			return self.api_keys[self.provider]
 
 		# Try from environment as a fallback
 		env_var = ENV_VAR_MAP.get(self.provider)
 		if env_var:
-			return os.environ.get(env_var)
+			key = os.environ.get(env_var)
+			if key:
+				logger.debug("Using API key from environment for provider: %s", self.provider)
+				return key
+			# If key is not found or is empty, log the warning
+			logger.warning("API key not found in environment for provider: %s (env var: %s)", self.provider, env_var)
 
+		logger.warning("No API key found for provider: %s", self.provider)
 		return None
 
 
@@ -115,10 +140,16 @@ def get_llm_config(
 	# Get LLM config from loader
 	llm_config_dict = config_loader.get_llm_config()
 
+	# Log the model being used
+	model = llm_config_dict.get("model", DEFAULT_MODEL)
+	logger.debug("Using model from config: %s", model)
+
 	# Apply overrides
 	for key, value in overrides.items():
 		if value is not None:  # Only override if value is not None
 			llm_config_dict[key] = value
+			if key == "model":
+				logger.debug("Overriding model with: %s", value)
 
 	# Create and return config object
 	return LLMConfig(

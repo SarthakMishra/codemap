@@ -249,8 +249,6 @@ def test_subject_rule_configuration() -> None:
 	# Valid - follows all rules (shorter subject to fit within max length)
 	message = "feat: This sentence-case subject ends with a period."
 	is_valid, messages = linter.lint(message)
-	if not is_valid:
-		pass
 	assert is_valid, f"Expected valid message but got errors: {messages}"
 
 	# Invalid - wrong case (lowercase)
@@ -269,8 +267,8 @@ def test_subject_rule_configuration() -> None:
 	message = "feat: This is a valid subject without a period"
 	is_valid, messages = linter.lint(message)
 	assert not is_valid
-	assert any("Subject must end with '.'" in msg for msg in messages) or any(
-		"Header must end with '.'" in msg for msg in messages
+	assert any("Subject must end with '.'." in msg for msg in messages) or any(
+		"Header must end with '.'." in msg for msg in messages
 	)
 
 	# Configure multiple valid cases

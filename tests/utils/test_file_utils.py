@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from codemap.utils.file_utils import count_tokens, get_output_path
+from codemap.gen.utils import determine_output_path
+from codemap.utils.file_utils import count_tokens
 from tests.base import FileSystemTestBase
 
 
@@ -46,7 +47,7 @@ class TestFileUtils(FileSystemTestBase):
 		config = {}
 
 		# Call function
-		result = get_output_path(repo_root, output_path, config)
+		result = determine_output_path(repo_root, output_path, config)
 
 		# Verify result
 		assert result == output_path
@@ -72,7 +73,7 @@ class TestOutputPath(FileSystemTestBase):
 		config = {"output_dir": "docs"}
 
 		# Call function
-		result = get_output_path(self.temp_dir, None, config)
+		result = determine_output_path(self.temp_dir, None, config)
 
 		# Verify result
 		expected_path = self.temp_dir / "docs" / "documentation_20240601_123456.md"
@@ -95,7 +96,7 @@ class TestOutputPath(FileSystemTestBase):
 			mock_now = mock_datetime.now.return_value
 			mock_now.strftime.return_value = "20240601_123456"
 
-			result = get_output_path(repo_root, output_path, config)
+			result = determine_output_path(repo_root, output_path, config)
 
 		# Verify result
 		expected_path = docs_dir / "documentation_20240601_123456.md"

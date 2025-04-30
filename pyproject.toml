@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codemap"
-version = "0.4.4"
+version = "0.1.0"
 description = "CLI tool that generates optimized markdown docs and streamline Git workflows"
 readme = "README.md"
 authors = [
@@ -32,6 +32,15 @@ dependencies = [
     "pandas>=2.2.3",
     "multilspy>=0.0.15",
     "pytest-mock>=3.14.0",
+    "python-daemon>=3.1.2",
+    "lockfile>=0.12.2",
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "pydantic>=2.7.0",
+    "pyxdg>=0.28",
+    "packaging>=24.2",
+    "requests-unixsocket>=0.4.1",
+    "pathspec>=0.12.1",
 ]
 
 [dependency-groups]
@@ -50,6 +59,13 @@ dev = [
     "python-semantic-release>=9.3.1",
     "radon>=6.0.1",
     "ruff>=0.11.6",
+]
+model2vec = [
+    "matplotlib[pyplot]>=3.10.1",
+    "model2vec[distill]>=0.4.1",
+    "psutil>=7.0.0",
+    "sentence-transformers>=4.1.0",
+    "transformers>=4.51.1",
 ]
 
 [tool.pyright]
@@ -90,7 +106,7 @@ venv = ".venv"
 extraPaths = ["src"]
 
 [project.scripts]
-codemap = "codemap.cli_app:main"
+codemap = "codemap.cli:main"
 
 [tool.pytest]
 testpaths = ["tests"]
@@ -130,6 +146,7 @@ ignore = [
     "COM812",  # Use a constant for the message in a raise statement
     "TC001",  # Move application import into a type-checking block
     "ERA001", # Found commented-out code
+    "G004", # Logging statement uses f-string
     # Disable rules that conflict with tab indentation
     "E101",  # Indentation contains mixed spaces and tabs
     "W191",  # indentation contains tabs
@@ -138,7 +155,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108"]
+"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
+"models/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
+"models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 "src/codemap/utils/pr_strategies.py" = ["ARG002"]  # Allow unused arguments in strategy interface methods
 

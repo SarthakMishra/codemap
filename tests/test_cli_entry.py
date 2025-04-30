@@ -1,4 +1,4 @@
-"""Tests for the cli_app module."""
+"""Tests for the cli module."""
 
 from unittest.mock import patch
 
@@ -16,15 +16,15 @@ class TestCliEntry(CLITestBase):
 		"""
 		Test the main function.
 
-		Tests that the main function in cli_app calls the app function and
-		returns its result.
+		Tests that the main function in cli calls the app function and returns
+		its result.
 
 		"""
-		with patch("codemap.cli_app.app") as mock_app:
+		with patch("codemap.cli.app") as mock_app:
 			mock_app.return_value = 0
 
 			# Import the module to get the main function
-			from codemap.cli_app import main
+			from codemap.cli import main
 
 			# Act: Call the main function
 			result = main()
@@ -42,14 +42,14 @@ class TestCliEntry(CLITestBase):
 
 		"""
 		# Arrange/Act: Import the module
-		import codemap.cli_app
+		import codemap.cli
 
 		# Assert: Check that the module has the expected attributes
-		assert hasattr(codemap.cli_app, "app")
-		assert hasattr(codemap.cli_app, "main")
+		assert hasattr(codemap.cli, "app")
+		assert hasattr(codemap.cli, "main")
 
 		# Check that app is a Typer instance
-		assert str(type(codemap.cli_app.app)).endswith("typer.main.Typer'>")
+		assert str(type(codemap.cli.app)).endswith("typer.main.Typer'>")
 
 	def test_cli_invoke(self) -> None:
 		"""

@@ -1,0 +1,13 @@
+{
+    "model_type": "model2vec",
+    "architectures": [
+        "StaticModel"
+    ],
+    "tokenizer_name": "Qodo/Qodo-Embed-1-1.5B",
+    "apply_pca": 384,
+    "apply_zipf": null,
+    "sif_coefficient": 0.0001,
+    "hidden_dim": 384,
+    "seq_length": 1000000,
+    "normalize": true
+}

@@ -17,9 +17,9 @@ if TYPE_CHECKING:
 	from collections.abc import Generator
 
 # Get app from the CLI module
-from codemap import cli_app
+from codemap import cli
 
-app = cli_app.app
+app = cli.app
 
 
 @pytest.fixture
@@ -625,76 +625,40 @@ class TestHandlePRCreation:
 			patch("codemap.cli.pr_cmd.get_commit_messages") as mock_get_commits,
 			patch("codemap.cli.pr_cmd._generate_title") as mock_generate_title,
 			patch("codemap.cli.pr_cmd._generate_description") as mock_generate_desc,
-			patch("codemap.cli.pr_cmd.loading_spinner") as mock_spinner,
-			patch("codemap.git.utils.run_git_command") as mock_run_git,
+			patch("codemap.utils.cli_utils.loading_spinner") as mock_spinner,
+			patch("codemap.git.utils.run_git_command"),
 		):
-			# Configure mocks
-			mock_config.return_value.get_workflow_strategy.return_value = "github-flow"
+			# Configure mock returns
+			mock_config.return_value.config = {"pr": {}}
+			mock_strategy.return_value.get_default_base.return_value = "main"
+			mock_pr_gen_instance = MagicMock()
+			mock_pr_generator.return_value = mock_pr_gen_instance
+			mock_pr_gen_instance.create_pr.return_value = MagicMock(number=123, url="fake_url")
 
-			# Set up PR config without branch mapping for the branch type
-			pr_config = {
-				"defaults": {"base_branch": "main", "feature_prefix": "feat/"},
-				"strategy": "github-flow",
-				"branch_mapping": {},  # Empty branch mapping
-				"generate": {"title_strategy": "commits", "description_strategy": "llm"},
-			}
-			mock_config.return_value.get_pr_config.return_value = pr_config
-			mock_config.return_value.get_content_generation_config.return_value = pr_config["generate"]
+			mock_get_commits.return_value = [  # Simulate some commits
+				{"hash": "123", "author": "A", "date": "D", "message": "msg1"}
+			]
+			mock_generate_title.return_value = "Chore Refactor Title"
+			mock_generate_desc.return_value = "Chore Refactor Description"
 
-			# Set up strategy
-			strategy = MagicMock()
-			strategy.detect_branch_type.return_value = "feature"
-			strategy.get_default_base.return_value = "main"
-			strategy.get_remote_branches.return_value = ["main", "develop", "staging"]
-			strategy.get_local_branches.return_value = ["chore/refactor", "main", "feature/test"]
-			mock_strategy.return_value = strategy
+			# Simulate user actions: select target branch, confirm title/desc/PR
+			mock_select.return_value.ask.return_value = "main"  # User selects main
+			mock_confirm.side_effect = [True, True, True]  # Confirm title, desc, PR
 
-			# Set up PR generator
-			pr_gen = MagicMock()
-			pr_gen.get_existing_pr.return_value = None
-			mock_pull_request = MagicMock()
-			mock_pull_request.number = 123
-			mock_pull_request.url = "https://github.com/user/repo/pull/123"
-			pr_gen.create_pr.return_value = mock_pull_request
-			mock_pr_generator.return_value = pr_gen
-
-			# Set up branch selection
-			mock_select.return_value.ask.side_effect = [
-				"develop",
-				"edit",
-			]  # First for branch selection, second for edit method
-			# Set up confirm to edit the title/description
-			mock_confirm.return_value.ask.side_effect = [False, True]  # No for title edit, Yes for description edit
-
-			# Other mocks
-			mock_generate_title.return_value = "Test PR title"
-			mock_generate_desc.return_value = "Test PR description"
-			mock_get_commits.return_value = ["commit1", "commit2"]
-			mock_run_git.return_value = ""
-
-			# Context manager for spinner
-			mock_spinner.return_value.__enter__.return_value = None
-
-			# Call the function under test
+			# Act: Call the function
 			result = _handle_pr_creation(options, "chore/refactor")
 
-		# Verify select was called (now we expect 2 calls - one for branch selection, one for edit method)
-		assert mock_select.call_count == 2
-		# First call should be for branch selection
-		assert mock_select.call_args_list[0][0][0] == "Select target branch for PR:"
-		# Second call should be for edit method
-		assert mock_select.call_args_list[1][0][0] == "Edit method:"
-
-		# Verify PR was created with the correct base branch
-		pr_gen.create_pr.assert_called_once()
-		call_args = pr_gen.create_pr.call_args[0]
-		assert call_args[0] == "develop"  # Base branch
-		assert call_args[1] == "chore/refactor"  # Head branch
-
-		# Make sure the result is correct
-		assert result is not None
-		assert result.number == 123
-		assert result.url == "https://github.com/user/repo/pull/123"
+			# Assert: Verify interactions
+			assert result is not None
+			assert mock_spinner.call_count >= 1
+			mock_get_commits.assert_called_once_with("main", "chore/refactor")
+			assert mock_generate_title.call_count == 1
+			assert mock_generate_desc.call_count == 1
+			assert mock_select.call_count == 1  # Called once to select target branch
+			assert mock_confirm.call_count == 3  # Confirm title, desc, PR
+			mock_pr_gen_instance.create_pr.assert_called_once()
+			# Verify PR was created with the selected base branch
+			assert mock_pr_gen_instance.create_pr.call_args[0][0] == "main"
 
 	def test_pr_display_panels(self, mock_git_utils: dict[str, Any]) -> None:
 		"""Test that PR title and description are displayed in panels."""
@@ -720,70 +684,56 @@ class TestHandlePRCreation:
 			patch("codemap.cli.pr_cmd.get_commit_messages") as mock_get_commits,
 			patch("codemap.cli.pr_cmd._generate_title") as mock_generate_title,
 			patch("codemap.cli.pr_cmd._generate_description") as mock_generate_desc,
-			patch("codemap.cli.pr_cmd.loading_spinner") as mock_spinner,
-			patch("codemap.git.utils.run_git_command") as mock_run_git,
+			patch("codemap.utils.cli_utils.loading_spinner") as mock_spinner,
+			patch("codemap.git.utils.run_git_command"),
 			patch("codemap.cli.pr_cmd.console.print") as mock_console_print,
 		):
-			# Configure mocks
-			mock_config.return_value.get_workflow_strategy.return_value = "github-flow"
+			# Configure mock returns
+			mock_config.return_value.config = {"pr": {}}
+			mock_strategy.return_value.get_default_base.return_value = "main"
+			mock_pr_gen_instance = MagicMock()
+			mock_pr_generator.return_value = mock_pr_gen_instance
+			mock_pr_gen_instance.create_pr.return_value = MagicMock(number=123, url="fake_url")
 
-			# Set up PR config
-			pr_config = {
-				"defaults": {"base_branch": "main", "feature_prefix": "feat/"},
-				"strategy": "github-flow",
-				"branch_mapping": {"feature": {"base": "main", "prefix": "feature/"}},
-				"generate": {"title_strategy": "commits", "description_strategy": "llm"},
-			}
-			mock_config.return_value.get_pr_config.return_value = pr_config
-			mock_config.return_value.get_content_generation_config.return_value = pr_config["generate"]
+			mock_get_commits.return_value = [  # Simulate some commits
+				{"hash": "123", "author": "A", "date": "D", "message": "msg1"}
+			]
+			test_title = "Test PR Title Display"
+			test_desc = "Test PR Description Display"
+			mock_generate_title.return_value = test_title
+			mock_generate_desc.return_value = test_desc
+			# Simulate user confirming title, description, and PR creation
+			mock_confirm.side_effect = [True, True, True]
 
-			# Set up strategy
-			strategy = MagicMock()
-			strategy.detect_branch_type.return_value = "feature"
-			strategy.get_default_base.return_value = "main"
-			mock_strategy.return_value = strategy
-
-			# Set up PR generator
-			pr_gen = MagicMock()
-			pr_gen.get_existing_pr.return_value = None
-			mock_pull_request = MagicMock()
-			mock_pull_request.number = 123
-			mock_pull_request.url = "https://github.com/user/repo/pull/123"
-			pr_gen.create_pr.return_value = mock_pull_request
-			mock_pr_generator.return_value = pr_gen
-
-			# Set up confirm to not edit title/description
-			mock_confirm.return_value.ask.return_value = False
-
-			# Other mocks
-			mock_generate_title.return_value = "My Test PR Title"
-			mock_generate_desc.return_value = (
-				"This is a test PR description\n\n- With multiple lines\n- And bullet points"
-			)
-			mock_get_commits.return_value = ["commit1", "commit2"]
-			mock_run_git.return_value = ""
-
-			# Context manager for spinner
-			mock_spinner.return_value.__enter__.return_value = None
-
-			# Call the function under test
+			# Act: Call the function
 			result = _handle_pr_creation(options, "feature/test")
 
-		# Verify Panel output was called
-		mock_console_print.assert_called()
+			# Assert: Verify interactions
+			assert result is not None
+			assert mock_spinner.call_count >= 1
+			mock_get_commits.assert_called_once_with("main", "feature/test")
+			mock_generate_title.assert_called_once()
+			mock_generate_desc.assert_called_once()
+			assert mock_confirm.call_count == 3  # Confirm title, desc, PR
 
-		# Verify PR creation happened with correct data
-		pr_gen.create_pr.assert_called_once_with(
-			"main",
-			"feature/test",
-			"My Test PR Title",
-			"This is a test PR description\n\n- With multiple lines\n- And bullet points",
-		)
+			# Verify console.print was called with Panel containing title and description
+			# This requires checking the arguments passed to console.print
+			title_found = False
+			desc_found = False
+			for call_args in mock_console_print.call_args_list:
+				args, _ = call_args
+				if args:
+					# Check if the argument is a Panel and contains the title/desc
+					# This is a simplification; real check might involve Rich renderables
+					panel_content = str(args[0])
+					if test_title in panel_content:
+						title_found = True
+					if test_desc in panel_content:
+						desc_found = True
+			assert title_found, "PR Title panel not printed"
+			assert desc_found, "PR Description panel not printed"
 
-		# Make sure the result is correct
-		assert result is not None
-		assert result.number == 123
-		assert result.url == "https://github.com/user/repo/pull/123"
+			mock_pr_gen_instance.create_pr.assert_called_once()
 
 	def test_pr_edit_title_and_description(self, mock_git_utils: dict[str, Any]) -> None:
 		"""Test editing PR title and description in interactive mode."""
@@ -811,6 +761,7 @@ class TestHandlePRCreation:
 			patch("codemap.cli.pr_cmd.get_commit_messages") as mock_get_commits,
 			patch("codemap.cli.pr_cmd._generate_title") as mock_generate_title,
 			patch("codemap.cli.pr_cmd._generate_description") as mock_generate_desc,
+			patch("codemap.utils.cli_utils.loading_spinner") as mock_spinner,
 			patch("codemap.cli.pr_cmd.loading_spinner") as mock_spinner,
 			patch("codemap.git.utils.run_git_command") as mock_run_git,
 		):
@@ -899,68 +850,42 @@ class TestHandlePRCreation:
 			patch("codemap.cli.pr_cmd.get_commit_messages") as mock_get_commits,
 			patch("codemap.cli.pr_cmd._generate_title") as mock_generate_title,
 			patch("codemap.cli.pr_cmd._generate_description") as mock_generate_desc,
-			patch("codemap.cli.pr_cmd.loading_spinner") as mock_spinner,
-			patch("codemap.git.utils.run_git_command") as mock_run_git,
+			patch("codemap.utils.cli_utils.loading_spinner") as mock_spinner,
+			patch("codemap.git.utils.run_git_command"),
 		):
-			# Configure mocks
-			mock_config.return_value.get_workflow_strategy.return_value = "github-flow"
+			# Configure mock returns
+			mock_config.return_value.config = {"pr": {}}
+			mock_strategy.return_value.get_default_base.return_value = "main"
+			mock_pr_gen_instance = MagicMock()
+			mock_pr_generator.return_value = mock_pr_gen_instance
+			mock_pr_gen_instance.create_pr.return_value = MagicMock(number=123, url="fake_url")
 
-			# Set up PR config
-			pr_config = {
-				"defaults": {"base_branch": "main", "feature_prefix": "feat/"},
-				"strategy": "github-flow",
-				"branch_mapping": {"feature": {"base": "main", "prefix": "feature/"}},
-				"generate": {"title_strategy": "commits", "description_strategy": "llm"},
-			}
-			mock_config.return_value.get_pr_config.return_value = pr_config
-			mock_config.return_value.get_content_generation_config.return_value = pr_config["generate"]
+			mock_get_commits.return_value = [  # Simulate some commits
+				{"hash": "123", "author": "A", "date": "D", "message": "msg1"}
+			]
+			mock_generate_title.return_value = "Initial Title"
 
-			# Set up strategy
-			strategy = MagicMock()
-			strategy.detect_branch_type.return_value = "feature"
-			strategy.get_default_base.return_value = "main"
-			mock_strategy.return_value = strategy
+			# Simulate regeneration: first generation fails, second succeeds
+			mock_generate_desc.side_effect = ["Initial Description", "Regenerated Description"]
 
-			# Set up PR generator
-			pr_gen = MagicMock()
-			pr_gen.get_existing_pr.return_value = None
-			mock_pull_request = MagicMock()
-			mock_pull_request.number = 123
-			mock_pull_request.url = "https://github.com/user/repo/pull/123"
-			pr_gen.create_pr.return_value = mock_pull_request
-			mock_pr_generator.return_value = pr_gen
+			# Simulate user actions: confirm title, select regenerate, confirm description, confirm PR
+			mock_select.return_value.ask.return_value = "regenerate"  # User chooses to regenerate
+			mock_confirm.side_effect = [True, True, True]  # Confirm title, confirm desc, confirm PR
 
-			# Set up confirm responses to not edit title but edit description
-			mock_confirm.return_value.ask.side_effect = [False, True]  # Don't edit title, edit description
-
-			# Set up select for regeneration option
-			mock_select.return_value.ask.return_value = "regenerate"
-
-			# Other mocks
-			mock_generate_title.return_value = "Original PR Title"
-			# First call is for initial description, second for regenerated description
-			mock_generate_desc.side_effect = ["Original PR description", "Regenerated PR description with LLM"]
-			mock_get_commits.return_value = ["commit1", "commit2"]
-			mock_run_git.return_value = ""
-
-			# Context manager for spinner
-			mock_spinner.return_value.__enter__.return_value = None
-
-			# Call the function under test
+			# Act: Call the function
 			result = _handle_pr_creation(options, "feature/test")
 
-		# Verify _generate_description was called twice (initial + regeneration)
-		assert mock_generate_desc.call_count == 2
-
-		# Verify PR was created with regenerated description
-		pr_gen.create_pr.assert_called_once_with(
-			"main", "feature/test", "Original PR Title", "Regenerated PR description with LLM"
-		)
-
-		# Verify result
-		assert result is not None
-		assert result.number == 123
-		assert result.url == "https://github.com/user/repo/pull/123"
+			# Assert: Verify interactions
+			assert result is not None
+			assert mock_spinner.call_count >= 2  # Spinner for commits, desc generation (x2)
+			mock_get_commits.assert_called_once_with("main", "feature/test")
+			assert mock_generate_title.call_count == 1  # Title generated once
+			assert mock_generate_desc.call_count == 2  # Description generated twice
+			assert mock_select.call_count == 1  # Called once for action
+			assert mock_confirm.call_count == 3  # Confirm title, desc, PR
+			mock_pr_gen_instance.create_pr.assert_called_once()
+			# Check final description used for PR creation
+			assert mock_pr_gen_instance.create_pr.call_args[0][2] == "Regenerated Description"
 
 	def test_pr_update_with_panels(self, mock_git_utils: dict[str, Any]) -> None:
 		"""Test PR update with panel display."""
@@ -1151,77 +1076,44 @@ class TestHandlePRCreation:
 			patch("codemap.cli.pr_cmd.get_commit_messages") as mock_get_commits,
 			patch("codemap.cli.pr_cmd._generate_title") as mock_generate_title,
 			patch("codemap.cli.pr_cmd._generate_description") as mock_generate_desc,
-			patch("codemap.cli.pr_cmd.loading_spinner") as mock_spinner,
+			patch("codemap.utils.cli_utils.loading_spinner") as mock_spinner,
 			# Create real Text and Markdown objects instead of mocks
-			patch("codemap.cli.pr_cmd.Text", return_value=Text("Mocked Title")),
-			patch("codemap.cli.pr_cmd.Markdown", return_value=Markdown("Mocked Description")),
+			patch("codemap.cli.pr_cmd.Text") as mock_text_cls,
+			patch("codemap.cli.pr_cmd.Markdown") as mock_markdown_cls,
 		):
-			# Configure mocks
-			mock_config.return_value.get_workflow_strategy.return_value = "github-flow"
-
-			# Set up PR config
-			pr_config = {
-				"defaults": {"base_branch": "main", "feature_prefix": "feat/"},
-				"strategy": "github-flow",
-				"branch_mapping": {"feature": {"base": "main", "prefix": "feature/"}},
-				"generate": {"title_strategy": "commits", "description_strategy": "llm"},
-			}
-			mock_config.return_value.get_pr_config.return_value = pr_config
-			mock_config.return_value.get_content_generation_config.return_value = pr_config["generate"]
-
-			# Set up strategy
-			strategy = MagicMock()
-			strategy.detect_branch_type.return_value = "feature"
-			strategy.get_default_base.return_value = "main"
-			mock_strategy.return_value = strategy
-
-			# Set up PR generator
-			pr_gen = MagicMock()
-			pr_gen.get_existing_pr.return_value = None
-			mock_pull_request = MagicMock()
-			mock_pull_request.number = 123
-			mock_pull_request.url = "https://github.com/user/repo/pull/123"
-			pr_gen.create_pr.return_value = mock_pull_request
-			mock_pr_generator.return_value = pr_gen
-
-			# Set up confirm to not edit title/description
-			mock_confirm.return_value.ask.return_value = False
-
-			# Set up complex markdown description
-			markdown_description = """# Feature Description
-
-## Overview
-This PR adds a new feature that:
-- Improves user experience
-- Fixes several bugs
-- Adds new functionality
-
-## Code Changes
-```python
-def new_function():
-    return "Hello World"
-```
-
-## Testing
-1. Test case 1
-2. Test case 2
-"""
-
-			# Other mocks
-			mock_generate_title.return_value = "New Feature PR Title"
+			# Configure mock returns
+			mock_config.return_value.config = {"pr": {}}
+			mock_strategy.return_value.get_default_base.return_value = "main"
+			mock_pr_generator.return_value = MagicMock()
+			mock_get_commits.return_value = [  # Simulate some commits
+				{"hash": "123", "author": "A", "date": "D", "message": "msg1"}
+			]
+			mock_generate_title.return_value = "Test PR Title"
+			# Use Markdown syntax in the description
+			markdown_description = "# Test PR Description\n\n- Bullet point 1\n- Bullet point 2"
 			mock_generate_desc.return_value = markdown_description
-			mock_get_commits.return_value = ["commit1", "commit2"]
+			mock_confirm.return_value = True  # User confirms PR creation
 
-			# Context manager for spinner
-			mock_spinner.return_value.__enter__.return_value = None
+			# Spy on the actual Text and Markdown constructors
+			mock_text_cls.side_effect = Text
+			mock_markdown_cls.side_effect = Markdown
 
-			# Call the function under test - this now should not error
+			# Act: Call the function
 			result = _handle_pr_creation(options, "feature/test")
 
-			# Verify PR was created successfully
+			# Assert: Verify interactions and Markdown rendering
 			assert result is not None
-			assert result.number == 123
-			assert result.url == "https://github.com/user/repo/pull/123"
+			mock_spinner.assert_called()  # Spinner should be called
+			mock_pr_generator.assert_called_once()  # Generator should be initialized
+			mock_get_commits.assert_called_once_with("main", "feature/test")
+			mock_generate_title.assert_called_once()
+			mock_generate_desc.assert_called_once()
+
+			# Check that Text was called with the title
+			mock_text_cls.assert_any_call("Test PR Title", style="bold blue")
+
+			# Check that Markdown was called with the description
+			mock_markdown_cls.assert_any_call(markdown_description)
 
 	def test_branch_selection_questionnaire(self, mock_git_utils: dict[str, Any]) -> None:
 		"""Test branch selection through questionnaire."""
