@@ -31,52 +31,52 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 > [!Important]
 > CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
 
-### Easy Install (Recommended)
+### Installation using pipx (Recommended)
+
+Using `pipx` is recommended as it installs the package in an isolated environment and automatically manages the PATH.
 
 ```bash
-# One-line installer (downloads and runs install.sh)
-curl -sSL https://raw.githubusercontent.com/SarthakMishra/codemap/main/install.sh | bash
+# Ensure pipx is installed (install it if you haven't)
+# python3 -m pip install --user pipx
+# python3 -m pipx ensurepath
 
-# Or download and run manually
-curl -sSL -o install.sh https://raw.githubusercontent.com/SarthakMishra/codemap/main/install.sh
-chmod +x install.sh
-./install.sh
+# Install codemap directly from GitHub
+pipx install git+https://github.com/SarthakMishra/codemap.git
 ```
 
-### Manual Installation
+### Alternative: Manual Installation using pip
 
-If you prefer to install manually:
+If you prefer not to use `pipx`, you can install using `pip` directly:
 
 ```bash
 # Install with pip (user installation)
 pip install --user git+https://github.com/SarthakMishra/codemap.git
 
 # Make sure your PATH includes the user bin directory
-# Usually this is ~/.local/bin on Linux or ~/Library/Python/X.Y/bin on macOS
+# Add the following to your shell profile (e.g., ~/.bashrc, ~/.zshrc):
+# export PATH="$HOME/.local/bin:$PATH"
+# Or find the correct path using: python3 -m site --user-base
 ```
 
 ### Updating CodeMap
 
-CodeMap automatically checks for updates and will notify you when a new version is available.
+To update CodeMap to the latest version from the repository:
 
 ```bash
-# Check for updates
-codemap version
+# If installed with pipx
+pipx upgrade codemap
 
-# Update to the latest version
-codemap update
-
-# Alternatively, use the package management commands
-codemap pkg update
+# If installed with pip --user
+pip install --user --upgrade git+https://github.com/SarthakMishra/codemap.git
 ```
 
 ### Uninstalling
 
 ```bash
-# Uninstall CodeMap
-codemap pkg uninstall
+# If installed with pipx
+pipx uninstall codemap
 
-# Or manually with pip
+# If installed with pip
 pip uninstall codemap
 ```
 
@@ -87,43 +87,50 @@ Generate optimized markdown documentation and directory structures for your proj
 ### Command Options
 
 ```bash
-codemap generate [PATH] [OPTIONS]
+codemap gen [PATH] [OPTIONS]
 ```
 
 **Arguments:**
-- `PATH`: Path to the codebase to document (defaults to current directory)
+- `PATH`: Path to the codebase to analyze (defaults to current directory)
 
 **Options:**
-- `--output`, `-o`: Output file path for the documentation
+- `--output`, `-o`: Output file path for the documentation (overrides config)
 - `--config`, `-c`: Path to custom configuration file
-- `--map-tokens`: Override token limit for documentation (default: 10000)
-- `--max-content-length`: Maximum content length for each file (default: 2000)
-- `--tree`: Generate only the directory tree structure
+- `--max-content-length`: Maximum content length for file display (set to 0 for unlimited, overrides config)
+- `--lod`: Level of Detail for code analysis (signatures, structure, docs, full). Default: `docs`. Overrides config.
+- `--semantic`/`--no-semantic`: Enable/disable semantic analysis using LSP. Default: enabled. Overrides config.
+- `--tree`/`--no-tree`: Include/exclude directory tree in output. Overrides config (`gen.include_tree`).
 - `--verbose`, `-v`: Enable verbose logging
+- `--process`/`--no-process`: Process the codebase before generation. Default: enabled.
+- `--entity-graph`/`--no-entity-graph`: Include/exclude entity relationship graph (Mermaid) in output. Overrides config (`gen.include_entity_graph`).
+- `--mermaid-entities`: Comma-separated list of entity types (e.g., 'module,class,function'). Overrides config (`gen.mermaid_entities`).
+- `--mermaid-relationships`: Comma-separated list of relationship types (e.g., 'declares,imports,calls'). Overrides config (`gen.mermaid_relationships`).
+- `--mermaid-legend`/`--no-mermaid-legend`: Show/hide the legend in the Mermaid diagram. Overrides config (`gen.mermaid_show_legend`).
+- `--mermaid-unconnected`/`--no-mermaid-unconnected`: Remove/keep nodes with no connections in the Mermaid diagram. Overrides config (`gen.mermaid_remove_unconnected`).
 
 ### Examples
 
 ```bash
-# Generate documentation for current directory
-codemap generate
+# Generate documentation for current directory using defaults
+codemap gen
 
-# Generate documentation for a specific path
-codemap generate /path/to/your/project
+# Generate for a specific path with full detail and no semantic analysis
+codemap gen /path/to/project --lod full --no-semantic
 
-# Generate only directory tree
-codemap generate --tree /path/to/project
+# Generate docs with signatures only and custom Mermaid settings
+codemap gen --lod signatures --mermaid-entities "class,function" --mermaid-relationships "calls"
 
-# Custom output location
-codemap generate -o ./docs/codebase.md
+# Generate only directory tree (implicitly disables entity graph)
+codemap gen --tree --no-entity-graph
 
-# Override token limits
-codemap generate --map-tokens 5000 --max-content-length 1500
+# Custom output location and content length
+codemap gen -o ./docs/codebase.md --max-content-length 1500
 
-# Use custom configuration
-codemap generate --config custom-config.yml
+# Use custom configuration file
+codemap gen --config custom-config.yml
 
 # Verbose mode for debugging
-codemap generate -v
+codemap gen -v
 ```
 
 ## Smart Commit Feature
@@ -136,17 +143,20 @@ Create intelligent Git commits with AI-assisted message generation. The tool ana
 ### Basic Usage
 
 ```bash
-# Basic usage with default settings
+# Basic usage with default settings (interactive, semantic splitting)
 codemap commit
 
-# Commit with a specific message
+# Commit with a specific message (skips AI generation)
 codemap commit -m "feat: add new feature"
 
 # Commit all changes (including untracked files)
 codemap commit -a
 
 # Use a specific LLM model
-codemap commit --model groq/llama-3-8b-instruct
+codemap commit --model groq/llama-3.1-8b-instant
+
+# Bypass git hooks (e.g., pre-commit)
+codemap commit --bypass-hooks
 ```
 
 ### Command Options
@@ -159,11 +169,12 @@ codemap commit [PATH] [OPTIONS]
 - `PATH`: Path to repository or specific file to commit (defaults to current directory)
 
 **Options:**
-- `--message`, `-m`: Specify a commit message directly
-- `--all`, `-a`: Commit all changes (including untracked files)
-- `--model`: LLM model to use for message generation (default: gpt-4o-mini)
-- `--strategy`, `-s`: Strategy for splitting diffs (default: semantic)
-- `--non-interactive`: Run in non-interactive mode
+- `--message`, `-m`: Specify a commit message directly (skips AI generation)
+- `--all`, `-a`: Commit all changes (stages untracked files)
+- `--model`: LLM model to use for message generation (default: `openai/gpt-4o-mini`). Overrides config (`commit.llm.model`).
+- `--strategy`, `-s`: Strategy for splitting diffs (default: `semantic`). Options: `file`, `hunk`, `semantic`. Overrides config (`commit.strategy`).
+- `--non-interactive`: Run in non-interactive mode (accepts all generated messages)
+- `--bypass-hooks`: Bypass git hooks with `--no-verify` (overrides config `commit.bypass_hooks`).
 - `--verbose`, `-v`: Enable verbose logging
 
 ### Interactive Workflow
@@ -207,6 +218,11 @@ The tool uses semantic analysis to group related changes together based on:
 - Code content similarity
 - Directory structure
 - Common file patterns
+
+> [!Note]
+> The semantic strategy utilizes a custom, distilled version of the `Qodo/Qodo-Embed-1-1.5B` model, named `Qodo-Embed-M-1-1.5B-M2V-Distilled`.
+> This [Model2Vec](https://github.com/MinishLab/model2vec) distilled model is significantly smaller (233MB vs 5.9GB) and faster (~112x) than the original while retaining ~85% of its performance, making semantic analysis efficient.
+> You can find more details [here](https://huggingface.co/sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled).
 
 ### Environment Variables
 
@@ -269,17 +285,20 @@ The `codemap pr` command helps you create and manage pull requests with ease. It
 codemap pr create [PATH] [OPTIONS]
 ```
 
+**Arguments:**
+- `PATH`: Path to the codebase to analyze (defaults to current directory)
+
 **Options:**
 - `--branch`, `-b`: Target branch name
-- `--type`, `-t`: Branch type (feature, release, hotfix, bugfix)
-- `--base`: Base branch for the PR (defaults to repo default)
+- `--type`, `-t`: Branch type (e.g., feature, release, hotfix, bugfix). Valid types depend on workflow strategy.
+- `--base`: Base branch for the PR (defaults to repo default or workflow-defined default)
 - `--title`: Pull request title
 - `--desc`, `-d`: Pull request description (file path or text)
 - `--no-commit`: Skip the commit process before creating PR
 - `--force-push`, `-f`: Force push the branch
-- `--workflow`, `-w`: Git workflow strategy (github-flow, gitflow, trunk-based)
+- `--workflow`, `-w`: Git workflow strategy (github-flow, gitflow, trunk-based). Overrides config (`pr.strategy`).
 - `--non-interactive`: Run in non-interactive mode
-- `--model`, `-m`: LLM model for content generation
+- `--model`, `-m`: LLM model for content generation (overrides config `llm.model`).
 - `--verbose`, `-v`: Enable verbose logging
 
 ### Updating a PR
@@ -288,12 +307,15 @@ codemap pr create [PATH] [OPTIONS]
 codemap pr update [PATH] [OPTIONS]
 ```
 
+**Arguments:**
+- `PATH`: Path to the codebase to analyze (defaults to current directory)
+
 **Options:**
-- `--pr`: PR number to update
+- `--pr`: PR number to update (required if not updating PR for current branch)
 - `--title`: New PR title
-- `--desc`, `-d`: New PR description
-- `--no-commit`: Skip the commit process before updating PR
-- `--force-push`, `-f`: Force push the branch
+- `--desc`, `-d`: New PR description (file path or text)
+# Note: --no-commit is NOT an option for 'update'
+- `--force-push`, `-f`: Force push the branch (use with caution)
 - `--non-interactive`: Run in non-interactive mode
 - `--verbose`, `-v`: Enable verbose logging
 
@@ -426,93 +448,128 @@ codemap commit --model openrouter/meta-llama/llama-3-8b-instruct
 
 ## Configuration
 
-Create a `.codemap.yml` file in your project root to customize the behavior. Below are all available configuration options with their default values:
+Create a `.codemap.yml` file in your project root to customize the behavior. Below are all available configuration options with their default values from `config.py`:
 
 ```yaml
-# Documentation Generation Settings
-token_limit: 10000              # Maximum tokens for entire documentation (0 for unlimited)
-use_gitignore: true            # Whether to respect .gitignore patterns
-output_dir: documentation       # Directory to store documentation files
-max_content_length: 5000       # Maximum content length per file (0 for unlimited)
+# LLM configuration (applies globally unless overridden by command-specific LLM config)
+llm:
+  model: openai/gpt-4o-mini  # Default LLM model (provider/model_name format)
+  api_base: null             # Custom API base URL (e.g., for local LLMs or proxies)
 
-# Commit Feature Configuration
+# Documentation Generation Settings ('gen' command)
+gen:
+  max_content_length: 5000       # Max content length per file (0 = unlimited)
+  use_gitignore: true            # Respect .gitignore patterns
+  output_dir: documentation       # Directory for generated docs
+  include_tree: true             # Include directory tree in output
+  include_entity_graph: true     # Include Mermaid entity relationship graph
+  semantic_analysis: true        # Enable semantic analysis using LSP
+  lod_level: docs                # Level of Detail: signatures, structure, docs, full
+  mermaid_entities:              # Entity types for Mermaid graph
+    - module
+    - class
+    - function
+    - method
+    - constant
+    - variable
+    - import
+  mermaid_relationships:         # Relationship types for Mermaid graph
+    - declares
+    - imports
+    - calls
+  mermaid_show_legend: true      # Show legend in Mermaid diagram
+  mermaid_remove_unconnected: false # Remove unconnected nodes in Mermaid diagram
+
+# Processor configuration (background analysis)
+processor:
+  enabled: true                  # Enable background processing (currently unused)
+  max_workers: 4                 # Max parallel workers for analysis
+  ignored_patterns:              # Patterns to ignore during analysis
+    - "**/.git/**"
+    - "**/__pycache__/**"
+    - "**/.venv/**"
+    - "**/node_modules/**"
+    - "**/*.pyc"
+    - "**/dist/**"
+    - "**/build/**"
+  default_lod_level: signatures  # Default LOD for background processing
+
+# Commit Feature Configuration ('commit' command)
 commit:
-  # Strategy for splitting diffs: file, hunk, semantic
-  strategy: file
+  strategy: semantic             # Diff splitting strategy: file, hunk, semantic
+  bypass_hooks: false            # Default for --bypass-hooks flag (--no-verify)
+  # Note: 'commit.llm' config is deprecated; use global 'llm' section
 
-  # LLM Configuration
-  llm:
-    model: openai/gpt-4o-mini  # Default LLM model
-    api_base: null             # Custom API base URL (optional)
+  convention:                    # Commit convention settings (based on Conventional Commits)
+    types:                       # Allowed commit types
+      - feat
+      - fix
+      - docs
+      - style
+      - refactor
+      - perf
+      - test
+      - build
+      - ci
+      - chore
+    scopes: []                   # Optional scopes (can be auto-derived if empty)
+    max_length: 72               # Max length for commit subject line
 
-  # Commit Convention Settings
-  convention:
-    # Available commit types
-    types:
-      - feat     # New feature
-      - fix      # Bug fix
-      - docs     # Documentation
-      - style    # Formatting, missing semicolons, etc.
-      - refactor # Code change that neither fixes a bug nor adds a feature
-      - perf     # Performance improvement
-      - test     # Adding or updating tests
-      - build    # Build system or external dependencies
-      - ci       # CI configuration
-      - chore    # Other changes that don't modify src or test files
+  lint:                          # Commitlint rule configuration (see https://commitlint.js.org/#/reference-rules)
+    # Header rules
+    header_max_length: { level: ERROR, rule: always, value: 100 }
+    header_case: { level: DISABLED, rule: always, value: lower-case }
+    header_full_stop: { level: ERROR, rule: never, value: . }
+    # Type rules
+    type_enum: { level: ERROR, rule: always } # Uses types from commit.convention.types
+    type_case: { level: ERROR, rule: always, value: lower-case }
+    type_empty: { level: ERROR, rule: never }
+    # Scope rules
+    scope_case: { level: ERROR, rule: always, value: lower-case }
+    scope_empty: { level: DISABLED, rule: never }
+    scope_enum: { level: DISABLED, rule: always } # Uses scopes from commit.convention.scopes
+    # Subject rules
+    subject_case: { level: ERROR, rule: never, value: [sentence-case, start-case, pascal-case, upper-case] }
+    subject_empty: { level: ERROR, rule: never }
+    subject_full_stop: { level: ERROR, rule: never, value: . }
+    subject_exclamation_mark: { level: DISABLED, rule: never }
+    # Body rules
+    body_leading_blank: { level: WARNING, rule: always }
+    body_empty: { level: DISABLED, rule: never }
+    body_max_line_length: { level: ERROR, rule: always, value: 100 }
+    # Footer rules
+    footer_leading_blank: { level: WARNING, rule: always }
+    footer_empty: { level: DISABLED, rule: never }
+    footer_max_line_length: { level: ERROR, rule: always, value: 100 }
 
-    # Optional scopes for your project
-    scopes: []   # Define custom scopes or leave empty to derive from directory structure
-
-    # Maximum length for commit message subject line
-    max_length: 72
-    
-    # Commit linting configuration (optional)
-    linting:
-      enabled: true                # Enable/disable commit message linting (default: true)
-      auto_fix: true               # Attempt to fix non-compliant messages (default: true)
-      max_regeneration_attempts: 3 # Maximum attempts to regenerate a compliant message (default: 3)
-      rules:
-        subject_min_length: 10     # Minimum length for commit subject (default: 10)
-        imperative_subject: true   # Enforce imperative mood in subject (default: true)
-        no_subject_period: true    # No period at the end of subject (default: true)
-        scope_lowercase: true      # Enforce lowercase scope (default: true)
-        type_in_allowed: true      # Type must be in allowed types list (default: true)
-
-# Pull Request Configuration
+# Pull Request Configuration ('pr' command)
 pr:
-  # Default branch settings
   defaults:
-    base_branch: main
-    feature_prefix: "feature/"
-    
-  # Git workflow strategy
-  strategy: "github-flow"  # Options: github-flow, gitflow, trunk-based
-  
-  # Branch mapping for different PR types
-  branch_mapping:
-    feature:
-      base: develop
-      prefix: "feature/"
-    bugfix:
-      base: develop
-      prefix: "bugfix/"
-    release:
-      base: main
-      prefix: "release/"
-    hotfix:
-      base: main
-      prefix: "hotfix/"
-      
-  # Content generation
-  generate:
-    title_strategy: "commits"  # Options: commits, llm, branch-name
-    description_strategy: "llm"  # Options: commits, llm, template
-    template:
-      sections:
-        - title: "Changes"
-          content: "{changes}"
-        - title: "Testing"
-          content: "Tested by: {user}"
+    base_branch: null            # Default base branch (null = repo default)
+    feature_prefix: "feature/"   # Default prefix for feature branches
+
+  strategy: github-flow          # Git workflow: github-flow, gitflow, trunk-based
+
+  branch_mapping:                # Branch base/prefix mapping (primarily for GitFlow)
+    feature: { base: develop, prefix: "feature/" }
+    release: { base: main, prefix: "release/" }
+    hotfix: { base: main, prefix: "hotfix/" }
+    bugfix: { base: develop, prefix: "bugfix/" }
+
+  generate:                      # Content generation settings
+    title_strategy: commits      # How to generate title: commits, llm, template
+    description_strategy: commits # How to generate description: commits, llm, template
+    # Template used if description_strategy is 'template' AND use_workflow_templates is false
+    description_template: |
+      ## Changes
+      {changes}
+
+      ## Testing
+      {testing_instructions}
+
+      ## Screenshots
+      {screenshots}
+    use_workflow_templates: true # Use built-in templates based on workflow/branch type?
 ```
 
 ### Configuration Priority
@@ -544,37 +601,34 @@ ANTHROPIC_API_BASE=your_custom_url
 
 ### Configuration Tips
 
-1. **Token Limits**
-   - Set `token_limit: 0` for unlimited tokens (careful with large codebases)
-   - Adjust `max_content_length` based on your file sizes
+1. **Token Limits (Deprecated)**: The `token_limit` setting is no longer used. Use `max_content_length` to control file content size.
 
 2. **Git Integration**
-   - `use_gitignore: true` respects your `.gitignore` patterns
-   - Configure commit scopes to match your project structure
+    *   `gen.use_gitignore: true` respects your `.gitignore`.
+    *   Configure `commit.convention.scopes` to match your project structure or leave empty for auto-derivation.
+    *   Use `commit.bypass_hooks` or the `--bypass-hooks` flag to skip Git hooks.
 
 3. **LLM Settings**
-   - Choose provider-specific models (e.g., `openai/gpt-4`, `anthropic/claude-3`)
-   - Set custom API bases for self-hosted or proxy services
+    *   Use the global `llm` section for default model and API base.
+    *   Override with `--model` in `commit` or `pr` commands.
+    *   Set custom API bases (e.g., `llm.api_base`) for self-hosted or proxy services.
 
-4. **Commit Conventions**
-   - Add custom commit types to match your workflow
-   - Adjust `max_length` to enforce commit message style
-   - Define scopes to categorize changes
-   - Commit linter automatically validates messages against convention rules
-   - Configure custom linting rules in the `.codemap.yml` convention section
-   - Control linting behavior with the `linting` configuration:
-     - Enable/disable linting with `enabled: true|false`
-     - Set auto-fixing of non-compliant messages with `auto_fix: true|false`
-     - Control regeneration attempts with `max_regeneration_attempts`
-     - Fine-tune specific rules in the `rules` subsection
+4. **Commit Conventions & Linting**
+    *   Customize `commit.convention.types` and `commit.convention.scopes`.
+    *   Adjust `commit.convention.max_length`.
+    *   Configure `commit.lint` rules (based on commitlint standard). The `linting` section mentioned previously is now under `commit.lint`.
 
 5. **PR Workflow Settings**
-   - Choose from different Git workflow strategies (`github-flow`, `gitflow`, `trunk-based`)
-   - Configure default base branches for different PR types
-   - Set branch prefixes for consistent naming (`feature/`, `bugfix/`, etc.)
-   - Customize PR content generation with different strategies
-   - Define PR description templates with custom sections
-   - Control PR creation and update behavior
+    *   Choose a `pr.strategy` (`github-flow`, `gitflow`, `trunk-based`).
+    *   Configure `pr.defaults` and `pr.branch_mapping` (especially for GitFlow).
+    *   Customize PR content generation (`pr.generate.title_strategy`, `pr.generate.description_strategy`).
+    *   Use `pr.generate.use_workflow_templates` to control template usage. Define a fallback in `pr.generate.description_template`.
+
+6. **Documentation Generation (`gen`)**
+    *   Control detail level with `gen.lod_level` or `--lod`.
+    *   Enable/disable semantic analysis (`gen.semantic_analysis`, `--semantic`).
+    *   Toggle the directory tree (`gen.include_tree`, `--tree`).
+    *   Configure the Mermaid entity graph (`gen.include_entity_graph`, `gen.mermaid_*` options, and corresponding flags).
 
 ### Output Structure
 
