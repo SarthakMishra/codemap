@@ -83,11 +83,20 @@ ProcessingFlag = Annotated[
 	),
 ]
 
+EntityGraphFlag = Annotated[
+	bool | None,
+	typer.Option(
+		"--entity-graph/--no-entity-graph",
+		"-e",
+		help="Include entity relationship graph in output",
+	),
+]
+
 LODLevelOpt = Annotated[
-	LODLevel,
+	str,
 	typer.Option(
 		"--lod",
-		help="Level of Detail for code analysis",
+		help="Level of Detail for code analysis (e.g., 'full', 'docs', 'signatures')",
 		case_sensitive=False,
 	),
 ]
@@ -137,7 +146,7 @@ def gen_command(
 	output: OutputOpt = None,
 	config: ConfigOpt = None,
 	max_content_length: MaxContentLengthOpt = None,
-	lod_level: LODLevelOpt = LODLevel.DOCS,
+	lod_level_str: LODLevelOpt = "docs",
 	semantic_analysis: Annotated[
 		bool,
 		typer.Option(
@@ -162,6 +171,7 @@ def gen_command(
 		),
 	] = False,
 	process: ProcessingFlag = True,
+	entity_graph: EntityGraphFlag = None,
 ) -> None:
 	"""
 	Generate code documentation.
@@ -207,10 +217,30 @@ def gen_command(
 		enable_semantic = (
 			semantic_analysis if semantic_analysis is not None else gen_config_data.get("semantic_analysis", True)
 		)
+		include_entity_graph = (
+			entity_graph if entity_graph is not None else gen_config_data.get("include_entity_graph", True)
+		)
+
+		# Initialize lod_level to a default before the try block
+		lod_level: LODLevel = LODLevel.DOCS  # Default if conversion fails somehow
 
 		# Get LOD level from config if not specified
-		config_lod = gen_config_data.get("lod_level", LODLevel.DOCS.value)
-		lod_level = lod_level or LODLevel(config_lod)
+		config_lod_str = str(gen_config_data.get("lod_level", LODLevel.DOCS.name.lower()))  # Default to 'docs'
+
+		# Determine the final LOD level string (CLI > Config > Default)
+		final_lod_str = lod_level_str if lod_level_str != LODLevel.DOCS.name.lower() else config_lod_str
+
+		# Convert the final string to the LODLevel enum
+		try:
+			# Look up enum member by name (uppercase) instead of value
+			lod_level = LODLevel[final_lod_str.upper()]
+		except (ValueError, KeyError) as e:  # Catch KeyError for invalid names
+			# Provide a more helpful error message if conversion fails
+			# Get valid names (lowercase) for the error message
+			valid_names = [name.lower() for name in LODLevel.__members__]
+			exit_with_error(
+				f"Invalid LOD level '{final_lod_str}'. Valid levels are: {', '.join(valid_names)}", exception=e
+			)
 
 		# Create generation config
 		gen_config = GenConfig(
@@ -218,10 +248,15 @@ def gen_command(
 			max_content_length=content_length,
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
+			include_entity_graph=include_entity_graph,
 		)
 
 		# Determine output path
 		from codemap.gen.utils import determine_output_path
+
+		# --- DIAGNOSTIC PRINT --- #
+		logger.debug("Gen config data being passed to determine_output_path: %s", gen_config_data)
+		# ---------------------- #
 
 		output_path = determine_output_path(project_root, output, gen_config_data)
 

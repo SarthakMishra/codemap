@@ -17,12 +17,12 @@ DEFAULT_CONFIG = {
 		# Directory to store documentation files
 		"output_dir": "documentation",
 		# Whether to include directory tree in output
-		"include_tree": False,
+		"include_tree": True,
+		# Whether to include entity relationship graph in output
+		"include_entity_graph": True,
 		# Enable semantic analysis using LSP
 		"semantic_analysis": True,
-		# Output file for generated documentation
-		"output_file": "code_documentation.md",
-		# Level of Detail for code analysis (names, docs, signatures, full)
+		# Level of Detail for code analysis (signatures, structure, docs, full)
 		"lod_level": "docs",
 	},
 	# Processor configuration
