@@ -2,7 +2,7 @@
 
 # Import core git types/utils
 # Import diff_splitter
-from codemap.git.diff_splitter import DiffChunk, DiffSplitter, SplitStrategy
+from codemap.git.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.utils import GitDiff, GitError, run_git_command
 
 __all__ = [
@@ -12,6 +12,5 @@ __all__ = [
 	# Git core types/utils
 	"GitDiff",
 	"GitError",
-	"SplitStrategy",
 	"run_git_command",
 ]
