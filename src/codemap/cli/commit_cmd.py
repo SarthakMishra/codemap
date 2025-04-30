@@ -31,7 +31,6 @@ if TYPE_CHECKING:
 from codemap.git import (
 	DiffChunk,
 	DiffSplitter,
-	SplitStrategy,
 )
 from codemap.git.commit_generator.command import CommitCommand
 from codemap.git.utils import (
@@ -868,14 +867,14 @@ def _run_commit_command(config: RunConfig) -> int:
 			# Process staged changes
 			staged_diff = get_staged_diff()
 			if staged_diff.files:
-				staged_chunks = splitter.split_diff(staged_diff, SplitStrategy.SEMANTIC)
+				staged_chunks = splitter.split_diff(staged_diff)
 				chunks.extend(staged_chunks)
 
 			# Process unstaged changes
 			if not chunks or not config.staged_only:
 				unstaged_diff = get_unstaged_diff()
 				if unstaged_diff.files:
-					unstaged_chunks = splitter.split_diff(unstaged_diff, SplitStrategy.SEMANTIC)
+					unstaged_chunks = splitter.split_diff(unstaged_diff)
 					chunks.extend(unstaged_chunks)
 
 		# Check if there are any chunks
