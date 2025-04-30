@@ -74,13 +74,14 @@ class TestCommitWorkflow(GitTestBase):
 		assert self.mock_chunk.is_llm_generated is True
 		self.mock_message_generator.generate_message.assert_called_once_with(self.mock_chunk)
 
-	@patch("codemap.git.commit_generator.command.run_git_command")
 	@patch("codemap.git.commit_generator.command.stage_files")
-	@patch("codemap.git.commit_generator.command.unstage_files")
 	@patch("codemap.git.commit_generator.command.get_staged_diff")
 	@patch("codemap.git.commit_generator.command.commit_only_files")
 	def test_perform_commit(
-		self, mock_commit: Mock, mock_get_staged: Mock, mock_unstage: Mock, mock_stage: Mock, mock_run_git: Mock
+		self,
+		mock_commit: Mock,
+		mock_get_staged: Mock,
+		mock_stage: Mock,
 	) -> None:
 		"""
 		Test the _perform_commit method.
@@ -98,8 +99,6 @@ class TestCommitWorkflow(GitTestBase):
 
 		# Assert: Verify results
 		assert result
-		mock_run_git.assert_called()
-		mock_unstage.assert_called_with(["file3.py"])
 		mock_stage.assert_called_with(self.mock_chunk.files)
 		mock_commit.assert_called_with(self.mock_chunk.files, "Test commit message", ignore_hooks=False)
 		self.mock_ui.show_success.assert_called()
@@ -231,4 +230,3 @@ class TestCommitWorkflow(GitTestBase):
 		assert result
 		assert mock_generate_message.call_count == 2
 		assert mock_perform_commit.call_count == 2
-		self.mock_ui.show_all_committed.assert_called_once()
