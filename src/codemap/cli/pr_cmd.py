@@ -21,7 +21,7 @@ from codemap.cli.commit_cmd import create_universal_generator
 from codemap.git.commit_generator.command import CommitCommand
 from codemap.git.commit_generator.generator import CommitMessageGenerator
 from codemap.git.diff_splitter.schemas import DiffChunk
-from codemap.git.diff_splitter.splitter import DiffSplitter, SplitStrategy
+from codemap.git.diff_splitter.splitter import DiffSplitter
 from codemap.git.pr_generator.generator import PRGenerator
 from codemap.git.pr_generator.schemas import PullRequest
 from codemap.git.pr_generator.strategies import branch_exists, create_strategy
@@ -372,7 +372,9 @@ def _handle_commits(options: PROptions) -> bool:
 		# Set up the splitter
 		if options.repo_path is not None:
 			splitter = DiffSplitter(repo_root=options.repo_path)
-			chunks = splitter.split_diff(diff, str(SplitStrategy.SEMANTIC))
+			chunks, filtered_large_files = splitter.split_diff(diff)
+			if filtered_large_files:
+				console.print(f"[yellow]Skipped {len(filtered_large_files)} large files due to size limits.[/yellow]")
 			if not chunks:
 				show_warning("No changes to commit after filtering.")
 				return True

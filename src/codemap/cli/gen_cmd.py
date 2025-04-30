@@ -139,7 +139,7 @@ def initialize_pipeline(repo_path: Path, config_data: dict) -> ProcessingPipelin
 	embedding_cache_dir = project_cache_dir / "embeddings"
 	embedding_cache_dir.mkdir(exist_ok=True, parents=True)
 	embedding_config = EmbeddingConfig(
-		model=processor_config.get("embedding_model", "Qodo/Qodo-Embed-1-1.5B"),
+		model=processor_config.get("embedding_model", "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"),
 		dimensions=processor_config.get("embedding_dimensions", 384),
 		batch_size=processor_config.get("batch_size", 32),
 	)

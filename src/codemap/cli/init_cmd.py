@@ -484,7 +484,7 @@ def configure_repository_settings(repo_path: Path | None = None) -> dict[str, An
 			"enabled": True,
 			"max_workers": int(max_workers),
 			"cache_dir": ".codemap_cache",
-			"embedding_model": "Qodo/Qodo-Embed-1-1.5B",
+			"embedding_model": "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
 			"batch_size": 32,
 		}
 
@@ -548,7 +548,7 @@ def initialize_processor(repo_path: Path, config: dict) -> ProcessingPipeline:
 	embedding_cache_dir.mkdir(exist_ok=True, parents=True)
 
 	embedding_config = EmbeddingConfig(
-		model=processor_config.get("embedding_model", "Qodo/Qodo-Embed-1-1.5B"),
+		model=processor_config.get("embedding_model", "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"),
 		dimensions=processor_config.get("embedding_dimensions", 384),
 		batch_size=processor_config.get("batch_size", 32),
 	)
