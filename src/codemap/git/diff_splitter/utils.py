@@ -4,15 +4,33 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Iterable
 from pathlib import Path
+from re import Pattern
 
 import numpy as np
 
 from codemap.git.utils import GitError, run_git_command
 
-from .constants import EPSILON, MAX_FILE_SIZE_FOR_LLM
+from .constants import EPSILON, MAX_FILE_SIZE_FOR_LLM, MIN_NAME_LENGTH_FOR_SIMILARITY
 
 logger = logging.getLogger(__name__)
+
+
+__all__ = [
+	"are_files_related",
+	"calculate_semantic_similarity",
+	"create_chunk_description",
+	"determine_commit_type",
+	"extract_code_from_diff",
+	"filter_valid_files",
+	"get_deleted_tracked_files",
+	"get_language_specific_patterns",
+	"has_related_file_pattern",
+	"have_similar_names",
+	"is_test_environment",
+	"match_test_file_patterns",
+]
 
 
 def extract_code_from_diff(diff_content: str) -> tuple[str, str]:
@@ -474,3 +492,91 @@ def calculate_semantic_similarity(emb1: list[float], emb2: list[float]) -> float
 	except (ValueError, TypeError, ArithmeticError, OverflowError):
 		logger.warning("Failed to calculate similarity")
 		return 0.0
+
+
+def match_test_file_patterns(file1: str, file2: str) -> bool:
+	"""Check if files match common test file patterns."""
+	# test_X.py and X.py patterns
+	if file1.startswith("test_") and file1[5:] == file2:
+		return True
+	if file2.startswith("test_") and file2[5:] == file1:
+		return True
+
+	# X_test.py and X.py patterns
+	if file1.endswith("_test.py") and file1[:-8] + ".py" == file2:
+		return True
+	return bool(file2.endswith("_test.py") and file2[:-8] + ".py" == file1)
+
+
+def have_similar_names(file1: str, file2: str) -> bool:
+	"""Check if files have similar base names."""
+	base1 = file1.rsplit(".", 1)[0] if "." in file1 else file1
+	base2 = file2.rsplit(".", 1)[0] if "." in file2 else file2
+
+	return (base1 in base2 or base2 in base1) and min(len(base1), len(base2)) >= MIN_NAME_LENGTH_FOR_SIMILARITY
+
+
+def has_related_file_pattern(file1: str, file2: str, related_file_patterns: Iterable[tuple[Pattern, Pattern]]) -> bool:
+	"""
+	Check if files match known related patterns.
+
+	Args:
+	    file1: First file path
+	    file2: Second file path
+	    related_file_patterns: Compiled regex pattern pairs to check against
+
+	Returns:
+	    True if the files match a known pattern, False otherwise
+
+	"""
+	for pattern1, pattern2 in related_file_patterns:
+		if (pattern1.match(file1) and pattern2.match(file2)) or (pattern2.match(file1) and pattern1.match(file2)):
+			return True
+	return False
+
+
+def are_files_related(file1: str, file2: str, related_file_patterns: Iterable[tuple[Pattern, Pattern]]) -> bool:
+	"""
+	Determine if two files are semantically related based on various criteria.
+
+	Args:
+	    file1: First file path
+	    file2: Second file path
+	    related_file_patterns: Compiled regex pattern pairs for pattern matching
+
+	Returns:
+	    True if the files are related, False otherwise
+
+	"""
+	# 1. Files in the same directory
+	dir1 = file1.rsplit("/", 1)[0] if "/" in file1 else ""
+	dir2 = file2.rsplit("/", 1)[0] if "/" in file2 else ""
+	if dir1 and dir1 == dir2:
+		return True
+
+	# 2. Files in closely related directories (parent/child or same root directory)
+	if dir1 and dir2:
+		if dir1.startswith(dir2 + "/") or dir2.startswith(dir1 + "/"):
+			return True
+		# Check if they share the same top-level directory
+		top_dir1 = dir1.split("/", 1)[0] if "/" in dir1 else dir1
+		top_dir2 = dir2.split("/", 1)[0] if "/" in dir2 else dir2
+		if top_dir1 and top_dir1 == top_dir2:
+			return True
+
+	# 3. Test files and implementation files (simple check)
+	if (file1.startswith("tests/") and file2 in file1) or (file2.startswith("tests/") and file1 in file2):
+		return True
+
+	# 4. Test file patterns
+	file1_name = file1.rsplit("/", 1)[-1] if "/" in file1 else file1
+	file2_name = file2.rsplit("/", 1)[-1] if "/" in file2 else file2
+	if match_test_file_patterns(file1_name, file2_name):
+		return True
+
+	# 5. Files with similar names
+	if have_similar_names(file1_name, file2_name):
+		return True
+
+	# 6. Check for related file patterns
+	return has_related_file_pattern(file1, file2, related_file_patterns)

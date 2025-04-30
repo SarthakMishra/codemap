@@ -14,15 +14,14 @@ from codemap.git.utils import GitDiff
 from .constants import (
 	DEFAULT_CODE_EXTENSIONS,
 	DEFAULT_SIMILARITY_THRESHOLD,
-	DIRECTORY_SIMILARITY_THRESHOLD,
 	MAX_CHUNKS_BEFORE_CONSOLIDATION,
 	MAX_FILE_SIZE_FOR_LLM,
 	MAX_FILES_PER_GROUP,
 	MIN_CHUNKS_FOR_CONSOLIDATION,
-	MIN_NAME_LENGTH_FOR_SIMILARITY,
 )
 from .schemas import DiffChunk
 from .utils import (
+	are_files_related,
 	calculate_semantic_similarity,
 	create_chunk_description,
 	determine_commit_type,
@@ -206,44 +205,35 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not diff.files:
 			return []
 
-		# Initialize structures
-		all_chunks: list[DiffChunk] = []
-		processed_files: set[str] = set()
-		semantic_chunks: list[DiffChunk] = []
-
-		# First pass: create a chunk for each file
+		# 1. Create one chunk per file initially
+		initial_file_chunks: list[DiffChunk] = []
 		for file_path in diff.files:
-			# Skip if already processed
-			if file_path in processed_files:
-				continue
-
-			# Create single-file chunks first
 			file_diff = GitDiff(
 				files=[file_path],
 				content=diff.content,
 				is_staged=diff.is_staged,
 			)
+			enhanced_chunks = self._enhance_semantic_split(file_diff)
+			if enhanced_chunks:
+				initial_file_chunks.extend(enhanced_chunks)
+			else:
+				logger.warning("No chunk generated for file: %s", file_path)
 
-			# Apply semantic enhancement to the single file
-			file_chunks = self._enhance_semantic_split(file_diff)
-			if file_chunks:
-				all_chunks.extend(file_chunks)
-				processed_files.add(file_path)
+		if not initial_file_chunks:
+			return []
 
-		# Group chunks by directory for further processing
-		directory_groups = self._group_chunks_by_directory(all_chunks)
+		# 2. Consolidate chunks from the same file (though step 1 should make this rare)
+		#    and potentially by directory if that logic is re-enabled later.
+		consolidated_chunks = self._consolidate_small_chunks(initial_file_chunks)
 
-		# Process each directory group
-		for chunks in directory_groups.values():
-			self._process_directory_group(chunks, processed_files, semantic_chunks)
+		# 3. Group remaining chunks by relatedness and similarity
+		processed_files: set[str] = set()
+		final_semantic_chunks: list[DiffChunk] = []
+		self._group_related_files(consolidated_chunks, processed_files, final_semantic_chunks)
+		self._process_remaining_chunks(consolidated_chunks, processed_files, final_semantic_chunks)
 
-		# Process any remaining chunks
-		self._process_remaining_chunks(all_chunks, processed_files, semantic_chunks)
-
-		# Consolidate small chunks if needed
-		return self._consolidate_if_needed(semantic_chunks)
-
-		# Return consolidated chunks
+		# 4. Final consolidation check
+		return self._consolidate_if_needed(final_semantic_chunks)
 
 	def _validate_embedding_model(self) -> None:
 		"""Validate that the embedding model is available."""
@@ -292,12 +282,8 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			remaining_chunks = [c for c in chunks if not c.files or c.files[0] not in dir_processed]
 
 			if remaining_chunks:
-				# Use a lower similarity threshold for files in the same directory
-				self._group_by_content_similarity(
-					remaining_chunks,
-					semantic_chunks,
-					similarity_threshold=DIRECTORY_SIMILARITY_THRESHOLD,
-				)
+				# Use default similarity threshold instead
+				self._group_by_content_similarity(remaining_chunks, semantic_chunks)
 
 			# Add all processed files to the global processed set
 			processed_files.update(dir_processed)
@@ -664,87 +650,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		return chunks
 
-	def _are_files_related(self, file1: str, file2: str) -> bool:
-		"""
-		Determine if two files are semantically related.
-
-		Args:
-		    file1: First file path
-		    file2: Second file path
-
-		Returns:
-		    True if the files are related, False otherwise
-
-		"""
-		# 1. Files in the same directory
-		dir1 = file1.rsplit("/", 1)[0] if "/" in file1 else ""
-		dir2 = file2.rsplit("/", 1)[0] if "/" in file2 else ""
-		if dir1 and dir1 == dir2:
-			return True
-
-		# 2. Files in closely related directories (parent/child)
-		if dir1 and dir2 and (dir1.startswith(dir2 + "/") or dir2.startswith(dir1 + "/")):
-			return True
-
-		# 3. Test files and implementation files
-		if (file1.startswith("tests/") and file2 in file1) or (file2.startswith("tests/") and file1 in file2):
-			return True
-
-		# 4. Test file patterns
-		file1_name = file1.rsplit("/", 1)[-1] if "/" in file1 else file1
-		file2_name = file2.rsplit("/", 1)[-1] if "/" in file2 else file2
-
-		# Check common test file patterns
-		if self._match_test_file_patterns(file1_name, file2_name):
-			return True
-
-		# 5. Files with similar names
-		if self._have_similar_names(file1_name, file2_name):
-			return True
-
-		# 6. Check for related file patterns
-		return self._has_related_file_pattern(file1, file2)
-
-	@staticmethod
-	def _match_test_file_patterns(file1: str, file2: str) -> bool:
-		"""Check if files match common test file patterns."""
-		# test_X.py and X.py patterns
-		if file1.startswith("test_") and file1[5:] == file2:
-			return True
-		if file2.startswith("test_") and file2[5:] == file1:
-			return True
-
-		# X_test.py and X.py patterns
-		if file1.endswith("_test.py") and file1[:-8] + ".py" == file2:
-			return True
-		return bool(file2.endswith("_test.py") and file2[:-8] + ".py" == file1)
-
-	@staticmethod
-	def _have_similar_names(file1: str, file2: str) -> bool:
-		"""Check if files have similar base names."""
-		base1 = file1.rsplit(".", 1)[0] if "." in file1 else file1
-		base2 = file2.rsplit(".", 1)[0] if "." in file2 else file2
-
-		return (base1 in base2 or base2 in base1) and min(len(base1), len(base2)) >= MIN_NAME_LENGTH_FOR_SIMILARITY
-
-	def _has_related_file_pattern(self, file1: str, file2: str) -> bool:
-		"""
-		Check if files match known related patterns.
-
-		Args:
-		    file1: First file path
-		    file2: Second file path
-
-		Returns:
-		    True if the files match a known pattern, False otherwise
-
-		"""
-		for pattern1, pattern2 in self.related_file_patterns:
-			if (pattern1.match(file1) and pattern2.match(file2)) or (pattern2.match(file1) and pattern1.match(file2)):
-				return True
-
-		return False
-
 	def _group_by_content_similarity(
 		self,
 		chunks: list[DiffChunk],
@@ -765,9 +670,32 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		# Check if model is available
 		if self._embedding_model is None:
-			logger.debug("Skipping semantic similarity grouping - embedding model not available")
-			# Add chunks individually since we can't calculate similarity
-			result_chunks.extend(chunks)
+			logger.debug("Embedding model not available, using fallback grouping strategy")
+			# If model is unavailable, try to group by file path patterns
+			grouped_paths: dict[str, list[DiffChunk]] = {}
+
+			# Group by common path prefixes
+			for chunk in chunks:
+				if not chunk.files:
+					result_chunks.append(chunk)
+					continue
+
+				file_path = chunk.files[0]
+				# Get directory or file prefix as the grouping key
+				if "/" in file_path:
+					# Use directory as key
+					key = file_path.rsplit("/", 1)[0]
+				else:
+					# Use file prefix (before extension) as key
+					key = file_path.split(".", 1)[0] if "." in file_path else file_path
+
+				if key not in grouped_paths:
+					grouped_paths[key] = []
+				grouped_paths[key].append(chunk)
+
+			# Create chunks from each group
+			for related_chunks in grouped_paths.values():
+				self._create_semantic_chunk(related_chunks, result_chunks)
 			return
 
 		processed_indices = set()
@@ -828,7 +756,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				if i == j or not other_chunk.files or other_chunk.files[0] in processed_files:
 					continue
 
-				if self._are_files_related(chunk.files[0], other_chunk.files[0]):
+				if are_files_related(chunk.files[0], other_chunk.files[0], self.related_file_patterns):
 					related_chunks.append(other_chunk)
 					processed_files.add(other_chunk.files[0])
 
@@ -880,6 +808,9 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		"""
 		Consolidate small chunks into larger, more meaningful groups.
 
+		First, consolidates chunks originating from the same file.
+		Then, consolidates remaining single-file chunks by directory.
+
 		Args:
 		    chunks: List of diff chunks to consolidate
 
@@ -891,64 +822,35 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if len(chunks) < MIN_CHUNKS_FOR_CONSOLIDATION:
 			return chunks
 
-		# Separate single-file chunks from multi-file chunks
-		single_file_chunks = [c for c in chunks if len(c.files) == 1]
-		multi_file_chunks = [c for c in chunks if len(c.files) > 1]
+		# --- Step 1: Consolidate chunks from the same file ----
+		file_groups: dict[str, list[DiffChunk]] = {}
+		other_chunks: list[DiffChunk] = []  # Chunks with multiple files or no files
 
-		# If we don't have many single-file chunks, no need to consolidate
-		if len(single_file_chunks) < MIN_CHUNKS_FOR_CONSOLIDATION:
-			return chunks
-
-		# Group by directory
-		consolidated_chunks = self._consolidate_by_directory(single_file_chunks)
-
-		# Add back the multi-file chunks
-		consolidated_chunks.extend(multi_file_chunks)
-
-		return consolidated_chunks
-
-	def _consolidate_by_directory(self, chunks: list[DiffChunk]) -> list[DiffChunk]:
-		"""Consolidate chunks by directory."""
-		dir_groups: dict[str, list[DiffChunk]] = {}
-
-		# Group by directory
 		for chunk in chunks:
-			if not chunk.files:
-				continue
+			if len(chunk.files) == 1:
+				file_path = chunk.files[0]
+				if file_path not in file_groups:
+					file_groups[file_path] = []
+				file_groups[file_path].append(chunk)
+			else:
+				other_chunks.append(chunk)  # Keep multi-file chunks separate for now
 
-			file_path = chunk.files[0]
-			dir_path = file_path.rsplit("/", 1)[0] if "/" in file_path else "root"
-
-			if dir_path not in dir_groups:
-				dir_groups[dir_path] = []
-
-			dir_groups[dir_path].append(chunk)
-
-		# Create consolidated chunks for each directory
-		consolidated_chunks = []
-
-		for dir_path, dir_chunks in dir_groups.items():
-			if len(dir_chunks) > 1:
-				# Combine all chunks in this directory
-				all_files = []
-				combined_content = []
-
-				for c in dir_chunks:
-					all_files.extend(c.files)
-					combined_content.append(c.content)
-
-				commit_type = determine_commit_type(all_files)
-				display_dir = dir_path if dir_path != "root" else "root directory"
-
-				consolidated_chunks.append(
-					DiffChunk(
-						files=all_files,
-						content="\n".join(combined_content),
-						description=f"{commit_type}: update files in {display_dir}",
-					)
+		consolidated_same_file_chunks: list[DiffChunk] = []
+		for file_path, file_chunk_list in file_groups.items():
+			if len(file_chunk_list) > 1:
+				# Merge chunks for this file
+				combined_content = "\n".join([c.content for c in file_chunk_list])
+				# Use the description from the first chunk or generate a default one
+				description = file_chunk_list[0].description or f"Changes in {file_path}"
+				consolidated_same_file_chunks.append(
+					DiffChunk(files=[file_path], content=combined_content, description=description)
 				)
 			else:
-				# Keep single chunks in directories with only one file
-				consolidated_chunks.extend(dir_chunks)
+				# Keep single chunks as they are
+				consolidated_same_file_chunks.extend(file_chunk_list)
 
-		return consolidated_chunks
+		# Combine same-file consolidated chunks and the multi-file chunks
+		final_chunks = consolidated_same_file_chunks + other_chunks
+
+		logger.debug("Consolidated (file-level only) from %d to %d chunks", len(chunks), len(final_chunks))
+		return final_chunks
