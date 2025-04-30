@@ -38,7 +38,7 @@ class TestFileUtils(FileSystemTestBase):
 		assert token_count == 0
 
 	@patch("pathlib.Path.mkdir")
-	@patch("codemap.utils.file_utils.datetime")
+	@patch("datetime.datetime")
 	def test_get_output_path_with_explicit_path(self, mock_datetime: MagicMock, mock_mkdir: MagicMock) -> None:
 		"""Test get_output_path with an explicit output path."""
 		# Set up test data
@@ -62,7 +62,7 @@ class TestFileUtils(FileSystemTestBase):
 class TestOutputPath(FileSystemTestBase):
 	"""Test cases for output path generation."""
 
-	@patch("codemap.utils.file_utils.datetime")
+	@patch("datetime.datetime")
 	def test_get_output_path_with_config(self, mock_datetime: MagicMock) -> None:
 		"""Test get_output_path using config and no explicit path."""
 		# Set up mock datetime
@@ -92,7 +92,7 @@ class TestOutputPath(FileSystemTestBase):
 		config = {"output_dir": str(docs_dir)}
 
 		# Call function
-		with patch("codemap.utils.file_utils.datetime") as mock_datetime:
+		with patch("datetime.datetime") as mock_datetime:
 			mock_now = mock_datetime.now.return_value
 			mock_now.strftime.return_value = "20240601_123456"
 
