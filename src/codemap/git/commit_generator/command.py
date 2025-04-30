@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Constants
+MAX_FILES_BEFORE_BATCHING = 10
+
 
 class CommitCommand:
 	"""Handles the commit command workflow."""
@@ -109,7 +112,22 @@ class CommitCommand:
 
 			# Get the staged diff which should now include all changes
 			staged = get_staged_diff()
-			if staged.files:
+
+			# If we have a lot of files, process them in smaller batches
+			# to avoid overwhelming the splitter
+			if len(staged.files) > MAX_FILES_BEFORE_BATCHING:
+				# Create smaller diffs with max 5-10 files each
+				logger.info("Processing %d files in smaller batches", len(staged.files))
+				for i in range(0, len(staged.files), 5):
+					batch_files = staged.files[i : i + 5]
+					batch_diff = GitDiff(
+						files=batch_files,
+						content=staged.content,  # Keep same content for now
+						is_staged=True,
+					)
+					changes.append(batch_diff)
+			elif staged.files:
+				# If we have a reasonable number of files, process them as-is
 				changes.append(staged)
 
 			# We'll still check for any unstaged changes that might have been missed
@@ -210,8 +228,10 @@ class CommitCommand:
 			with loading_spinner("Staging files..."):
 				run_git_command(["git", "add", "."])
 
-			# Unstage files not in the current chunk to ensure only chunk files are committed
+			# Get all staged files
 			all_staged_files = get_staged_diff().files
+
+			# Unstage files not in the current chunk
 			files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
 			if files_to_unstage:
 				unstage_files(files_to_unstage)
@@ -241,6 +261,7 @@ class CommitCommand:
 				if other_staged:
 					logger.warning("Other files were staged but not included in commit: %s", other_staged)
 
+			# Show success message based on what was committed
 			self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
 
 			# Re-stage all remaining changes for the next commit
@@ -421,13 +442,19 @@ class CommitCommand:
 
 				# Now proceed with organizing changes semantically
 				with loading_spinner("Organizing changes semantically..."):
-					chunks = self.splitter.split_diff(diff, "semantic")
+					chunks, filtered_large_files = self.splitter.split_diff(diff)
+					if filtered_large_files:
+						self.ui.show_error(
+							f"Skipped {len(filtered_large_files)} large files from analysis due to size limits."
+						)
+
 				if not chunks:
 					continue
 
 				# Process all chunks
 				if not self.process_all_chunks(chunks):
 					return False
+
 		except typer.Exit:
 			# Make sure exit is marked as an intended abort
 			self.error_state = "aborted"
