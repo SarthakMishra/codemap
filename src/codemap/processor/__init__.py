@@ -1,67 +1,47 @@
 """
-Code processing modules for CodeMap.
+CodeMap processor module.
 
-This package contains modules for processing and analyzing code:
-- chunking: Strategies for breaking code into semantic chunks
-- analysis: Tools for analyzing code structure and metadata
-- embedding: Tools for generating vector embeddings of code
+This module provides functionality for code processing and analysis,
+with a focus on generating code structure at different levels of detail
+using tree-sitter.
 
 """
 
 from __future__ import annotations
 
-import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
+from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
 from codemap.processor.pipeline import ProcessingPipeline
 
-if TYPE_CHECKING:
-	from codemap.processor.embedding.models import EmbeddingConfig
-	from codemap.processor.storage.base import StorageConfig
+__all__ = [
+	"LODEntity",
+	"LODGenerator",
+	"LODLevel",
+	"ProcessingPipeline",
+	"create_processor",
+]
 
-logger = logging.getLogger(__name__)
 
-__all__ = ["ProcessingPipeline", "initialize_processor"]
-
-
-def initialize_processor(
+def create_processor(
 	repo_path: str | Path,
-	storage_config: StorageConfig | None = None,
-	embedding_config: EmbeddingConfig | None = None,
-	enable_lsp: bool = True,
 	max_workers: int = 4,
+	default_lod_level: LODLevel = LODLevel.SIGNATURES,
 ) -> ProcessingPipeline:
 	"""
-	Initialize the processor module with proper directory structure.
-
-	This is a convenience function that sets up the processing pipeline
-	with the appropriate directory structure for storing embeddings and
-	vector databases.
+	Create a processing pipeline for a repository.
 
 	Args:
-	    repo_path: Path to the repository to process
-	    storage_config: Optional custom storage configuration
-	    embedding_config: Optional custom embedding configuration
-	    enable_lsp: Whether to enable LSP analysis
-	    max_workers: Maximum number of worker threads
+	    repo_path: Path to the repository root
+	    max_workers: Maximum number of worker threads for processing
+	    default_lod_level: Default Level of Detail to use for processing
 
 	Returns:
-	    Initialized processing pipeline
+	    A configured ProcessingPipeline instance
 
 	"""
-	# Convert string path to Path object
-	if isinstance(repo_path, str):
-		repo_path = Path(repo_path)
-
-	# Create and return the processing pipeline
-	pipeline = ProcessingPipeline(
-		repo_path=repo_path,
-		storage_config=storage_config,
-		embedding_config=embedding_config,
-		enable_lsp=enable_lsp,
+	return ProcessingPipeline(
+		repo_path=Path(repo_path),
 		max_workers=max_workers,
+		default_lod_level=default_lod_level,
 	)
-
-	logger.info("Processor module initialized with repository: %s", repo_path)
-	return pipeline
