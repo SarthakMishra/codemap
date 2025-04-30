@@ -15,8 +15,6 @@ from typing import Annotated
 
 import typer
 
-from codemap.daemon.client import DaemonClient
-from codemap.daemon.command import start_daemon, wait_for_daemon_api
 from codemap.gen import (
 	CompressionStrategy,
 	DocFormat,
@@ -24,6 +22,7 @@ from codemap.gen import (
 	GenConfig,
 	GenerationMode,
 )
+from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import exit_with_error, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 
@@ -91,29 +90,166 @@ VerboseFlag = Annotated[
 	),
 ]
 
-AutoStartDaemonOpt = Annotated[
+ProcessingFlag = Annotated[
 	bool,
 	typer.Option(
-		"--auto-start-daemon/--no-auto-start-daemon",
-		help="Automatically start the daemon if it's not running",
+		"--process/--no-process",
+		help="Process the codebase before generation",
 	),
 ]
 
 
-def check_daemon_connection() -> bool:
+def initialize_pipeline(repo_path: Path, config_data: dict) -> ProcessingPipeline:
 	"""
-	Check if the daemon is running and accessible.
+	Initialize the processing pipeline for code analysis.
+
+	Args:
+	    repo_path: Path to the repository
+	    config_data: Configuration data
 
 	Returns:
-	    bool: True if the daemon is running, False otherwise
+	    ProcessingPipeline: Initialized pipeline
 
 	"""
-	try:
-		client = DaemonClient()
-		client.check_status()
-		return True
-	except (RuntimeError, ConnectionError):
-		return False
+	from codemap.processor.embedding.models import EmbeddingConfig
+	from codemap.processor.storage.base import StorageConfig
+	from codemap.utils.directory_manager import get_directory_manager
+
+	# Extract processor configuration
+	processor_config = config_data.get("processor", {})
+
+	# Get directory manager for cache directories
+	dir_manager = get_directory_manager()
+	dir_manager.set_project_dir(repo_path)
+	project_cache_dir = dir_manager.get_project_cache_dir(create=True)
+
+	if not project_cache_dir:
+		project_cache_dir = repo_path / ".codemap_cache"
+		project_cache_dir.mkdir(exist_ok=True, parents=True)
+
+	# Configure storage
+	storage_dir = project_cache_dir / "storage"
+	storage_dir.mkdir(exist_ok=True, parents=True)
+	cache_dir = storage_dir / "cache"
+	cache_dir.mkdir(exist_ok=True, parents=True)
+
+	storage_config = StorageConfig(uri=str(storage_dir / "vector.lance"), create_if_missing=True, cache_dir=cache_dir)
+
+	# Configure embeddings
+	embedding_cache_dir = project_cache_dir / "embeddings"
+	embedding_cache_dir.mkdir(exist_ok=True, parents=True)
+	embedding_config = EmbeddingConfig(
+		model=processor_config.get("embedding_model", "Qodo/Qodo-Embed-1-1.5B"),
+		dimensions=processor_config.get("embedding_dimensions", 384),
+		batch_size=processor_config.get("batch_size", 32),
+	)
+
+	# Get ignored patterns
+	ignored_patterns = set(processor_config.get("ignored_patterns", []))
+	ignored_patterns.update(
+		[
+			"**/.git/**",
+			"**/__pycache__/**",
+			"**/.venv/**",
+			"**/node_modules/**",
+			"**/.codemap_cache/**",
+			"**/*.pyc",
+			"**/dist/**",
+			"**/build/**",
+		]
+	)
+
+	# Initialize pipeline
+	pipeline = ProcessingPipeline(
+		repo_path=repo_path,
+		storage_config=storage_config,
+		embedding_config=embedding_config,
+		ignored_patterns=ignored_patterns,
+		max_workers=processor_config.get("max_workers", 4),
+		enable_lsp=processor_config.get("enable_lsp", True),
+	)
+
+	logger.info("Processing pipeline initialized for repository: %s", repo_path)
+	return pipeline
+
+
+def process_codebase(repo_path: Path, config_data: dict) -> None:
+	"""
+	Process the codebase with the pipeline.
+
+	Args:
+	    repo_path: Path to the repository
+	    config_data: Configuration data
+
+	"""
+	import os
+
+	from codemap.utils.cli_utils import console, progress_indicator
+
+	# Initialize the pipeline
+	pipeline = initialize_pipeline(repo_path, config_data)
+
+	# Create a list of all files to process
+	all_files = []
+	logger.info("Scanning repository at %s for files to process", repo_path)
+
+	# Get ignored patterns as a list of strings
+	ignored_patterns = list(pipeline.ignored_patterns)
+
+	for root, _, files in os.walk(repo_path):
+		root_path = Path(root)
+
+		# Skip ignored directories
+		if any(part.startswith(".") for part in root_path.parts):
+			continue
+
+		for file in files:
+			# Skip hidden files
+			if file.startswith("."):
+				continue
+
+			file_path = root_path / file
+
+			# Check if file should be processed
+			should_process = True
+			for pattern in ignored_patterns:
+				try:
+					if file_path.match(pattern):
+						should_process = False
+						break
+				except (TypeError, ValueError):
+					# Skip invalid patterns
+					continue
+
+			if should_process:
+				all_files.append(file_path)
+
+	# Process files in batches with progress display
+	total_files = len(all_files)
+	if total_files == 0:
+		console.print("[yellow]No files found to process in the repository.[/]")
+		return
+
+	console.print(f"Found {total_files} files to process.")
+
+	# Use the progress_indicator utility
+	with progress_indicator("Processing repository files", style="progress", total=total_files) as advance:
+		# Process in batches for better performance
+		batch_size = 100
+		for i in range(0, total_files, batch_size):
+			batch = all_files[i : min(i + batch_size, total_files)]
+
+			# Process the batch
+			pipeline.batch_process(batch)
+
+			# Update progress
+			advance(len(batch))
+
+	logger.info("Repository scan completed. Processed %d files.", total_files)
+	console.print(f"[green]Repository scan complete. Processed {total_files} files.[/]")
+
+	# Clean up
+	pipeline.stop()
 
 
 def gen_command(
@@ -172,7 +308,7 @@ def gen_command(
 			help="Enable verbose logging",
 		),
 	] = False,
-	auto_start_daemon: AutoStartDaemonOpt = False,
+	process: ProcessingFlag = True,
 ) -> None:
 	"""
 	Generate code documentation for LLM context or human-readable docs.
@@ -201,26 +337,13 @@ def gen_command(
 		# Get gen-specific config with defaults
 		gen_config_data = config_data.get("gen", {})
 
-		# Check if daemon is required and if it's running
-		if not check_daemon_connection():
-			# Get the auto_start_daemon setting from either the command line or config
-			auto_start = auto_start_daemon or gen_config_data.get("auto_start_daemon", False)
+		# Process the codebase if requested
+		if process:
+			from codemap.utils.cli_utils import console
 
-			if auto_start:
-				from codemap.utils.cli_utils import console
-
-				console.print("[yellow]Daemon is not running. Attempting to start it...[/yellow]")
-
-				result = start_daemon(config_path=config, foreground=False, timeout=30)
-				if result != 0 or not wait_for_daemon_api(timeout=10):
-					exit_with_error("Failed to start the daemon. Please start it manually with 'codemap daemon start'")
-
-				console.print("[green]Daemon started successfully[/green]")
-			else:
-				exit_with_error(
-					"The CodeMap daemon is not running. "
-					"Please start it with 'codemap daemon start' or use --auto-start-daemon."
-				)
+			console.print("[yellow]Processing codebase...[/yellow]")
+			process_codebase(target_path, config_data)
+			console.print("[green]Codebase processing completed successfully[/green]")
 
 		# Override config values from command line arguments
 		token_limit = map_tokens if map_tokens is not None else gen_config_data.get("token_limit", 10000)
@@ -253,7 +376,6 @@ def gen_command(
 			max_content_length=content_length,
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
-			auto_start_daemon=auto_start_daemon,
 		)
 
 		# Determine output path

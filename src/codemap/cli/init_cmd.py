@@ -12,7 +12,6 @@ import questionary
 import typer
 from rich.panel import Panel
 
-from codemap.daemon.command import start_daemon
 from codemap.processor import ProcessingPipeline
 from codemap.processor.embedding.models import EmbeddingConfig
 from codemap.processor.storage.base import StorageConfig
@@ -62,13 +61,6 @@ def init_command(
 			help="Perform initial repository scan after initialization",
 		),
 	] = True,
-	background: Annotated[
-		bool,
-		typer.Option(
-			"--background",
-			help="Start daemon service after initialization",
-		),
-	] = False,
 	is_verbose: Annotated[
 		bool,
 		typer.Option(
@@ -81,7 +73,7 @@ def init_command(
 	"""
 	Initialize a new CodeMap project with optional wizard-guided configuration.
 
-	On first run, this will set up global configurations (daemon, LLM API,
+	On first run, this will set up global configurations (LLM API,
 	storage). Subsequent runs will only configure repository-specific
 	settings unless --full-setup is used.
 
@@ -198,28 +190,14 @@ def init_command(
 					run_initial_scan(pipeline, repo_root)
 					pipeline.stop()  # Clean shutdown after scanning
 
-				# Start daemon if requested
-				if background:
-					console.print("\n[bold]Starting CodeMap daemon service...[/bold]")
-					try:
-						# Use the existing daemon start command
-						result = start_daemon(config_path=None, foreground=False, timeout=30)
-						if result == 0:
-							console.print("[green]Started CodeMap daemon service[/green]")
-						else:
-							show_warning("Failed to start daemon service. Try running 'codemap daemon start' manually.")
-					except Exception as e:
-						show_warning(f"Error starting daemon: {e}")
-						logger.exception("Failed to start daemon")
 			except Exception as e:
 				show_warning(f"Could not initialize processor: {e}")
 				logger.exception("Failed to initialize processor")
 
 		console.print("\nNext steps:")
 		console.print("1. Review and customize .codemap.yml for your project")
-		console.print("2. Run 'codemap generate' to create documentation")
-		console.print("3. Run 'codemap daemon start' to start the background service")
-		console.print("4. Run 'codemap commit' to use AI-powered commit messages")
+		console.print("2. Run 'codemap gen' to create documentation")
+		console.print("3. Run 'codemap gen --process' to process and generate documentation")
 
 	except (FileNotFoundError, PermissionError, OSError) as e:
 		exit_with_error(f"File system error: {e!s}", exception=e)
@@ -548,6 +526,7 @@ def initialize_processor(repo_path: Path, config: dict) -> ProcessingPipeline:
 
 	# Use directory manager to get properly set up cache directories
 	dir_manager = get_directory_manager()
+	dir_manager.set_project_dir(repo_path)
 	project_cache_dir = dir_manager.get_project_cache_dir(create=True)
 
 	if not project_cache_dir:
@@ -559,10 +538,10 @@ def initialize_processor(repo_path: Path, config: dict) -> ProcessingPipeline:
 	# Configure storage using directory manager paths
 	storage_dir = project_cache_dir / "storage"
 	storage_dir.mkdir(exist_ok=True, parents=True)
+	cache_dir = storage_dir / "cache"
+	cache_dir.mkdir(exist_ok=True, parents=True)
 
-	storage_config = StorageConfig(
-		uri=str(storage_dir / "vector.lance"), create_if_missing=True, cache_dir=storage_dir / "cache"
-	)
+	storage_config = StorageConfig(uri=str(storage_dir / "vector.lance"), create_if_missing=True, cache_dir=cache_dir)
 
 	# Configure embedding with proper cache directory
 	embedding_cache_dir = project_cache_dir / "embeddings"
@@ -634,9 +613,13 @@ def run_initial_scan(pipeline: ProcessingPipeline, repo_path: Path) -> None:
 			# Check if file should be processed (not in ignored patterns)
 			should_process = True
 			for pattern in pipeline.ignored_patterns:
-				if file_path.match(pattern):
-					should_process = False
-					break
+				try:
+					if file_path.match(pattern):
+						should_process = False
+						break
+				except TypeError:
+					# Skip invalid patterns
+					continue
 
 			if should_process:
 				all_files.append(file_path)

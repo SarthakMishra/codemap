@@ -27,7 +27,6 @@ except ImportError:
 
 from codemap import __version__
 from codemap.cli.commit_cmd import commit_command
-from codemap.cli.daemon_cmd import daemon_cmd
 from codemap.cli.gen_cmd import gen_command
 from codemap.cli.init_cmd import init_command
 from codemap.cli.pkg_cmd import pkg_cmd
@@ -48,7 +47,6 @@ app.command(name="init")(init_command)
 app.command(name="gen")(gen_command)
 app.command(name="commit")(commit_command)
 app.command(name="pr")(pr_command)
-app.add_typer(daemon_cmd)
 app.add_typer(pkg_cmd)
 
 
