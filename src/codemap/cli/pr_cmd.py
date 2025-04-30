@@ -652,6 +652,18 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 						logger.exception("Failed to determine base branch from workflow strategy")
 						base_branch = "main"
 
+		# ---> Add interactive base branch selection here <---
+		if options.interactive and not options.base_branch:  # Only ask if interactive and not provided via CLI
+			confirmed_base_branch = questionary.text(
+				"Enter the base branch for the PR:", default=base_branch, qmark="🎯"
+			).ask()
+
+			if not confirmed_base_branch:
+				show_error("Base branch selection cancelled.")
+				return None
+			base_branch = confirmed_base_branch
+		# <--- End interactive base branch selection --->
+
 		# Check for existing PR first
 		existing_pr = get_existing_pr(branch_name)
 		if existing_pr:
