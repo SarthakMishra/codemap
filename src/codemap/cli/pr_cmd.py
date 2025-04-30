@@ -448,8 +448,11 @@ def _handle_commits(options: PROptions) -> bool:
 			else:
 				console.print("[green]Semantic analysis model loaded successfully.[/green]")
 
+		# Calculate grand total before calling process_all_chunks
+		grand_total = len(chunks)
 		result = command.process_all_chunks(
 			chunks,
+			grand_total=grand_total,
 			interactive=options.interactive,
 		)
 	except (OSError, ValueError, RuntimeError, ConnectionError) as e:

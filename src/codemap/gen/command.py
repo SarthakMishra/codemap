@@ -4,11 +4,9 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Any
 
-from codemap.processor import initialize_processor
-from codemap.processor.chunking.base import Chunk
-from codemap.processor.embedding.models import EmbeddingConfig
+from codemap.processor import LODEntity, create_processor
 from codemap.utils.cli_utils import console, show_error
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
@@ -28,9 +26,9 @@ def process_codebase(
 	config: GenConfig,
 	progress: Progress,
 	task_id: TaskID,
-) -> tuple[list[Chunk], dict]:
+) -> tuple[list[LODEntity], dict]:
 	"""
-	Process a codebase using the pipeline architecture.
+	Process a codebase using the LOD pipeline architecture.
 
 	Args:
 	    target_path: Path to the target codebase
@@ -39,44 +37,23 @@ def process_codebase(
 	    task_id: Task ID for progress reporting
 
 	Returns:
-	    Tuple of (list of chunks, metadata dict)
+	    Tuple of (list of LOD entities, metadata dict)
 
 	Raises:
-	    RuntimeError: If initialization fails or daemon connectivity issues occur
+	    RuntimeError: If initialization fails
 
 	"""
 	logger.info("Starting codebase processing for: %s", target_path)
 	progress.update(task_id, description="Initializing processor...")
 
-	# Configure pipeline settings based on generation config
-	# Fixed constructor parameters
-	embedding_config = EmbeddingConfig(dimensions=384)
-
 	try:
-		# Initialize processor pipeline
-		pipeline = initialize_processor(
+		# Initialize processor pipeline with LOD support
+		pipeline = create_processor(
 			repo_path=target_path,
-			embedding_config=embedding_config,
-			enable_lsp=config.semantic_analysis,
+			default_lod_level=config.lod_level,
 		)
-	except ConnectionError as e:
-		# Use show_error for user-friendly error messages
-		error_msg = (
-			"Failed to connect to the CodeMap daemon service. "
-			"Please ensure the daemon is running with 'codemap daemon start' or "
-			"use the --auto-start-daemon flag to start it automatically."
-		)
-		show_error(error_msg)
-		logger.exception("Failed to connect to daemon service")
-		raise RuntimeError(error_msg) from e
 	except RuntimeError as e:
 		logger.exception("Error initializing processor")
-		if "daemon" in str(e).lower() or "connection" in str(e).lower():
-			error_msg = (
-				f"Daemon connection error: {e}. Please ensure the daemon is running with 'codemap daemon start'."
-			)
-			show_error(error_msg)
-			raise RuntimeError(error_msg) from e
 		error_msg = f"Processor initialization failed: {e}"
 		show_error(error_msg)
 		raise RuntimeError(error_msg) from e
@@ -93,32 +70,36 @@ def process_codebase(
 	progress.update(task_id, total=total_files)
 	progress.update(task_id, description=f"Processing {total_files} files...")
 
-	# Process files in batches - convert to Sequence to address type issue
-	pipeline.batch_process(cast("list[str | Path]", filtered_paths))
-
-	# Collect processed chunks and metadata
-	processed_chunks = []
-	processed_count = 0
+	# Process files
+	processed_files = 0
+	entities: list[LODEntity] = []
 
 	for path in filtered_paths:
 		if not path.is_file():
 			continue
 
-		job = pipeline.get_job_status(path)
-		if job and job.completed_at and not job.error:
-			processed_chunks.extend(job.chunks)
-			processed_count += 1
-			progress.update(task_id, completed=processed_count)
+		# Process the file and get its LOD entity
+		entity = pipeline.process_file_sync(path, config.lod_level)
+		if entity:
+			entities.append(entity)
+			processed_files += 1
+			progress.update(task_id, completed=processed_files)
+
+	# Wait for any pending async operations
+	pipeline.wait_for_completion()
+
+	# Clean up
+	pipeline.stop()
 
 	# Generate repository metadata
-	metadata = {
+	languages = {entity.language for entity in entities if entity.language}
+
+	metadata: dict[str, Any] = {
 		"name": target_path.name,
 		"stats": {
 			"total_files": total_files,
-			"total_lines": sum(
-				chunk.metadata.location.end_line - chunk.metadata.location.start_line + 1 for chunk in processed_chunks
-			),
-			"languages": list({chunk.metadata.language for chunk in processed_chunks if chunk.metadata.language}),
+			"total_lines": sum(entity.end_line - entity.start_line + 1 for entity in entities),
+			"languages": list(languages),
 		},
 	}
 
@@ -126,7 +107,7 @@ def process_codebase(
 	if config.include_tree:
 		metadata["tree"] = generate_tree(target_path, filtered_paths)
 
-	return processed_chunks, metadata
+	return entities, metadata
 
 
 class GenCommand:
@@ -173,17 +154,11 @@ class GenCommand:
 				TimeElapsedColumn(),
 			) as progress:
 				task_id = progress.add_task("Processing codebase...", total=None)
-				chunks, metadata = process_codebase(target_path, self.config, progress, task_id)
+				entities, metadata = process_codebase(target_path, self.config, progress, task_id)
 
-			# Generate documentation based on mode
-			from .models import GenerationMode
-
+			# Generate documentation
 			console.print("[green]Processing complete. Generating documentation...")
-
-			if self.config.mode == GenerationMode.LLM:
-				content = generator.generate_llm_context(chunks, metadata)
-			else:
-				content = generator.generate_human_docs(chunks, metadata)
+			content = generator.generate_documentation(entities, metadata)
 
 			# Write documentation to output file
 			write_documentation(output_path, content)
@@ -196,8 +171,6 @@ class GenCommand:
 
 		except Exception as e:
 			logger.exception("Error during gen command execution")
-			from codemap.utils.cli_utils import show_error
-
 			# Show a clean error message to the user
 			error_msg = f"Generation failed: {e!s}"
 			show_error(error_msg)

@@ -3,30 +3,43 @@
 from textwrap import dedent
 
 DEFAULT_CONFIG = {
+	# LLM configuration
+	"llm": {
+		"model": "openai/gpt-4o-mini",
+		"api_base": None,
+	},
 	# Gen command configuration
 	"gen": {
-		# Maximum number of tokens to include (0 for unlimited)
-		"token_limit": 10000,
+		# Maximum content length per file (0 for unlimited)
+		"max_content_length": 5000,
 		# Whether to respect gitignore patterns
 		"use_gitignore": True,
 		# Directory to store documentation files
 		"output_dir": "documentation",
-		# Maximum content length per file (0 for unlimited)
-		"max_content_length": 5000,
-		# Generation mode: 'llm' or 'human'
-		"mode": "llm",
-		# Compression strategy: 'smart', 'aggressive', 'minimal', 'none'
-		"compression": "smart",
-		# Documentation format for human-readable docs: 'markdown', 'mintlify', 'mkdocs', 'mdx'
-		"doc_format": "markdown",
 		# Whether to include directory tree in output
 		"include_tree": False,
 		# Enable semantic analysis using LSP
 		"semantic_analysis": True,
 		# Output file for generated documentation
 		"output_file": "code_documentation.md",
-		# Whether to automatically start the daemon if not running
-		"auto_start_daemon": False,
+		# Level of Detail for code analysis (names, docs, signatures, full)
+		"lod_level": "docs",
+	},
+	# Processor configuration
+	"processor": {
+		"enabled": True,
+		"max_workers": 4,
+		"ignored_patterns": [
+			"**/.git/**",
+			"**/__pycache__/**",
+			"**/.venv/**",
+			"**/node_modules/**",
+			"**/*.pyc",
+			"**/dist/**",
+			"**/build/**",
+		],
+		# Default LOD level for processing
+		"default_lod_level": "signatures",
 	},
 	# Commit feature configuration
 	"commit": {
@@ -34,11 +47,6 @@ DEFAULT_CONFIG = {
 		"strategy": "file",
 		# Whether to bypass git hooks with --no-verify when committing
 		"bypass_hooks": False,
-		# LLM configuration
-		"llm": {
-			"model": "openai/gpt-4o-mini",
-			"api_base": None,
-		},
 		# Commit convention settings
 		"convention": {
 			"types": [
@@ -199,37 +207,5 @@ DEFAULT_CONFIG = {
 			# Whether to use PR templates from workflow strategies
 			"use_workflow_templates": True,
 		},
-	},
-	# Server configuration - covers both daemon and API server
-	"server": {
-		# Network settings
-		"host": "127.0.0.1",
-		"port": 8765,
-		# CORS settings
-		"allow_cors": True,
-		"cors_origins": ["*"],
-		# Performance
-		"max_connections": 10,
-		# Daemon specific
-		"log_level": "info",
-		"pid_file": "~/.codemap/run/daemon.pid",
-		"log_file": "~/.codemap/logs/daemon.log",
-		"auto_start": False,
-		# Socket connection
-		"use_socket": False,
-		"socket_file": "~/.codemap/run/daemon.sock",
-	},
-	# Processing configuration
-	"processing": {
-		"num_workers": 2,
-		"timeout": 300,
-		"chunk_size": 4096,
-	},
-	# Storage configuration
-	"storage": {
-		"data_dir": "~/.codemap/data",
-		"use_cache": True,
-		"cache_size_mb": 512,
-		"cache_dir": "~/.codemap/cache",
 	},
 }

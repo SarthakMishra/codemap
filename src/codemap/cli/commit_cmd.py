@@ -14,7 +14,6 @@ import questionary
 import typer
 from rich.markdown import Markdown
 from rich.markup import escape
-from rich.padding import Padding
 from rich.panel import Panel
 from rich.text import Text
 
@@ -30,16 +29,11 @@ if TYPE_CHECKING:
 
 from codemap.git import (
 	DiffChunk,
-	DiffSplitter,
 )
 from codemap.git.commit_generator.command import CommitCommand
 from codemap.git.utils import (
 	GitError,
 	commit_only_files,
-	get_other_staged_files,
-	get_staged_diff,
-	get_unstaged_diff,
-	get_untracked_files,
 	run_git_command,
 	validate_repo_path,
 )
@@ -47,7 +41,6 @@ from codemap.llm import LLMError
 from codemap.utils.cli_utils import (
 	console,
 	exit_with_error,
-	progress_indicator,
 	setup_logging,
 	show_error,
 	show_warning,
@@ -114,64 +107,6 @@ def _load_prompt_template(template_path: str | None) -> str | None:
 	except OSError:
 		show_warning(f"Could not load prompt template: {template_path}")
 		return None
-
-
-def _extract_provider_from_model(model: str) -> str | None:
-	"""
-	Extract provider from model name if possible.
-
-	Args:
-	    model: Model identifier like "provider/model_name" or "provider/org/model_name"
-
-	Returns:
-	    Provider name or None if not in expected format
-
-	"""
-	# Handle explicit provider prefixes (get first part before slash)
-	if "/" in model:
-		provider = model.split("/")[0]  # Take first part regardless of number of slashes
-		return provider.lower()  # Normalize to lowercase
-
-	# For models without provider prefix, return None
-	# LiteLLM will handle these appropriately
-	return None
-
-
-def _get_api_key_for_provider(provider: str) -> str | None:
-	"""
-	Get API key for the specified provider from environment.
-
-	Args:
-	    provider: Provider name
-
-	Returns:
-	    API key or None if not found
-
-	"""
-	provider_env_vars = {
-		"openai": "OPENAI_API_KEY",
-		"anthropic": "ANTHROPIC_API_KEY",
-		"azure": "AZURE_API_KEY",
-		"groq": "GROQ_API_KEY",
-		"mistral": "MISTRAL_API_KEY",
-		"together": "TOGETHER_API_KEY",
-		"cohere": "COHERE_API_KEY",
-		"openrouter": "OPENROUTER_API_KEY",
-	}
-
-	# Get environment variable name for this provider
-	env_var = provider_env_vars.get(provider)
-	if not env_var:
-		return None
-
-	# Try to get key from environment
-	api_key = os.environ.get(env_var)
-
-	# Fallback to OpenAI if requested
-	if not api_key and provider != "openai":
-		api_key = os.environ.get("OPENAI_API_KEY")
-
-	return api_key
 
 
 def create_universal_generator(
@@ -387,85 +322,6 @@ def print_chunk_summary(chunk: DiffChunk, index: int) -> None:
 		padding=(1, 2),
 	)
 	console.print(panel)
-
-
-def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bool]:
-	"""
-	Check for other staged and untracked files.
-
-	Args:
-	    chunk_files: Files in the current chunk
-
-	Returns:
-	    Tuple of (other_staged, other_untracked, has_warnings)
-
-	"""
-	other_staged = get_other_staged_files(chunk_files)
-
-	# For untracked files, check if they are already included in the chunk
-	all_untracked = get_untracked_files()
-	other_untracked = [f for f in all_untracked if f not in chunk_files]
-
-	has_warnings = bool(other_staged or other_untracked)
-
-	# Display warnings
-	if other_staged:
-		warning_message = "The following files are also staged but not part of this commit:\n"
-		for file in other_staged:
-			warning_message += f"  - {file}\n"
-		show_warning(warning_message)
-
-	if other_untracked:
-		warning_message = "The following new files are not included in this commit:\n"
-		for file in other_untracked:
-			warning_message += f"  - {file}\n"
-		show_warning(warning_message)
-
-	return other_staged, other_untracked, has_warnings
-
-
-def _handle_other_files(chunk: DiffChunk, other_staged: list[str], other_untracked: list[str]) -> bool:
-	"""
-	Handle other staged or untracked files.
-
-	Args:
-	    chunk: The current chunk
-	    other_staged: Other staged files
-	    other_untracked: Other untracked files
-
-	Returns:
-	    False if action is cancelled, True otherwise
-
-	"""
-	# Prepare choices
-	choices = [
-		{"value": "continue", "name": "Continue with just the selected files"},
-		{"value": "all_staged", "name": "Include all staged files in this commit"},
-	]
-
-	# Only add untracked option if there are untracked files
-	if other_untracked:
-		choices.append({"value": "all_untracked", "name": "Include all untracked files in this commit"})
-
-	if other_staged and other_untracked:
-		choices.append({"value": "all", "name": "Include all staged and untracked files"})
-
-	choices.append({"value": "cancel", "name": "Cancel this commit"})
-
-	# Ask user what to do
-	action = questionary.select("Other files found. What would you like to do?", choices=choices).ask()
-
-	if action == "cancel":
-		console.print("[yellow]Commit cancelled[/yellow]")
-		return False
-
-	# Update chunk files if needed
-	if action in ("all_staged", "all"):
-		chunk.files.extend(other_staged)
-	if action in ("all_untracked", "all"):
-		chunk.files.extend(other_untracked)
-
-	return True
 
 
 def _commit_changes(
@@ -813,129 +669,6 @@ class RunConfig:
 
 
 DEFAULT_RUN_CONFIG = RunConfig()
-
-
-def _run_commit_command(config: RunConfig) -> int:
-	"""
-	Run the commit command logic.
-
-	Args:
-	    config: Run configuration
-
-	Returns:
-	    Exit code
-
-	"""
-	# Validate the repository path
-	try:
-		repo_path = validate_repo_path(config.repo_path)
-		if repo_path is None:
-			show_error("Repository path is None")
-			return 1
-	except ValueError as e:
-		show_error(str(e))
-		return 1
-
-	# Load configuration from .codemap.yml if it exists
-	config_loader = ConfigLoader(repo_root=repo_path)
-	# Override bypass_hooks from config file if not explicitly set
-	if repo_path and not hasattr(config, "_bypass_hooks_set"):
-		config.bypass_hooks = config_loader.get_bypass_hooks()
-
-	# Show welcome message
-	console.print(
-		Padding("[bold]CodeMap Conventional Commit Generator[/]", (1, 0, 0, 0)),
-	)
-
-	# Determine generation mode
-	mode = GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART
-
-	# Configure options
-	options = CommitOptions(
-		repo_path=repo_path,  # Now guaranteed to be a Path, not None
-		generation_mode=mode,
-		model=config.model,
-		api_base=config.api_base,
-		commit=config.commit,
-		prompt_template=config.prompt_template,
-		api_key=config.api_key,
-	)
-
-	try:
-		# Check if there are any changes
-		with progress_indicator("Checking for changes", style="spinner"):
-			try:
-				staged = get_staged_diff()
-				unstaged = get_unstaged_diff()
-				untracked = get_untracked_files()
-				has_changes = bool(staged.files or unstaged.files or untracked)
-			except GitError:
-				has_changes = False
-
-		if not has_changes:
-			console.print("[yellow]No changes to commit[/yellow]")
-			return 0
-
-		# Set up message generator
-		with progress_indicator("Setting up message generator", style="spinner"):
-			generator = setup_message_generator(options)
-
-		# Get staged and unstaged changes
-		with progress_indicator("Analyzing repository changes", style="spinner"):
-			# Get changes from Git
-			splitter = DiffSplitter(repo_path)  # Now guaranteed to be a Path, not None
-			chunks = []
-			all_filtered_files = []
-
-			# Process staged changes
-			staged_diff = get_staged_diff()
-			if staged_diff.files:
-				staged_chunks, filtered_staged_files = splitter.split_diff(staged_diff)
-				chunks.extend(staged_chunks)
-				all_filtered_files.extend(filtered_staged_files)
-
-			# Process unstaged changes
-			if not chunks or not config.staged_only:
-				unstaged_diff = get_unstaged_diff()
-				if unstaged_diff.files:
-					unstaged_chunks, filtered_unstaged_files = splitter.split_diff(unstaged_diff)
-					chunks.extend(unstaged_chunks)
-					all_filtered_files.extend(filtered_unstaged_files)
-
-		# Check if there are any chunks
-		if not chunks and not all_filtered_files:
-			console.print("[yellow]No changes to commit[/yellow]")
-			return 0
-
-		# Report filtered files if any
-		if all_filtered_files:
-			console.print(
-				Panel(
-					f"[yellow]Some files were excluded from the commit due to their size:[/yellow]\n"
-					f"{chr(10).join('- ' + f for f in all_filtered_files)}",
-					title="⚠️ Warning: Large Files Excluded",
-					border_style="yellow",
-				)
-			)
-
-			# If we only had filtered files and no valid chunks, show error
-			if not chunks:
-				console.print("[red]All modified files were too large to process. No changes will be committed.[/red]")
-				return 1
-
-		# Process chunks
-		exit_code = process_all_chunks(options, chunks, generator)
-
-		# If we successfully committed something but had filtered files, show a mixed success message
-		if exit_code == 0 and all_filtered_files:
-			console.print("[green]✓[/green] Changes committed, but some files were excluded (see warning above)")
-		elif exit_code == 0:
-			console.print("[green]✓[/green] All changes committed!")
-
-		return exit_code
-	except (ValueError, RuntimeError, TypeError) as e:
-		show_error(str(e))
-		return 1
 
 
 def _raise_command_failed_error() -> None:
