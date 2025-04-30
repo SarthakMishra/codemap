@@ -18,9 +18,7 @@ from codemap.git.utils import (
 	get_staged_diff,
 	get_unstaged_diff,
 	get_untracked_files,
-	run_git_command,
 	stage_files,
-	unstage_files,
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import loading_spinner
@@ -88,79 +86,41 @@ class CommitCommand:
 
 	def _get_changes(self) -> list[GitDiff]:
 		"""
-		Get all changes in the repository.
+		Get staged, unstaged, and untracked changes separately.
 
 		Returns:
-		    List of GitDiff objects
+		    List of GitDiff objects representing changes.
 
 		Raises:
-		    RuntimeError: If Git operations fail
-
+		    RuntimeError: If Git operations fail.
 		"""
+		changes = []
 		try:
-			changes = []
+			# Get staged changes
+			staged = get_staged_diff()
+			if staged and staged.files:
+				changes.append(staged)
+				logger.debug("Found %d staged files.", len(staged.files))
 
-			# First stage all files (including untracked) to ensure we have a complete diff
-			# This makes it easier to analyze all changes together
-			try:
-				# Use git add . to stage everything
-				run_git_command(["git", "add", "."])
-				logger.debug("Staged all changes for analysis")
-			except GitError as e:
-				logger.warning("Failed to stage all changes: %s", e)
-				# Continue with the process even if staging fails
-
-			# Get the list of staged files
-			staged_files_list = run_git_command(["git", "diff", "--cached", "--name-only"]).splitlines()
-
-			# If we have a lot of files, process them in smaller batches
-			# to avoid overwhelming the splitter
-			if len(staged_files_list) > MAX_FILES_BEFORE_BATCHING:
-				# Create smaller diffs with max 5-10 files each
-				logger.info("Processing %d files in smaller batches", len(staged_files_list))
-				# Use a smaller batch size, e.g., 5
-				batch_size = 5
-				for i in range(0, len(staged_files_list), batch_size):
-					batch_files = staged_files_list[i : i + batch_size]
-					if not batch_files:  # Skip empty batches
-						continue
-					# Get the specific diff content for this batch
-					batch_content = run_git_command(["git", "diff", "--cached", "--", *batch_files])
-					batch_diff = GitDiff(
-						files=batch_files,
-						content=batch_content,  # Use batch-specific content
-						is_staged=True,
-					)
-					changes.append(batch_diff)
-			elif staged_files_list:
-				# If we have a reasonable number of files, process them as-is
-				# Get the full staged diff content
-				full_staged_content = run_git_command(["git", "diff", "--cached"])
-				staged_diff = GitDiff(files=staged_files_list, content=full_staged_content, is_staged=True)
-				changes.append(staged_diff)
-
-			# We'll still check for any unstaged changes that might have been missed
+			# Get unstaged changes
 			unstaged = get_unstaged_diff()
-			if unstaged.files:
+			if unstaged and unstaged.files:
 				changes.append(unstaged)
+				logger.debug("Found %d unstaged files.", len(unstaged.files))
 
-			# Check for any untracked files that might have been missed by git add .
-			# This can happen if there are gitignore rules or other issues
-			untracked = get_untracked_files()
-			if untracked:
-				# Create a GitDiff object for untracked files
-				untracked_diff = GitDiff(
-					files=untracked,
-					content="",  # No content for untracked files
-					is_staged=False,
-				)
+			# Get untracked files
+			untracked_files = get_untracked_files()
+			if untracked_files:
+				untracked_diff = GitDiff(files=untracked_files, content="", is_staged=False)
 				changes.append(untracked_diff)
+				logger.debug("Found %d untracked files.", len(untracked_files))
 
 		except GitError as e:
-			msg = f"Failed to get changes: {e}"
+			msg = f"Failed to get repository changes: {e}"
+			logger.exception(msg)
 			raise RuntimeError(msg) from e
-		else:
-			return changes
+
+		return changes
 
 	def _generate_commit_message(self, chunk: DiffChunk) -> None:
 		"""
@@ -233,85 +193,21 @@ class CommitCommand:
 
 		"""
 		try:
-			# Make sure all files are staged first (in case any were missed or unstaged)
-			with loading_spinner("Staging files..."):
-				run_git_command(["git", "add", "."])
+			# Ensure the specific files for this chunk are staged
+			# This prevents accidentally committing unrelated staged changes
+			with loading_spinner("Staging chunk files..."):
+				stage_files(chunk.files)
 
-			# Get all staged files
-			all_staged_files = get_staged_diff().files
-
-			# Unstage files not in the current chunk
-			files_to_unstage = [f for f in all_staged_files if f not in chunk.files]
-			if files_to_unstage:
-				unstage_files(files_to_unstage)
-
-			# Make sure the chunk files are staged (should be redundant but ensures consistency)
-			stage_files(chunk.files)
-
-			# Create commit using commit_only_files which handles hooks better
-			with loading_spinner("Creating commit..."):
-				# Use the class's bypass_hooks setting as the default
-				initial_ignore_hooks = self.bypass_hooks
-				try:
-					# First try with hooks enabled (unless bypass_hooks is True)
-					other_staged = commit_only_files(chunk.files, message, ignore_hooks=initial_ignore_hooks)
-				except GitError as hook_error:
-					if "hook failed" in str(hook_error).lower() and not initial_ignore_hooks:
-						# If hook failed and we weren't already bypassing hooks, ask user if they want to bypass hooks
-						if self.ui.confirm_bypass_hooks():
-							# Retry with hooks disabled
-							other_staged = commit_only_files(chunk.files, message, ignore_hooks=True)
-						else:
-							raise  # Re-raise if user doesn't want to bypass hooks
-					else:
-						raise  # Re-raise if it's not a hook-related error or we were already bypassing hooks
-
-				# Log if there were other files staged but not included
-				if other_staged:
-					logger.warning("Other files were staged but not included in commit: %s", other_staged)
-
-			# Show success message based on what was committed
-			self.ui.show_success(f"Created commit for {', '.join(chunk.files)}")
-
-			# Re-stage all remaining changes for the next commit
-			# This ensures we don't lose track of any changes
-			with loading_spinner("Re-staging remaining changes..."):
-				run_git_command(["git", "add", "."])
-
-		except GitError as e:
-			# Display the git error in a formatted box
-			error_message = str(e)
-
-			# Check if the error contains a detailed git error message with newlines
-			if "\n" in error_message:
-				# Split the message if it contains a "Git Error Output:" section
-				if "Git Error Output:" in error_message:
-					parts = error_message.split("Git Error Output:", 1)
-					main_error = parts[0].strip()
-					git_output = "Git Error Output:" + parts[1].strip()
-
-					# Show the main error first, then the details in a panel
-					self.ui.show_error(f"Failed to commit changes: {main_error}")
-
-					from rich.console import Console
-					from rich.panel import Panel
-
-					console = Console()
-					console.print(Panel(git_output, title="Git Command Output", border_style="red"))
-				else:
-					# Just show the full error in a formatted panel
-					from rich.console import Console
-					from rich.panel import Panel
-
-					console = Console()
-					console.print(Panel(error_message, title="Git Command Error", border_style="red"))
-			else:
-				# For simple one-line errors, just display directly
-				self.ui.show_error(f"Failed to commit changes: {error_message}")
-
-			return False
-		else:
+			# Commit only the files specified in the chunk
+			commit_only_files(chunk.files, message, ignore_hooks=self.bypass_hooks)
+			self.ui.show_success(f"Committed {len(chunk.files)} files.")
 			return True
+		except GitError as e:
+			error_msg = f"Error during commit: {e}"
+			self.ui.show_error(error_msg)
+			logger.exception(error_msg)
+			self.error_state = "failed"
+			return False
 
 	def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
 		"""
@@ -396,17 +292,10 @@ class CommitCommand:
 		    True if successful, False if failed or aborted
 
 		"""
-		i = 0
-		while i < len(chunks):
-			chunk = chunks[i]
-			# Calculate the absolute index based on the start of this list + current index
-			# Note: This assumes chunks are processed sequentially without modification to the list order
-			absolute_index = sum(len(c.files) for c in chunks[:i])  # Or a better way to track overall index
-
+		for i, chunk in enumerate(chunks):
 			if interactive:
-				# Pass the grand_total for correct display
-				if not self._process_chunk(chunk, absolute_index + i, grand_total):
-					self.error_state = "aborted"
+				if not self._process_chunk(chunk, i, grand_total):
+					# _process_chunk sets error_state and returns False on failure/abort
 					return False
 			else:
 				# Non-interactive mode: commit all chunks automatically
@@ -415,9 +304,8 @@ class CommitCommand:
 					self.error_state = "failed"
 					return False
 
-			i += 1
-		# Don't show "All changes committed" here, as it might be called per batch
-		# self.ui.show_all_committed()
+		# If loop completes without returning False, it was successful
+		self.ui.show_all_committed()
 		return True
 
 	def run(self) -> bool:
@@ -432,63 +320,46 @@ class CommitCommand:
 
 		"""
 		try:
-			# 1. Get all change groups (batches)
+			# 1. Get changes
 			with loading_spinner("Analyzing repository changes..."):
-				change_groups = self._get_changes()
+				change_diffs = self._get_changes()
 
-			if not change_groups:
-				self.ui.show_error("No changes to commit")
-				return False
+			if not change_diffs:
+				self.ui.show_error("No changes detected to commit.")
+				return True  # Success, nothing to do
 
-			# 2. Generate all semantic chunks from all groups
-			all_semantic_chunks: list[DiffChunk] = []
-			all_filtered_files: list[str] = []
+			# Combine all changes into one diff for splitting
+			# This simplifies logic, assuming splitter can handle combined diff
+			combined_files = [f for diff in change_diffs for f in diff.files]
+			combined_content = "\n".join(diff.content for diff in change_diffs if diff.content)
+			combined_diff = GitDiff(files=combined_files, content=combined_content)
 
-			with loading_spinner("Checking semantic analysis capabilities..."):
-				self.splitter._check_sentence_transformers_availability()  # noqa: SLF001
-
-			if self.splitter._sentence_transformers_available:  # noqa: SLF001
-				with loading_spinner("Loading embedding model..."):
-					self.splitter._check_model_availability()  # noqa: SLF001
-
+			# 2. Split the combined diff
 			with loading_spinner("Organizing changes semantically..."):
-				for diff_group in change_groups:
-					chunks, filtered = self.splitter.split_diff(diff_group)
-					all_semantic_chunks.extend(chunks)
-					all_filtered_files.extend(filtered)
+				chunks, filtered_files = self.splitter.split_diff(combined_diff)
 
-			# 3. Handle filtered files warning (only once)
-			if all_filtered_files:
-				self.ui.show_error(f"Skipped {len(all_filtered_files)} large files from analysis due to size limits.")
+			# 3. Handle filtered files warning
+			if filtered_files:
+				self.ui.show_error(f"Skipped {len(filtered_files)} large files from analysis due to size limits.")
 
-			# 4. Check if there are any chunks to process
-			if not all_semantic_chunks:
-				if all_filtered_files:
-					self.ui.show_error("All files were too large or resulted in no processable chunks.")
-				else:
-					self.ui.show_error("No processable changes found.")  # Or a more specific message
+			# 4. Check if there are chunks to process
+			if not chunks:
+				self.ui.show_error("No processable changes found after analysis.")
+				return True  # Success, nothing to commit after filtering/splitting
+
+			# 5. Process all chunks
+			grand_total = len(chunks)
+			if not self.process_all_chunks(chunks, grand_total):
+				# Error state is set within process_all_chunks or _process_chunk
 				return False
-
-			# 5. Process all collected semantic chunks together
-			grand_total = len(all_semantic_chunks)
-			i = 0
-			while i < grand_total:
-				chunk = all_semantic_chunks[i]
-				if not self._process_chunk(chunk, i, grand_total):
-					# _process_chunk handles setting error_state and returning False on abort/fail
-					return False
-				i += 1
-
-			# Show final success message only after all chunks are processed
-			self.ui.show_all_committed()
 
 		except typer.Exit:
-			# Make sure exit is marked as an intended abort
 			self.error_state = "aborted"
 			raise
-		except (RuntimeError, ValueError) as e:
+		except (RuntimeError, ValueError, GitError) as e:
 			self.ui.show_error(str(e))
 			self.error_state = "failed"
+			logger.exception("Commit command failed.")  # Log the exception
 			return False
 		else:
 			# Check if we need to restore the original branch
@@ -501,7 +372,6 @@ class CommitCommand:
 						self.ui.show_success(f"Restoring original branch: {self.original_branch}")
 						checkout_branch(self.original_branch)
 				except (ImportError, GitError) as e:
-					# Log but don't fail if we can't restore the branch
 					logger.warning("Failed to restore original branch: %s", str(e))
 
 			return True
