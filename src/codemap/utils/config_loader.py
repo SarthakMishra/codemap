@@ -290,7 +290,7 @@ class ConfigLoader:
 		        str: Workflow strategy name
 
 		"""
-		return self.get("git.workflow_strategy", "default")
+		return self.get("git.workflow_strategy", "github-flow")
 
 	def get_pr_config(self) -> dict[str, Any]:
 		"""
