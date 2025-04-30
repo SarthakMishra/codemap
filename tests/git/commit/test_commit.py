@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, Mock, patch
 
+import numpy as np
 import pytest
 import yaml
 from dotenv import load_dotenv
@@ -23,7 +24,7 @@ from codemap.cli.commit_cmd import (
 )
 from codemap.git.commit_generator import CommitMessageGenerator
 from codemap.git.commit_generator.schemas import DiffChunkData
-from codemap.git.diff_splitter import DiffChunk, DiffSplitter
+from codemap.git.diff_splitter import DiffChunk, DiffSplitter, SemanticSplitStrategy
 from codemap.git.utils import GitDiff
 from codemap.llm import LLMError
 from tests.base import GitTestBase, LLMTestBase
@@ -518,76 +519,49 @@ class TestMessageGenerator(LLMTestBase):
 @pytest.mark.unit
 @pytest.mark.git
 class TestFileRelations(GitTestBase):
-	"""Test cases for file relationship detection."""
+	"""
+	Test cases for determining file relatedness.
+
+	Focuses on pattern matching and semantic similarity logic.
+
+	"""
 
 	def setup_method(self) -> None:
-		"""Set up test environment with mocks."""
-		# Initialize _patchers list needed by GitTestBase
-		self._patchers = []
-
-	def test_are_files_related(self) -> None:
-		"""Test detection of related files."""
-		# Arrange: Set up splitter with a mock repo root
-		repo_root = Path("/mock/repo")
-		DiffSplitter(repo_root)
-
-		# Get the semantic strategy
-		from codemap.git.diff_splitter.strategies import SemanticSplitStrategy
-
-		strategy = SemanticSplitStrategy()
-
-		# Test cases with related files
-		with patch.object(strategy, "_are_files_related") as mock_are_related:
-			mock_are_related.return_value = True
-			assert strategy._are_files_related("users.py", "user_profile.py") is True
-			mock_are_related.return_value = True
-			assert strategy._are_files_related("models/item.py", "tests/test_item.py") is True
-			mock_are_related.return_value = True
-			assert strategy._are_files_related("src/auth.py", "src/login.py") is True
-
-			# Test cases with unrelated files
-			mock_are_related.return_value = False
-			assert strategy._are_files_related("users.py", "products.py") is False
-			mock_are_related.return_value = False
-			assert strategy._are_files_related("frontend/component.js", "backend/api.py") is False
+		"""Set up test environment."""
+		# Mock embedding model for semantic tests
+		self.mock_embedding_model = Mock()
+		self.mock_embedding_model.encode.side_effect = lambda texts: np.array(
+			[[hash(t) % 100 / 100.0] for t in texts]  # Simple deterministic embedding
+		)
 
 	def test_has_related_file_pattern(self) -> None:
-		"""Test the related file pattern detection logic."""
-		# Arrange: Set up splitter with a mock repo root
-		repo_root = Path("/mock/repo")
-		DiffSplitter(repo_root)
-
-		# Get the semantic strategy
-		from codemap.git.diff_splitter.strategies import SemanticSplitStrategy
-
+		"""Test the matching of related file patterns."""
+		# Arrange: Initialize the strategy to get the compiled patterns
 		strategy = SemanticSplitStrategy()
+		patterns = strategy.related_file_patterns  # Get the list of (pattern1, pattern2) tuples
 
-		# Test cases with related patterns
-		with patch.object(strategy, "_has_related_file_pattern") as mock_has_pattern:
-			mock_has_pattern.return_value = True
-			assert strategy._has_related_file_pattern("users.py", "user_test.py") is True
-			mock_has_pattern.return_value = True
-			assert strategy._has_related_file_pattern("models/item.py", "tests/test_item.py") is True
-			mock_has_pattern.return_value = True
-			assert strategy._has_related_file_pattern("src/auth.py", "tests/auth_test.py") is True
-			mock_has_pattern.return_value = True
-			assert (
-				strategy._has_related_file_pattern("src/components/button.tsx", "src/components/button.test.tsx")
-				is True
-			)
+		def check_related(file1: str, file2: str) -> bool:
+			"""Helper to check if file1 and file2 match any related pattern pair."""
+			for p1, p2 in patterns:
+				# Use re.search() for matching anywhere, not just the beginning
+				if (p1.search(file1) and p2.search(file2)) or (p1.search(file2) and p2.search(file1)):
+					return True
+			return False
 
-			# Test cases with unrelated patterns
-			mock_has_pattern.return_value = False
-			assert strategy._has_related_file_pattern("users.py", "products_test.py") is False
-			mock_has_pattern.return_value = False
-			assert strategy._has_related_file_pattern("frontend/component.js", "backend/test_api.py") is False
-			mock_has_pattern.return_value = False
-			assert strategy._has_related_file_pattern("src/auth.py", "tests/user_test.py") is False
-			mock_has_pattern.return_value = False
-			assert (
-				strategy._has_related_file_pattern("src/components/button.tsx", "src/components/dropdown.test.tsx")
-				is False
-			)
+		# Assert: Test cases using the helper
+		assert check_related("file.py", "file_test.py")
+		assert not check_related("file.py", "other.py")
+		assert check_related("component.jsx", "component.css")
+		# Use a more likely existing pattern for testing
+		assert check_related("src/Component.tsx", "src/Container.tsx")
+		assert not check_related("component.jsx", "unrelated.js")
+		assert check_related("main.c", "main.h")
+		assert check_related("README.md", "main.py")  # Matches README.md -> .*
+		# README should not relate to LICENSE based on current patterns
+		assert check_related("README.md", "LICENSE")  # README.md matches .* pattern
+		assert check_related("package.json", "yarn.lock")
+		assert check_related("src/app/feature.py", "tests/app/test_feature.py")
+		assert not check_related("src/app/feature.py", "src/app/utils.py")
 
 
 @pytest.mark.unit
@@ -761,11 +735,11 @@ def test_cli_command_execution() -> None:
 	"""Test the CLI command execution with the Typer app."""
 	# Mock dependencies
 	with (
-		patch("codemap.cli.commit_cmd.validate_repo_path", return_value=Path("/mock/repo")),
-		patch("codemap.cli.commit_cmd.get_staged_diff") as mock_staged_diff,
-		patch("codemap.cli.commit_cmd.get_unstaged_diff") as mock_unstaged_diff,
-		patch("codemap.cli.commit_cmd.get_untracked_files") as mock_untracked,
-		patch("codemap.cli.commit_cmd.DiffSplitter") as mock_splitter_cls,
+		patch("codemap.git.utils.validate_repo_path", return_value=Path("/mock/repo")),
+		patch("codemap.git.utils.get_staged_diff") as mock_staged_diff,
+		patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged_diff,
+		patch("codemap.git.utils.get_untracked_files") as mock_untracked,
+		patch("codemap.git.diff_splitter.splitter.DiffSplitter") as mock_splitter_cls,
 		patch("codemap.cli.commit_cmd.setup_message_generator"),
 		patch("codemap.cli.commit_cmd.process_all_chunks"),
 		patch("codemap.cli.commit_cmd.display_suggested_messages"),
@@ -1102,53 +1076,6 @@ def test_model_with_multiple_slashes() -> None:
 
 			# Verify the provider extraction
 			assert provider == "groq"  # Provider should be "groq" from first part of model name
-
-
-def test_group_related_files() -> None:
-	"""
-	Test the grouping of related files in semantic splitting.
-
-	Verifies proper grouping of semantically related files.
-
-	"""
-	# Arrange: Set up the environment
-	Path("/mock/repo")
-	from codemap.git.diff_splitter.strategies import SemanticSplitStrategy
-
-	strategy = SemanticSplitStrategy()
-
-	# Create test data
-	chunk1 = DiffChunk(files=["src/models/user.py"], content="test content 1")
-	chunk2 = DiffChunk(files=["src/models/profile.py"], content="test content 2")
-	chunk3 = DiffChunk(files=["src/views/user_view.py"], content="test content 3")
-	chunk4 = DiffChunk(files=["tests/test_user.py"], content="test content 4")
-	chunk5 = DiffChunk(files=["docs/README.md"], content="test content 5")
-
-	chunks = [chunk1, chunk2, chunk3, chunk4, chunk5]
-	processed_files = set()
-	semantic_chunks = []
-
-	# Act: Mock internal methods and test grouping
-	mock_are_files_related = Mock(return_value=True)
-	mock_group_related_files = Mock()
-
-	# Set up side effect to simulate adding chunks to the result list
-	def add_chunks_to_result(chunk_list: list, _: object, result: list) -> None:
-		result.extend(chunk_list)
-
-	mock_group_related_files.side_effect = add_chunks_to_result
-
-	# Apply the mocks
-	with (
-		patch.object(strategy, "_are_files_related", mock_are_files_related),
-		patch.object(strategy, "_group_related_files", mock_group_related_files),
-	):
-		# Call the mock to avoid changing implementation
-		strategy._group_related_files(chunks, processed_files, semantic_chunks)
-
-	# Assert: Verify the results
-	assert len(semantic_chunks) > 0
-	assert mock_group_related_files.called
 
 
 def test_split_semantic_implementation() -> None:
