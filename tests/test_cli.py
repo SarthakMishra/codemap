@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import shutil
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, TypeVar
 from unittest.mock import Mock, patch
@@ -312,9 +312,10 @@ class TestOutputPath(FileSystemTestBase):
 		}
 
 		# Act: Generate output path with mocked datetime
-		with patch("codemap.utils.file_utils.datetime") as mock_datetime:
+		# Patch the standard library datetime module directly
+		with patch("datetime.datetime") as mock_datetime:
 			mock_datetime.now.return_value = current_time
-			mock_datetime.timezone = timezone  # Make sure timezone is accessible
+			# Ensure the timezone object is accessible for strftime (Removed as unnecessary)
 			result = _determine_output_path(sample_repo, None, config)
 
 			# Assert: Verify filename has correct timestamp
