@@ -1,9 +1,8 @@
 """
 Implementation of the gen command for code documentation generation.
 
-This module implements the enhanced 'gen' command, which can generate:
-1. LLM-optimized code context with semantic compression
-2. Human-readable documentation in multiple formats
+This module implements the enhanced 'gen' command, which can generate
+human-readable documentation in Markdown format.
 
 """
 
@@ -15,14 +14,8 @@ from typing import Annotated
 
 import typer
 
-from codemap.gen import (
-	CompressionStrategy,
-	DocFormat,
-	GenCommand,
-	GenConfig,
-	GenerationMode,
-)
-from codemap.processor.pipeline import ProcessingPipeline
+from codemap.gen import GenCommand, GenConfig
+from codemap.processor import LODLevel, create_processor
 from codemap.utils.cli_utils import exit_with_error, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 
@@ -53,14 +46,6 @@ ConfigOpt = Annotated[
 		"--config",
 		"-c",
 		help="Path to config file",
-	),
-]
-
-MapTokensOpt = Annotated[
-	int | None,
-	typer.Option(
-		"--map-tokens",
-		help="Override token limit (set to 0 for unlimited)",
 	),
 ]
 
@@ -98,51 +83,29 @@ ProcessingFlag = Annotated[
 	),
 ]
 
+LODLevelOpt = Annotated[
+	LODLevel,
+	typer.Option(
+		"--lod",
+		help="Level of Detail for code analysis",
+		case_sensitive=False,
+	),
+]
 
-def initialize_pipeline(repo_path: Path, config_data: dict) -> ProcessingPipeline:
+
+def initialize_processor(repo_path: Path, config_data: dict) -> None:
 	"""
-	Initialize the processing pipeline for code analysis.
+	Initialize the processor for code analysis.
 
 	Args:
 	    repo_path: Path to the repository
 	    config_data: Configuration data
 
-	Returns:
-	    ProcessingPipeline: Initialized pipeline
-
 	"""
-	from codemap.processor.embedding.models import EmbeddingConfig
-	from codemap.processor.storage.base import StorageConfig
-	from codemap.utils.directory_manager import get_directory_manager
+	from codemap.utils.cli_utils import console
 
 	# Extract processor configuration
 	processor_config = config_data.get("processor", {})
-
-	# Get directory manager for cache directories
-	dir_manager = get_directory_manager()
-	dir_manager.set_project_dir(repo_path)
-	project_cache_dir = dir_manager.get_project_cache_dir(create=True)
-
-	if not project_cache_dir:
-		project_cache_dir = repo_path / ".codemap_cache"
-		project_cache_dir.mkdir(exist_ok=True, parents=True)
-
-	# Configure storage
-	storage_dir = project_cache_dir / "storage"
-	storage_dir.mkdir(exist_ok=True, parents=True)
-	cache_dir = storage_dir / "cache"
-	cache_dir.mkdir(exist_ok=True, parents=True)
-
-	storage_config = StorageConfig(uri=str(storage_dir / "vector.lance"), create_if_missing=True, cache_dir=cache_dir)
-
-	# Configure embeddings
-	embedding_cache_dir = project_cache_dir / "embeddings"
-	embedding_cache_dir.mkdir(exist_ok=True, parents=True)
-	embedding_config = EmbeddingConfig(
-		model=processor_config.get("embedding_model", "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"),
-		dimensions=processor_config.get("embedding_dimensions", 384),
-		batch_size=processor_config.get("batch_size", 32),
-	)
 
 	# Get ignored patterns
 	ignored_patterns = set(processor_config.get("ignored_patterns", []))
@@ -159,137 +122,27 @@ def initialize_pipeline(repo_path: Path, config_data: dict) -> ProcessingPipelin
 		]
 	)
 
-	# Initialize pipeline
-	pipeline = ProcessingPipeline(
-		repo_path=repo_path,
-		storage_config=storage_config,
-		embedding_config=embedding_config,
-		ignored_patterns=ignored_patterns,
-		max_workers=processor_config.get("max_workers", 4),
-		enable_lsp=processor_config.get("enable_lsp", True),
-	)
-
-	logger.info("Processing pipeline initialized for repository: %s", repo_path)
-	return pipeline
-
-
-def process_codebase(repo_path: Path, config_data: dict) -> None:
-	"""
-	Process the codebase with the pipeline.
-
-	Args:
-	    repo_path: Path to the repository
-	    config_data: Configuration data
-
-	"""
-	import os
-
-	from codemap.utils.cli_utils import console, progress_indicator
-
-	# Initialize the pipeline
-	pipeline = initialize_pipeline(repo_path, config_data)
-
-	# Create a list of all files to process
-	all_files = []
-	logger.info("Scanning repository at %s for files to process", repo_path)
-
-	# Get ignored patterns as a list of strings
-	ignored_patterns = list(pipeline.ignored_patterns)
-
-	for root, _, files in os.walk(repo_path):
-		root_path = Path(root)
-
-		# Skip ignored directories
-		if any(part.startswith(".") for part in root_path.parts):
-			continue
-
-		for file in files:
-			# Skip hidden files
-			if file.startswith("."):
-				continue
-
-			file_path = root_path / file
-
-			# Check if file should be processed
-			should_process = True
-			for pattern in ignored_patterns:
-				try:
-					if file_path.match(pattern):
-						should_process = False
-						break
-				except (TypeError, ValueError):
-					# Skip invalid patterns
-					continue
-
-			if should_process:
-				all_files.append(file_path)
-
-	# Process files in batches with progress display
-	total_files = len(all_files)
-	if total_files == 0:
-		console.print("[yellow]No files found to process in the repository.[/]")
-		return
-
-	console.print(f"Found {total_files} files to process.")
-
-	# Use the progress_indicator utility
-	with progress_indicator("Processing repository files", style="progress", total=total_files) as advance:
-		# Process in batches for better performance
-		batch_size = 100
-		for i in range(0, total_files, batch_size):
-			batch = all_files[i : min(i + batch_size, total_files)]
-
-			# Process the batch
-			pipeline.batch_process(batch)
-
-			# Update progress
-			advance(len(batch))
-
-	logger.info("Repository scan completed. Processed %d files.", total_files)
-	console.print(f"[green]Repository scan complete. Processed {total_files} files.[/]")
-
-	# Clean up
-	pipeline.stop()
+	# Initialize processor with LOD support
+	try:
+		processor = create_processor(repo_path=repo_path)
+		console.print("[green]Processor initialized successfully[/green]")
+		processor.stop()
+	except Exception as e:
+		console.print(f"[red]Failed to initialize processor: {e}[/red]")
+		raise
 
 
 def gen_command(
 	path: PathArg = Path(),
 	output: OutputOpt = None,
 	config: ConfigOpt = None,
-	map_tokens: MapTokensOpt = None,
 	max_content_length: MaxContentLengthOpt = None,
-	compression: Annotated[
-		CompressionStrategy,
-		typer.Option(
-			"--compression",
-			"-c",
-			help="Compression strategy to use",
-			case_sensitive=False,
-		),
-	] = CompressionStrategy.SMART,
-	mode: Annotated[
-		GenerationMode,
-		typer.Option(
-			"--mode",
-			"-m",
-			help="Generation mode: llm (for AI context) or human (for human docs)",
-			case_sensitive=False,
-		),
-	] = GenerationMode.LLM,
-	format: Annotated[  # noqa: A002
-		DocFormat,
-		typer.Option(
-			"--format",
-			"-f",
-			help="Output format for human-readable docs",
-			case_sensitive=False,
-		),
-	] = DocFormat.MARKDOWN,
+	lod_level: LODLevelOpt = LODLevel.DOCS,
 	semantic_analysis: Annotated[
 		bool,
 		typer.Option(
 			"--semantic/--no-semantic",
-			help="Enable/disable semantic analysis using LSP",
+			help="Enable/disable semantic analysis",
 		),
 	] = True,
 	tree: Annotated[
@@ -311,17 +164,16 @@ def gen_command(
 	process: ProcessingFlag = True,
 ) -> None:
 	"""
-	Generate code documentation for LLM context or human-readable docs.
+	Generate code documentation.
 
-	This command processes a codebase and generates either:
-	- LLM-optimized context with semantic compression (default)
-	- Human-readable documentation in various formats
+	This command processes a codebase and generates Markdown documentation
+	with configurable level of detail.
 
 	Examples:
-	        codemap gen                      # Generate LLM context for current directory
-	        codemap gen --mode human         # Generate human-readable docs
-	        codemap gen --compression aggressive    # Use aggressive compression
-	        codemap gen --format mkdocs      # Generate MkDocs format (for human mode)
+	        codemap gen                      # Generate docs for current directory
+	        codemap gen --lod full           # Generate full implementation docs
+	        codemap gen --lod signatures     # Generate docs with signatures only
+	        codemap gen --no-semantic        # Generate without semantic analysis
 
 	"""
 	setup_logging(is_verbose=is_verbose)
@@ -341,25 +193,14 @@ def gen_command(
 		if process:
 			from codemap.utils.cli_utils import console
 
-			console.print("[yellow]Processing codebase...[/yellow]")
-			process_codebase(target_path, config_data)
-			console.print("[green]Codebase processing completed successfully[/green]")
+			console.print("[yellow]Initializing processor...[/yellow]")
+			initialize_processor(target_path, config_data)
+			console.print("[green]Processor initialization completed successfully[/green]")
 
-		# Override config values from command line arguments
-		token_limit = map_tokens if map_tokens is not None else gen_config_data.get("token_limit", 10000)
+		# Command line arguments override config file
 		content_length = (
 			max_content_length if max_content_length is not None else gen_config_data.get("max_content_length", 5000)
 		)
-
-		# Get other gen settings with defaults
-		config_compression = gen_config_data.get("compression", CompressionStrategy.SMART.value)
-		config_mode = gen_config_data.get("mode", GenerationMode.LLM.value)
-		config_doc_format = gen_config_data.get("doc_format", DocFormat.MARKDOWN.value)
-
-		# Command line arguments override config file
-		compression_strategy = compression or CompressionStrategy(config_compression)
-		generation_mode = mode or GenerationMode(config_mode)
-		doc_format = format or DocFormat(config_doc_format)
 
 		# Handle boolean flags - default to config values if not provided
 		include_tree = tree if tree is not None else gen_config_data.get("include_tree", False)
@@ -367,12 +208,13 @@ def gen_command(
 			semantic_analysis if semantic_analysis is not None else gen_config_data.get("semantic_analysis", True)
 		)
 
+		# Get LOD level from config if not specified
+		config_lod = gen_config_data.get("lod_level", LODLevel.DOCS.value)
+		lod_level = lod_level or LODLevel(config_lod)
+
 		# Create generation config
 		gen_config = GenConfig(
-			mode=generation_mode,
-			compression_strategy=compression_strategy,
-			doc_format=doc_format,
-			token_limit=token_limit,
+			lod_level=lod_level,
 			max_content_length=content_length,
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
