@@ -59,6 +59,7 @@ dev = [
     "python-semantic-release>=9.3.1",
     "radon>=6.0.1",
     "ruff>=0.11.6",
+    "twine>=6.1.0",
 ]
 model2vec = [
     "matplotlib[pyplot]>=3.10.1",
@@ -225,18 +226,6 @@ prerelease = false
 match = "^dev$"
 prerelease = true
 prerelease_token = "next"
-
-# Release branches - for preparing new stable releases
-[tool.semantic_release.branches.release]
-match = "^release\\/v?[0-9]+\\.[0-9]+\\.[0-9]+$"
-prerelease = true
-prerelease_token = "rc"
-
-# Feature branches - for developing new features
-[tool.semantic_release.branches.feature]
-match = "^feature\\/.*"
-prerelease = true
-prerelease_token = "alpha"
 
 # Commit message parsing configuration
 [tool.semantic_release.commit_parser_options]

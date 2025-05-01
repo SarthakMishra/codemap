@@ -9,10 +9,12 @@ from codemap.git.commit_generator.command import CommitCommand
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.interactive import ChunkAction, ChunkResult
 from tests.base import GitTestBase
+from tests.conftest import skip_git_tests
 
 
 @pytest.mark.unit
 @pytest.mark.git
+@skip_git_tests
 class TestCommitWorkflow(GitTestBase):
 	"""
 	Test cases for commit workflow logic in CommitCommand.

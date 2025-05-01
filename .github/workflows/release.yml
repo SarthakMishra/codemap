@@ -1,0 +1,156 @@
+name: Release and Publish
+
+on:
+  push:
+    branches:
+      - main
+      - dev
+
+concurrency:
+  # Group concurrency by workflow name and branch/tag ref
+  # Ensures only one release job runs at a time for a given branch
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write # Allow tagging and creating releases
+  id-token: write # Allow OIDC token generation for PyPI publishing
+
+jobs:
+  # Wait for other required checks to succeed before proceeding with release
+  check-required-workflows:
+    name: Check Required Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for tests (ubuntu)
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'test (ubuntu-latest, 3.12)' # Match name in tests.yml job matrix
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+      
+      - name: Wait for tests (macos)
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'test (macos-latest, 3.12)' # Match name in tests.yml job matrix
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+      
+      - name: Wait for lint
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'lint' # Match name in lint.yml job
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+
+  release:
+    name: Semantic Release
+    needs: check-required-workflows
+    runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.semantic.outputs.released }}
+      version: ${{ steps.semantic.outputs.version }}
+      tag: ${{ steps.semantic.outputs.tag }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Need full history for semantic-release
+          fetch-depth: 0
+          # Use PAT if GITHUB_TOKEN doesn't have push access to protected branches
+          # token: ${{ secrets.PAT_TOKEN }} # Uncomment if using PAT
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # Match project requirement
+
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+
+      - name: Verify upstream has not changed (for non-main branches)
+        # Prevents race conditions if the base branch changes during the workflow run
+        # See: https://python-semantic-release.readthedocs.io/en/latest/automatic-releases/github-actions.html#common-workflow-example
+        if: github.ref != 'refs/heads/main'
+        run: |
+          set -eu
+          # Example assumes release branches merge to 'main'
+          # Adjust 'main' if your release branches merge elsewhere
+          UPSTREAM_BRANCH="main"
+          LOCAL_BRANCH_SHA=$(git rev-parse HEAD)
+          git fetch origin "$UPSTREAM_BRANCH"
+          UPSTREAM_BRANCH_SHA=$(git rev-parse "origin/$UPSTREAM_BRANCH")
+
+          MERGE_BASE_SHA=$(git merge-base HEAD "origin/$UPSTREAM_BRANCH")
+
+          if [[ "$MERGE_BASE_SHA" != "$UPSTREAM_BRANCH_SHA" ]]; then
+            echo "::error::Merge base $MERGE_BASE_SHA is not the same as upstream $UPSTREAM_BRANCH ($UPSTREAM_BRANCH_SHA)."
+            echo "::error::The upstream branch '$UPSTREAM_BRANCH' has changed since this release branch was created."
+            echo "::error::Please merge the latest changes from '$UPSTREAM_BRANCH' into this release branch."
+            exit 1
+          fi
+          echo "Verified merge base matches upstream branch '$UPSTREAM_BRANCH'."
+
+      - name: Run Python Semantic Release
+        id: semantic
+        uses: python-semantic-release/python-semantic-release@v9.21.0 # Use latest stable version
+        with:
+          # Use the GITHUB_TOKEN for authentication with the GitHub API
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          # Use PAT if GITHUB_TOKEN doesn't have push access
+          # github_token: ${{ secrets.PAT_TOKEN }} # Uncomment if using PAT
+
+          # Configure committer details for the release commit
+          git_committer_name: "github-actions[bot]"
+          git_committer_email: "github-actions[bot]@users.noreply.github.com"
+          
+          # Use branch configuration from pyproject.toml
+          # This will properly handle 'next' prerelease token for dev branch
+        env:
+          # Ensure uv is in the PATH
+          PATH: /home/runner/.cargo/bin:$PATH
+
+  publish:
+    name: Publish to PyPI
+    needs: release
+    if: needs.release.outputs.released == 'true' # Only run if a release was created
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/codemap # URL to the PyPI project
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Checkout the specific tag created by semantic-release
+          ref: ${{ needs.release.outputs.tag }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # Match project requirement
+
+      - name: Install uv and build dependencies
+        run: |
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          # Ensure uv is available in the path for subsequent steps
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          # Install build tools using uv
+          uv pip install build twine
+
+      - name: Build package
+        run: uv run python -m build
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # OIDC (Trusted Publishing) is configured via the job's environment
+          # and permissions settings. No user/password required here.
+          # Ensure PyPI project has a Trusted Publisher configured for:
+          # Workflow: release.yml
+          # Environment: pypi
+          # See: https://docs.pypi.org/trusted-publishers/
+          skip_existing: true # Optional: Skip if version already exists on PyPI 

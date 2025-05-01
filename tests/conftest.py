@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 from io import StringIO
 from pathlib import Path
@@ -17,6 +18,12 @@ from codemap.git.utils import GitDiff
 
 if TYPE_CHECKING:
 	from collections.abc import Generator
+
+
+# Skip git-dependent tests when SKIP_GIT_TESTS environment variable is set
+skip_git_tests = pytest.mark.skipif(
+	os.environ.get("SKIP_GIT_TESTS") == "1", reason="Git-dependent tests are skipped in CI environment"
+)
 
 
 @pytest.fixture(autouse=True)
