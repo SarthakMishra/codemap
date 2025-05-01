@@ -111,6 +111,8 @@ jobs:
           # Configure committer details for the release commit
           git_committer_name: "github-actions[bot]"
           git_committer_email: "github-actions[bot]@users.noreply.github.com"
+
+          vcs_release: true
           
           # Use branch configuration from pyproject.toml
           # This will properly handle 'next' prerelease token for dev branch
