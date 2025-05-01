@@ -39,7 +39,7 @@ class CodeMapGenerator:
 		self.output_path = output_path
 
 	def _generate_mermaid_diagram(self, entities: list[LODEntity]) -> str:
-		"""Generate a Mermaid diagram string for entity relationships."""
+		"""Generate a Mermaid diagram string for entity relationships using subgraphs."""
 		# Convert config strings to lower case for case-insensitive comparison
 		allowed_entities = {e.lower() for e in self.config.mermaid_entities} if self.config.mermaid_entities else None
 		allowed_relationships = (
@@ -58,75 +58,90 @@ class CodeMapGenerator:
 				return True  # Include all if not specified
 			return relationship_type.lower() in allowed_relationships
 
-		# --- Data Collection --- #
-		nodes_definitions: dict[str, tuple[str, str]] = {}  # node_id -> (definition_line, class_name)
-		edge_definitions: list[str] = []
-		call_edge_definitions: list[str] = []
+		# --- Data Structures --- #
+		# node_id -> (definition_line, class_name) for regular nodes
+		node_definitions: dict[str, tuple[str, str]] = {}
+		# subgraph_id -> (label, type, list_of_contained_node_ids)
+		subgraph_definitions: dict[str, tuple[str, str, list[str]]] = {}
+		# subgraph_id -> parent_subgraph_id (for nesting)
+		subgraph_hierarchy: dict[str, str] = {}
+		# Edges (parent_id, child_id, label, type)
+		edges: list[tuple[str, str, str, str]] = []
+		# Track processed entities/subgraphs to avoid duplicates
+		processed_ids = set()
+		# Map entity ID to entity object
 		entity_map: dict[str, LODEntity] = {}
-		processed_entity_ids = set()
-		internal_paths = {str(e.metadata.get("file_path")) for e in entities if e.metadata.get("file_path")}
+		# Track which nodes/subgraphs are connected by edges
+		connected_ids = set()
+		# Map simple function/method names to their full node IDs
 		name_to_node_ids: dict[str, list[str]] = {}
-		connected_nodes = set()  # Keep track of nodes involved in any edge
+		# Keep track of nodes defined outside any subgraph (like external imports)
+		global_nodes: set[str] = set()
+
+		internal_paths = {str(e.metadata.get("file_path")) for e in entities if e.metadata.get("file_path")}
 
 		def get_node_id(entity: LODEntity) -> str:
 			file_path_str = entity.metadata.get("file_path", "unknown_file")
 			base_id = f"{file_path_str}_{entity.start_line}_{entity.name or entity.entity_type.name}"
+			# Ensure Mermaid compatibility (alphanumeric + underscore)
 			return "".join(c if c.isalnum() else "_" for c in base_id)
 
-		def process_entity(entity: LODEntity, parent_node_id: str | None = None) -> None:
-			nonlocal processed_entity_ids, connected_nodes
-
-			if entity.entity_type == EntityType.UNKNOWN:
-				return
+		def process_entity_recursive(entity: LODEntity, current_subgraph_id: str | None = None) -> None:
+			nonlocal processed_ids, connected_ids, global_nodes
 
 			entity_node_id = get_node_id(entity)
+
+			if entity.entity_type == EntityType.UNKNOWN or entity_node_id in processed_ids:
+				return
+
+			processed_ids.add(entity_node_id)
+			entity_map[entity_node_id] = entity
 			include_this_entity = should_include_entity(entity.entity_type)
 
-			if entity_node_id in processed_entity_ids:
-				return
-			processed_entity_ids.add(entity_node_id)
-			entity_map[entity_node_id] = entity
+			next_subgraph_id = current_subgraph_id
 
-			# --- Define Node (if allowed) --- #
-			node_definition = ""
-			node_class = ""
-			if include_this_entity:
+			# --- Handle Subgraphs (Module, Class) --- #
+			if entity.entity_type in (EntityType.MODULE, EntityType.CLASS) and include_this_entity:
+				subgraph_label = _escape_mermaid_label(
+					entity.name or Path(entity.metadata.get("file_path", "unknown")).name
+				)
+				subgraph_type = "moduleSubgraph" if entity.entity_type == EntityType.MODULE else "classSubgraph"
+				if entity.entity_type == EntityType.MODULE and current_subgraph_id:  # Nested module
+					subgraph_type = "submoduleSubgraph"
+
+				subgraph_definitions[entity_node_id] = (subgraph_label, subgraph_type, [])
+				if current_subgraph_id:
+					subgraph_hierarchy[entity_node_id] = current_subgraph_id
+				# Mark the container as potentially connected if it has children or dependencies
+				connected_ids.add(entity_node_id)
+				next_subgraph_id = entity_node_id  # Children belong to this new subgraph
+
+			# --- Handle Nodes (Functions, Methods, Vars, Consts, Imports) --- #
+			elif include_this_entity and entity.entity_type != EntityType.IMPORT:  # Imports handled separately
+				node_definition = ""
+				node_class = ""
 				label = _escape_mermaid_label(entity.name or f"({entity.entity_type.name.lower()})")
-				if entity.entity_type == EntityType.MODULE:
-					file_label = _escape_mermaid_label(Path(entity.metadata.get("file_path", "unknown")).name)
-					node_definition = f'  {entity_node_id}["{file_label}"]'
-					node_class = "fileNode"
-				elif entity.entity_type == EntityType.CLASS:
-					node_definition = f'  {entity_node_id}{{"{label}"}}'
-					node_class = "classNode"
-				elif entity.entity_type in (EntityType.FUNCTION, EntityType.METHOD):
-					node_definition = f'  {entity_node_id}("{label}")'
+
+				if entity.entity_type in (EntityType.FUNCTION, EntityType.METHOD):
+					node_definition = f'{entity_node_id}("{label}")'
 					node_class = "funcNode"
 				elif entity.entity_type == EntityType.CONSTANT:
-					node_definition = f'  {entity_node_id}["{label}"]'
+					node_definition = f'{entity_node_id}["{label}"]'
 					node_class = "constNode"
 				elif entity.entity_type == EntityType.VARIABLE:
-					node_definition = f'  {entity_node_id}["{label}"]'
+					node_definition = f'{entity_node_id}["{label}"]'
 					node_class = "varNode"
+				# Add other types if needed
 
-				if node_definition and entity_node_id not in nodes_definitions:
-					nodes_definitions[entity_node_id] = (node_definition, node_class)
+				if node_definition and entity_node_id not in node_definitions:
+					node_definitions[entity_node_id] = (node_definition, node_class)
+					if current_subgraph_id:
+						subgraph_definitions[current_subgraph_id][2].append(entity_node_id)
+					else:
+						# Should not happen often if root is module, but handle just in case
+						global_nodes.add(entity_node_id)
 
-			# --- Define Parent Edge (if allowed) --- #
-			if (
-				parent_node_id
-				and entity_node_id in entity_map
-				and should_include_relationship("declares")
-				and parent_node_id in entity_map
-				and entity_node_id in entity_map
-			):  # Check existence in map first
-				edge = f"  {parent_node_id} --->|declares| {entity_node_id}"
-				if edge not in edge_definitions:
-					edge_definitions.append(edge)
-					connected_nodes.add(parent_node_id)
-					connected_nodes.add(entity_node_id)
-
-			# --- Add to Name Map --- #
+			# --- Add to Name Map (for call edges) --- #
 			if entity.entity_type in (EntityType.FUNCTION, EntityType.METHOD):
 				name = entity.name
 				if name:
@@ -134,132 +149,287 @@ class CodeMapGenerator:
 						name_to_node_ids[name] = []
 					name_to_node_ids[name].append(entity_node_id)
 
-			# --- Define Dependencies (Imports - if allowed) --- #
+			# --- Process Dependencies (Imports) --- #
 			dependencies = entity.metadata.get("dependencies", [])
-			importing_node_id = parent_node_id if entity.entity_type == EntityType.IMPORT else entity_node_id
-			if importing_node_id and importing_node_id in entity_map and should_include_relationship("imports"):
+			# Imports are associated with the module/class they are in, or globally if nowhere else
+
+			if dependencies and should_include_relationship("imports"):
 				for dep in dependencies:
 					is_external = not dep.startswith(".") and not any(
-						dep.startswith(str(p)) for p in internal_paths if isinstance(p, Path)
+						dep.startswith(str(p).replace("\\", "/"))
+						for p in internal_paths
+						if p  # Handle path separators
 					)
 					dep_id = "dep_" + "".join(c if c.isalnum() else "_" for c in dep)
 					dep_label = _escape_mermaid_label(dep)
 
-					if dep_id not in nodes_definitions:
+					if dep_id not in node_definitions and dep_id not in processed_ids:
+						processed_ids.add(dep_id)  # Mark as processed to avoid duplicate definitions
 						dep_class = "externalImportNode" if is_external else "internalImportNode"
 						node_shape = f'(("{dep_label}"))' if is_external else f'["{dep_label}"]'
-						nodes_definitions[dep_id] = (f"  {dep_id}{node_shape}", dep_class)
+						node_definitions[dep_id] = (f"{dep_id}{node_shape}", dep_class)
+						global_nodes.add(dep_id)  # Imports are defined globally
 
-					edge = f"  {importing_node_id} -.->|imports| {dep_id}"
-					if edge not in edge_definitions:
-						edge_definitions.append(edge)
-						connected_nodes.add(importing_node_id)
-						connected_nodes.add(dep_id)
+					# Add edge from the importing *container* (subgraph) to the dependency
+					# Use the entity_node_id of the *module* or *class* for the source of the import edge
+					source_node_id = (
+						entity_node_id
+						if entity.entity_type in (EntityType.MODULE, EntityType.CLASS)
+						else current_subgraph_id
+					)
+					if source_node_id and source_node_id != dep_id:  # Check source_node_id validity
+						edge_tuple = (source_node_id, dep_id, "imports", "import")
+						if edge_tuple not in edges:
+							edges.append(edge_tuple)
+							connected_ids.add(source_node_id)
+							connected_ids.add(dep_id)
 
 			# --- Process Children Recursively --- #
-			current_node_id_for_children = entity_node_id
-			for child in entity.children:
-				if child.entity_type != EntityType.UNKNOWN:
-					process_entity(child, current_node_id_for_children)
+			for child in sorted(entity.children, key=lambda e: e.start_line):
+				process_entity_recursive(child, next_subgraph_id)
+
+				# --- Define Parent Edge (Declares) --- #
+				# Edge from container (subgraph) to child node/subgraph
+				child_node_id = get_node_id(child)
+				if (
+					next_subgraph_id  # Ensure there is a parent subgraph
+					and child.entity_type != EntityType.UNKNOWN
+					and child_node_id in processed_ids  # Ensure child was processed (not filtered out)
+					and should_include_relationship("declares")
+				):
+					# Only add edge if child is *directly* contained (node or subgraph)
+					is_child_node = child_node_id in node_definitions
+					is_child_subgraph = child_node_id in subgraph_definitions
+
+					if is_child_node or is_child_subgraph:
+						edge_tuple = (next_subgraph_id, child_node_id, "declares", "declare")
+						if edge_tuple not in edges:
+							edges.append(edge_tuple)
+							connected_ids.add(next_subgraph_id)
+							connected_ids.add(child_node_id)
 
 		# --- Main Processing Loop --- #
 		for entity in entities:
-			if entity.entity_type == EntityType.MODULE:
-				process_entity(entity)
+			# Start processing from top-level modules
+			if entity.entity_type == EntityType.MODULE and entity.metadata.get("file_path"):
+				process_entity_recursive(entity, current_subgraph_id=None)
 
-		# --- Define Call Edges (if allowed) --- #
+		# --- Define Call Edges --- #
 		if should_include_relationship("calls"):
 			for caller_node_id, caller_entity in entity_map.items():
-				if caller_node_id in nodes_definitions and caller_entity.entity_type in (
+				# Check if the caller is a function/method node that was actually defined
+				if caller_node_id in node_definitions and caller_entity.entity_type in (
 					EntityType.FUNCTION,
 					EntityType.METHOD,
 				):
 					calls = caller_entity.metadata.get("calls", [])
 					for called_name in calls:
-						simple_called_name = called_name.split(".")[-1]
-						if simple_called_name in name_to_node_ids:
-							for target_node_id in name_to_node_ids[simple_called_name]:
-								if target_node_id in nodes_definitions:
-									if caller_node_id == target_node_id:
-										continue
-									call_edge = f"  {caller_node_id} -->|calls| {target_node_id}"
-									if call_edge not in call_edge_definitions:
-										call_edge_definitions.append(call_edge)
-										connected_nodes.add(caller_node_id)
-										connected_nodes.add(target_node_id)
+						# Try matching full name first, then simple name
+						possible_target_ids = []
+						if (
+							called_name in name_to_node_ids
+						):  # Full name match? (e.g., class.method) - Less likely with simple parsing
+							possible_target_ids.extend(name_to_node_ids[called_name])
+						else:
+							simple_called_name = called_name.split(".")[-1]
+							if simple_called_name in name_to_node_ids:
+								possible_target_ids.extend(name_to_node_ids[simple_called_name])
+
+						for target_node_id in possible_target_ids:
+							# Ensure target is also a defined node and not the caller itself
+							if target_node_id in node_definitions and caller_node_id != target_node_id:
+								edge_tuple = (caller_node_id, target_node_id, "calls", "call")
+								if edge_tuple not in edges:
+									edges.append(edge_tuple)
+									connected_ids.add(caller_node_id)
+									connected_ids.add(target_node_id)
 
 		# --- Assemble Final Mermaid String --- #
-		mermaid_lines = [
-			"graph LR",
-			"  classDef fileNode fill:#555,stroke:#FFF,stroke-width:1px,color:white;",
-			"  classDef classNode fill:#8B008B,stroke:#FFF,stroke-width:1px,color:white;",
-			"  classDef funcNode fill:#00008B,stroke:#FFF,stroke-width:1px,color:white;",
-			"  classDef constNode fill:#483D8B,stroke:#CCC,stroke-width:1px,color:white;",
-			"  classDef varNode fill:#808000,stroke:#CCC,stroke-width:1px,color:white;",
-			"  classDef internalImportNode fill:#008B8B,stroke:#FFF,stroke-width:1px,color:white;",
-			"  classDef externalImportNode fill:#B8860B,stroke:#FFF,stroke-width:1px,color:white;",
-		]
+		mermaid_lines = ["graph LR"]  # Or TD for Top-Down if preferred
 
-		if self.config.mermaid_show_legend:
-			mermaid_lines.extend(
-				[
-					"  subgraph Legend",
-					"    direction LR",
-					'    legend_file["File"]:::fileNode',
-					'    legend_class{"Class"}:::classNode',
-					'    legend_func("Function/Method"):::funcNode',
-					'    legend_const["Constant"]:::constNode',
-					'    legend_var["Variable"]:::varNode',
-					'    legend_import_int["Internal Import"]:::internalImportNode',
-					'    legend_import_ext(("External Import")):::externalImportNode',
-					"  end",
-					"",
-				]
+		# --- Define Style Strings (Instead of classDef) ---
+		style_map = {
+			# Node Styles
+			"funcNode": "fill:#007bff,stroke:#FFF,stroke-width:1px,color:white",  # Blue
+			"constNode": "fill:#6f42c1,stroke:#FFF,stroke-width:1px,color:white",  # Purple
+			"varNode": "fill:#fd7e14,stroke:#FFF,stroke-width:1px,color:white",  # Orange
+			"internalImportNode": "fill:#20c997,stroke:#FFF,stroke-width:1px,color:white",  # Teal
+			"externalImportNode": "fill:#ffc107,stroke:#333,stroke-width:1px,color:#333",  # Yellow
+			# Subgraph Styles
+			"moduleSubgraph": "fill:#121630,color:#FFF",  # Dark Grey BG
+			"submoduleSubgraph": "fill:#2a122e,color:#FFF",  # Lighter Grey BG
+			"classSubgraph": "fill:#100f5e,color:#FFF",  # Light Green BG
+		}
+
+		# --- Render Logic --- #
+		rendered_elements = set()  # Track IDs of things actually rendered
+		output_lines = []
+		style_lines = []  # Collect style commands separately
+		used_style_keys = set()  # Track which styles (funcNode, classSubgraph etc.) are used
+
+		# Function to recursively render subgraphs and their nodes
+		def render_subgraph(subgraph_id: str, indent: str = "") -> None:
+			if subgraph_id in rendered_elements:
+				return
+			rendered_elements.add(subgraph_id)
+
+			label, sg_type, contained_node_ids = subgraph_definitions[subgraph_id]
+			output_lines.append(f'{indent}subgraph {subgraph_id}["{label}"]')
+			output_lines.append(f"{indent}  direction LR")  # Or TD
+
+			# Render nodes inside this subgraph
+			for node_id in contained_node_ids:
+				if node_id in node_definitions:
+					# Apply filtering if enabled
+					if self.config.mermaid_remove_unconnected and node_id not in connected_ids:
+						continue
+					if node_id in rendered_elements:
+						continue  # Should not happen, but safeguard
+					rendered_elements.add(node_id)
+
+					definition, node_class = node_definitions[node_id]
+					output_lines.append(f"{indent}  {definition}")
+					if node_class in style_map:
+						style_lines.append(f"{indent}  style {node_id} {style_map[node_class]}")
+						used_style_keys.add(node_class)  # Track used style
+
+			# Render nested subgraphs
+			nested_subgraphs = [sid for sid, parent_id in subgraph_hierarchy.items() if parent_id == subgraph_id]
+			for nested_id in sorted(nested_subgraphs):  # Sort for consistent output
+				# Apply filtering if enabled - check if the subgraph itself or any node inside it is connected
+				is_nested_connected = subgraph_id in connected_ids or any(
+					nid in connected_ids for nid in subgraph_definitions[nested_id][2]
+				)
+				if self.config.mermaid_remove_unconnected and not is_nested_connected:
+					continue
+				render_subgraph(nested_id, indent + "  ")
+
+			output_lines.append(f"{indent}end")
+			# Apply style definition to subgraph *after* end
+			if sg_type in style_map:
+				style_lines.append(f"{indent}style {subgraph_id} {style_map[sg_type]}")
+				used_style_keys.add(sg_type)  # Track used style
+
+		# --- Define Global Nodes (Imports primarily) ---
+		output_lines.append("\n  %% Global Nodes")
+		for node_id in sorted(global_nodes):
+			if node_id in node_definitions:
+				# Apply filtering if enabled
+				if self.config.mermaid_remove_unconnected and node_id not in connected_ids:
+					continue
+				if node_id in rendered_elements:
+					continue
+				rendered_elements.add(node_id)
+
+				definition, node_class = node_definitions[node_id]
+				output_lines.append(f"  {definition}")
+				if node_class in style_map:
+					style_lines.append(f"  style {node_id} {style_map[node_class]}")
+					used_style_keys.add(node_class)  # Track used style
+
+		# --- Render Top-Level Subgraphs ---
+		output_lines.append("\n  %% Subgraphs")
+		top_level_subgraphs = [sg_id for sg_id in subgraph_definitions if sg_id not in subgraph_hierarchy]
+		for sg_id in sorted(top_level_subgraphs):
+			# Apply filtering if enabled - check if the subgraph itself or any node inside it is connected
+			is_sg_connected = sg_id in connected_ids or any(
+				nid in connected_ids for nid in subgraph_definitions[sg_id][2]
 			)
+			if self.config.mermaid_remove_unconnected and not is_sg_connected:
+				continue
+			render_subgraph(sg_id)
 
-		# Add node definitions (potentially filtered)
-		final_node_definitions = []
-		for node_id, (definition, class_name) in nodes_definitions.items():
-			if self.config.mermaid_remove_unconnected and node_id not in connected_nodes:
-				continue  # Skip unconnected node
-			if class_name:
-				final_node_definitions.append(f"{definition}:::{class_name}")
-			else:
-				final_node_definitions.append(definition)
+		# --- Render Edges --- #
+		output_lines.append("\n  %% Edges")
+		link_styles = []
+		call_edge_indices = []
+		import_edge_indices = []
+		declare_edge_indices = []
 
-		mermaid_lines.extend(sorted(final_node_definitions))
-		mermaid_lines.append("\n  %% Edges")
+		filtered_edges = []
+		for _i, (source_id, target_id, label, edge_type) in enumerate(edges):
+			# Ensure both source and target were actually rendered (or are subgraphs that contain rendered nodes)
+			source_exists = source_id in rendered_elements or source_id in subgraph_definitions
+			target_exists = target_id in rendered_elements or target_id in subgraph_definitions
 
-		# Filter edges to only include those connecting rendered nodes
-		final_edges = []
-		rendered_nodes = set(
-			nodes_definitions.keys() if not self.config.mermaid_remove_unconnected else connected_nodes
-		)
+			if source_exists and target_exists:
+				edge_str = ""
+				if edge_type == "import":
+					edge_str = f"  {source_id} -.->|{label}| {target_id}"
+					import_edge_indices.append(len(filtered_edges))  # Index in the filtered list
+				elif edge_type == "call":
+					edge_str = f"  {source_id} -->|{label}| {target_id}"
+					call_edge_indices.append(len(filtered_edges))
+				elif edge_type == "declare":
+					# Make declare edges less prominent
+					edge_str = f"  {source_id} --- {target_id}"  # Simple line, no label needed visually
+					declare_edge_indices.append(len(filtered_edges))
+				else:  # Default or unknown edge type
+					edge_str = f"  {source_id} --> {target_id}"
 
-		for edge in edge_definitions + call_edge_definitions:
-			# Basic parsing to find connected nodes (assuming format '  node1 -->|label| node2')
-			try:
-				parts = edge.strip().split(" ")
-				node1 = parts[0]
-				node2 = parts[-1]
-				if node1 in rendered_nodes and node2 in rendered_nodes:
-					final_edges.append(edge)
-			except IndexError:
-				logger.warning(f"Could not parse edge for node filtering: {edge}")
-				# Add edge anyway if parsing fails, to be safe?
-				# final_edges.append(edge)
+				if edge_str:
+					filtered_edges.append(edge_str)
 
-		mermaid_lines.extend(sorted(final_edges))
+		output_lines.extend(sorted(filtered_edges))  # Sort for consistency
 
-		# --- Apply Link Styles (only to rendered call edges) ---
-		if call_edge_definitions:  # Check if calls were processed
-			rendered_call_edges = [edge for edge in final_edges if edge in call_edge_definitions]
-			if rendered_call_edges:
-				mermaid_lines.append("\n  %% Link Styles")
-				# Get the indices of the rendered call edges *within the final_edges list*
-				call_edge_indices_in_final = [i for i, edge in enumerate(final_edges) if edge in rendered_call_edges]
-				link_styles = [f"  linkStyle {idx} stroke:green,stroke-width:2px" for idx in call_edge_indices_in_final]
-				mermaid_lines.extend(link_styles)
+		# --- Apply Link Styles --- #
+		if call_edge_indices or import_edge_indices or declare_edge_indices:
+			output_lines.append("\n  %% Link Styles")
+			link_styles.extend(
+				[f"  linkStyle {idx} stroke:#28a745,stroke-width:2px;" for idx in call_edge_indices]
+			)  # Green
+			link_styles.extend(
+				[
+					f"  linkStyle {idx} stroke:#ffc107,stroke-width:1px,stroke-dasharray: 5 5;"
+					for idx in import_edge_indices
+				]
+			)  # Yellow dashed
+			link_styles.extend(
+				[f"  linkStyle {idx} stroke:#adb5bd,stroke-width:1px;" for idx in declare_edge_indices]
+			)  # Gray thin
+
+			output_lines.extend(link_styles)
+
+		# --- Generate Dynamic Legend (if enabled) ---
+		legend_lines = []
+		legend_style_lines = []
+		if self.config.mermaid_show_legend and used_style_keys:
+			legend_lines.append("\n  %% Legend")
+			legend_lines.append("  subgraph Legend")
+			legend_lines.append("    direction LR")
+
+			# Define all possible legend items and their corresponding style keys
+			legend_item_definitions = {
+				"legend_module": ("moduleSubgraph", '["Module/File"]'),
+				"legend_submodule": ("submoduleSubgraph", '["Sub-Module"]'),
+				"legend_class": ("classSubgraph", '["Class"]'),
+				"legend_func": ("funcNode", '("Function/Method")'),
+				"legend_const": ("constNode", '["Constant"]'),
+				"legend_var": ("varNode", '["Variable"]'),
+				"legend_import_int": ("internalImportNode", '["Internal Import"]'),
+				"legend_import_ext": ("externalImportNode", '(("External Import"))'),
+			}
+
+			for legend_id, (style_key, definition) in legend_item_definitions.items():
+				# Only add legend item if its corresponding style was actually used in the graph
+				if style_key in used_style_keys:
+					legend_lines.append(f"    {legend_id}{definition}")
+					# Also add its style command to the list of styles
+					if style_key in style_map:
+						legend_style_lines.append(f"  style {legend_id} {style_map[style_key]}")
+
+			legend_lines.append("  end")
+			legend_lines.append("")  # Add a blank line after legend
+
+		# --- Assemble Final Output --- #
+		mermaid_lines.extend(legend_lines)  # Add legend definitions (if any)
+		mermaid_lines.extend(output_lines)  # Add main graph structure and edges
+
+		# Append all collected style commands at the end
+		all_style_lines = style_lines + legend_style_lines
+		if all_style_lines:
+			mermaid_lines.append("\n  %% Styles")
+			mermaid_lines.extend(sorted(all_style_lines))
 
 		return "\n".join(mermaid_lines)
 
