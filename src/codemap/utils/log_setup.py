@@ -72,7 +72,8 @@ def log_environment_info() -> None:
 		logger.info("Platform: %s", platform.platform())
 
 	except Exception:
-		logger.exception("Error logging environment info: %s")
+		# logger.exception automatically handles exception info
+		logger.exception("Error logging environment info:")
 
 
 def display_error_summary(error_message: str) -> None:
