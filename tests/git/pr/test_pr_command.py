@@ -369,11 +369,23 @@ class TestHandleBranchCreation:
 		)
 
 		# Call the function
-		with patch("codemap.cli.pr_cmd._validate_branch_name", return_value=True):
+		with (
+			patch("codemap.cli.pr_cmd._validate_branch_name", return_value=True),
+			patch("codemap.cli.pr_cmd.branch_exists") as mock_branch_exists,
+			patch("codemap.cli.pr_cmd.create_branch") as mock_create_branch,
+			patch("codemap.cli.pr_cmd.checkout_branch") as mock_checkout_branch,
+		):
+			# Assume branch doesn't exist initially for this test path
+			mock_branch_exists.return_value = False
+
 			result = _handle_branch_creation(options)
 
 		# Verify result
 		assert result == "specified-branch"
+		# Verify that create_branch was called because mock_branch_exists returned False
+		mock_branch_exists.assert_called_once_with("specified-branch")
+		mock_create_branch.assert_called_once_with("specified-branch")
+		mock_checkout_branch.assert_not_called()  # Should not be called if create_branch was
 
 	def test_handle_branch_creation_invalid_branch(self) -> None:
 		"""Test handling branch creation with invalid branch name."""
@@ -679,8 +691,9 @@ class TestHandlePRCreation:
 			assert mock_confirm.call_count == 1  # Confirm initial creation prompt
 			mock_pr_gen_instance.create_pr.assert_called_once()
 			# Verify PR was created with the selected base branch
-			assert mock_pr_gen_instance.create_pr.call_args[0][0] == "chore/refactor"  # First param is branch_name
-			assert mock_pr_gen_instance.create_pr.call_args[0][1] == "main"  # Second param is base_branch
+			# Corrected Assertion: First argument should be base_branch ('main')
+			assert mock_pr_gen_instance.create_pr.call_args[0][0] == "main"  # First param is base_branch
+			assert mock_pr_gen_instance.create_pr.call_args[0][1] == "chore/refactor"  # Second param is branch_name
 
 	def test_pr_display_panels(self, mock_git_utils: dict[str, Any]) -> None:
 		"""Test that PR title and description are displayed in panels."""
@@ -844,7 +857,8 @@ class TestHandlePRCreation:
 
 		# Verify PR creation happened with the correctly selected base branch
 		# and original title/desc (editing prompts might not be reached or are separate)
-		pr_gen.create_pr.assert_called_once_with("feature/test", "main", "Original PR Title", "Original PR description")
+		# Corrected Assertion: Expect order (base, head)
+		pr_gen.create_pr.assert_called_once_with("main", "feature/test", "Original PR Title", "Original PR description")
 
 		# Verify result
 		assert result is not None
