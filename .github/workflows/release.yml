@@ -17,8 +17,38 @@ permissions:
   id-token: write # Allow OIDC token generation for PyPI publishing
 
 jobs:
+  # Wait for other required checks to succeed before proceeding with release
+  check-required-workflows:
+    name: Check Required Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for tests (ubuntu)
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'test (ubuntu-latest, 3.12)' # Match name in tests.yml job matrix
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+      
+      - name: Wait for tests (macos)
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'test (macos-latest, 3.12)' # Match name in tests.yml job matrix
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+      
+      - name: Wait for lint
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'lint' # Match name in lint.yml job
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 20
+
   release:
     name: Semantic Release
+    needs: check-required-workflows
     runs-on: ubuntu-latest
     outputs:
       released: ${{ steps.semantic.outputs.released }}
@@ -76,6 +106,9 @@ jobs:
           # Configure committer details for the release commit
           git_committer_name: "github-actions[bot]"
           git_committer_email: "github-actions[bot]@users.noreply.github.com"
+          
+          # Use branch configuration from pyproject.toml
+          # This will properly handle 'next' prerelease token for dev branch
         env:
           # Ensure uv is in the PATH
           PATH: /home/runner/.cargo/bin:$PATH
