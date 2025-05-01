@@ -115,8 +115,8 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           # Ensure uv is available in the path for subsequent steps
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-          # Install build tools using uv
-          uv pip install build twine
+          # Install build tools using uv into the system environment
+          uv pip install --system build twine
 
       - name: Build package
         run: uv run python -m build
