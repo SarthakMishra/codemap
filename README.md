@@ -31,6 +31,9 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 > [!Important]
 > CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
 
+> [!Tip]
+> After installation, you can use either `codemap` or the shorter alias `cm` to run the commands.
+
 ### Installation using pipx (Recommended)
 
 Using `pipx` is recommended as it installs the package in an isolated environment and automatically manages the PATH.
@@ -113,12 +116,14 @@ codemap gen [PATH] [OPTIONS]
 ```bash
 # Generate documentation for current directory using defaults
 codemap gen
+# Or using the alias:
+cm gen
 
 # Generate for a specific path with full detail and no semantic analysis
 codemap gen /path/to/project --lod full --no-semantic
 
 # Generate docs with signatures only and custom Mermaid settings
-codemap gen --lod signatures --mermaid-entities "class,function" --mermaid-relationships "calls"
+cm gen --lod signatures --mermaid-entities "class,function" --mermaid-relationships "calls"
 
 # Generate only directory tree (implicitly disables entity graph)
 codemap gen --tree --no-entity-graph
@@ -142,6 +147,8 @@ Create intelligent Git commits with AI-assisted message generation. The tool ana
 ```bash
 # Basic usage with default settings (interactive, semantic splitting)
 codemap commit
+# Or using the alias:
+cm commit
 
 # Commit with a specific message (skips AI generation)
 codemap commit -m "feat: add new feature"
@@ -280,6 +287,8 @@ The `codemap pr` command helps you create and manage pull requests with ease. It
 
 ```bash
 codemap pr create [PATH] [OPTIONS]
+# Or using the alias:
+cm pr create [PATH] [OPTIONS]
 ```
 
 **Arguments:**
@@ -302,6 +311,8 @@ codemap pr create [PATH] [OPTIONS]
 
 ```bash
 codemap pr update [PATH] [OPTIONS]
+# Or using the alias:
+cm pr update [PATH] [OPTIONS]
 ```
 
 **Arguments:**
@@ -433,6 +444,8 @@ CodeMap supports multiple LLM providers through LiteLLM:
 ```bash
 # Using OpenAI (default)
 codemap commit --model openai/gpt-4o-mini
+# Or using the alias:
+cm commit --model openai/gpt-4o-mini
 
 # Using Anthropic
 codemap commit --model anthropic/claude-3-sonnet-20240229

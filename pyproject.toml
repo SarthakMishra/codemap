@@ -107,6 +107,7 @@ extraPaths = ["src"]
 
 [project.scripts]
 codemap = "codemap.cli:main"
+cm = "codemap.cli:main"
 
 [tool.pytest]
 testpaths = ["tests"]
