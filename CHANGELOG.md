@@ -1,6 +1,25 @@
 # CHANGELOG
 
 
+## v2.0.0 (2025-05-01)
+
+### Features
+
+- Add build and pyproject-hooks dependencies, update CodeMap version to 1.0.0
+  ([`d033caa`](https://github.com/SarthakMishra/codemap/commit/d033caaa475861eb65e7d68ebdc6e65c6c6cddfc))
+
+This commit introduces the 'build' and 'pyproject-hooks' packages as dependencies, and updates the
+  version of CodeMap to 1.0.0. The build dependency is necessary for project packaging and building.
+
+- **project**: Bump version to 1.0.0 and add build dependency
+  ([`5b2cd6c`](https://github.com/SarthakMishra/codemap/commit/5b2cd6c12cc3145ced9ce753fbc0ec7e09edbdda))
+
+Bump the project version to 1.0.0 and add build dependency to support building and packaging the
+  project.
+
+BREAKING CHANGE: version bump to 1.0.0
+
+
 ## v1.0.0 (2025-05-01)
 
 
