@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
@@ -15,6 +14,7 @@ from tests.base import FileSystemTestBase
 
 if TYPE_CHECKING:
 	from collections.abc import Iterator
+	from pathlib import Path
 
 
 # Mock the CommitCommand class entirely for initial tests
@@ -22,9 +22,13 @@ if TYPE_CHECKING:
 def mock_commit_command() -> Iterator[tuple[MagicMock, MagicMock]]:
 	"""Fixture to mock the CommitCommand class and its instance."""
 	with patch("codemap.cli.commit_cmd.CommitCommand", autospec=True) as mock_class:
-		mock_instance = mock_class.return_value
+		# Create the mock instance properly
+		mock_instance = MagicMock()
 		mock_instance.run.return_value = True  # Simulate successful run
-		mock_instance.error_state = None
+		mock_instance.error_state = None  # Add the error_state attribute properly
+
+		# Configure the class mock to return our instance
+		mock_class.return_value = mock_instance
 		yield mock_class, mock_instance
 
 
@@ -45,7 +49,8 @@ def mock_git_utils() -> Iterator[dict[str, MagicMock]]:
 		# Setup default return values for mocks if needed
 		from codemap.git.utils import GitDiff  # Import for type hinting if needed
 
-		mock_validate.return_value = Path("/mock/repo")  # Assume validation passes
+		# Instead of hardcoding a path, let validate_repo_path return what it's given
+		mock_validate.side_effect = lambda path: path  # Return the path it was given
 		# Simulate having some staged changes by default
 		mock_get_staged_diff.return_value = GitDiff(files=["file1.py"], content="+ stage diff", is_staged=True)
 		mock_get_unstaged_diff.return_value = None  # Default: no unstaged changes
@@ -98,7 +103,7 @@ class TestCommitCommand(FileSystemTestBase):
 		args, kwargs = mock_class.call_args
 		assert not args  # Should be called with kwargs only
 		assert "path" in kwargs
-		assert kwargs["path"] == Path("/mock/repo")  # Path returned by mock_validate
+		assert kwargs["path"] == self.temp_dir  # Path should be the temp_dir we passed
 		assert "model" in kwargs
 		assert kwargs["model"] == "gpt-4o-mini"  # Default model from CLI
 		assert "bypass_hooks" in kwargs
@@ -125,7 +130,7 @@ class TestCommitCommand(FileSystemTestBase):
 		# Check __init__ args - --all is handled later, not passed to init
 		args, kwargs = mock_class.call_args
 		assert not args
-		assert kwargs["path"] == Path("/mock/repo")
+		assert kwargs["path"] == self.temp_dir
 		assert kwargs["model"] == "gpt-4o-mini"
 		assert kwargs["bypass_hooks"] is False
 
@@ -151,7 +156,7 @@ class TestCommitCommand(FileSystemTestBase):
 		# Check __init__ args - -m is handled later, not passed to init
 		args, kwargs = mock_class.call_args
 		assert not args
-		assert kwargs["path"] == Path("/mock/repo")
+		assert kwargs["path"] == self.temp_dir
 		assert kwargs["model"] == "gpt-4o-mini"
 		assert kwargs["bypass_hooks"] is False
 
@@ -177,7 +182,7 @@ class TestCommitCommand(FileSystemTestBase):
 		# Check __init__ args - --non-interactive is handled later, not passed to init
 		args, kwargs = mock_class.call_args
 		assert not args
-		assert kwargs["path"] == Path("/mock/repo")
+		assert kwargs["path"] == self.temp_dir
 		assert kwargs["model"] == "gpt-4o-mini"
 		assert kwargs["bypass_hooks"] is False
 
