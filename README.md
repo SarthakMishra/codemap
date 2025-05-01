@@ -27,9 +27,6 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 
 ## Installation
 
-> [!Note]
-> This package will be published to PyPI upon reaching a stable version.
-
 > [!Important]
 > CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
 
@@ -45,8 +42,8 @@ Using `pipx` is recommended as it installs the package in an isolated environmen
 # python3 -m pip install --user pipx
 # python3 -m pipx ensurepath
 
-# Install codemap directly from GitHub
-pipx install git+https://github.com/SarthakMishra/codemap.git
+# Install codemap from PyPI
+pipx install codemap
 ```
 
 ### Alternative: Manual Installation using pip
@@ -55,7 +52,7 @@ If you prefer not to use `pipx`, you can install using `pip` directly:
 
 ```bash
 # Install with pip (user installation)
-pip install --user git+https://github.com/SarthakMishra/codemap.git
+pip install --user codemap
 
 # Make sure your PATH includes the user bin directory
 # Add the following to your shell profile (e.g., ~/.bashrc, ~/.zshrc):
@@ -63,15 +60,31 @@ pip install --user git+https://github.com/SarthakMishra/codemap.git
 # Or find the correct path using: python3 -m site --user-base
 ```
 
-### Updating CodeMap
+### Development Version (Latest GitHub)
 
-To update CodeMap to the latest version from the repository:
+If you want to try the latest development version with unreleased features:
 
 ```bash
-# If installed with pipx
+# Using pipx
+pipx install git+https://github.com/SarthakMishra/codemap.git
+
+# Or using pip
+pip install --user git+https://github.com/SarthakMishra/codemap.git
+```
+
+### Updating CodeMap
+
+To update CodeMap to the latest version:
+
+```bash
+# If installed with pipx from PyPI
 pipx upgrade codemap
 
-# If installed with pip --user
+# If installed with pip from PyPI
+pip install --user --upgrade codemap
+
+# If installed from GitHub
+pipx upgrade codemap  # or
 pip install --user --upgrade git+https://github.com/SarthakMishra/codemap.git
 ```
 
