@@ -323,27 +323,29 @@ def get_deleted_tracked_files() -> tuple[set, set]:
 	Get list of deleted but tracked files from git status.
 
 	Returns:
-	    Tuple of (deleted_tracked_files, already_staged_deletions) as sets
+	    Tuple of (deleted_unstaged_files, deleted_staged_files) as sets
 
 	"""
-	deleted_tracked_files = set()
-	already_staged_deletions = set()
+	deleted_unstaged_files = set()
+	deleted_staged_files = set()
 	try:
 		# Parse git status to find deleted files
 		status_output = run_git_command(["git", "status", "--porcelain"])
 		for line in status_output.splitlines():
 			if line.startswith(" D"):
 				# Unstaged deletion (space followed by D)
-				deleted_tracked_files.add(line[3:])
+				filename = line[3:].strip()  # Skip " D " prefix and strip any whitespace
+				deleted_unstaged_files.add(filename)
 			elif line.startswith("D "):
 				# Staged deletion (D followed by space)
-				already_staged_deletions.add(line[3:])
-		logger.debug("Found %d deleted tracked files in git status", len(deleted_tracked_files))
-		logger.debug("Found %d already staged deletions in git status", len(already_staged_deletions))
+				filename = line[2:].strip()  # Skip "D " prefix and strip any whitespace
+				deleted_staged_files.add(filename)
+		logger.debug("Found %d deleted unstaged files in git status", len(deleted_unstaged_files))
+		logger.debug("Found %d deleted staged files in git status", len(deleted_staged_files))
 	except GitError:
 		logger.warning("Failed to get git status for deleted files")
 
-	return deleted_tracked_files, already_staged_deletions
+	return deleted_unstaged_files, deleted_staged_files
 
 
 def filter_valid_files(files: list[str], is_test_environment: bool = False) -> tuple[list[str], list[str]]:
@@ -391,7 +393,7 @@ def filter_valid_files(files: list[str], is_test_environment: bool = False) -> t
 		return valid_files, filtered_large_files
 
 	# Get deleted files
-	deleted_tracked_files, already_staged_deletions = get_deleted_tracked_files()
+	deleted_unstaged_files, deleted_staged_files = get_deleted_tracked_files()
 
 	# Check if files exist in the repository (tracked by git) or filesystem
 	original_count = len(valid_files)
@@ -409,8 +411,8 @@ def filter_valid_files(files: list[str], is_test_environment: bool = False) -> t
 			if (
 				Path(file).exists()
 				or file in tracked_files
-				or file in deleted_tracked_files
-				or file in already_staged_deletions
+				or file in deleted_unstaged_files
+				or file in deleted_staged_files
 			):
 				filtered_files.append(file)
 			else:
@@ -426,7 +428,7 @@ def filter_valid_files(files: list[str], is_test_environment: bool = False) -> t
 		# If we can't check git tracked files, at least filter by filesystem existence and git status
 		filtered_files = []
 		for file in valid_files:
-			if Path(file).exists() or file in deleted_tracked_files or file in already_staged_deletions:
+			if Path(file).exists() or file in deleted_unstaged_files or file in deleted_staged_files:
 				filtered_files.append(file)
 			else:
 				logger.warning("Skipping non-existent file in diff: %s", file)
