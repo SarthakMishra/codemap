@@ -5,6 +5,9 @@ on:
     branches:
       - main
       - dev
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   # Group concurrency by workflow name and branch/tag ref
@@ -50,6 +53,8 @@ jobs:
     name: Semantic Release
     needs: check-required-workflows
     runs-on: ubuntu-latest
+    # Only run release job on push events to main/dev, not on pull requests
+    if: github.event_name == 'push'
     outputs:
       released: ${{ steps.semantic.outputs.released }}
       version: ${{ steps.semantic.outputs.version }}
