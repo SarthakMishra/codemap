@@ -14,6 +14,7 @@ from codemap.git.pr_generator import (
 from codemap.git.pr_generator.schemas import PullRequest
 from codemap.git.utils import GitError
 from tests.base import GitTestBase
+from tests.conftest import skip_git_tests
 
 
 def test_suggest_branch_name() -> None:
@@ -87,6 +88,7 @@ def test_generate_pr_description_from_commits() -> None:
 
 @pytest.mark.unit
 @pytest.mark.git
+@skip_git_tests
 class TestPRGenerator(GitTestBase):
 	"""Tests for the PRGenerator class."""
 

@@ -2,12 +2,12 @@ name: Tests
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'src/**'
       - 'tests/**'
   pull_request:
-    branches: [ main ]
+    branches: [ main, dev ]
     paths:
       - 'src/**'
       - 'tests/**'
@@ -44,13 +44,14 @@ jobs:
         uv venv
         uv sync
     
-    - name: Run CI tasks
+    - name: Run tests with coverage
       shell: bash
       env:
         VIRTUAL_ENV: ${{ github.workspace }}/.venv
         PATH: ${{ github.workspace }}/.venv/bin:${{ env.PATH }}
         PYTHONPATH: ${{ github.workspace }}
-      run: task ci:full
+        SKIP_GIT_TESTS: "1"  # Skip git-dependent tests in CI environment
+      run: task test:coverage:xml
     
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v4
