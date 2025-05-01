@@ -831,7 +831,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		)
 
 		with progress_indicator("Creating PR", style="spinner"):
-			pr = pr_generator.create_pr(branch_name, base_branch, title, description)
+			pr = pr_generator.create_pr(base_branch, branch_name, title, description)
 
 		console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
 
