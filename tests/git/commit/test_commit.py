@@ -64,7 +64,7 @@ index 2345678..bcdefgh 100644
 @@ -5,3 +5,6 @@ def old_function():
      # Some code
      pass
-+
+
 +def added_function():
 +    return "Hello, World!"
 """,
@@ -75,7 +75,7 @@ index 2345678..bcdefgh 100644
 @pytest.fixture
 def mock_diff_splitter() -> Generator[Mock, None, None]:
 	"""Create a mock DiffSplitter."""
-	with patch("codemap.git.diff_splitter.DiffSplitter") as mock:
+	with patch("codemap.git.diff_splitter.splitter.DiffSplitter") as mock:
 		splitter = Mock(spec=DiffSplitter)
 		splitter.split_diff.return_value = [
 			DiffChunk(
@@ -208,8 +208,9 @@ index 2345678..bcdefgh 100645
 			mock_split.return_value = expected_chunks
 
 			# Test the split_diff method (should use semantic strategy by default)
-			result = splitter.split_diff(diff)
-			assert result == expected_chunks
+			result_tuple = splitter.split_diff(diff)
+			result_chunks = result_tuple[0]  # Extract chunks from tuple
+			assert result_chunks == expected_chunks
 			mock_split.assert_called_once_with(diff)
 
 	def test_diff_splitter_semantic_strategy(self) -> None:
@@ -253,8 +254,9 @@ index 2345678..bcdefgh 100645
 			mock_split.return_value = expected_chunks
 
 			# Test the split_diff method (now always uses semantic strategy)
-			result = splitter.split_diff(diff)
-			assert result == expected_chunks
+			result_tuple = splitter.split_diff(diff)
+			result_chunks = result_tuple[0]  # Extract chunks from tuple
+			assert result_chunks == expected_chunks
 			mock_split.assert_called_once_with(diff)
 
 

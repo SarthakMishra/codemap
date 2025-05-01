@@ -1,0 +1,3 @@
+- check how entity recognition works in tree-sitter by default
+- try to find a better alternative than the current impleemntation which manually maps over entities and every languages needs to be mapped separately
+- better support for all tree-sitter supported languages

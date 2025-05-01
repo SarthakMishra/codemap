@@ -95,9 +95,9 @@ class TestLoadPromptTemplate:
 
 	def test_load_prompt_template_not_exists(self) -> None:
 		"""Test loading a prompt template that doesn't exist."""
-		with patch("codemap.cli.commit_cmd.console") as mock_console:
+		with patch("codemap.cli.commit_cmd.show_warning") as mock_show_warning:
 			assert _load_prompt_template("/nonexistent/path.txt") is None
-			mock_console.print.assert_called_once()
+			mock_show_warning.assert_called_once()
 
 	def test_load_prompt_template_none(self) -> None:
 		"""Test loading with None path."""
@@ -176,10 +176,10 @@ class TestPerformCommit:
 
 	def test_perform_commit_with_file_checks(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit with file checks."""
-		# Directly mock _commit_changes which is actually called
-		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit:
-			# Configure mock for success
-			mock_commit.return_value = True
+		# Patch the _commit_changes function directly called by _perform_commit
+		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit_changes:
+			# Configure the mock for success
+			mock_commit_changes.return_value = True
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -189,15 +189,14 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is True
-			mock_commit.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			mock_commit_changes.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
 
 	def test_perform_commit_with_other_files(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit when there are other files."""
-		# Modern implementation may not call _check_other_files or handle_other_files
-		# Directly mock _commit_changes which is actually called
-		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit:
+		# Patch the _commit_changes function directly
+		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit_changes:
 			# Configure the mock for success
-			mock_commit.return_value = True
+			mock_commit_changes.return_value = True
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -207,14 +206,17 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is True
-			mock_commit.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			mock_commit_changes.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
 
 	def test_perform_commit_failure(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit failure."""
-		# Directly mock _commit_changes which is actually called
-		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit:
+		# Patch the _commit_changes function directly
+		with (
+			patch("codemap.cli.commit_cmd._commit_changes") as mock_commit_changes,
+			patch("codemap.cli.commit_cmd.console.print"),
+		):  # Keep console patch if needed for error msg assertion
 			# Configure the mock for failure
-			mock_commit.return_value = False
+			mock_commit_changes.return_value = False
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -224,7 +226,8 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is False
-			mock_commit.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			mock_commit_changes.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			# Optionally, assert that console.print was called with an error message if _perform_commit handles it
 
 
 @pytest.mark.unit
@@ -285,11 +288,11 @@ def test_load_prompt_template_success(tmp_path: Path) -> None:
 @pytest.mark.unit
 def test_load_prompt_template_nonexistent() -> None:
 	"""Test loading prompt template with nonexistent file."""
-	with patch("codemap.cli.commit_cmd.console") as mock_console:
+	with patch("codemap.cli.commit_cmd.show_warning") as mock_show_warning:
 		result = _load_prompt_template("/nonexistent/path.txt")
 		assert result is None
-		mock_console.print.assert_called_once()
-		assert "Warning" in mock_console.print.call_args[0][0]
+		mock_show_warning.assert_called_once()
+		assert "Could not load prompt template" in mock_show_warning.call_args[0][0]
 
 
 @pytest.mark.unit

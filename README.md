@@ -137,9 +137,6 @@ codemap gen -v
 
 Create intelligent Git commits with AI-assisted message generation. The tool analyzes your changes, splits them into logical chunks, and generates meaningful commit messages using LLMs.
 
-> [!Warning]
-> **Known Issue:** The commit command may sometimes incorrectly identify test files containing diff code as actual diff files, causing Git commit operations to fail. If you encounter this error, simply re-run the command or use standard Git commit as a workaround. This issue will be fixed in an upcoming release.
-
 ### Basic Usage
 
 ```bash
@@ -314,7 +311,8 @@ codemap pr update [PATH] [OPTIONS]
 - `--pr`: PR number to update (required if not updating PR for current branch)
 - `--title`: New PR title
 - `--desc`, `-d`: New PR description (file path or text)
-# Note: --no-commit is NOT an option for 'update'
+> [!Note]
+> --no-commit is NOT an option for 'update'
 - `--force-push`, `-f`: Force push the branch (use with caution)
 - `--non-interactive`: Run in non-interactive mode
 - `--verbose`, `-v`: Enable verbose logging

@@ -15,6 +15,7 @@ import typer
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.panel import Panel
+from rich.rule import Rule
 from rich.text import Text
 
 from codemap.cli.commit_cmd import create_universal_generator
@@ -666,12 +667,15 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 					if "/" in branch_name:
 						branch_type = branch_name.split("/")[0]
 					# Now safe to call get_default_base
-					base_branch = workflow.get_default_base(branch_type) or "main"
+					base_branch = workflow.get_default_base(branch_type)
 				except Exception:  # Catch potential errors in get_default_base itself
 					logger.exception("Failed to determine base branch using workflow strategy")
-					base_branch = "main"
+					# base_branch remains None if error occurs or get_default_base returns None
 
-		# ---> Moved interactive base branch selection inside the main try block <---
+			# If base_branch is STILL None after all attempts, fallback to main
+			if base_branch is None:
+				base_branch = "main"
+				logger.warning("Could not automatically determine base branch, falling back to 'main'")
 
 		# Check for existing PR first
 		existing_pr = get_existing_pr(branch_name)
@@ -679,39 +683,54 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 			show_warning(f"PR #{existing_pr.number} already exists for this branch.")
 			return existing_pr
 
-		# ---> Interactive base branch selection moved here <---
-		if options.interactive and not options.base_branch:  # Only ask if interactive and not provided via CLI
+		# ---> Interactive base branch selection (only if needed and interactive) <---
+		# Ask only if interactive, base wasn't provided via CLI, AND we ended up with the fallback 'main'
+		# or couldn't determine one at all (base_branch is None or 'main').
+		if options.interactive and not options.base_branch and (not base_branch or base_branch == "main"):
+			logger.info("Interactively prompting for base branch as it was not specified or automatically determined.")
 			remote_branches = workflow.get_remote_branches()
 			choices = []
+			default_choice = base_branch  # Start with the current base_branch as potential default
+
 			if base_branch and base_branch in remote_branches:
 				# Add the detected/default branch first if it exists remotely
 				choices.append(base_branch)
-				remote_branches.remove(base_branch)  # Avoid duplication
+				# Prevent adding it again in extend below if it's the only one
+				if base_branch in remote_branches:
+					remote_branches.remove(base_branch)
+			else:
+				# If the current base_branch isn't remote, don't set it as default for selection
+				default_choice = None
 
-			choices.extend(sorted(remote_branches))  # Add remaining branches sorted
+			# Add remaining branches sorted
+			choices.extend(sorted(remote_branches))
 
 			if not choices:
-				show_error("Could not find any remote branches to select as base.")
-				return None
+				show_warning(f"Could not find any remote branches to select as base. Proceeding with '{base_branch}'.")
+			else:
+				selected_base_branch = questionary.select(
+					"Select the base branch for the PR:",
+					choices=choices,
+					default=default_choice,  # Use the determined base_branch if valid and remote
+					qmark="🎯",
+				).ask()
 
-			selected_base_branch = questionary.select(
-				"Select the base branch for the PR:", choices=choices, qmark="🎯"
-			).ask()
-
-			if not selected_base_branch:
-				show_error("Base branch selection cancelled.")
-				return None
-			base_branch = selected_base_branch
+				if not selected_base_branch:
+					show_warning(f"Base branch selection cancelled. Proceeding with '{base_branch}'.")
+				else:
+					base_branch = selected_base_branch
 		# <--- End interactive base branch selection --->
+
+		# Ensure base_branch is a non-empty string before proceeding
+		if not base_branch:
+			# This case should ideally not be reached due to prior checks/defaults/selection
+			msg = "Base branch could not be determined even after selection/fallback."
+			_exit_with_error(msg)
+			return None
 
 		# Get recent commits
 		try:
 			with progress_indicator("Fetching recent commits", style="spinner"):
-				# Ensure base_branch is a string before use
-				if base_branch is None:
-					# This case should ideally not be reached due to prior checks/defaults
-					msg = "Base branch could not be determined."
-					raise ValueError(msg)
 				commits = get_commit_messages(base_branch, branch_name)
 		except GitError as e:
 			show_error(f"Error fetching commits: {e}")
@@ -729,83 +748,99 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		title_strategy = content_config.get("title_strategy", "commits")
 		description_strategy = content_config.get("description_strategy", "commits")
 
-		# Generate title
-		with progress_indicator("Generating PR title", style="spinner"):
-			# If title is already provided, use it
-			if options.title:
-				title = options.title
-			else:
-				# Otherwise generate it based on the strategy
-				title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
+		# Generate initial title and description
+		title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
+		description = _generate_description(
+			options,
+			description_strategy,
+			commits,
+			branch_name,
+			branch_type,
+			workflow_strategy_name,
+			base_branch,
+			content_config,
+		)
 
-			# Make sure we have a title
-			if not title:
-				title = f"Update {branch_name}"
+		# --- Interactive Review Step ---
+		if options.interactive:
+			while True:
+				console.print(Rule("PR Preview"))
+				console.print(Panel(Text(title), title="[bold]Title[/bold]", border_style="blue"))
+				console.print(Panel(Markdown(description), title="[bold]Description[/bold]", border_style="blue"))
 
-		# Generate description
-		with progress_indicator("Generating PR description", style="spinner"):
-			# If description is already provided, use it
-			if options.description:
-				# Check if it's a file path or a string
-				description_path = Path(options.description)
-				if description_path.exists() and description_path.is_file():
-					try:
-						with Path.open(description_path, encoding="utf-8") as f:
-							description = f.read()
-					except OSError as e:
-						show_error(f"Error reading description file: {e}")
-						description = options.description
+				action = questionary.select(
+					"Review the generated PR content:",
+					choices=[
+						"Create PR",
+						"Edit Title",
+						"Edit Description",
+						"Regenerate",
+						"Exit",
+					],
+					default="Create PR",
+					qmark="📝",
+				).ask()
+
+				if action == "Create PR":
+					break
+				if action == "Edit Title":
+					new_title = questionary.text("Enter new title:", default=title).ask()
+					if new_title is not None:
+						title = new_title
+				elif action == "Edit Description":
+					# Use multiline text input for potentially long descriptions
+					new_description = questionary.text(
+						"Edit description (submit empty to keep current):",
+						default=description,
+						multiline=True,
+					).ask()
+					if new_description is not None:
+						description = new_description
+				elif action == "Regenerate":
+					console.print("[cyan]Regenerating title and description...[/cyan]")
+					title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
+					description = _generate_description(
+						options,
+						description_strategy,
+						commits,
+						branch_name,
+						branch_type,
+						workflow_strategy_name,
+						base_branch,
+						content_config,
+					)
+				elif action == "Exit" or action is None:
+					console.print("[yellow]PR creation cancelled.[/yellow]")
+					return None
 				else:
-					description = options.description
-			else:
-				# Generate description based on strategy
-				if base_branch is None:
-					# This case should ideally not be reached
-					msg = "Base branch could not be determined for description generation."
-					raise ValueError(msg)
-				description = _generate_description(
-					options,
-					description_strategy,
-					commits,
-					branch_name,
-					branch_type,
-					workflow_strategy_name,
-					base_branch,  # Now checked for None
-					content_config,
-				)
+					# Should not happen, but handle gracefully
+					console.print("[red]Invalid action selected.[/red]")
+					return None
 
-			# Make sure we have a description
-			if not description:
-				description = f"Update from branch {branch_name}"
+		# --- End Interactive Review Step ---
 
-		# Create the PR
-		with progress_indicator("Creating PR", style="spinner"):
-			# Initialize PR generator
-			llm_client = create_client(
+		# Create PR
+		pr_generator = PRGenerator(
+			repo_path=cast("Path", options.repo_path),
+			llm_client=create_client(
+				repo_path=cast("Path", options.repo_path),
 				model=options.model,
 				api_key=options.api_key,
 				api_base=options.api_base,
-			)
+			),
+		)
 
-			repo_path = cast("Path", options.repo_path)
-			generator = PRGenerator(
-				repo_path=repo_path,
-				llm_client=llm_client,
-			)
+		with progress_indicator("Creating PR", style="spinner"):
+			pr = pr_generator.create_pr(base_branch, branch_name, title, description)
 
-			# Create the PR
-			if base_branch is None:
-				# This case should ideally not be reached
-				msg = "Base branch could not be determined for PR creation."
-				raise ValueError(msg)
-			pr = generator.create_pr(base_branch, branch_name, title, description)
+		console.print(f"[green]Created PR #{pr.number}: {pr.url}[/green]")
 
-		# Show PR information
-		console.print(f"\n[green]Created PR #{pr.number}: {pr.title}[/green]")
-		console.print(f"[green]URL: {pr.url}[/green]")
+		# Display the final title and description in panels
+		title_panel = Panel(
+			Text(title, style="green"), title="[bold]PR Title[/bold]", border_style="green", padding=(1, 2)
+		)
+		console.print(title_panel)
 
-		# Show description (full)
-		console.print("\n[bold blue]Description:[/bold blue]")
 		# Description panel (full description)
 		desc_panel = Panel(
 			Markdown(description), title="[bold]PR Description[/bold]", border_style="green", padding=(1, 2)
@@ -813,6 +848,7 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 		console.print(desc_panel)
 
 		return pr
+
 	except GitError as e:
 		error_message = str(e).lower()
 		# Use a placeholder if base_branch is None when formatting the error
@@ -837,6 +873,12 @@ def _handle_pr_creation(options: PROptions, branch_name: str | None) -> PullRequ
 			# Handle other Git errors normally
 			show_error(f"Error creating PR: {e}")
 			return None  # Or re-raise depending on desired flow for other errors
+
+	# Handle non-Git exceptions, like LLM errors during generation
+	except Exception as e:
+		logger.exception("An unexpected error occurred during PR creation")
+		show_error(f"An unexpected error occurred: {e}")
+		return None
 
 
 def _handle_pr_update(options: PROptions, pr: PullRequest | None) -> PullRequest | None:

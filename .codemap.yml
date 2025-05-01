@@ -140,23 +140,11 @@ pr:
       prefix: "bugfix/"
 
   # Content generation settings
-  generate:
-    title_strategy: "commits"  # Options: commits, llm, branch-name
-    description_strategy: "llm"  # Options: commits, llm, template
-    
-    # Template for PR descriptions
-    description_template: |
-      ## Changes
-      {changes}
-      
-      ## Testing
-      {testing_instructions}
-      
-      ## Screenshots
-      {screenshots}
-    
-    # Whether to use PR templates from workflow strategies
-    use_workflow_templates: true
+  content:
+    title_strategy: llm
+    description_strategy: llm
+    # Add other existing pr settings below if they exist
+    # ... existing code ...
 
 # LLM configuration
 llm:
