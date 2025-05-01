@@ -93,6 +93,7 @@ class CommitCommand:
 
 		Raises:
 		    RuntimeError: If Git operations fail.
+
 		"""
 		changes = []
 		try:
