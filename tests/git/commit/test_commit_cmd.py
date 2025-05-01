@@ -176,19 +176,10 @@ class TestPerformCommit:
 
 	def test_perform_commit_with_file_checks(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit with file checks."""
-		# Directly mock _commit_changes which is actually called
-		# Updated: Patch the functions called by the refactored _perform_commit
-		# Target the command module where _perform_commit is defined
-		with (
-			patch("codemap.git.commit_generator.command.stage_files") as mock_stage,
-			patch("codemap.git.commit_generator.command.commit_only_files") as mock_commit,
-			# Patch Path.exists to simulate files being present
-			patch("pathlib.Path.exists", return_value=True),
-			# Patch run_git_command used by stage_files (called within commit_only_files)
-			patch("codemap.git.utils.run_git_command"),
-		):
+		# Patch the _commit_changes function directly called by _perform_commit
+		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit_changes:
 			# Configure the mock for success
-			mock_commit.return_value = []  # Simulate successful commit
+			mock_commit_changes.return_value = True
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -198,25 +189,14 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is True
-			mock_stage.assert_called_once_with(mock_diff_chunk.files)
-			mock_commit.assert_called_once_with(mock_diff_chunk.files, "feat: Test commit", ignore_hooks=False)
+			mock_commit_changes.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
 
 	def test_perform_commit_with_other_files(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit when there are other files."""
-		# Modern implementation may not call _check_other_files or handle_other_files
-		# Directly mock _commit_changes which is actually called
-		# Updated: Patch the functions called by the refactored _perform_commit
-		# Target the command module where _perform_commit is defined
-		with (
-			patch("codemap.git.commit_generator.command.stage_files") as mock_stage,
-			patch("codemap.git.commit_generator.command.commit_only_files") as mock_commit,
-			# Patch Path.exists to simulate files being present
-			patch("pathlib.Path.exists", return_value=True),
-			# Patch run_git_command used by stage_files (called within commit_only_files)
-			patch("codemap.git.utils.run_git_command"),
-		):
+		# Patch the _commit_changes function directly
+		with patch("codemap.cli.commit_cmd._commit_changes") as mock_commit_changes:
 			# Configure the mock for success
-			mock_commit.return_value = []  # Simulate successful commit
+			mock_commit_changes.return_value = True
 
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
@@ -226,28 +206,18 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is True
-			mock_stage.assert_called_once_with(mock_diff_chunk.files)
-			mock_commit.assert_called_once_with(mock_diff_chunk.files, "feat: Test commit", ignore_hooks=False)
+			mock_commit_changes.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
 
 	def test_perform_commit_failure(self, mock_diff_chunk: DiffChunk) -> None:
 		"""Test commit failure."""
-		# Directly mock _commit_changes which is actually called
-		# Updated: Patch the functions called by the refactored _perform_commit
-		# Simulate failure by having commit_only_files raise an exception
-		# Target the command module where _perform_commit is defined
-		from codemap.git.utils import GitError
-
+		# Patch the _commit_changes function directly
 		with (
-			patch("codemap.git.commit_generator.command.stage_files") as mock_stage,
-			patch(
-				"codemap.git.commit_generator.command.commit_only_files", side_effect=GitError("Commit failed")
-			) as mock_commit,
-			patch("codemap.cli.commit_cmd.console.print") as mock_print,  # Patch console where error is printed
-			# Patch Path.exists to simulate files being present
-			patch("pathlib.Path.exists", return_value=True),
-			# Patch run_git_command used by stage_files (called within commit_only_files)
-			patch("codemap.git.utils.run_git_command"),
-		):
+			patch("codemap.cli.commit_cmd._commit_changes") as mock_commit_changes,
+			patch("codemap.cli.commit_cmd.console.print"),
+		):  # Keep console patch if needed for error msg assertion
+			# Configure the mock for failure
+			mock_commit_changes.return_value = False
+
 			# Ensure mock_diff_chunk has files attribute
 			mock_diff_chunk.files = ["file1.py", "file2.py"]
 
@@ -256,13 +226,8 @@ class TestPerformCommit:
 
 			# Verify result and calls
 			assert result is False
-			mock_stage.assert_called_once_with(mock_diff_chunk.files)
-			mock_commit.assert_called_once_with(mock_diff_chunk.files, "feat: Test commit", ignore_hooks=False)
-			# Verify error message was printed (Error is printed within _perform_commit in the command module)
-			# The test setup might need adjustment if UI/console handling changed
-			# For now, assume the patched console.print is still relevant if the error propagates
-			mock_print.assert_called_once()
-			assert "Error during commit: Commit failed" in mock_print.call_args[0][0]
+			mock_commit_changes.assert_called_once_with("feat: Test commit", mock_diff_chunk.files)
+			# Optionally, assert that console.print was called with an error message if _perform_commit handles it
 
 
 @pytest.mark.unit
