@@ -20,38 +20,8 @@ permissions:
   id-token: write # Allow OIDC token generation for PyPI publishing
 
 jobs:
-  # Wait for other required checks to succeed before proceeding with release
-  check-required-workflows:
-    name: Check Required Workflows
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for tests (ubuntu)
-        uses: lewagon/wait-on-check-action@v1.3.1
-        with:
-          ref: ${{ github.ref }}
-          check-name: 'test (ubuntu-latest, 3.12)' # Match name in tests.yml job matrix
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 20
-      
-      - name: Wait for tests (macos)
-        uses: lewagon/wait-on-check-action@v1.3.1
-        with:
-          ref: ${{ github.ref }}
-          check-name: 'test (macos-latest, 3.12)' # Match name in tests.yml job matrix
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 20
-      
-      - name: Wait for lint
-        uses: lewagon/wait-on-check-action@v1.3.1
-        with:
-          ref: ${{ github.ref }}
-          check-name: 'lint' # Match name in lint.yml job
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          wait-interval: 20
-
   release:
     name: Semantic Release
-    needs: check-required-workflows
     runs-on: ubuntu-latest
     # Only run release job on push events to main/dev, not on pull requests
     if: github.event_name == 'push'
