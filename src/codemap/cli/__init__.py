@@ -43,9 +43,18 @@ except ImportError as err:
 # Configure logging
 logger = logging.getLogger(__name__)
 
+# Determine the invoked command name for help message customization
+invoked_command = Path(sys.argv[0]).name
+if invoked_command == "cm":
+	alias_note = "\n\nNote: 'cm' is an alias for 'codemap'."
+elif invoked_command == "codemap":
+	alias_note = "\n\nNote: You can also use 'cm' as a shorter alias."
+else:
+	alias_note = ""  # Handle cases where script might be called differently
+
 # Initialize the main CLI app
 app = typer.Typer(
-	help=f"CodeMap - Developer tools powered by AI\n\nVersion: {__version__}",
+	help=f"CodeMap - Developer tools powered by AI\n\nVersion: {__version__}{alias_note}",
 	no_args_is_help=True,
 )
 

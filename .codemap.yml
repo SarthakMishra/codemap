@@ -19,13 +19,13 @@ gen:
   # Level of Detail for code analysis (signatures, structure, docs, full)
   lod_level: docs
   # Mermaid entities to include (lowercase EntityType names, e.g., module, class, function)
-  # mermaid_entities: ["module", "class", "method", "function"]
+  mermaid_entities: ["module", "class", "method", "function"]
   # Mermaid relationships to include (declares, imports, calls)
-  # mermaid_relationships: ["calls"]
+  mermaid_relationships: ["calls", "imports"]
   # Whether to show the legend in the Mermaid diagram (true/false)
   mermaid_show_legend: true
   # Whether to remove nodes with no connections in the diagram (true/false)
-  mermaid_remove_unconnected: false
+  mermaid_remove_unconnected: true
 
 # Processor configuration
 processor:
