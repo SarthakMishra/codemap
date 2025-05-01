@@ -16,8 +16,7 @@ from rich.rule import Rule
 from rich.text import Text
 
 if TYPE_CHECKING:
-	from .diff_splitter import DiffChunk as DiffSplitterChunk
-	from .message_generator import DiffChunk as MessageGeneratorDiffChunk
+	from .diff_splitter import DiffChunk
 
 logger = logging.getLogger(__name__)
 
@@ -51,9 +50,7 @@ class CommitUI:
 		"""Initialize the commit UI."""
 		self.console = Console()
 
-	def display_chunk(
-		self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, index: int = 0, total: int = 1
-	) -> None:
+	def display_chunk(self, chunk: DiffChunk, index: int = 0, total: int = 1) -> None:
 		"""
 		Display a diff chunk to the user.
 
@@ -80,7 +77,7 @@ class CommitUI:
 		# Prepare diff content
 		panel_content = chunk.content
 		if not panel_content.strip():
-			panel_content = "[dim]No content diff available (e.g., new file or mode change)[/dim]"
+			panel_content = "No content diff available (e.g., new file or mode change)"
 
 		# Truncate to maximum of MAX_PREVIEW_LINES lines
 		content_lines = panel_content.splitlines()
@@ -211,9 +208,7 @@ class CommitUI:
 		self.console.print("[dim]Press Enter to keep current message[/]")
 		return Prompt.ask("Message", default=current_message)
 
-	def process_chunk(
-		self, chunk: DiffSplitterChunk | MessageGeneratorDiffChunk, index: int = 0, total: int = 1
-	) -> ChunkResult:
+	def process_chunk(self, chunk: DiffChunk, index: int = 0, total: int = 1) -> ChunkResult:
 		"""
 		Process a single diff chunk interactively.
 

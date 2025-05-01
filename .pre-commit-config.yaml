@@ -1,0 +1,26 @@
+repos:
+-   repo: local
+    hooks:       
+    -   id: pre-commit-tasks
+        name: Run pre-commit tasks (format)
+        language: system
+        entry: task pre-commit
+        pass_filenames: false
+        types: [python]
+        stages: [pre-commit]
+
+-   repo: local
+    hooks:
+    -   id: pre-push-tasks
+        name: Run pre-push tasks (format, lint, test)
+        language: system
+        entry: task pre-push
+        pass_filenames: false
+        types: [python]
+        stages: [pre-push]
+
+- repo: https://github.com/alessandrojcm/commitlint-pre-commit-hook
+  rev: v9.22.0
+  hooks:
+      - id: commitlint
+        stages: [commit-msg]

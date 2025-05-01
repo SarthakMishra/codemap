@@ -1,234 +1,346 @@
-"""Configuration loader for the CodeMap tool."""
+"""
+Configuration loader for CodeMap.
 
-from __future__ import annotations
+This module provides functionality for loading and managing
+configuration settings.
+
+"""
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar, cast
 
-# Import the actual DEFAULT_CONFIG from the config module
+import yaml
+from xdg.BaseDirectory import xdg_config_home
+
 from codemap.config import DEFAULT_CONFIG
 
-# Import here to avoid "possibly unbound" errors
-try:
-	import yaml
-except ImportError:
-	yaml = None
-
+# Set up logger
 logger = logging.getLogger(__name__)
 
+# Type variable for config values with better type safety
+T = TypeVar("T")
 
-class ConfigError(TypeError):
-	"""Custom error for configuration validation."""
+# Constant for minimum number of parts in environment variable
+MIN_ENV_VAR_PARTS = 2
 
-	TOKEN_LIMIT_MSG = "token_limit must be an integer"  # noqa: S105
-	GITIGNORE_MSG = "use_gitignore must be a boolean"
-	OUTPUT_DIR_MSG = "output_dir must be a string"
+# Type for configuration values
+ConfigValue = str | int | float | bool | dict[str, Any] | list[Any] | None
+
+
+class ConfigError(Exception):
+	"""Exception raised for configuration errors."""
 
 
 class ConfigLoader:
-	"""Configuration loader for the CodeMap tool."""
+	"""
+	Loads and manages configuration for CodeMap.
+
+	This class handles loading configuration from files, environment
+	variables, and default values, with proper error handling and path
+	resolution.
+
+	"""
+
+	_instance = None  # For singleton pattern
+
+	@classmethod
+	def get_instance(
+		cls, config_file: str | None = None, reload: bool = False, repo_root: Path | None = None
+	) -> "ConfigLoader":
+		"""
+		Get the singleton instance of ConfigLoader.
+
+		Args:
+		        config_file: Path to configuration file (optional)
+		        reload: Whether to reload config even if already loaded
+		        repo_root: Repository root path (optional)
+
+		Returns:
+		        ConfigLoader: Singleton instance
+
+		"""
+		if cls._instance is None or reload:
+			cls._instance = cls(config_file, repo_root=repo_root)
+		return cls._instance
 
 	def __init__(self, config_file: str | None = None, repo_root: Path | None = None) -> None:
 		"""
 		Initialize the configuration loader.
 
 		Args:
-		    config_file: Path to configuration file, None for default location
-		    repo_root: Repository root path, used for resolving relative paths
-
-		Raises:
-		    FileNotFoundError: If config_file is specified but not found
+		        config_file: Path to configuration file (optional)
+		        repo_root: Repository root path (optional)
 
 		"""
-		self.config_file = config_file
+		self.config: dict[str, Any] = {}
 		self.repo_root = repo_root
-		self._config: dict[str, Any] = {}
+		self.config_file = self._resolve_config_file(config_file)
 		self.load_config()
-		self._validate_config(self._config)
 
-	def load_config(self) -> None:
+	def _resolve_config_file(self, config_file: str | None = None) -> Path | None:
 		"""
-		Load configuration from file.
+		Resolve the configuration file path.
 
-		Raises:
-		    FileNotFoundError: If config_file is specified but not found
-		    yaml.YAMLError: If the YAML file cannot be parsed
-
-		"""
-		# Always start with default config
-		self._config = DEFAULT_CONFIG.copy()
-
-		# Try loading from specified config file, or default location
-		if self.config_file:
-			config_path = Path(self.config_file)
-			if not config_path.exists():
-				error_msg = f"Config file not found: {self.config_file}"
-				logger.warning(error_msg)
-				raise FileNotFoundError(error_msg)
-		elif self.repo_root:
-			# Look for .codemap.yml in the repository root
-			config_path = self.repo_root / ".codemap.yml"
-			if not config_path.exists():
-				logger.debug("Config file .codemap.yml not found in repository, using default config")
-				return
-		else:
-			# Look for .codemap.yml in the current directory
-			config_path = Path(".codemap.yml")
-			if not config_path.exists():
-				logger.debug("Default config file .codemap.yml not found, using default config")
-				return
-
-		# Check if yaml module is available
-		if yaml is None:
-			logger.warning("PyYAML not installed, using default config")
-			return
-
-		# Read and parse config file
-		try:
-			with config_path.open("r", encoding="utf-8") as f:
-				loaded_config = yaml.safe_load(f)
-				if not loaded_config:
-					logger.warning("Empty or invalid YAML in %s, using default config", config_path)
-					return
-
-				# Log the config file contents for debugging
-				logger.debug("Loaded config from %s: %s", config_path, loaded_config)
-
-				# Update config with loaded values
-				self._config.update(loaded_config)
-		except yaml.YAMLError:
-			logger.exception("Failed to parse YAML from %s", config_path)
-			raise  # Re-raise for tests
-		except (PermissionError, OSError):
-			logger.exception("Unable to read config file %s", config_path)
-			raise
-
-	def _validate_config(self, config: dict[str, Any]) -> None:
-		"""
-		Validate configuration values.
+		If a config file is specified, use that. Otherwise, look in standard locations:
+		1. ./.codemap.yml in the current directory
+		2. $XDG_CONFIG_HOME/codemap/config.yml
+		3. ~/.config/codemap/config.yml (fallback if XDG_CONFIG_HOME not set)
 
 		Args:
-		    config: Configuration dictionary to validate.
+		        config_file: Explicitly provided config file path (optional)
+
+		Returns:
+		        Optional[Path]: Resolved config file path or None if no suitable file found
+
+		"""
+		if config_file:
+			path = Path(config_file).expanduser().resolve()
+			if path.exists():
+				return path
+			logger.warning("Specified config file not found: %s", path)
+			return path  # Return it anyway, we'll handle the missing file in load_config
+
+		# Try current directory
+		local_config = Path(".codemap.yml")
+		if local_config.exists():
+			return local_config
+
+		# Try XDG config path
+		xdg_config_dir = Path(xdg_config_home) / "codemap"
+		xdg_config_file = xdg_config_dir / "config.yml"
+		if xdg_config_file.exists():
+			return xdg_config_file
+
+		# As a last resort, try the legacy ~/.codemap location
+		legacy_config = Path.home() / ".codemap" / "config.yml"
+		if legacy_config.exists():
+			return legacy_config
+
+		# If we get here, no config file was found
+		return None
+
+	def load_config(self) -> dict[str, Any]:
+		"""
+		Load configuration from file and apply environment variable overrides.
+
+		Returns:
+		        Dict[str, Any]: Loaded configuration
 
 		Raises:
-		    ConfigError: If any configuration values are invalid.
+		        ConfigError: If configuration file exists but cannot be loaded
 
 		"""
-		if "token_limit" in config and not isinstance(config["token_limit"], int):
-			raise ConfigError(ConfigError.TOKEN_LIMIT_MSG)
+		# Start with default configuration
+		self.config = DEFAULT_CONFIG.copy()
 
-		if "use_gitignore" in config and not isinstance(config["use_gitignore"], bool):
-			raise ConfigError(ConfigError.GITIGNORE_MSG)
+		# Try to load from file if available
+		if self.config_file:
+			try:
+				if self.config_file.exists():
+					with self.config_file.open(encoding="utf-8") as f:
+						file_config = yaml.safe_load(f)
+						if file_config:
+							self._merge_configs(self.config, file_config)
+					logger.info("Loaded configuration from %s", self.config_file)
+				else:
+					logger.warning("Configuration file not found: %s", self.config_file)
+			except (OSError, yaml.YAMLError) as e:
+				error_msg = f"Error loading configuration from {self.config_file}: {e}"
+				logger.exception(error_msg)
+				raise ConfigError(error_msg) from e
 
-		if "output_dir" in config and not isinstance(config["output_dir"], str):
-			raise ConfigError(ConfigError.OUTPUT_DIR_MSG)
+		return self.config
 
-	@property
-	def config(self) -> dict[str, Any]:
+	def _merge_configs(self, base: dict[str, Any], override: dict[str, Any]) -> None:
 		"""
-		Get the configuration dictionary.
+		Recursively merge two configuration dictionaries.
+
+		Args:
+		        base: Base configuration dictionary to merge into
+		        override: Override configuration to apply
+
+		"""
+		for key, value in override.items():
+			if isinstance(value, dict) and key in base and isinstance(base[key], dict):
+				self._merge_configs(base[key], value)
+			else:
+				base[key] = value
+
+	def get(self, key: str, default: T = None) -> T:
+		"""
+		Get a configuration value, optionally with a section.
+
+		Examples:
+		        # Get a top-level key
+		        config.get("daemon")
+
+		        # Get a nested key with dot notation
+		        config.get("daemon.host")
+
+		Args:
+		        key: Configuration key, can include dots for nested access
+		        default: Default value if key not found
 
 		Returns:
-		    Configuration dictionary
+		        T: Configuration value or default
 
 		"""
-		return self._config
+		parts = key.split(".")
 
-	def get_llm_config(self) -> dict[str, Any]:
+		# Start with the whole config
+		current = self.config
+
+		# Traverse the parts
+		for part in parts:
+			if isinstance(current, dict) and part in current:
+				current = current[part]
+			else:
+				return default
+
+		return cast("T", current)
+
+	def set(self, key: str, value: ConfigValue) -> None:
 		"""
-		Get LLM-specific configuration.
+		Set a configuration value.
+
+		Args:
+		        key: Configuration key, can include dots for nested access
+		        value: Value to set
+
+		"""
+		parts = key.split(".")
+
+		# Start with the whole config
+		current = self.config
+
+		# Traverse to the parent of the leaf
+		for _i, part in enumerate(parts[:-1]):
+			if part not in current:
+				current[part] = {}
+			elif not isinstance(current[part], dict):
+				# Convert to dict if it wasn't already
+				current[part] = {}
+			current = current[part]
+
+		# Set the leaf value
+		current[parts[-1]] = value
+
+	def save(self, config_file: str | None = None) -> None:
+		"""
+		Save the current configuration to a file.
+
+		Args:
+		        config_file: Path to save configuration to (optional, defaults to current config_file)
+
+		Raises:
+		        ConfigError: If configuration cannot be saved
+
+		"""
+		save_path = Path(config_file) if config_file else self.config_file
+
+		if not save_path:
+			error_msg = "No configuration file specified for saving"
+			logger.error(error_msg)
+			raise ConfigError(error_msg)
+
+		# Ensure parent directory exists
+		save_path.parent.mkdir(parents=True, exist_ok=True)
+
+		try:
+			with save_path.open("w", encoding="utf-8") as f:
+				yaml.dump(self.config, f, default_flow_style=False)
+			logger.info("Configuration saved to %s", save_path)
+		except OSError as e:
+			error_msg = f"Error saving configuration to {save_path}: {e}"
+			logger.exception(error_msg)
+			raise ConfigError(error_msg) from e
+
+	def get_bypass_hooks(self) -> bool:
+		"""
+		Get whether to bypass git hooks.
 
 		Returns:
-		    Dictionary with LLM configuration values
+		        bool: True if git hooks should be bypassed, False otherwise
 
 		"""
-		llm_config = {
-			"model": "openai/gpt-4o-mini",  # Default model
-			"api_base": None,
-			"api_key": None,
-			"provider": None,
-		}
-
-		# Check if commit section exists with LLM configuration
-		if "commit" in self._config and isinstance(self._config["commit"], dict):
-			commit_config = self._config["commit"]
-
-			# Extract LLM configuration
-			if "llm" in commit_config and isinstance(commit_config["llm"], dict):
-				config_llm = commit_config["llm"]
-
-				# Update model if specified
-				if "model" in config_llm:
-					llm_config["model"] = config_llm["model"]
-
-					# Extract provider from model name if it contains a prefix
-					if "/" in llm_config["model"]:
-						provider_prefix = llm_config["model"].split("/")[0].lower()
-						llm_config["provider"] = provider_prefix
-
-				# Allow explicit provider override
-				if "provider" in config_llm:
-					llm_config["provider"] = config_llm["provider"]
-
-				# Update API base if specified
-				if "api_base" in config_llm:
-					llm_config["api_base"] = config_llm["api_base"]
-
-				# Get provider-specific API key if available and provider is known
-				if llm_config["provider"]:
-					provider_key = f"{llm_config['provider']}_api_key"
-					if provider_key in config_llm:
-						llm_config["api_key"] = config_llm[provider_key]
-
-				# Fall back to generic api_key if provider-specific not found
-				if not llm_config["api_key"] and "api_key" in config_llm:
-					llm_config["api_key"] = config_llm["api_key"]
-
-		return llm_config
+		return self.get("git.bypass_hooks", self.get("commit.bypass_hooks", False))
 
 	def get_commit_convention(self) -> dict[str, Any]:
 		"""
 		Get commit convention configuration.
 
 		Returns:
-		    Dictionary with commit convention settings
+		        Dict[str, Any]: Commit convention configuration
 
 		"""
-		convention = {
-			"types": ["feat", "fix", "docs", "style", "refactor", "perf", "test", "build", "ci", "chore"],
-			"scopes": [],
-			"max_length": 72,
-		}
+		convention = self.get("commit.convention", {})
 
-		# Check if commit section exists with convention configuration
-		if "commit" in self._config and isinstance(self._config["commit"], dict):
-			commit_config = self._config["commit"]
-
-			if "convention" in commit_config and isinstance(commit_config["convention"], dict):
-				conv_config = commit_config["convention"]
-
-				if "types" in conv_config:
-					convention["types"] = conv_config["types"]
-				if "scopes" in conv_config:
-					convention["scopes"] = conv_config["scopes"]
-				if "max_length" in conv_config:
-					convention["max_length"] = conv_config["max_length"]
+		# Ensure 'types' is always present with a default value if missing
+		if "types" not in convention:
+			convention["types"] = DEFAULT_CONFIG["commit"]["convention"]["types"]
 
 		return convention
 
+	def get_workflow_strategy(self) -> str:
+		"""
+		Get the workflow strategy configuration.
 
-def get_config(config_file: str | None = None, repo_root: Path | None = None) -> dict[str, Any]:
-	"""
-	Helper function to get configuration without creating a class instance.
+		Returns:
+		        str: Workflow strategy name
 
-	Args:
-	    config_file: Path to configuration file, None for default location
-	    repo_root: Repository root path, used for resolving relative paths
+		"""
+		return self.get("git.workflow_strategy", "github-flow")
 
-	Returns:
-	    Configuration dictionary
+	def get_pr_config(self) -> dict[str, Any]:
+		"""
+		Get PR configuration.
 
-	"""
-	loader = ConfigLoader(config_file=config_file, repo_root=repo_root)
-	return loader.config
+		Returns:
+		        Dict[str, Any]: PR configuration
+
+		"""
+		return self.get("git.pr", {})
+
+	def get_content_generation_config(self) -> dict[str, Any]:
+		"""
+		Get content generation configuration.
+
+		Returns:
+		        Dict[str, Any]: Content generation configuration
+
+		"""
+		return self.get("generation.content", {})
+
+	def get_llm_config(self) -> dict[str, Any]:
+		"""
+		Get LLM configuration.
+
+		Returns:
+		        Dict[str, Any]: LLM configuration
+
+		"""
+		# Get the LLM config from the top-level section
+		llm_config = self.get("llm", {})
+
+		# If empty, use the default config
+		if not llm_config:
+			llm_config = DEFAULT_CONFIG["llm"]
+			logger.debug("Using default LLM config from DEFAULT_CONFIG")
+
+		# Ensure we have the proper model format with a provider
+		model = llm_config.get("model")
+		if model:
+			logger.debug("Using model from config: %s", model)
+			if "/" not in model:
+				# Add openai/ prefix if provider is missing
+				llm_config["model"] = f"openai/{model}"
+				logger.debug("Added openai/ prefix to model: %s", llm_config["model"])
+			else:
+				# Extract provider from model string to make it accessible in config
+				provider = model.split("/")[0].lower()
+				# Set provider explicitly in the config
+				llm_config["provider"] = provider
+				logger.debug("Extracted provider '%s' from model '%s'", provider, model)
+
+		return llm_config

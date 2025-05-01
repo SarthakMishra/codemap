@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Annotated
 import questionary
 import typer
 from rich.markdown import Markdown
-from rich.padding import Padding
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
@@ -25,27 +25,27 @@ except ImportError:
 if TYPE_CHECKING:
 	from collections.abc import Sequence
 
-	from codemap.git.message_generator import MessageGenerator
+	from codemap.git.commit_generator import CommitMessageGenerator
 
 from codemap.git import (
 	DiffChunk,
-	DiffSplitter,
-	SplitStrategy,
 )
-from codemap.git.command import CommitCommand
-from codemap.git.message_generator import LLMError
-from codemap.utils import validate_repo_path
-from codemap.utils.cli_utils import console, loading_spinner, setup_logging
-from codemap.utils.git_utils import (
+from codemap.git.commit_generator.command import CommitCommand
+from codemap.git.utils import (
 	GitError,
 	commit_only_files,
-	get_other_staged_files,
-	get_staged_diff,
-	get_unstaged_diff,
-	get_untracked_files,
 	run_git_command,
+	validate_repo_path,
 )
-from codemap.utils.llm_utils import create_universal_generator
+from codemap.llm import LLMError
+from codemap.utils.cli_utils import (
+	console,
+	exit_with_error,
+	setup_logging,
+	show_error,
+	show_warning,
+)
+from codemap.utils.config_loader import ConfigLoader
 
 # Truncate to maximum of 10 lines
 MAX_PREVIEW_LINES = 10
@@ -105,69 +105,62 @@ def _load_prompt_template(template_path: str | None) -> str | None:
 		with template_file.open("r") as f:
 			return f.read()
 	except OSError:
-		console.print(f"[yellow]Warning:[/yellow] Could not load prompt template: {template_path}")
+		show_warning(f"Could not load prompt template: {template_path}")
 		return None
 
 
-def _extract_provider_from_model(model: str) -> str | None:
+def create_universal_generator(
+	repo_path: Path,
+	model: str | None = None,
+	api_key: str | None = None,
+	api_base: str | None = None,
+	prompt_template: str | None = None,
+) -> CommitMessageGenerator:
 	"""
-	Extract provider from model name if possible.
+	Create a universal message generator with the provided options.
 
 	Args:
-	    model: Model identifier like "provider/model_name" or "provider/org/model_name"
+	    repo_path: Repository path
+	    model: Model name to use
+	    api_key: API key to use
+	    api_base: API base URL to use
+	    prompt_template: Custom prompt template
 
 	Returns:
-	    Provider name or None if not in expected format
+	    Configured CommitMessageGenerator
 
 	"""
-	# Handle explicit provider prefixes (get first part before slash)
-	if "/" in model:
-		provider = model.split("/")[0]  # Take first part regardless of number of slashes
-		return provider.lower()  # Normalize to lowercase
+	from codemap.git.commit_generator import CommitMessageGenerator
+	from codemap.llm import create_client
+	from codemap.utils.config_loader import ConfigLoader
 
-	# For models without provider prefix, return None
-	# LiteLLM will handle these appropriately
-	return None
+	# Create LLM client
+	llm_client = create_client(
+		repo_path=repo_path,
+		model=model,
+		api_key=api_key,
+		api_base=api_base,
+	)
 
+	# Create config loader
+	config_loader = ConfigLoader(repo_root=repo_path)
 
-def _get_api_key_for_provider(provider: str) -> str | None:
-	"""
-	Get API key for the specified provider from environment.
+	# Get default prompt template if not provided
+	if not prompt_template:
+		from codemap.git.commit_generator.prompts import DEFAULT_PROMPT_TEMPLATE
 
-	Args:
-	    provider: Provider name
+		prompt_template = DEFAULT_PROMPT_TEMPLATE
 
-	Returns:
-	    API key or None if not found
-
-	"""
-	provider_env_vars = {
-		"openai": "OPENAI_API_KEY",
-		"anthropic": "ANTHROPIC_API_KEY",
-		"azure": "AZURE_API_KEY",
-		"groq": "GROQ_API_KEY",
-		"mistral": "MISTRAL_API_KEY",
-		"together": "TOGETHER_API_KEY",
-		"cohere": "COHERE_API_KEY",
-		"openrouter": "OPENROUTER_API_KEY",
-	}
-
-	# Get environment variable name for this provider
-	env_var = provider_env_vars.get(provider)
-	if not env_var:
-		return None
-
-	# Try to get key from environment
-	api_key = os.environ.get(env_var)
-
-	# Fallback to OpenAI if requested
-	if not api_key and provider != "openai":
-		api_key = os.environ.get("OPENAI_API_KEY")
-
-	return api_key
+	# Create and return generator
+	return CommitMessageGenerator(
+		repo_root=repo_path,
+		llm_client=llm_client,
+		prompt_template=prompt_template,
+		config_loader=config_loader,
+	)
 
 
-def setup_message_generator(options: CommitOptions) -> MessageGenerator:
+def setup_message_generator(options: CommitOptions) -> CommitMessageGenerator:
 	"""
 	Set up a message generator with the provided options.
 
@@ -188,13 +181,53 @@ def setup_message_generator(options: CommitOptions) -> MessageGenerator:
 	)
 
 
+def generate_message(
+	chunk: DiffChunk,
+	message_generator: CommitMessageGenerator,
+	use_simple_mode: bool = False,
+	enable_linting: bool = True,
+) -> tuple[str, bool]:
+	"""
+	Generate a commit message for a diff chunk.
+
+	Args:
+	    chunk: Diff chunk to generate message for
+	    message_generator: Message generator to use
+	    use_simple_mode: Whether to use simple mode
+	    enable_linting: Whether to enable linting
+
+	Returns:
+	    Tuple of (message, whether LLM was used)
+
+	"""
+	if use_simple_mode:
+		# Use fallback generation without LLM
+		message = message_generator.fallback_generation(chunk)
+		return message, False
+
+	if enable_linting:
+		# Use lint-capable generation
+		from codemap.git.commit_generator.utils import generate_message_with_linting
+
+		message, used_llm, _ = generate_message_with_linting(
+			chunk=chunk,
+			generator=message_generator,
+			repo_root=message_generator.repo_root,
+		)
+		return message, used_llm
+
+	# Use regular generation without linting
+	message, used_llm = message_generator.generate_message(chunk)
+	return message, used_llm
+
+
 def generate_commit_message(
 	chunk: DiffChunk,
-	generator: MessageGenerator,
+	generator: CommitMessageGenerator,
 	mode: GenerationMode,
 ) -> tuple[str, bool]:
 	"""
-	Generate a commit message for the given chunk.
+	Generate a commit message for a diff chunk.
 
 	Args:
 	    chunk: Diff chunk to generate message for
@@ -205,27 +238,34 @@ def generate_commit_message(
 	    Tuple of (message, whether LLM was used)
 
 	"""
-	# Use the universal generate_message function from llm_utils
-	use_simple_mode = mode == GenerationMode.SIMPLE
-
-	try:
-		# Import at function level to avoid circular imports
-		from codemap.utils.llm_utils import generate_message as llm_utils_generate_message
-
-		message, used_llm = llm_utils_generate_message(chunk, generator, use_simple_mode)
-		return message, used_llm
-	except (ValueError, RuntimeError, LLMError) as e:
-		console.print(f"[red]Error generating message:[/red] {e}")
-		# Still try to generate a fallback message
-		from codemap.git.message_generator import DiffChunkData
+	# Handle simple mode directly
+	if mode == GenerationMode.SIMPLE:
+		from codemap.git.commit_generator.schemas import DiffChunkData
 
 		# Convert DiffChunk to DiffChunkData
 		chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
-
 		# Add description if it exists
 		if chunk.description is not None:
 			chunk_dict["description"] = chunk.description
+		message = generator.fallback_generation(chunk_dict)
+		return message, False
 
+	# Use the universal generate_message function for SMART mode
+	try:
+		message, used_llm = generate_message(
+			chunk=chunk, message_generator=generator, use_simple_mode=False, enable_linting=True
+		)
+		return message, used_llm
+	except (ValueError, RuntimeError, LLMError) as e:
+		show_error(f"Error generating message: {e}")
+		# Still try to generate a fallback message
+		from codemap.git.commit_generator.schemas import DiffChunkData
+
+		# Convert DiffChunk to DiffChunkData
+		chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
+		# Add description if it exists
+		if chunk.description is not None:
+			chunk_dict["description"] = chunk.description
 		message = generator.fallback_generation(chunk_dict)
 		return message, False
 
@@ -284,83 +324,6 @@ def print_chunk_summary(chunk: DiffChunk, index: int) -> None:
 	console.print(panel)
 
 
-def _check_other_files(chunk_files: list[str]) -> tuple[list[str], list[str], bool]:
-	"""
-	Check for other staged and untracked files.
-
-	Args:
-	    chunk_files: Files in the current chunk
-
-	Returns:
-	    Tuple of (other_staged, other_untracked, has_warnings)
-
-	"""
-	other_staged = get_other_staged_files(chunk_files)
-
-	# For untracked files, check if they are already included in the chunk
-	all_untracked = get_untracked_files()
-	other_untracked = [f for f in all_untracked if f not in chunk_files]
-
-	has_warnings = bool(other_staged or other_untracked)
-
-	# Display warnings
-	if other_staged:
-		console.print("[yellow]Warning:[/yellow] The following files are also staged but not part of this commit:")
-		for file in other_staged:
-			console.print(f"  - {file}")
-
-	if other_untracked:
-		console.print("[yellow]Warning:[/yellow] The following new files are not included in this commit:")
-		for file in other_untracked:
-			console.print(f"  - {file}")
-
-	return other_staged, other_untracked, has_warnings
-
-
-def _handle_other_files(chunk: DiffChunk, other_staged: list[str], other_untracked: list[str]) -> bool:
-	"""
-	Handle other staged or untracked files.
-
-	Args:
-	    chunk: The current chunk
-	    other_staged: Other staged files
-	    other_untracked: Other untracked files
-
-	Returns:
-	    False if action is cancelled, True otherwise
-
-	"""
-	# Prepare choices
-	choices = [
-		{"value": "continue", "name": "Continue with just the selected files"},
-		{"value": "all_staged", "name": "Include all staged files in this commit"},
-	]
-
-	# Only add untracked option if there are untracked files
-	if other_untracked:
-		choices.append({"value": "all_untracked", "name": "Include all untracked files in this commit"})
-
-	if other_staged and other_untracked:
-		choices.append({"value": "all", "name": "Include all staged and untracked files"})
-
-	choices.append({"value": "cancel", "name": "Cancel this commit"})
-
-	# Ask user what to do
-	action = questionary.select("Other files found. What would you like to do?", choices=choices).ask()
-
-	if action == "cancel":
-		console.print("[yellow]Commit cancelled[/yellow]")
-		return False
-
-	# Update chunk files if needed
-	if action in ("all_staged", "all"):
-		chunk.files.extend(other_staged)
-	if action in ("all_untracked", "all"):
-		chunk.files.extend(other_untracked)
-
-	return True
-
-
 def _commit_changes(
 	message: str,
 	files: list[str],
@@ -414,6 +377,34 @@ def _commit_changes(
 			logger.warning("There are %d other staged files that weren't included in this commit", len(other_staged))
 
 		return True
+	except GitError as e:
+		logger.exception("Failed to create commit due to Git error")
+
+		# Format Git error message in a nice panel
+		error_message = str(e)
+		if "\n" in error_message:
+			# Format multiline errors in a panel
+			from rich.panel import Panel
+
+			# Extract Git error details if available
+			if "Git Error Output:" in error_message:
+				parts = error_message.split("Git Error Output:", 1)
+				main_error = parts[0].strip()
+				git_output = parts[1].strip()
+
+				# Display the main error message
+				console.print(f"[red]Error:[/red] {escape(main_error)}")
+
+				# Display Git error details in a red panel
+				console.print(Panel(escape(git_output), title="Git Command Output", border_style="red", padding=(1, 2)))
+			else:
+				# Just display the whole error in a panel
+				console.print(Panel(escape(error_message), title="Git Error", border_style="red", padding=(1, 2)))
+		else:
+			# For simple one-line errors
+			console.print(f"[red]Error:[/red] {escape(error_message)}")
+
+		return False
 	except Exception as e:
 		logger.exception("Failed to create commit")
 		# Add explicit error message to console output to help pass tests
@@ -473,7 +464,7 @@ def _commit_with_message(chunk: DiffChunk, message: str) -> None:
 	console.print("Committing changes...")
 	success = _perform_commit(chunk, message)
 	if not success:
-		console.print("[red]Failed to commit changes[/red]")
+		show_error("Failed to commit changes")
 
 
 def _commit_with_user_input(chunk: DiffChunk, generated_message: str) -> None:
@@ -492,14 +483,14 @@ def _commit_with_user_input(chunk: DiffChunk, generated_message: str) -> None:
 		if edited_message:
 			success = _perform_commit(chunk, edited_message)
 			if not success:
-				console.print("[red]Failed to commit changes[/red]")
+				show_error("Failed to commit changes")
 		else:
-			console.print("[yellow]Commit canceled - empty message[/yellow]")
+			show_warning("Commit canceled - empty message")
 	except KeyboardInterrupt:
-		console.print("[yellow]Commit canceled by user[/yellow]")
+		show_warning("Commit canceled by user")
 	except Exception:
 		logger.exception("Error during commit process")
-		console.print("[red]Error:[/red] An unexpected error occurred during the commit process")
+		show_error("An unexpected error occurred during the commit process")
 
 
 @dataclass
@@ -509,7 +500,7 @@ class ChunkContext:
 	chunk: DiffChunk
 	index: int
 	total: int
-	generator: MessageGenerator
+	generator: CommitMessageGenerator
 	mode: GenerationMode
 
 
@@ -577,7 +568,7 @@ def process_chunk_interactively(context: ChunkContext) -> str:
 
 
 def display_suggested_messages(
-	options: CommitOptions, chunks: Sequence[DiffChunk], generator: MessageGenerator
+	options: CommitOptions, chunks: Sequence[DiffChunk], generator: CommitMessageGenerator
 ) -> None:
 	"""
 	Display suggested commit messages without committing.
@@ -610,33 +601,55 @@ def display_suggested_messages(
 def process_all_chunks(
 	options: CommitOptions,
 	chunks: Sequence[DiffChunk],
-	generator: MessageGenerator,
+	generator: CommitMessageGenerator,
 ) -> int:
 	"""
-	Process all chunks interactively.
+	Process all diff chunks.
 
 	Args:
 	    options: Commit options
 	    chunks: List of diff chunks
-	    generator: Message generator to use
+	    generator: CommitMessageGenerator instance
 
 	Returns:
-	    Exit code (0 for success)
+	    Exit code (0 for success, 1 for failure)
 
 	"""
-	for i, chunk in enumerate(chunks):
-		context = ChunkContext(
-			chunk=chunk,
-			index=i,
-			total=len(chunks),
-			generator=generator,
-			mode=options.generation_mode,
-		)
+	# Short circuit if there aren't any chunks
+	if not chunks:
+		logger.debug("No chunks to process")
+		return 0
 
-		if process_chunk_interactively(context) == "exit":
-			return 0
+	# If not interactive or we only have one chunk, process non-interactively
+	if len(chunks) == 1:
+		chunk = chunks[0]
+		print_chunk_summary(chunk, 0)
+		message, is_valid = generate_commit_message(chunk, generator, options.generation_mode)
 
-	console.print("[green]✓[/green] All changes committed!")
+		if not is_valid:
+			show_error("Generated commit message is not valid")
+			return 1
+
+		console.print(f"Generated message: {message}")
+
+		if options.commit:
+			_commit_with_message(chunk, message)
+		else:
+			console.print("[yellow]Skipping commit (commit=False)[/yellow]")
+	else:
+		# Process multiple chunks in interactive mode
+		for i, chunk in enumerate(chunks):
+			context = ChunkContext(
+				chunk=chunk,
+				index=i,
+				total=len(chunks),
+				generator=generator,
+				mode=options.generation_mode,
+			)
+
+			if process_chunk_interactively(context) == "exit":
+				return 0
+
 	return 0
 
 
@@ -652,99 +665,10 @@ class RunConfig:
 	commit: bool = True
 	prompt_template: str | None = None
 	staged_only: bool = False  # Only process staged changes
+	bypass_hooks: bool = False  # Whether to bypass git hooks (--no-verify)
 
 
 DEFAULT_RUN_CONFIG = RunConfig()
-
-
-def _run_commit_command(config: RunConfig) -> int:
-	"""
-	Run the commit command logic.
-
-	Args:
-	    config: Run configuration
-
-	Returns:
-	    Exit code
-
-	"""
-	# Validate the repository path
-	try:
-		repo_path = validate_repo_path(config.repo_path)
-		if repo_path is None:
-			console.print("[red]Error:[/red] Repository path is None")
-			return 1
-	except ValueError as e:
-		console.print(f"[red]Error:[/red] {e!s}")
-		return 1
-
-	# Show welcome message
-	console.print(
-		Padding("[bold]CodeMap Conventional Commit Generator[/]", (1, 0, 0, 0)),
-	)
-
-	# Determine generation mode
-	mode = GenerationMode.SIMPLE if config.force_simple else GenerationMode.SMART
-
-	# Configure options
-	options = CommitOptions(
-		repo_path=repo_path,  # Now guaranteed to be a Path, not None
-		generation_mode=mode,
-		model=config.model,
-		api_base=config.api_base,
-		commit=config.commit,
-		prompt_template=config.prompt_template,
-		api_key=config.api_key,
-	)
-
-	try:
-		# Check if there are any changes
-		with loading_spinner("Checking for changes..."):
-			try:
-				staged = get_staged_diff()
-				unstaged = get_unstaged_diff()
-				untracked = get_untracked_files()
-				has_changes = bool(staged.files or unstaged.files or untracked)
-			except GitError:
-				has_changes = False
-
-		if not has_changes:
-			console.print("[yellow]No changes to commit[/yellow]")
-			return 0
-
-		# Set up message generator
-		with loading_spinner("Setting up message generator..."):
-			generator = setup_message_generator(options)
-
-		# Get staged and unstaged changes
-		with loading_spinner("Analyzing repository changes..."):
-			# Get changes from Git
-			splitter = DiffSplitter(repo_path)  # Now guaranteed to be a Path, not None
-			chunks = []
-
-			# Process staged changes
-			staged_diff = get_staged_diff()
-			if staged_diff.files:
-				staged_chunks = splitter.split_diff(staged_diff, SplitStrategy.SEMANTIC)
-				chunks.extend(staged_chunks)
-
-			# Process unstaged changes
-			if not chunks or not config.staged_only:
-				unstaged_diff = get_unstaged_diff()
-				if unstaged_diff.files:
-					unstaged_chunks = splitter.split_diff(unstaged_diff, SplitStrategy.SEMANTIC)
-					chunks.extend(unstaged_chunks)
-
-		# Check if there are any chunks
-		if not chunks:
-			console.print("[yellow]No changes to commit[/yellow]")
-			return 0
-
-		# Process chunks
-		return process_all_chunks(options, chunks, generator)
-	except (ValueError, RuntimeError, TypeError) as e:
-		console.print(f"[red]Error:[/red] {e!s}")
-		return 1
 
 
 def _raise_command_failed_error() -> None:
@@ -757,6 +681,7 @@ def validate_and_process_commit(
 	path: Path | None,
 	all_files: bool = False,
 	model: str = "gpt-4o-mini",
+	bypass_hooks: bool = False,
 ) -> None:
 	"""
 	Validate repository path and process commit.
@@ -765,13 +690,23 @@ def validate_and_process_commit(
 	    path: Path to repository
 	    all_files: Whether to commit all files
 	    model: Model to use for generation
+	    bypass_hooks: Whether to bypass git hooks with --no-verify
 
 	"""
 	try:
+		# Load configuration from .codemap.yml if it exists
+		repo_path = validate_repo_path(path)
+		if repo_path:
+			config_loader = ConfigLoader(repo_root=repo_path)
+			# Get bypass_hooks from config if not explicitly set
+			if not hasattr(bypass_hooks, "_set_explicitly"):
+				bypass_hooks = config_loader.get_bypass_hooks()
+
 		# Create the CommitCommand instance
 		command = CommitCommand(
 			path=path,
 			model=model,
+			bypass_hooks=bypass_hooks,
 		)
 
 		# Stage files if all_files flag is set
@@ -791,8 +726,7 @@ def validate_and_process_commit(
 		raise
 	except Exception as e:
 		logger.exception("Error processing commit")
-		console.print(f"[red]Error: {e}[/red]")
-		raise typer.Exit(1) from e
+		exit_with_error(f"Error: {e}", exception=e)
 
 
 def commit_command(
@@ -814,6 +748,7 @@ def commit_command(
 	] = "gpt-4o-mini",
 	strategy: Annotated[str, typer.Option("--strategy", "-s", help="Strategy for splitting diffs")] = "semantic",
 	non_interactive: Annotated[bool, typer.Option("--non-interactive", help="Run in non-interactive mode")] = False,
+	bypass_hooks: Annotated[bool, typer.Option("--bypass-hooks", help="Bypass git hooks with --no-verify")] = False,
 	is_verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging")] = False,
 ) -> None:
 	"""
@@ -838,6 +773,7 @@ def commit_command(
 		logger.debug("Message: %s", message)
 		logger.debug("Strategy: %s", strategy)
 		logger.debug("Non-interactive mode: %s", non_interactive)
+		logger.debug("Bypass git hooks: %s", bypass_hooks)
 
 		# Check sentence_transformers
 		try:
@@ -862,4 +798,5 @@ def commit_command(
 		path=path,
 		all_files=all_files,
 		model=model,
+		bypass_hooks=bypass_hooks,
 	)

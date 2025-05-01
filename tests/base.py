@@ -43,7 +43,7 @@ class GitTestBase:
 		    path: Mock path to use
 
 		"""
-		patcher = patch("codemap.git.command.get_repo_root")
+		patcher = patch("codemap.git.commit_generator.command.get_repo_root")
 		self.mock_get_repo_root = patcher.start()
 		self.mock_get_repo_root.return_value = path
 		self._patchers.append(patcher)
@@ -97,9 +97,9 @@ class CLITestBase:
 		    Command result
 
 		"""
-		import codemap.cli_app
+		import codemap.cli
 
-		return self.runner.invoke(codemap.cli_app.app, command, input=input_text)
+		return self.runner.invoke(codemap.cli.app, command, input=input_text)
 
 
 class FileSystemTestBase:

@@ -7,7 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from codemap.utils.file_utils import count_tokens, get_output_path
+from codemap.gen.utils import determine_output_path
+from codemap.utils.file_utils import count_tokens
 from tests.base import FileSystemTestBase
 
 
@@ -37,7 +38,7 @@ class TestFileUtils(FileSystemTestBase):
 		assert token_count == 0
 
 	@patch("pathlib.Path.mkdir")
-	@patch("codemap.utils.file_utils.datetime")
+	@patch("datetime.datetime")
 	def test_get_output_path_with_explicit_path(self, mock_datetime: MagicMock, mock_mkdir: MagicMock) -> None:
 		"""Test get_output_path with an explicit output path."""
 		# Set up test data
@@ -46,7 +47,7 @@ class TestFileUtils(FileSystemTestBase):
 		config = {}
 
 		# Call function
-		result = get_output_path(repo_root, output_path, config)
+		result = determine_output_path(repo_root, output_path, config)
 
 		# Verify result
 		assert result == output_path
@@ -61,7 +62,7 @@ class TestFileUtils(FileSystemTestBase):
 class TestOutputPath(FileSystemTestBase):
 	"""Test cases for output path generation."""
 
-	@patch("codemap.utils.file_utils.datetime")
+	@patch("datetime.datetime")
 	def test_get_output_path_with_config(self, mock_datetime: MagicMock) -> None:
 		"""Test get_output_path using config and no explicit path."""
 		# Set up mock datetime
@@ -72,7 +73,7 @@ class TestOutputPath(FileSystemTestBase):
 		config = {"output_dir": "docs"}
 
 		# Call function
-		result = get_output_path(self.temp_dir, None, config)
+		result = determine_output_path(self.temp_dir, None, config)
 
 		# Verify result
 		expected_path = self.temp_dir / "docs" / "documentation_20240601_123456.md"
@@ -91,11 +92,11 @@ class TestOutputPath(FileSystemTestBase):
 		config = {"output_dir": str(docs_dir)}
 
 		# Call function
-		with patch("codemap.utils.file_utils.datetime") as mock_datetime:
+		with patch("datetime.datetime") as mock_datetime:
 			mock_now = mock_datetime.now.return_value
 			mock_now.strftime.return_value = "20240601_123456"
 
-			result = get_output_path(repo_root, output_path, config)
+			result = determine_output_path(repo_root, output_path, config)
 
 		# Verify result
 		expected_path = docs_dir / "documentation_20240601_123456.md"

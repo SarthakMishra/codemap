@@ -1,6 +1,6 @@
 # Contributing to CodeMap
 
-First off, thank you for considering contributing to CodeMap! We welcome contributions from everyone, and we're excited to see how you can help make this AI-powered developer toolkit even better.
+First off, thank you for considering contributing to CodeMap! We welcome contributions from everyone, and we're excited to see how you can help make this AI-powered dever toolkit even better.
 
 This document provides guidelines for contributing to the project. Please read it carefully to ensure a smooth and effective contribution process.
 
@@ -57,10 +57,10 @@ If you'd like to contribute code (bug fixes, new features), please follow the wo
 
 ## Getting Started
 
-Before you start coding, make sure you have set up your development environment correctly.
+Before you start coding, make sure you have set up your devment environment correctly.
 
 1.  **Prerequisites:** Ensure you have Python (3.12+), [Task](https://taskfile.dev/installation/), and [uv](https://github.com/astral-sh/uv#installation) installed.
-2.  **Follow Setup Guide:** Refer to the [Development Setup section in the README.md](./README.md#development-setup) for detailed instructions on cloning the repository, setting up the virtual environment, and installing dependencies.
+2.  **Follow Setup Guide:** Refer to the [Development Setup section in the README.md](./README.md#devment-setup) for detailed instructions on cloning the repository, setting up the virtual environment, and installing dependencies.
 
 ## Branching Strategy (Simplified Git Flow)
 
@@ -69,21 +69,21 @@ We use a simplified Git Flow model to manage branches and releases.
 ```mermaid
 gitGraph
     commit
-    branch develop
-    checkout develop
+    branch dev
+    checkout dev
     commit
 
     branch feature/new-feature
     checkout feature/new-feature
     commit
     commit
-    checkout develop
+    checkout dev
     merge feature/new-feature
 
     branch feature/another-feature
     checkout feature/another-feature
     commit
-    checkout develop
+    checkout dev
     merge feature/another-feature
 
     branch release/v1.0.0
@@ -91,7 +91,7 @@ gitGraph
     commit tag: "v1.0.0-rc"
     checkout main
     merge release/v1.0.0 tag: "v1.0.0"
-    checkout develop
+    checkout dev
     merge release/v1.0.0
 
     branch hotfix/critical-fix
@@ -99,7 +99,7 @@ gitGraph
     commit
     checkout main
     merge hotfix/critical-fix tag: "v1.0.1"
-    checkout develop
+    checkout dev
     merge hotfix/critical-fix
 ```
 
@@ -109,35 +109,35 @@ gitGraph
     -   Represents the latest **stable production-ready** release.
     -   All commits on `main` should correspond to a tagged release version (e.g., `v1.0.0`).
     -   Protected by CI checks. Direct pushes are discouraged; merges happen via `release` or `hotfix` branches.
--   **`develop`**:
-    -   The primary integration branch for **ongoing development** and upcoming features.
-    -   Reflects the latest development state, potentially including pre-release versions (e.g., `v1.1.0-alpha`).
-    -   All feature branches are merged into `develop`.
+-   **`dev`**:
+    -   The primary integration branch for **ongoing devment** and upcoming features.
+    -   Reflects the latest devment state, potentially including pre-release versions (e.g., `v1.1.0-alpha`).
+    -   All feature branches are merged into `dev`.
     -   Continuously tested via CI.
 
 ### Supporting Branches
 
 -   **Feature branches (`feature/*`)**:
-    -   Branched off `develop`.
-    -   Used for developing new features or significant changes.
+    -   Branched off `dev`.
+    -   Used for deving new features or significant changes.
     -   Named descriptively (e.g., `feature/add-pr-update-command`).
-    -   Merged back into `develop` via Pull Requests (PRs).
+    -   Merged back into `dev` via Pull Requests (PRs).
 -   **Release branches (`release/*`)**:
-    -   Branched off `develop` when preparing for a new stable release.
+    -   Branched off `dev` when preparing for a new stable release.
     -   Used for final testing, documentation updates, and version bumping (e.g., `release/v1.2.0`).
-    -   Merged into `main` (and tagged) and back into `develop`.
+    -   Merged into `main` (and tagged) and back into `dev`.
 -   **Hotfix branches (`hotfix/*`)**:
     -   Branched off `main`.
     *   Used for critical bug fixes needed in the production version.
-    *   Merged into `main` (and tagged) and back into `develop`.
+    *   Merged into `main` (and tagged) and back into `dev`.
 
 ### Workflow Examples
 
 1.  **New Feature Development**:
     ```bash
-    # Start from the develop branch
-    git checkout develop
-    git pull origin develop
+    # Start from the dev branch
+    git checkout dev
+    git pull origin dev
 
     # Create your feature branch
     git checkout -b feature/your-feature-name
@@ -147,12 +147,12 @@ gitGraph
     # Push your feature branch
     git push -u origin feature/your-feature-name
 
-    # Open a Pull Request to merge `feature/your-feature-name` into `develop`
+    # Open a Pull Request to merge `feature/your-feature-name` into `dev`
     ```
 
 2.  **Release Preparation (Maintainer Task)**:
     ```bash
-    git checkout develop
+    git checkout dev
     git checkout -b release/v1.3.0
     # Bump version, finalize docs, test
     # ...
@@ -160,9 +160,9 @@ gitGraph
     git merge --no-ff release/v1.3.0
     git tag -a v1.3.0 -m "Version 1.3.0 Release"
     git push origin main --tags
-    git checkout develop
+    git checkout dev
     git merge --no-ff release/v1.3.0 # Merge back changes
-    git push origin develop
+    git push origin dev
     git branch -d release/v1.3.0 # Delete release branch
     ```
 
@@ -176,9 +176,9 @@ gitGraph
     git merge --no-ff hotfix/critical-bug-fix
     git tag -a v1.3.1 -m "Hotfix for critical bug"
     git push origin main --tags
-    git checkout develop
+    git checkout dev
     git merge --no-ff hotfix/critical-bug-fix # Merge back changes
-    git push origin develop
+    git push origin dev
     git branch -d hotfix/critical-bug-fix # Delete hotfix branch
     ```
 
@@ -190,12 +190,12 @@ gitGraph
     cd codemap
     git remote add upstream https://github.com/SarthakMishra/codemap.git
     ```
-2.  **Setup:** Follow the [Development Setup](./README.md#development-setup) instructions.
-3.  **Branch:** Create a new branch based on the correct base branch (`develop` for features/improvements, `main` only for agreed-upon hotfixes).
+2.  **Setup:** Follow the [Development Setup](./README.md#devment-setup) instructions.
+3.  **Branch:** Create a new branch based on the correct base branch (`dev` for features/improvements, `main` only for agreed-upon hotfixes).
     ```bash
     # For features/improvements
-    git checkout develop
-    git pull upstream develop # Keep develop up-to-date
+    git checkout dev
+    git pull upstream dev # Keep dev up-to-date
     git checkout -b feature/your-descriptive-name
 
     # For hotfixes (usually maintainers)
@@ -230,7 +230,7 @@ gitGraph
     ```bash
     git push -u origin feature/your-descriptive-name
     ```
-9.  **Pull Request:** Open a Pull Request (PR) from your fork's branch to the `SarthakMishra/codemap` `develop` branch (or `main` for hotfixes). See [Pull Request Process](#pull-request-process).
+9.  **Pull Request:** Open a Pull Request (PR) from your fork's branch to the `SarthakMishra/codemap` `dev` branch (or `main` for hotfixes). See [Pull Request Process](#pull-request-process).
 
 ## Coding Standards
 
@@ -266,7 +266,7 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0
 
 ## Pull Request Process
 
-1.  **Target Branch:** Ensure your PR targets the correct base branch (`develop` for most contributions, `main` only for approved hotfixes).
+1.  **Target Branch:** Ensure your PR targets the correct base branch (`dev` for most contributions, `main` only for approved hotfixes).
 2.  **Title & Description:** Provide a clear and descriptive title for your PR. The description should explain:
     *   What changes were made.
     *   Why these changes were necessary (link to relevant issues using `Fixes #123` or `Related to #456`).

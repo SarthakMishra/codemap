@@ -1,3 +1,3 @@
-"""CodeMap package for generating optimized markdown documentation."""
+"""CodeMap - AI-powered developer toolkit."""
 
 __version__ = "0.1.0"

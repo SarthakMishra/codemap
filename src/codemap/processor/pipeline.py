@@ -2,102 +2,88 @@
 Pipeline orchestration for code processing.
 
 This module defines the main processing pipeline that orchestrates:
-1. File watching (via watcher module)
-2. Parsing/chunking files on change
-3. Analyzing code and extracting metadata
-4. Generating embeddings
-5. Storing processed data
+1. Generating code metadata with tree-sitter at different LOD levels
+2. Providing results to client modules
 
 """
 
 from __future__ import annotations
 
 import logging
-import time
-from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any
 
-from codemap.processor.analysis.git.analyzer import GitMetadataAnalyzer
-from codemap.processor.analysis.git.models import GitMetadata
-from codemap.processor.analysis.lsp.analyzer import LSPAnalyzer
-from codemap.processor.analysis.lsp.models import LSPMetadata
-from codemap.processor.chunking.base import Chunk
-from codemap.processor.chunking.tree_sitter import TreeSitterChunker
-from codemap.processor.embedding.generator import EmbeddingGenerator
-from codemap.processor.embedding.models import EmbeddingConfig
-from codemap.processor.storage.base import StorageConfig
-from codemap.processor.storage.lance import LanceDBStorage
-from codemap.processor.watcher import FileWatcher
-from codemap.utils.file_utils import read_file_content
-
-if TYPE_CHECKING:
-	from collections.abc import Callable
+from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class ProcessingJob:
-	"""Represents a file processing job in the pipeline."""
+# Utility functions for file type checking
+def is_binary_file(file_path: Path) -> bool:
+	"""
+	Check if a file is binary.
 
-	file_path: Path
-	"""Path to the file being processed."""
+	Args:
+	        file_path: Path to the file
 
-	is_deletion: bool = False
-	"""Whether this job is for a file deletion."""
+	Returns:
+	        True if the file is binary, False otherwise
 
-	chunks: list[Chunk] = field(default_factory=list)
-	"""Chunks extracted from the file (if not a deletion)."""
+	"""
+	# Skip files larger than 10 MB
+	try:
+		if file_path.stat().st_size > 10 * 1024 * 1024:
+			return True
 
-	lsp_metadata: dict[str, LSPMetadata] = field(default_factory=dict)
-	"""LSP metadata for chunks, keyed by chunk full name."""
+		# Try to read as text
+		with file_path.open(encoding="utf-8") as f:
+			chunk = f.read(1024)
+			return "\0" in chunk
+	except UnicodeDecodeError:
+		return True
+	except (OSError, PermissionError):
+		return True
 
-	started_at: float = field(default_factory=time.time)
-	"""Time when processing started."""
 
-	completed_at: float | None = None
-	"""Time when processing completed, or None if still in progress."""
+def is_text_file(file_path: Path) -> bool:
+	"""
+	Check if a file is a text file.
 
-	error: Exception | None = None
-	"""Error that occurred during processing, if any."""
+	Args:
+	        file_path: Path to the file
+
+	Returns:
+	        True if the file is a text file, False otherwise
+
+	"""
+	return not is_binary_file(file_path)
 
 
 class ProcessingPipeline:
 	"""
 	Main pipeline for code processing and analysis.
 
-	This class orchestrates the complete flow from file changes to
-	processed data, connecting file watching with code analysis, chunking,
-	embedding, and storage.
+	This class orchestrates the generation of LOD data for code files and
+	directories using tree-sitter, with parallel processing capabilities.
 
 	"""
 
 	def __init__(
 		self,
 		repo_path: Path,
-		storage_config: StorageConfig | None = None,
-		embedding_config: EmbeddingConfig | None = None,
 		ignored_patterns: set[str] | None = None,
 		max_workers: int = 4,
-		enable_lsp: bool = True,
-		on_chunks_processed: Callable[[list[Chunk], Path], None] | None = None,
-		on_file_deleted: Callable[[Path], None] | None = None,
+		default_lod_level: LODLevel = LODLevel.SIGNATURES,
 	) -> None:
 		"""
 		Initialize the processing pipeline.
 
 		Args:
-		    repo_path: Path to the repository root
-		    storage_config: Configuration for storage backend, if None a default local LanceDB config will be used
-		    embedding_config: Configuration for embedding generation, if None a default config will be used
-		    ignored_patterns: Set of glob patterns to ignore when watching for changes
-		    max_workers: Maximum number of worker threads for processing
-		    enable_lsp: Whether to enable LSP analysis (True by default)
-		    on_chunks_processed: Callback when chunks are processed for a file
-		    on_file_deleted: Callback when a file is deleted
+		        repo_path: Path to the repository root
+		        ignored_patterns: Set of glob patterns to ignore when processing
+		        max_workers: Maximum number of worker threads for processing
+		        default_lod_level: Default Level of Detail to use for processing
 
 		"""
 		self.repo_path = repo_path
@@ -114,338 +100,273 @@ class ProcessingPipeline:
 		}
 
 		# Setup processing components
-		self.chunker = TreeSitterChunker()
-		self.git_analyzer = GitMetadataAnalyzer(repo_path)
-
-		# Initialize LSP analyzer if enabled
-		self.enable_lsp = enable_lsp
-		self.lsp_analyzer = LSPAnalyzer(repo_path) if enable_lsp else None
-
-		# Initialize embedding generator
-		self.embedding_generator = EmbeddingGenerator(embedding_config)
-
-		# Initialize storage
-		if storage_config is None:
-			# Default to a local LanceDB database in the repo
-			storage_dir = repo_path / ".codemap" / "storage"
-			storage_config = StorageConfig(uri=str(storage_dir))
-
-		self.storage = LanceDBStorage(storage_config)
-
-		# Try to initialize storage early to catch any issues
-		try:
-			self.storage.initialize()
-		except (RuntimeError, ValueError, ConnectionError) as e:
-			logger.warning("Failed to initialize storage: %s", e)
-			logger.warning("Storage operations will be attempted at runtime")
-
-		# Callback handlers
-		self.on_chunks_processed = on_chunks_processed
-		self.on_file_deleted = on_file_deleted
+		self.lod_generator = LODGenerator()
+		self.default_lod_level = default_lod_level
 
 		# Threading setup
 		self.max_workers = max_workers
 		self.executor = ThreadPoolExecutor(max_workers=max_workers)
+		self._futures: list[Future] = []
 
-		# Processing state
-		self.active_jobs: dict[Path, ProcessingJob] = {}
-		self.watcher: FileWatcher | None = None
-
-	def start(self) -> None:
-		"""Start the processing pipeline, including file watching."""
-		logger.info("Starting processing pipeline for repository: %s", self.repo_path)
-
-		# Initialize file watcher with callbacks
-		self.watcher = FileWatcher(
-			paths=self.repo_path,
-			on_created=self._handle_file_created,
-			on_modified=self._handle_file_modified,
-			on_deleted=self._handle_file_deleted,
-			ignored_patterns=self.ignored_patterns,
-			recursive=True,
-		)
-
-		# Start file watching
-		self.watcher.start()
-		logger.info("File watcher started")
+		# In-memory cache for processed files
+		self.processed_files: dict[Path, LODEntity] = {}
 
 	def stop(self) -> None:
 		"""Stop the processing pipeline and clean up resources."""
 		logger.info("Stopping processing pipeline")
 
-		# Stop file watcher
-		if self.watcher:
-			self.watcher.stop()
-
 		# Shutdown thread pool
 		self.executor.shutdown(wait=True)
-
-		# Close LSP analyzer if enabled
-		if self.lsp_analyzer:
-			try:
-				self.lsp_analyzer.close()
-			except Exception:
-				logger.exception("Error closing LSP analyzer")
-
-		# Close storage
-		if hasattr(self, "storage"):
-			try:
-				self.storage.close()
-			except Exception:
-				logger.exception("Error closing storage")
+		self._futures.clear()
 
 		logger.info("Processing pipeline stopped")
 
-	def process_file(self, file_path: str | Path) -> None:
+	def process_file(self, file_path: str | Path, level: LODLevel | None = None) -> None:
 		"""
-		Process a single file.
+		Process a single file asynchronously.
 
 		Args:
-		    file_path: Path to the file to process
+		        file_path: Path to the file to process
+		        level: Level of Detail to use, defaults to pipeline's default level
 
 		"""
 		path_obj = Path(file_path)
 
-		# Create a job record
-		job = ProcessingJob(file_path=path_obj)
-		self.active_jobs[path_obj] = job
-
-		# Submit to thread pool
-		self.executor.submit(self._process_file_worker, path_obj)
-
-	def _process_file_worker(self, file_path: Path) -> None:
-		"""
-		Worker function to process a file in a separate thread.
-
-		Args:
-		    file_path: Path to the file to process
-
-		"""
-		job = self.active_jobs.get(file_path)
-		if not job:
+		# Skip binary files
+		if is_binary_file(path_obj):
+			logger.debug("Skipping binary file: %s", path_obj)
 			return
 
-		try:
-			logger.debug("Processing file: %s", file_path)
+		# Submit to thread pool
+		future = self.executor.submit(self._process_file_worker, path_obj, level or self.default_lod_level)
+		self._futures.append(future)
 
-			# Read the file content
-			content = read_file_content(file_path)
-
-			# Get Git metadata for the file
-			git_metadata = GitMetadata(
-				is_committed=True,  # Assuming the file is committed
-				commit_id=self.git_analyzer.get_current_commit(),
-				commit_message="",  # Simplified - not fetching commit message
-				timestamp=datetime.now(UTC),  # Simplified
-				branch=[self.git_analyzer.get_current_branch()],
-			)
-
-			# Chunk the file
-			chunks = list(self.chunker.chunk(content, file_path, git_metadata))
-
-			# Update job with results
-			job.chunks = chunks
-
-			# Enrich with LSP metadata if enabled
-			lsp_metadata = {}
-			if self.enable_lsp and self.lsp_analyzer and chunks:
-				try:
-					logger.debug("Enriching chunks with LSP metadata for %s", file_path)
-					lsp_metadata = self.lsp_analyzer.enrich_chunks(chunks)
-					job.lsp_metadata = lsp_metadata
-					logger.debug("Enriched %d chunks with LSP metadata for %s", len(lsp_metadata), file_path)
-				except (ValueError, TypeError, RuntimeError, AttributeError) as e:
-					logger.warning("Error enriching chunks with LSP for %s: %s", file_path, e)
-
-			# Generate embeddings for the chunks
-			# Note: We could potentially enhance the content with LSP info for better embeddings
-			embeddings = self.embedding_generator.generate_embeddings(chunks)
-
-			# Store chunks and embeddings
-			try:
-				commit_id = git_metadata.commit_id
-				self.storage.store_chunks(chunks, commit_id)
-
-				# Store LSP metadata if available
-				if lsp_metadata:
-					self.storage.store_lsp_metadata(lsp_metadata, chunks, commit_id)
-
-				if embeddings:
-					self.storage.store_embeddings(embeddings)
-
-				logger.debug(
-					"Stored %d chunks, %d LSP metadata, and %d embeddings for %s",
-					len(chunks),
-					len(lsp_metadata),
-					len(embeddings),
-					file_path,
-				)
-			except Exception:
-				logger.exception("Error storing data for %s", file_path)
-
-			job.completed_at = time.time()
-
-			# Call callback if provided
-			if self.on_chunks_processed:
-				self.on_chunks_processed(chunks, file_path)
-
-			logger.debug("Completed processing file: %s", file_path)
-
-		except Exception as e:
-			logger.exception("Error processing file %s", file_path)
-			job.error = e
-			job.completed_at = time.time()
-
-		finally:
-			# Clean up finished job after a delay
-			# (keeping it around briefly for status checks)
-			self.executor.submit(self._cleanup_job, file_path, delay=60)
-
-	def _cleanup_job(self, file_path: Path, delay: float = 0) -> None:
+	def process_file_sync(self, file_path: str | Path, level: LODLevel | None = None) -> LODEntity | None:
 		"""
-		Clean up a completed job after an optional delay.
+		Process a single file synchronously and return the result.
 
 		Args:
-		    file_path: Path to the file/job to clean up
-		    delay: Time in seconds to wait before cleanup
-
-		"""
-		if delay > 0:
-			time.sleep(delay)
-		self.active_jobs.pop(file_path, None)
-
-	def _handle_file_created(self, file_path: str) -> None:
-		"""
-		Handle file creation events from the watcher.
-
-		Args:
-		    file_path: Path to the created file
-
-		"""
-		logger.debug("File created: %s", file_path)
-		self.process_file(file_path)
-
-	def _handle_file_modified(self, file_path: str) -> None:
-		"""
-		Handle file modification events from the watcher.
-
-		Args:
-		    file_path: Path to the modified file
-
-		"""
-		logger.debug("File modified: %s", file_path)
-		self.process_file(file_path)
-
-	def _handle_file_deleted(self, file_path: str) -> None:
-		"""
-		Handle file deletion events from the watcher.
-
-		Args:
-		    file_path: Path to the deleted file
-
-		"""
-		path_obj = Path(file_path)
-		logger.debug("File deleted: %s", file_path)
-
-		# Create a deletion job record
-		job = ProcessingJob(file_path=path_obj, is_deletion=True)
-		self.active_jobs[path_obj] = job
-
-		# Delete from storage
-		try:
-			self.storage.delete_file(file_path)
-			logger.debug("Deleted %s from storage", file_path)
-		except Exception as deletion_error:
-			logger.exception("Error deleting %s from storage", file_path)
-			job.error = deletion_error
-
-		# Call callback if provided
-		if self.on_file_deleted:
-			try:
-				self.on_file_deleted(path_obj)
-			except Exception as e:
-				logger.exception("Error handling file deletion for %s", file_path)
-				job.error = e
-
-		job.completed_at = time.time()
-
-	def get_job_status(self, file_path: str | Path) -> ProcessingJob | None:
-		"""
-		Get the status of a processing job.
-
-		Args:
-		    file_path: Path to the file
+		        file_path: Path to the file to process
+		        level: Level of Detail to use, defaults to pipeline's default level
 
 		Returns:
-		    Processing job status if available, None otherwise
+		        LOD entity or None if processing failed or file is binary
 
 		"""
 		path_obj = Path(file_path)
-		return self.active_jobs.get(path_obj)
 
-	def batch_process(self, paths: list[str | Path]) -> None:
+		# Skip binary files
+		if is_binary_file(path_obj):
+			logger.debug("Skipping binary file: %s", path_obj)
+			return None
+
+		# Process directly
+		return self._process_file_worker(path_obj, level or self.default_lod_level)
+
+	def _process_file_worker(self, file_path: Path, level: LODLevel) -> LODEntity | None:
 		"""
-		Process multiple files in batch.
+		Worker function to process a file.
 
 		Args:
-		    paths: List of file paths to process
+		        file_path: Path to the file to process
+		        level: Level of Detail to use
+
+		Returns:
+		        LOD entity or None if processing failed
+
+		"""
+		try:
+			logger.debug("Processing file: %s at LOD level %s", file_path, level.name)
+
+			# Generate LOD entity
+			lod_entity = self.lod_generator.generate_lod(file_path, level)
+
+			# Store in cache
+			if lod_entity:
+				self.processed_files[file_path] = lod_entity
+				logger.debug("Successfully generated LOD entity for %s", file_path)
+			else:
+				logger.warning("LODGenerator returned None for %s (file might be unsupported or empty)", file_path)
+
+			return lod_entity
+
+		except Exception:
+			logger.exception("Error processing file %s", file_path)
+			return None
+		finally:
+			# Log final status (redundant with above but good for overview)
+			status = (
+				"succeeded (added to cache)"
+				if file_path in self.processed_files
+				else "failed or skipped (not in cache)"
+			)
+			logger.debug("Final processing status for %s: %s", file_path, status)
+
+	def batch_process(self, paths: list[str | Path], level: LODLevel | None = None) -> None:
+		"""
+		Process multiple files in batch asynchronously.
+
+		Args:
+		        paths: List of file paths to process
+		        level: Level of Detail to use, defaults to pipeline's default level
 
 		"""
 		for path in paths:
-			self.process_file(path)
+			self.process_file(path, level)
 
-	def search(self, query: str, limit: int = 10, use_vector: bool = True) -> list[tuple[Chunk, float]]:
+	def wait_for_completion(self, timeout: float | None = None) -> bool:
 		"""
-		Search the codebase using the storage backend.
-
-		If use_vector is True, the query will be transformed into a vector
-		and used for semantic search. Otherwise, plain text search will be used.
+		Wait for all pending file processing tasks to complete.
 
 		Args:
-		    query: Search query
-		    limit: Maximum number of results to return
-		    use_vector: Whether to use vector search
+		        timeout: Maximum time to wait in seconds, or None to wait indefinitely
 
 		Returns:
-		    List of (chunk, score) tuples, sorted by score (highest first)
+		        True if all tasks completed, False if timeout occurred
 
 		"""
-		if use_vector:
-			# Generate a vector for the query using the embedding generator
-			try:
-				# Create a dummy chunk for the query
-				from codemap.processor.chunking.base import ChunkMetadata, EntityType, Location
+		from concurrent.futures import ALL_COMPLETED, wait
 
-				dummy_location = Location(
-					file_path=Path("query"),
-					start_line=1,
-					end_line=1,
-				)
+		if not self._futures:
+			return True
 
-				dummy_metadata = ChunkMetadata(
-					entity_type=EntityType.UNKNOWN,
-					name="query",
-					location=dummy_location,
-					language="text",
-				)
+		_, not_done = wait(self._futures, timeout=timeout, return_when=ALL_COMPLETED)
 
-				query_chunk = Chunk(content=query, metadata=dummy_metadata)
+		# Clean up completed futures
+		self._futures = list(not_done)
 
-				# Generate embedding
-				embedding = self.embedding_generator.generate_embedding(query_chunk)
+		return len(not_done) == 0
 
-				if embedding and embedding.embedding is not None:
-					# Convert to list if needed
-					vector = embedding.embedding
-					if hasattr(vector, "tolist"):
-						vector = vector.tolist()
+	def get_lod_entity(
+		self, file_path: Path, level: LODLevel | None = None, force_refresh: bool = False
+	) -> LODEntity | None:
+		"""
+		Get the LOD entity for a file.
 
-					# Ensure we have a list of floats as required by the API
-					if isinstance(vector, list):
-						# Search by vector
-						return self.storage.search_by_vector(vector, limit)
-			except Exception:
-				logger.exception("Error during vector search")
+		If the file has already been processed at the requested level or higher,
+		returns the cached entity. Otherwise, processes the file at the requested level.
 
-		# Fallback to text search or if use_vector is False
-		return self.storage.search_by_text(query, limit)
+		Args:
+		        file_path: Path to the file
+		        level: Level of Detail requested, defaults to pipeline's default level
+		        force_refresh: Whether to force reprocessing even if cached
+
+		Returns:
+		        LOD entity for the file, or None if processing failed
+
+		"""
+		requested_level = level or self.default_lod_level
+
+		# Check if we have a cached entity at the same or higher level
+		if not force_refresh and file_path in self.processed_files:
+			existing_entity = self.processed_files[file_path]
+
+			# If we have content in the entity and level is FULL, we know it was processed at FULL level
+			if requested_level == LODLevel.FULL and existing_entity.content:
+				return existing_entity
+
+			# If we have signature and level is SIGNATURES, we know it was processed at SIGNATURES level
+			if requested_level == LODLevel.SIGNATURES and existing_entity.signature:
+				return existing_entity
+
+			# If we have docstring and level is DOCS, we know it was processed at DOCS level
+			if requested_level == LODLevel.DOCS and existing_entity.docstring:
+				return existing_entity
+
+		# Process synchronously in this case
+		return self.process_file_sync(file_path, requested_level)
+
+	def process_repository(self, repo_path: Path | None = None) -> int:
+		"""
+		Process an entire repository asynchronously.
+
+		Args:
+		        repo_path: Repository path, uses the pipeline's repo path if None
+
+		Returns:
+		        Number of files submitted for processing
+
+		"""
+		target_repo = repo_path or self.repo_path
+
+		# Get all files in the repository
+		all_files = []
+		for path_obj in target_repo.rglob("*"):
+			if path_obj.is_file() and is_text_file(path_obj):
+				# Check against ignored patterns
+				should_ignore = False
+				for pattern in self.ignored_patterns:
+					if path_obj.match(pattern):
+						should_ignore = True
+						break
+
+				if not should_ignore:
+					all_files.append(path_obj)
+
+		# Process all files
+		self.batch_process(all_files)
+
+		return len(all_files)
+
+	def get_repository_structure(
+		self, root_path: Path | None = None, level: LODLevel = LODLevel.STRUCTURE
+	) -> dict[str, Any]:
+		"""
+		Get a structured representation of the repository.
+
+		Args:
+		        root_path: Root path to start from, uses pipeline's repo path if None
+		        level: Level of Detail to use for files
+
+		Returns:
+		        Hierarchical structure of the repository with LOD entities
+
+		"""
+		target_path = root_path or self.repo_path
+
+		# Start with the basic directory structure
+		result = {"type": "directory", "name": target_path.name, "path": str(target_path), "children": []}
+
+		# List all items in the directory
+		try:
+			items = list(target_path.iterdir())
+
+			# Process directories first
+			for item in sorted([i for i in items if i.is_dir()], key=lambda x: x.name):
+				# Skip ignored directories
+				should_ignore = False
+				for pattern in self.ignored_patterns:
+					if item.match(pattern):
+						should_ignore = True
+						break
+
+				if should_ignore:
+					continue
+
+				# Recursively process this directory
+				child_structure = self.get_repository_structure(item, level)
+				result["children"].append(child_structure)
+
+			# Then process files
+			for item in sorted([i for i in items if i.is_file()], key=lambda x: x.name):
+				# Skip ignored files
+				should_ignore = False
+				for pattern in self.ignored_patterns:
+					if item.match(pattern):
+						should_ignore = True
+						break
+
+				if should_ignore:
+					continue
+
+				# Get LOD entity for this file
+				file_entity = self.get_lod_entity(item, level)
+
+				file_result = {"type": "file", "name": item.name, "path": str(item), "entity": file_entity}
+
+				result["children"].append(file_result)
+
+		except (PermissionError, FileNotFoundError) as e:
+			logger.warning(f"Error processing directory {target_path}: {e}")
+
+		return result

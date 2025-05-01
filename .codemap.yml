@@ -1,14 +1,54 @@
-token_limit: 10000
-use_gitignore: true
-output_dir: documentation
-max_content_length: 2000
+# CodeMap configuration file
+
+# Generation configuration
+gen:
+  # Maximum content length per file (0 for unlimited)
+  max_content_length: 2000
+  # Whether to respect gitignore patterns
+  use_gitignore: true
+  # Directory to store documentation files
+  output_dir: documentation
+  # Whether to include directory tree in output
+  include_tree: true
+  # Whether to include entity relationship graph in output
+  include_entity_graph: true
+  # Enable semantic analysis using LSP
+  semantic_analysis: true
+  # Output file for generated documentation (Overrides output_dir if present)
+  # output_file: code_documentation.md # Remove this to use output_dir
+  # Level of Detail for code analysis (signatures, structure, docs, full)
+  lod_level: docs
+  # Mermaid entities to include (lowercase EntityType names, e.g., module, class, function)
+  mermaid_entities: ["module", "class", "method", "function"]
+  # Mermaid relationships to include (declares, imports, calls)
+  mermaid_relationships: ["calls", "imports"]
+  # Whether to show the legend in the Mermaid diagram (true/false)
+  mermaid_show_legend: true
+  # Whether to remove nodes with no connections in the diagram (true/false)
+  mermaid_remove_unconnected: true
+
+# Processor configuration
+processor:
+  enabled: true
+  max_workers: 8
+  ignored_patterns:
+    - "**/.git/**"
+    - "**/__pycache__/**"
+    - "**/.venv/**"
+    - "**/node_modules/**"
+    - "**/*.pyc"
+    - "**/dist/**"
+    - "**/build/**"
+  # Default LOD level for processing
+  default_lod_level: signatures
 
 # Commit feature configuration
 commit:
-  # LLM configuration
-  llm:
-    model: groq/meta-llama/llama-4-scout-17b-16e-instruct
-    # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
+  # Strategy for splitting diffs: file, hunk, semantic
+  strategy: file
+  # Whether to bypass git hooks (--no-verify) when committing
+  # Set to true only if you want to skip hooks (default: false)
+  bypass_hooks: false
 
   # Commit convention settings
   convention:
@@ -29,3 +69,85 @@ commit:
 
     # Maximum length for commit message subject line
     max_length: 72
+  
+  # Commit lint rules to match .commitlintrc
+  lint:
+    body_leading_blank:
+      level: WARNING
+      rule: always
+    body_max_line_length:
+      level: ERROR
+      rule: always
+      value: 100
+    footer_leading_blank:
+      level: WARNING
+      rule: always
+    footer_max_line_length:
+      level: ERROR
+      rule: always
+      value: 100
+    header_max_length:
+      level: ERROR
+      rule: always
+      value: 100
+    subject_case:
+      level: ERROR
+      rule: never
+      value: ["sentence-case", "start-case", "pascal-case", "upper-case"]
+    subject_empty:
+      level: ERROR
+      rule: never
+    subject_full_stop:
+      level: ERROR
+      rule: never
+      value: "."
+    type_case:
+      level: ERROR
+      rule: always
+      value: "lower-case"
+    type_empty:
+      level: ERROR
+      rule: never
+    type_enum:
+      level: ERROR
+      rule: always
+      # Use the types defined in convention section above
+      value: ~
+
+# Pull request configuration
+pr:
+  # Default branch settings
+  defaults:
+    base_branch: dev  # Default base branch if not specified
+    feature_prefix: "feat/"  # Default prefix for feature branches
+
+  # Git workflow strategy: github-flow, gitflow, trunk-based
+  strategy: "github-flow"  # Default workflow strategy
+
+  # Branch mapping for different PR types (used by GitFlow)
+  branch_mapping:
+    feature:
+      base: dev
+      prefix: "feat/"
+    release:
+      base: main
+      prefix: "release/"
+    hotfix:
+      base: dev
+      prefix: "fix/"
+    bugfix:
+      base: dev
+      prefix: "bugfix/"
+
+  # Content generation settings
+  content:
+    title_strategy: llm
+    description_strategy: llm
+    # Add other existing pr settings below if they exist
+    # ... existing code ...
+
+# LLM configuration
+llm:
+  model: groq/meta-llama/llama-4-scout-17b-16e-instruct
+  # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
+  api_base: null
