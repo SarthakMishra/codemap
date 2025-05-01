@@ -404,9 +404,22 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 			title,
 			"--body",
 			description,
+			"--json",
+			"number,url,title,body,headRefName",
 		]
 
-		result = subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
+		logger.info(f"Attempting to create PR with command: {' '.join(cmd)}")
+		logger.info(f"Arguments - Base: '{base_branch}', Head: '{head_branch}'")
+
+		logger.debug("Running GitHub CLI command: %s", " ".join(cmd))
+		result = subprocess.run(  # noqa: S603
+			cmd,
+			check=True,
+			capture_output=True,
+			text=True,
+			encoding="utf-8",
+		)
+
 		output = result.stdout.strip()
 
 		# Extract PR URL and number
