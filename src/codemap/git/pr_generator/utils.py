@@ -404,8 +404,6 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 			title,
 			"--body",
 			description,
-			"--json",
-			"number,url,title,body,headRefName",
 		]
 
 		logger.info(f"Attempting to create PR with command: {' '.join(cmd)}")
@@ -420,16 +418,16 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 			encoding="utf-8",
 		)
 
-		output = result.stdout.strip()
-
-		# Extract PR URL and number
-		pr_url = output.strip()
+		# gh pr create outputs the URL of the created PR to stdout
+		pr_url = result.stdout.strip()
 		pr_number = None
 
 		# Try to extract PR number from URL
 		match = re.search(r"/pull/(\d+)$", pr_url)
 		if match:
 			pr_number = int(match.group(1))
+		else:
+			logger.warning("Could not extract PR number from URL: %s", pr_url)
 
 		return PullRequest(
 			branch=head_branch,
@@ -439,7 +437,18 @@ def create_pull_request(base_branch: str, head_branch: str, title: str, descript
 			number=pr_number,
 		)
 	except subprocess.CalledProcessError as e:
-		msg = f"Failed to create PR: {e.stderr}"
+		# Use stderr for the error message from gh
+		error_message = e.stderr.strip() if e.stderr else "Unknown gh error"
+		logger.exception("GitHub CLI error during PR creation: %s", error_message)
+		msg = f"Failed to create PR: {error_message}"
+		raise PRCreationError(msg) from e
+	except (
+		FileNotFoundError,
+		json.JSONDecodeError,
+	) as e:  # Keep JSONDecodeError in case gh output changes unexpectedly
+		# Handle gh not found or unexpected output issues
+		logger.exception("Error running gh command or parsing output: %s")
+		msg = f"Error during PR creation: {e}"
 		raise PRCreationError(msg) from e
 
 
