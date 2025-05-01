@@ -22,6 +22,10 @@ This document provides guidelines for contributing to the project. Please read i
   - [Testing](#testing)
   - [Commit Message Guidelines](#commit-message-guidelines)
   - [Pull Request Process](#pull-request-process)
+  - [Release Process](#release-process)
+    - [Automatic Releases](#automatic-releases)
+    - [Release Preparation](#release-preparation)
+    - [Hotfix Process](#hotfix-process)
   - [Code of Conduct](#code-of-conduct)
   - [License](#license)
   - [Questions?](#questions)
@@ -64,7 +68,7 @@ Before you start coding, make sure you have set up your devment environment corr
 
 ## Branching Strategy (Simplified Git Flow)
 
-We use a simplified Git Flow model to manage branches and releases.
+We use a simplified Git Flow model to manage branches and releases, with automated releases powered by Python Semantic Release.
 
 ```mermaid
 gitGraph
@@ -78,40 +82,40 @@ gitGraph
     commit
     commit
     checkout dev
-    merge feature/new-feature
+    merge feature/new-feature tag: "v0.2.0-next.1"
 
     branch feature/another-feature
     checkout feature/another-feature
     commit
     checkout dev
-    merge feature/another-feature
+    merge feature/another-feature tag: "v0.2.0-next.2"
 
-    branch release/v1.0.0
-    checkout release/v1.0.0
-    commit tag: "v1.0.0-rc"
+    branch release/v0.2.0
+    checkout release/v0.2.0
+    commit
     checkout main
-    merge release/v1.0.0 tag: "v1.0.0"
+    merge release/v0.2.0 tag: "v0.2.0"
     checkout dev
-    merge release/v1.0.0
+    merge main
 
     branch hotfix/critical-fix
     checkout hotfix/critical-fix
     commit
     checkout main
-    merge hotfix/critical-fix tag: "v1.0.1"
+    merge hotfix/critical-fix tag: "v0.2.1"
     checkout dev
-    merge hotfix/critical-fix
+    merge main
 ```
 
 ### Core Branches
 
 -   **`main`**:
     -   Represents the latest **stable production-ready** release.
-    -   All commits on `main` should correspond to a tagged release version (e.g., `v1.0.0`).
-    -   Protected by CI checks. Direct pushes are discouraged; merges happen via `release` or `hotfix` branches.
+    -   Pushes to `main` trigger automatic stable version releases.
+    -   Protected branch with required reviews. Changes come via approved PRs from `release/*` or `hotfix/*` branches.
 -   **`dev`**:
-    -   The primary integration branch for **ongoing devment** and upcoming features.
-    -   Reflects the latest devment state, potentially including pre-release versions (e.g., `v1.1.0-alpha`).
+    -   The primary integration branch for **ongoing development** and upcoming features.
+    -   Pushes to `dev` trigger automatic pre-release versions with the `-next` tag.
     -   All feature branches are merged into `dev`.
     -   Continuously tested via CI.
 
@@ -119,17 +123,20 @@ gitGraph
 
 -   **Feature branches (`feature/*`)**:
     -   Branched off `dev`.
-    -   Used for deving new features or significant changes.
+    -   Used for developing new features or significant changes.
     -   Named descriptively (e.g., `feature/add-pr-update-command`).
     -   Merged back into `dev` via Pull Requests (PRs).
 -   **Release branches (`release/*`)**:
     -   Branched off `dev` when preparing for a new stable release.
-    -   Used for final testing, documentation updates, and version bumping (e.g., `release/v1.2.0`).
-    -   Merged into `main` (and tagged) and back into `dev`.
+    -   Used for final testing, documentation updates, and version stabilization.
+    -   Format: `release/vX.Y.0` (e.g., `release/v1.2.0`).
+    -   Merged into `main` via PR, which triggers automatic release.
+    -   No need for manual version bumping as this is handled by semantic-release.
 -   **Hotfix branches (`hotfix/*`)**:
     -   Branched off `main`.
-    *   Used for critical bug fixes needed in the production version.
-    *   Merged into `main` (and tagged) and back into `dev`.
+    -   Used for critical bug fixes needed in the production version.
+    -   Merged into `main` via PR, triggering automatic patch release.
+    -   Also merged back into `dev` (usually by merging the updated `main`).
 
 ### Workflow Examples
 
@@ -148,38 +155,54 @@ gitGraph
     git push -u origin feature/your-feature-name
 
     # Open a Pull Request to merge `feature/your-feature-name` into `dev`
+    # When merged, a new pre-release version may be created automatically
     ```
 
-2.  **Release Preparation (Maintainer Task)**:
+2.  **Release Preparation**:
     ```bash
     git checkout dev
+    git pull origin dev
+    
+    # Create a release branch (no need to bump versions manually)
     git checkout -b release/v1.3.0
-    # Bump version, finalize docs, test
-    # ...
-    git checkout main
-    git merge --no-ff release/v1.3.0
-    git tag -a v1.3.0 -m "Version 1.3.0 Release"
-    git push origin main --tags
+    
+    # Make any final adjustments, documentation updates, etc.
+    # Push the release branch
+    git push -u origin release/v1.3.0
+    
+    # Create a PR from release/v1.3.0 to main
+    # When the PR is approved and merged:
+    # 1. A new release will be automatically created
+    # 2. The package will be built and published to PyPI
+    # 3. Main should be merged back to dev to sync the version changes
     git checkout dev
-    git merge --no-ff release/v1.3.0 # Merge back changes
+    git pull origin dev
+    git merge origin/main
     git push origin dev
-    git branch -d release/v1.3.0 # Delete release branch
     ```
 
-3.  **Hotfix (Maintainer Task / Urgent Contributor Task)**:
+3.  **Hotfix Process**:
     ```bash
     git checkout main
+    git pull origin main
+    
+    # Create a hotfix branch
     git checkout -b hotfix/critical-bug-fix
-    # Fix the bug, commit using `codemap commit`
-    # ...
-    git checkout main
-    git merge --no-ff hotfix/critical-bug-fix
-    git tag -a v1.3.1 -m "Hotfix for critical bug"
-    git push origin main --tags
+    
+    # Fix the bug and commit using conventional commit format
+    # (preferably using `codemap commit`)
+    
+    # Push the hotfix branch
+    git push -u origin hotfix/critical-bug-fix
+    
+    # Create a PR from hotfix/critical-bug-fix to main
+    # When merged, a patch release will be automatically created
+    
+    # After the hotfix is released, sync changes back to dev
     git checkout dev
-    git merge --no-ff hotfix/critical-bug-fix # Merge back changes
+    git pull origin dev
+    git merge origin/main
     git push origin dev
-    git branch -d hotfix/critical-bug-fix # Delete hotfix branch
     ```
 
 ## Code Contribution Workflow
@@ -249,7 +272,7 @@ gitGraph
 
 ## Commit Message Guidelines
 
-We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification. This helps automate changelog generation and provides a clear history.
+We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) specification. This enables automatic version determination and changelog generation as part of our release process.
 
 -   **Use `codemap commit`:** The easiest way to comply is by using the built-in `codemap commit` command, which guides you through creating compliant messages.
 -   **Manual Format:** If committing manually, the format is:
@@ -260,8 +283,29 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0
 
     [optional footer(s)]
     ```
--   **Types:** Use the types defined in the [`.codemap.yml`](./.codemap.yml) configuration (e.g., `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`).
--   **Scope:** An optional scope can provide context (e.g., `cli`, `docs`, `git`, `llm`).
+-   **Types:** Use the types defined in the [`.codemap.yml`](./.codemap.yml) configuration:
+    - `feat`: A new feature (triggers a minor version bump)
+    - `fix`: A bug fix (triggers a patch version bump)
+    - `perf`: A performance improvement (triggers a patch version bump)
+    - `docs`: Documentation changes only
+    - `style`: Changes that don't affect the code's meaning (formatting, etc.)
+    - `refactor`: Code changes that neither fix bugs nor add features
+    - `test`: Adding or correcting tests
+    - `build`: Changes to the build system or dependencies
+    - `ci`: Changes to CI configuration files and scripts
+    - `chore`: Other changes that don't modify src or test files
+    
+-   **Breaking Changes:** To indicate a breaking change (major version bump), add `BREAKING CHANGE:` in the footer or append a `!` after the type/scope:
+    ```
+    feat!: remove deprecated API
+    ```
+    or
+    ```
+    feat: new API
+    
+    BREAKING CHANGE: old API removed
+    ```
+
 -   **Description:** A concise summary of the change in the imperative mood (e.g., "add", "fix", "update" not "added", "fixed", "updated").
 
 ## Pull Request Process
@@ -274,6 +318,46 @@ We follow the [Conventional Commits](https://www.conventionalcommits.org/en/v1.0
 3.  **CI Checks:** Ensure all automated checks (linting, testing, type checking) pass.
 4.  **Review:** A maintainer will review your PR. Be prepared to discuss your changes and make adjustments based on feedback.
 5.  **Merging:** Once approved and all checks pass, a maintainer will merge your PR.
+
+## Release Process
+
+We use Python Semantic Release with GitHub Actions to automate our release process. This automates version management, changelog generation, and PyPI releases.
+
+### Automatic Releases
+
+Releases are triggered automatically when commits are pushed to the following branches:
+
+- **`main` branch:** Stable releases (e.g., `v1.0.0`)
+- **`dev` branch:** Pre-releases with the `next` tag (e.g., `v1.1.0-next.1`)
+
+The release workflow:
+1. Analyzes commit messages since the last release to determine the next version
+2. Updates version in `src/codemap/__init__.py`
+3. Generates a changelog
+4. Creates a new commit with these changes
+5. Creates a Git tag for the release
+6. Publishes a GitHub Release with the changelog
+7. Builds and uploads the package to PyPI
+
+### Release Preparation
+
+For major releases, we recommend:
+
+1. Create a `release/vX.Y.0` branch from `dev`
+2. Finalize documentation, testing, and polish
+3. Open a PR from the release branch to `main`
+4. After PR approval, the merge to `main` will trigger an automatic release
+5. The `main` branch is then merged back to `dev` to sync version changes
+
+### Hotfix Process
+
+For critical fixes to production:
+
+1. Create a `hotfix/issue-description` branch from `main`
+2. Implement and test the fix
+3. Open a PR to `main`
+4. After merge, the fix will be automatically released with a patch version increase
+5. The hotfix should also be merged back to `dev`
 
 ## Code of Conduct
 
