@@ -7,6 +7,8 @@ name = "codemap"
 version = "1.0.0"
 description = "CLI tool that generates optimized markdown docs and streamline Git workflows"
 readme = "README.md"
+source = "https://github.com/SarthakMishra/codemap"
+changelog = "CHANGELOG.md"
 authors = [
     { name="Sarthak Mishra", email="hi@sarthakmishra.com" },
 ]
