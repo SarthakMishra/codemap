@@ -1,7 +1,7 @@
 # CHANGELOG
 
 
-## v1.0.0 (2025-05-01)
+## v1.0.0-next.1 (2025-05-01)
 
 ### Bug Fixes
 
@@ -774,6 +774,15 @@ The test code had several lines with noqa comments that were not necessary. Thes
 
 - Depend on tests and lint workflows before releasing
   ([`95913cb`](https://github.com/SarthakMishra/codemap/commit/95913cb1f8649c450cba3763c896de706a21ce5d))
+
+- Enable VCS release in GitHub Actions workflow
+  ([`bc377d4`](https://github.com/SarthakMishra/codemap/commit/bc377d4f97b80f5ed68a994f8ecb83d534827625))
+
+- Remove check for required workflows in release job
+  ([`9cc9207`](https://github.com/SarthakMishra/codemap/commit/9cc92078ca56edd60178295c356077e7861ba87d))
+
+- Run release workflows on pull requests
+  ([`9ee91fd`](https://github.com/SarthakMishra/codemap/commit/9ee91fd99402f501f1620499cb5ad4042d000c11))
 
 - **pre-commit**: Added pre-commit hooks
   ([`5818317`](https://github.com/SarthakMishra/codemap/commit/58183171e47c70f849fd56a285380bd3f97ff656))
