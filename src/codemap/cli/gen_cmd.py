@@ -15,7 +15,7 @@ from typing import Annotated
 import typer
 
 from codemap.gen import GenCommand, GenConfig
-from codemap.processor import LODLevel, create_processor
+from codemap.processor.lod import LODLevel
 from codemap.utils.cli_utils import exit_with_error, setup_logging
 from codemap.utils.config_loader import ConfigLoader
 
@@ -75,14 +75,6 @@ VerboseFlag = Annotated[
 	),
 ]
 
-ProcessingFlag = Annotated[
-	bool,
-	typer.Option(
-		"--process/--no-process",
-		help="Process the codebase before generation",
-	),
-]
-
 EntityGraphFlag = Annotated[
 	bool | None,
 	typer.Option(
@@ -134,45 +126,6 @@ MermaidUnconnectedFlag = Annotated[
 ]
 
 
-def initialize_processor(repo_path: Path, config_data: dict) -> None:
-	"""
-	Initialize the processor for code analysis.
-
-	Args:
-	    repo_path: Path to the repository
-	    config_data: Configuration data
-
-	"""
-	from codemap.utils.cli_utils import console
-
-	# Extract processor configuration
-	processor_config = config_data.get("processor", {})
-
-	# Get ignored patterns
-	ignored_patterns = set(processor_config.get("ignored_patterns", []))
-	ignored_patterns.update(
-		[
-			"**/.git/**",
-			"**/__pycache__/**",
-			"**/.venv/**",
-			"**/node_modules/**",
-			"**/.codemap_cache/**",
-			"**/*.pyc",
-			"**/dist/**",
-			"**/build/**",
-		]
-	)
-
-	# Initialize processor with LOD support
-	try:
-		processor = create_processor(repo_path=repo_path)
-		console.print("[green]Processor initialized successfully[/green]")
-		processor.stop()
-	except Exception as e:
-		console.print(f"[red]Failed to initialize processor: {e}[/red]")
-		raise
-
-
 def gen_command(
 	path: PathArg = Path(),
 	output: OutputOpt = None,
@@ -202,7 +155,6 @@ def gen_command(
 			help="Enable verbose logging",
 		),
 	] = False,
-	process: ProcessingFlag = True,
 	entity_graph: EntityGraphFlag = None,
 	mermaid_entities_str: MermaidEntitiesOpt = None,
 	mermaid_relationships_str: MermaidRelationshipsOpt = None,
@@ -234,14 +186,6 @@ def gen_command(
 
 		# Get gen-specific config with defaults
 		gen_config_data = config_data.get("gen", {})
-
-		# Process the codebase if requested
-		if process:
-			from codemap.utils.cli_utils import console
-
-			console.print("[yellow]Initializing processor...[/yellow]")
-			initialize_processor(target_path, config_data)
-			console.print("[green]Processor initialization completed successfully[/green]")
 
 		# Command line arguments override config file
 		content_length = (
