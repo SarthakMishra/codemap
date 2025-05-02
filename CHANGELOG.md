@@ -377,6 +377,9 @@ Co-authored-by: Copilot Autofix powered by AI
 - Remove unused files
   ([`fd70a17`](https://github.com/SarthakMishra/codemap/commit/fd70a171068043b57044891af41c74befd128510))
 
+- Reset version to 0.0.0
+  ([`dfe0f41`](https://github.com/SarthakMishra/codemap/commit/dfe0f4124e4ab8d4ed2cf4ca6ff3e54c4c1d24ac))
+
 - Update .gitignore
   ([`63d4414`](https://github.com/SarthakMishra/codemap/commit/63d44148ed520e06635a29ba847412d35c412440))
 
