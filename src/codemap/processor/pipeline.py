@@ -100,14 +100,29 @@ class ProcessingPipeline:
 			logger.info("Initial synchronization complete.")
 
 	def stop(self) -> None:
-		"""Stop the processing pipeline and clean up resources."""
-		logger.info("Stopping processing pipeline...")
+		"""Stops the pipeline and releases resources."""
+		logger.info("Stopping ProcessingPipeline...")
 		if self.kuzu_manager:
-			self.kuzu_manager.close()
-			logger.info("KuzuDB connection closed.")
-		# Milvus client closing might be handled by its singleton logic or GC.
-		# Explicit close if needed can be added here.
-		logger.info("Processing pipeline stopped.")
+			try:
+				self.kuzu_manager.close()
+				logger.info("KuzuDB connection closed.")
+			except Exception:
+				logger.exception("Error closing KuzuDB connection.")
+			self.kuzu_manager = None
+
+		if self.milvus_client:
+			try:
+				# Use the standard close method if available
+				if hasattr(self.milvus_client, "close"):
+					self.milvus_client.close()
+					logger.info("Milvus client connection closed.")
+				else:
+					logger.warning("Could not find close method on Milvus client.")
+			except Exception:
+				logger.exception("Error closing Milvus client connection.")
+			self.milvus_client = None
+
+		logger.info("ProcessingPipeline stopped.")
 
 	# --- Synchronization ---
 
