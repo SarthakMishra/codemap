@@ -124,3 +124,18 @@ markdown_extensions:
   - pymdownx.tasklist:
       custom_checkbox: true
   - pymdownx.tilde
+
+  # Additional configuration
+extra:
+  status:
+    new: Recently added
+    deprecated: Deprecated
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/SarthakMishra
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/codemap/
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/in/itssarthakmishra/
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/MishraMishry
