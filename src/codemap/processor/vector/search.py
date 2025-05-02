@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 import numpy as np
-from pymilvus import Hit
+from pymilvus import Hit, exceptions
 
 from . import client, config, embedder
 
@@ -102,7 +102,7 @@ def semantic_search(query: str, k: int = 5) -> list[SearchResult] | None:
 		logger.info(f"Formatted {len(formatted_results)} search results.")
 		return formatted_results
 
-	except client.exceptions.MilvusException:
+	except exceptions.MilvusException:
 		# logger.exception(f"Milvus search error: {e}")
 		logger.exception("Milvus search error")
 		return None
