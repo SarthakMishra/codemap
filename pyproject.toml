@@ -91,6 +91,9 @@ model2vec = [
     "sentence-transformers>=4.1.0",
     "transformers>=4.51.1",
 ]
+docs = [
+    "mkdocs-material>=9.6.12",
+]
 
 [tool.pyright]
 # Define included and excluded directories
