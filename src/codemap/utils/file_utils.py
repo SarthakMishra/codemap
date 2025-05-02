@@ -53,3 +53,64 @@ def read_file_content(file_path: Path | str) -> str:
 		with path_obj.open("rb") as f:
 			content = f.read()
 			return content.decode("utf-8", errors="replace")
+
+
+def ensure_directory_exists(dir_path: Path) -> None:
+	"""
+	Ensure that a directory exists, creating it if necessary.
+
+	Args:
+	    dir_path (Path): The path to the directory.
+	"""
+	if not dir_path.exists():
+		logger.info(f"Creating directory: {dir_path}")
+		try:
+			dir_path.mkdir(parents=True, exist_ok=True)
+		except OSError:
+			logger.exception(f"Failed to create directory {dir_path}")
+			raise
+	elif not dir_path.is_dir():
+		logger.error(f"Path exists but is not a directory: {dir_path}")
+		msg = f"Path exists but is not a directory: {dir_path}"
+		raise NotADirectoryError(msg)
+
+
+# Utility functions for file type checking
+def is_binary_file(file_path: Path) -> bool:
+	"""
+	Check if a file is binary.
+
+	Args:
+	        file_path: Path to the file
+
+	Returns:
+	        True if the file is binary, False otherwise
+
+	"""
+	# Skip files larger than 10 MB
+	try:
+		if file_path.stat().st_size > 10 * 1024 * 1024:
+			return True
+
+		# Try to read as text
+		with file_path.open(encoding="utf-8") as f:
+			chunk = f.read(1024)
+			return "\0" in chunk
+	except UnicodeDecodeError:
+		return True
+	except (OSError, PermissionError):
+		return True
+
+
+def is_text_file(file_path: Path) -> bool:
+	"""
+	Check if a file is a text file.
+
+	Args:
+	        file_path: Path to the file
+
+	Returns:
+	        True if the file is a text file, False otherwise
+
+	"""
+	return not is_binary_file(file_path)
