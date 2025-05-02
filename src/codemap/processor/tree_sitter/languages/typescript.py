@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from codemap.processor.tree_sitter.base import EntityType
 from codemap.processor.tree_sitter.languages.base import LanguageConfig
-from codemap.processor.tree_sitter.languages.javascript import JavaScriptSyntaxHandler
+from codemap.processor.tree_sitter.languages.javascript import JAVASCRIPT_CONFIG, JavaScriptSyntaxHandler
 
 if TYPE_CHECKING:
 	from tree_sitter import Node
@@ -31,29 +31,24 @@ class TypeScriptConfig(LanguageConfig):
 	type_alias: ClassVar[list[str]] = ["type_alias_declaration"]
 
 	# Functions and methods
-	function: ClassVar[list[str]] = [
-		"function_declaration",
-		"function",
-		"arrow_function",
-		"generator_function_declaration",
-	]
-	method: ClassVar[list[str]] = ["method_definition", "method_signature"]
-	property_def: ClassVar[list[str]] = ["property_identifier", "public_field_definition", "property_signature"]
-	test_case: ClassVar[list[str]] = ["call_expression"]  # Special detection for test frameworks
-	test_suite: ClassVar[list[str]] = ["call_expression"]  # Special detection for test frameworks
+	function: ClassVar[list[str]] = [*JAVASCRIPT_CONFIG.function, "function_signature"]
+	method: ClassVar[list[str]] = [*JAVASCRIPT_CONFIG.method, "method_signature"]
+	property_def: ClassVar[list[str]] = [*JAVASCRIPT_CONFIG.property_def, "public_field_definition"]
+	test_case: ClassVar[list[str]] = JAVASCRIPT_CONFIG.test_case
+	test_suite: ClassVar[list[str]] = JAVASCRIPT_CONFIG.test_suite
 
 	# Variables and constants
-	variable: ClassVar[list[str]] = ["variable_declaration", "lexical_declaration"]
-	constant: ClassVar[list[str]] = ["variable_declaration", "lexical_declaration"]  # const declarations
-	class_field: ClassVar[list[str]] = ["public_field_definition"]
+	variable: ClassVar[list[str]] = JAVASCRIPT_CONFIG.variable
+	constant: ClassVar[list[str]] = JAVASCRIPT_CONFIG.constant
+	class_field: ClassVar[list[str]] = [*JAVASCRIPT_CONFIG.class_field, "public_field_definition"]
 
 	# Code organization
-	import_: ClassVar[list[str]] = ["import_statement"]
-	decorator: ClassVar[list[str]] = ["decorator"]
+	import_: ClassVar[list[str]] = [*JAVASCRIPT_CONFIG.import_, "import_alias"]
+	decorator: ClassVar[list[str]] = JAVASCRIPT_CONFIG.decorator
 
 	# Documentation
-	comment: ClassVar[list[str]] = ["comment"]
-	docstring: ClassVar[list[str]] = ["comment"]  # TS uses comments for documentation
+	comment: ClassVar[list[str]] = JAVASCRIPT_CONFIG.comment
+	docstring: ClassVar[list[str]] = JAVASCRIPT_CONFIG.docstring
 
 	file_extensions: ClassVar[list[str]] = [".ts", ".tsx"]
 	tree_sitter_name: ClassVar[str] = "typescript"
@@ -72,9 +67,8 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 
 	def __init__(self) -> None:
 		"""Initialize with TypeScript configuration."""
-		super().__init__()
-		# Override the config from JavaScriptSyntaxHandler
-		self.config = TYPESCRIPT_CONFIG
+		# Revert to super() and ignore potential linter false positive
+		super().__init__(TYPESCRIPT_CONFIG)  # type: ignore[call-arg] # pylint: disable=too-many-function-args
 
 	def get_entity_type(self, node: Node, parent: Node | None, content_bytes: bytes) -> EntityType:
 		"""
@@ -96,13 +90,15 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 			parent.type if parent else None,
 		)
 
-		# TypeScript-specific types
-		if node_type == "interface_declaration":
+		# Check for TypeScript specific types first
+		if node_type in self.config.interface:
 			return EntityType.INTERFACE
+		if node_type in self.config.type_alias:
+			return EntityType.TYPE_ALIAS
 		if node_type == "enum_declaration":
 			return EntityType.ENUM
-		if node_type == "type_alias_declaration":
-			return EntityType.TYPE_ALIAS
+		if node_type == "module":  # TS internal modules/namespaces
+			return EntityType.NAMESPACE
 		if node_type == "namespace_declaration":
 			return EntityType.NAMESPACE
 		if node_type == "method_signature":
@@ -157,11 +153,8 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 		    The body node if available, None otherwise
 
 		"""
-		# TypeScript-specific handling
-		if node.type in ["interface_declaration", "namespace_declaration"] or node.type == "enum_declaration":
-			return node.child_by_field_name("body")
-
-		# Fall back to JavaScript body extraction
+		if node.type in ("interface_declaration", "function_signature", "method_signature"):
+			return None  # Interfaces and signatures have no body block
 		return super().get_body_node(node)
 
 	def get_children_to_process(self, node: Node, body_node: Node | None) -> list[Node]:
@@ -198,3 +191,29 @@ class TypeScriptSyntaxHandler(JavaScriptSyntaxHandler):
 		"""
 		# TypeScript import statements are the same as JavaScript
 		return super().extract_imports(node, content_bytes)
+
+	def get_enclosing_node_of_type(self, node: Node, target_type: EntityType) -> Node | None:
+		"""
+		Find the first ancestor node matching the target TypeScript entity type.
+
+		Handles INTERFACE specifically and falls back to the JavaScript handler
+		for other types (CLASS, FUNCTION, METHOD, MODULE).
+
+		Args:
+		    node: The starting node.
+		    target_type: The EntityType to search for in ancestors.
+
+		Returns:
+		    The ancestor node if found, otherwise None.
+
+		"""
+		if target_type == EntityType.INTERFACE:
+			target_node_types = ["interface_declaration"]
+			current = node.parent
+			while current:
+				if current.type in target_node_types:
+					return current
+				current = current.parent
+			return None
+		# Fall back to JS handler for other types (CLASS, FUNCTION, METHOD, MODULE)
+		return super().get_enclosing_node_of_type(node, target_type)
