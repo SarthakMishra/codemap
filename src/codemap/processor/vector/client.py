@@ -4,11 +4,12 @@ import logging
 
 from pymilvus import MilvusClient
 
-# from milvus_lite.client import MilvusClient # Reverted change
-from codemap.processor.utils.file_utils import ensure_directory_exists
-from codemap.processor.utils.path_utils import get_cache_path
 from codemap.processor.vector import config
 from codemap.processor.vector.schema import create_collection_schema
+
+# from milvus_lite.client import MilvusClient # Reverted change
+from codemap.utils.file_utils import ensure_directory_exists
+from codemap.utils.path_utils import get_cache_path
 
 logger = logging.getLogger(__name__)
 

@@ -6,9 +6,7 @@ from typing import Any, Never
 
 from pymilvus import MilvusClient, exceptions
 
-from codemap.processor.utils.file_utils import read_file_content
 from codemap.processor.utils.git_utils import get_git_tracked_files
-from codemap.processor.utils.path_utils import get_workspace_root
 from codemap.processor.utils.sync_utils import compare_states
 from codemap.processor.vector import chunker, config
 from codemap.processor.vector.client import get_milvus_client
@@ -16,6 +14,8 @@ from codemap.processor.vector.embedder import generate_embeddings
 
 # Import ConfigLoader
 from codemap.utils.config_loader import ConfigLoader
+from codemap.utils.file_utils import read_file_content
+from codemap.utils.path_utils import find_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ def synchronize_vectors(repo_path: Path | None = None) -> None:
 	"""
 	if repo_path is None:
 		try:
-			repo_path = get_workspace_root()
+			repo_path = find_project_root()
 		except FileNotFoundError:
 			logger.exception("Synchronization failed: Could not determine repository path.")
 			return
@@ -234,8 +234,8 @@ def _process_files(
 		logger.debug(f"Processing file {i + 1}/{len(files_to_process)}: {file_path_str}")
 
 		# 1. Read file content using utility
-		content, read_success = read_file_content(file_full_path)
-		if not read_success:
+		content = read_file_content(file_full_path)
+		if not content:
 			logger.error(f"Skipping file {file_path_str}: Failed to read content.")
 			error_count += 1
 			continue
