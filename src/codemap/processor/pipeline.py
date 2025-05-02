@@ -15,49 +15,9 @@ from pathlib import Path
 from typing import Any
 
 from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
+from codemap.utils.file_utils import is_binary_file, is_text_file
 
 logger = logging.getLogger(__name__)
-
-
-# Utility functions for file type checking
-def is_binary_file(file_path: Path) -> bool:
-	"""
-	Check if a file is binary.
-
-	Args:
-	        file_path: Path to the file
-
-	Returns:
-	        True if the file is binary, False otherwise
-
-	"""
-	# Skip files larger than 10 MB
-	try:
-		if file_path.stat().st_size > 10 * 1024 * 1024:
-			return True
-
-		# Try to read as text
-		with file_path.open(encoding="utf-8") as f:
-			chunk = f.read(1024)
-			return "\0" in chunk
-	except UnicodeDecodeError:
-		return True
-	except (OSError, PermissionError):
-		return True
-
-
-def is_text_file(file_path: Path) -> bool:
-	"""
-	Check if a file is a text file.
-
-	Args:
-	        file_path: Path to the file
-
-	Returns:
-	        True if the file is a text file, False otherwise
-
-	"""
-	return not is_binary_file(file_path)
 
 
 class ProcessingPipeline:
