@@ -6,8 +6,8 @@ from pathlib import Path
 from codemap.processor.graph.graph_builder import GraphBuilder
 from codemap.processor.graph.kuzu_manager import KuzuManager
 from codemap.processor.utils.git_utils import get_git_tracked_files
-from codemap.processor.utils.path_utils import get_workspace_root
 from codemap.processor.utils.sync_utils import compare_states
+from codemap.utils.path_utils import find_project_root
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class GraphSynchronizer:
 		"""
 		if repo_path is None:
 			try:
-				self.repo_path = get_workspace_root()
+				self.repo_path = find_project_root()
 			except FileNotFoundError:
 				logger.exception("GraphSynchronizer init failed: Could not determine repository path.")
 				raise

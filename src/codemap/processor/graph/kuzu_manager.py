@@ -8,8 +8,8 @@ import kuzu
 from kuzu import QueryResult
 
 from codemap.processor.tree_sitter.base import EntityType
-from codemap.processor.utils.file_utils import ensure_directory_exists
-from codemap.processor.utils.path_utils import get_cache_path
+from codemap.utils.file_utils import ensure_directory_exists
+from codemap.utils.path_utils import get_cache_path
 
 logger = logging.getLogger(__name__)
 
