@@ -28,8 +28,9 @@ class KuzuManager:
 		.codemap_cache directory.
 
 		Args:
-			db_path (Optional[str]): Path to the KuzuDB database file.
-									 Defaults to None.
+		        db_path (Optional[str]): Path to the KuzuDB database file.
+		                                                         Defaults to None.
+
 		"""
 		if db_path is None:
 			# Use utility to get the graph cache directory

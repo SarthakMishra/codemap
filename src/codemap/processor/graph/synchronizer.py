@@ -22,9 +22,10 @@ class GraphSynchronizer:
 		Initialize the synchronizer with repository and database connections.
 
 		Args:
-			repo_path (Path | None): Path to the repository root. If None, it's determined.
-			kuzu_manager (KuzuManager): Manager for KuzuDB operations.
-			graph_builder (GraphBuilder): Builder for creating graph entities.
+		        repo_path (Path | None): Path to the repository root. If None, it's determined.
+		        kuzu_manager (KuzuManager): Manager for KuzuDB operations.
+		        graph_builder (GraphBuilder): Builder for creating graph entities.
+
 		"""
 		if repo_path is None:
 			try:
@@ -39,23 +40,33 @@ class GraphSynchronizer:
 		self.graph_builder = graph_builder
 		logger.info(f"GraphSynchronizer initialized for repo: {self.repo_path}")
 
-	def sync_graph(self) -> bool:
+	def sync_graph(self, current_git_files: dict[str, str] | None = None) -> bool:
 		"""
-		Synchronize the KuzuDB graph with current Git state.
+		Synchronize the KuzuDB graph with the provided Git state.
+
+		Args:
+		        current_git_files (dict[str, str] | None, optional):
+		                A dictionary mapping file paths to Git hashes.
+		                If None, it will be fetched from the repository.
+		                Defaults to None.
 
 		Returns:
-			bool: True if synchronization was successful (or not needed),
-				  False otherwise.
+		        bool: True if synchronization was successful (or not needed),
+		                  False otherwise.
+
 		"""
 		logger.info(f"Starting graph synchronization for: {self.repo_path}")
 
-		# 1. Get current Git state (files and hashes)
-		logger.debug("Fetching current Git state...")
-		current_git_files = get_git_tracked_files(self.repo_path)
+		# 1. Get Git state (use provided or fetch)
 		if current_git_files is None:
-			logger.error("Synchronization failed: Could not get Git tracked files.")
-			return False
-		logger.debug(f"Found {len(current_git_files)} files in Git.")
+			logger.debug("Fetching current Git state...")
+			current_git_files = get_git_tracked_files(self.repo_path)
+			if current_git_files is None:
+				logger.error("Synchronization failed: Could not get Git tracked files.")
+				return False
+			logger.debug(f"Found {len(current_git_files)} files in Git.")
+		else:
+			logger.debug(f"Using provided Git state with {len(current_git_files)} files.")
 
 		# 2. Get KuzuDB state (files and hashes)
 		logger.debug("Fetching current KuzuDB state...")
