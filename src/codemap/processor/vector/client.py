@@ -2,10 +2,13 @@
 
 import logging
 
-from pymilvus import MilvusClient, exceptions
+from pymilvus import MilvusClient
 
-from . import config
-from .schema import create_collection_schema
+# from milvus_lite.client import MilvusClient # Reverted change
+from codemap.processor.utils.file_utils import ensure_directory_exists
+from codemap.processor.utils.path_utils import get_cache_path
+from codemap.processor.vector import config
+from codemap.processor.vector.schema import create_collection_schema
 
 logger = logging.getLogger(__name__)
 
@@ -15,18 +18,26 @@ _milvus_client: MilvusClient | None = None
 
 def _initialize_milvus_client() -> MilvusClient | None:
 	"""Initializes and returns a new MilvusClient instance."""
-	db_path = config.get_vector_db_path()
+	global _milvus_client  # noqa: PLW0603
 	try:
-		# Using MilvusClient directly for Lite
-		new_client = MilvusClient(uri=str(db_path))
-		logger.info(f"Milvus client initialized with DB path: {db_path}")
-		ensure_collection_exists(new_client)
-		return new_client
-	except exceptions.MilvusException:
-		logger.exception(f"Milvus connection error for DB {db_path}")
-		return None
+		vector_cache_dir = get_cache_path("vector")
+		ensure_directory_exists(vector_cache_dir)
+		db_file = vector_cache_dir / config.VECTOR_DB_FILE_NAME
+		db_path = str(db_file)
+
+		logger.info(f"Initializing Milvus Lite client at: {db_path}")
+		client = MilvusClient(db_path)
+		ensure_collection_exists(client)
+		_milvus_client = client
+		return _milvus_client
 	except Exception:
-		logger.exception(f"Unexpected error initializing Milvus client for DB {db_path}")
+		logger.exception("Failed to initialize Milvus client")
+		if _milvus_client:
+			try:
+				_milvus_client.close()
+			except Exception:
+				logger.exception("Error closing Milvus client during cleanup")
+			_milvus_client = None
 		return None
 
 
@@ -51,52 +62,31 @@ def ensure_collection_exists(client: MilvusClient) -> None:
 		if not client.has_collection(collection_name):
 			logger.info(f"Collection '{collection_name}' not found. Creating...")
 			schema = create_collection_schema()
-			# For Milvus Lite, index_params in create_collection might not be strictly necessary
-			# as it defaults to FLAT, but including it for clarity/future compatibility.
-			index_params = client.prepare_index_params()
-			index_params.add_index(
-				field_name=config.FIELD_EMBEDDING,
-				index_type=config.INDEX_TYPE,  # Should be FLAT for Lite
-				metric_type=config.METRIC_TYPE,
-				# params={} # FLAT index usually doesn't require params
-			)
-			client.create_collection(
-				collection_name=collection_name,
-				schema=schema,
-				index_params=index_params,
-				# Milvus Lite ignores consistency_level, num_shards etc.
-			)
+			client.create_collection(collection_name, schema=schema)
 			logger.info(f"Collection '{collection_name}' created successfully.")
-			# Note: Loading is implicitly handled by Milvus Lite
 		else:
 			logger.debug(f"Collection '{collection_name}' already exists.")
-			# Optionally: Verify schema matches?
-			# existing_schema = client.describe_collection(collection_name)
-			# compare schemas...
-
-	except exceptions.MilvusException:
-		logger.exception(f"Milvus error checking/creating collection '{collection_name}'")
 	except Exception:
-		logger.exception(f"Unexpected error ensuring collection '{collection_name}' exists")
+		logger.exception(f"Unexpected error checking/creating collection '{collection_name}'")
+		raise
 
 
 def close_milvus_connection() -> None:
 	"""Closes the Milvus connection if open."""
 	global _milvus_client  # noqa: PLW0603
 	client_to_close = _milvus_client
-	if client_to_close is not None:
+	_milvus_client = None  # Set to None immediately
+
+	if client_to_close:
+		logger.info("Closing Milvus client connection.")
 		try:
-			# Set global variable to None *before* closing
-			_milvus_client = None
 			client_to_close.close()
-			logger.info("Milvus connection closed.")
-		except exceptions.MilvusException:
-			logger.exception("Error closing Milvus connection")
-			# Should we try to restore _milvus_client? Probably not, it's likely unusable.
 		except Exception:
 			logger.exception("Unexpected error closing Milvus connection")
+		finally:
+			logger.info("Milvus client connection closed.")
 	else:
-		logger.debug("Attempted to close Milvus connection, but it was already None.")
+		logger.debug("No active Milvus client connection to close.")
 
 
 # Example Usage (can be removed later)

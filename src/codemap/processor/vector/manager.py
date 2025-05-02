@@ -1,24 +1,38 @@
 """Orchestrates the vector database synchronization process."""
 
 import logging
-import subprocess
 from pathlib import Path
+from typing import Any, Never
 
 from pymilvus import MilvusClient, exceptions
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.processor.utils.file_utils import read_file_content
+from codemap.processor.utils.git_utils import get_git_tracked_files
+from codemap.processor.utils.path_utils import get_workspace_root
+from codemap.processor.utils.sync_utils import compare_states
+from codemap.processor.vector import chunker, config
+from codemap.processor.vector.client import get_milvus_client
+from codemap.processor.vector.embedder import generate_embeddings
 
-from . import chunker, client, config, embedder
+# Import ConfigLoader
+from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
-GitFileInfo = dict[str, str]  # Maps file_path (str) to git_hash (str)
-MilvusFileInfo = dict[str, set[str]]  # Maps file_path (str) to set of git_hash (str)
+# Type alias for dictionary mapping file path to git hash
+GitFileInfo = dict[str, str]
+# Type alias for dictionary mapping file path to a set of git hashes found in Milvus
+MilvusFileInfo = dict[str, set[str]]
 
-MIN_GIT_LS_FILES_PARTS = 4  # Constant for magic number 4
+# Removed MIN_GIT_LS_FILES_PARTS, now in git_utils
 
 
-def synchronize_vectors(repo_path: Path) -> None:
+# Helper for TRY301
+def _raise_embedding_error(message: str) -> Never:
+	raise ValueError(message)
+
+
+def synchronize_vectors(repo_path: Path | None = None) -> None:
 	"""
 	Synchronizes the Milvus vector database with the current Git state.
 
@@ -27,108 +41,91 @@ def synchronize_vectors(repo_path: Path) -> None:
 	3. Determines files to add, update, or delete.
 	4. Processes changes: chunks, embeds, and updates Milvus.
 
+	Args:
+		repo_path (Path | None, optional): The path to the repository root.
+										   If None, attempts to find it automatically.
+										   Defaults to None.
 	"""
-	logger.info(f"Starting vector database synchronization for repo: {repo_path}")
+	if repo_path is None:
+		try:
+			repo_path = get_workspace_root()
+		except FileNotFoundError:
+			logger.exception("Synchronization failed: Could not determine repository path.")
+			return
 
-	milvus_client = client.get_milvus_client()
+	milvus_client = get_milvus_client()
 	if not milvus_client:
-		logger.error("Cannot synchronize: Failed to get Milvus client.")
+		logger.error("Synchronization failed: Milvus client not available.")
 		return
 
 	# --- Load Configuration --- #
+	# Configuration loading is now implemented
 	try:
 		config_loader = ConfigLoader(repo_root=repo_path)
-		config_data = config_loader.config
+		app_config = config_loader.config  # Get the loaded config dictionary
 		logger.info("Successfully loaded configuration.")
 	except Exception:
-		logger.exception(f"Cannot synchronize: Failed to load configuration from {repo_path}")
+		logger.exception("Failed to load configuration")
 		return
 	# --- End Load Configuration --- #
 
+	logger.info(f"Starting vector synchronization for repository: {repo_path}")
+
 	# 1. Get Git state
-	current_git_files = _get_git_tracked_files(repo_path)
+	logger.debug("Fetching current Git state...")
+	current_git_files = get_git_tracked_files(repo_path)
 	if current_git_files is None:
-		logger.error("Cannot synchronize: Failed to get Git tracked files.")
+		logger.error("Synchronization failed: Could not get Git tracked files.")
 		return
-	logger.info(f"Found {len(current_git_files)} tracked files in Git.")
+	logger.debug(f"Found {len(current_git_files)} files in Git.")
 
 	# 2. Get Milvus state
+	logger.debug("Fetching current Milvus state...")
 	existing_milvus_files = _get_milvus_file_hashes(milvus_client)
 	if existing_milvus_files is None:
-		logger.error("Cannot synchronize: Failed to get existing files from Milvus.")
+		logger.error("Synchronization failed: Could not get file hashes from Milvus.")
 		return
-	logger.info(f"Found {len(existing_milvus_files)} files represented in Milvus.")
+	logger.debug(f"Found {len(existing_milvus_files)} files represented in Milvus.")
 
 	# 3. Determine changes
-	files_to_add, files_to_update, files_to_delete = _compare_states(current_git_files, existing_milvus_files)
+	logger.debug("Comparing Git state with Milvus state...")
+	files_to_add, files_to_update, files_to_delete = compare_states(current_git_files, existing_milvus_files)
 
 	total_changes = len(files_to_add) + len(files_to_update) + len(files_to_delete)
 	if total_changes == 0:
-		logger.info("Vector database is already synchronized. No changes needed.")
+		logger.info("Vector database is already up-to-date.")
 		return
 
 	# Format long log message
-	logger.info(
-		f"Changes identified: {len(files_to_add)} to add, "
+	log_message = (
+		f"Synchronization required: {len(files_to_add)} to add, "
 		f"{len(files_to_update)} to update, {len(files_to_delete)} to delete."
 	)
+	logger.info(log_message)
 
 	# 4. Process changes
 	# Process deletions first
-	_delete_files_from_milvus(milvus_client, files_to_delete)
+	if files_to_delete:
+		logger.debug(f"Deleting {len(files_to_delete)} files from Milvus...")
+		_delete_files_from_milvus(milvus_client, files_to_delete)
 
 	# Process additions and updates (involve reading, chunking, embedding, inserting)
 	files_to_process = files_to_add.union(files_to_update)
-	_process_files(milvus_client, repo_path, files_to_process, current_git_files, config_data)
-
-	logger.info("Vector database synchronization finished.")
-
-
-def _get_git_tracked_files(repo_path: Path) -> GitFileInfo | None:
-	"""Uses 'git ls-files -s' to get tracked files and their blob hashes."""
-	try:
-		# Run git command
-		# -s shows staged contents' mode bits, object name and stage number
-		# --full-name ensures paths are relative to repo root
-		# S603/S607: Calling git is considered safe here as it's a standard tool
-		# and we are not constructing commands from user input.
-		result = subprocess.run(  # noqa: S603
-			["git", "ls-files", "-s", "--full-name"],  # noqa: S607
-			cwd=repo_path,
-			capture_output=True,
-			text=True,
-			check=True,
-			encoding="utf-8",
+	if files_to_process:
+		logger.debug(f"Processing {len(files_to_process)} files for addition/update...")
+		_process_files(
+			milvus_client,
+			repo_path,
+			files_to_process,
+			current_git_files,  # Pass the dict containing current hashes
+			files_to_update,  # Pass the set of files needing deletion first
+			app_config,
 		)
 
-		files_info: GitFileInfo = {}
-		for line in result.stdout.strip().split("\n"):
-			if not line:
-				continue
-			# Format: <mode> <object> <stage>\t<file>
-			parts = line.split()
-			# Use constant instead of magic number
-			if len(parts) >= MIN_GIT_LS_FILES_PARTS:
-				git_hash = parts[1]
-				file_path = parts[3]
-				# For simplicity, ignore different stages for now, take the first seen hash
-				if file_path not in files_info:
-					files_info[file_path] = git_hash
-			else:
-				logger.warning(f"Could not parse git ls-files line: {line}")
+	logger.info("Vector synchronization finished.")
 
-		return files_info
 
-	except FileNotFoundError:
-		logger.exception("'git' command not found. Is Git installed and in PATH?")
-		return None
-	except subprocess.CalledProcessError as e:
-		logger.exception("Git command failed")
-		logger.exception(f"Stderr: {e.stderr}")
-		return None
-	except Exception:
-		logger.exception("Error getting Git tracked files")
-		return None
+# Removed _get_git_tracked_files function (now in git_utils)
 
 
 def _get_milvus_file_hashes(client: MilvusClient) -> MilvusFileInfo | None:
@@ -171,28 +168,7 @@ def _get_milvus_file_hashes(client: MilvusClient) -> MilvusFileInfo | None:
 		return None
 
 
-def _compare_states(git_files: GitFileInfo, milvus_files: MilvusFileInfo) -> tuple[set[str], set[str], set[str]]:
-	"""Compares Git and Milvus states to find differences."""
-	git_paths = set(git_files.keys())
-	milvus_paths = set(milvus_files.keys())
-
-	# Files in Git but not Milvus
-	files_to_add = git_paths - milvus_paths
-
-	# Files in Milvus but not Git (deleted)
-	files_to_delete = milvus_paths - git_paths
-
-	# Files in both - check hash
-	files_to_update = set()
-	common_paths = git_paths.intersection(milvus_paths)
-	for path in common_paths:
-		current_git_hash = git_files[path]
-		# Check if the current hash is NOT the ONLY hash present in Milvus for this path
-		# This handles cases where old versions might still be in Milvus due to previous errors
-		if current_git_hash not in milvus_files[path] or len(milvus_files[path]) > 1:
-			files_to_update.add(path)
-
-	return files_to_add, files_to_update, files_to_delete
+# Removed _compare_states function (now in sync_utils)
 
 
 def _delete_files_from_milvus(client: MilvusClient, files_to_delete: set[str]) -> None:
@@ -222,112 +198,135 @@ def _delete_files_from_milvus(client: MilvusClient, files_to_delete: set[str]) -
 
 
 def _process_files(
-	milvus_client: MilvusClient,
+	client: MilvusClient,
 	repo_path: Path,
 	files_to_process: set[str],
-	git_file_info: GitFileInfo,
-	config_data: dict,
+	current_git_files: GitFileInfo,  # Get hashes from here
+	files_to_update: set[str],
+	app_config: dict[str, Any],
 ) -> None:
 	"""
 	Reads, chunks, embeds, and inserts/updates data for the given files.
 
-	Handles deleting old entries for updated files before inserting new
-	ones.
-
+	Handles deleting old entries for updated files before inserting new ones.
 	"""
-	if not files_to_process:
-		return
-
-	logger.info(f"Processing {len(files_to_process)} files for addition/update...")
-
 	# First, delete existing entries for files that need updating
-	_delete_files_from_milvus(milvus_client, files_to_process)  # Safe to call even if file wasn't in Milvus (additions)
+	if files_to_update:
+		logger.info(f"Deleting existing Milvus entries for {len(files_to_update)} updated files...")
+		_delete_files_from_milvus(client, files_to_update)
+		logger.info("Deletion of outdated entries complete.")
 
 	processed_count = 0
 	error_count = 0
-	all_chunk_data_to_insert = []  # Accumulate data for batch insertion
+	all_chunk_data_to_insert: list[dict[str, Any]] = []  # Accumulate data
 
-	for file_path_str in files_to_process:
-		file_path = repo_path / file_path_str
-		current_git_hash = git_file_info.get(file_path_str)
+	logger.info(f"Processing {len(files_to_process)} files...")
+	for i, file_path_str in enumerate(files_to_process):
+		file_path = Path(file_path_str)
+		file_full_path = repo_path / file_path
+		git_hash = current_git_files.get(file_path_str)
 
-		if not current_git_hash:
-			logger.warning(f"Skipping {file_path_str}: Could not find its current git hash.")
+		if not git_hash:
+			logger.warning(f"Skipping file {file_path_str}: Could not find its Git hash.")
+			error_count += 1
 			continue
 
+		logger.debug(f"Processing file {i + 1}/{len(files_to_process)}: {file_path_str}")
+
+		# 1. Read file content using utility
+		content, read_success = read_file_content(file_full_path)
+		if not read_success:
+			logger.error(f"Skipping file {file_path_str}: Failed to read content.")
+			error_count += 1
+			continue
+
+		# 2. Chunk file
 		try:
-			# Read file content - Use Path.open()
-			# with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-			with file_path.open("r", encoding="utf-8", errors="ignore") as f:
-				content = f.read()
-
-			# Chunk the file - pass config_data
-			chunks = chunker.chunk_file(Path(file_path_str), content, current_git_hash, config_data)
-			if chunks is None:
-				logger.warning(f"Skipping {file_path_str}: Chunking failed.")
-				error_count += 1
-				continue
-
-			if not chunks:
-				logger.debug(f"No chunks generated for {file_path_str}. Skipping insertion.")
-				continue
-
-			# Extract text for embedding
-			texts_to_embed = [chunk[config.FIELD_CHUNK_TEXT] for chunk in chunks]
-
-			# Generate embeddings
-			embeddings = embedder.generate_embeddings(texts_to_embed)
-			if embeddings is None:
-				logger.warning(f"Skipping {file_path_str}: Embedding failed.")
-				error_count += 1
-				continue
-
-			# Prepare data for Milvus insertion (list of dicts)
-			data_batch = []
-			for i, chunk in enumerate(chunks):
-				# Ensure embedding is a list for Milvus client
-				embedding_list = embeddings[i].tolist()
-				chunk_data = {**chunk, config.FIELD_EMBEDDING: embedding_list}
-				# Remove FIELD_CHUNK_TEXT if schema doesn't store full text (optional)
-				# if not STORE_FULL_TEXT_IN_SCHEMA:
-				#    del chunk_data[config.FIELD_CHUNK_TEXT]
-				data_batch.append(chunk_data)
-
-			all_chunk_data_to_insert.extend(data_batch)
-			processed_count += 1
-			logger.debug(f"Prepared {len(data_batch)} chunks for {file_path_str}.")
-
-		except FileNotFoundError:
-			logger.warning(f"Skipping {file_path_str}: File not found during processing (might be race condition?).")
-			error_count += 1
+			# Pass app_config if chunker needs it
+			chunks = chunker.chunk_file(file_path, content, git_hash, app_config)
 		except Exception:
-			logger.exception(f"Error processing file {file_path_str}")
+			logger.exception(f"Failed to chunk file {file_path_str}")
 			error_count += 1
+			continue
+
+		if not chunks:
+			logger.warning(f"No chunks generated for file {file_path_str}. Skipping.")
+			continue
+
+		logger.debug(f"Generated {len(chunks)} chunks for {file_path_str}")
+
+		# 3. Generate embeddings for all chunks in the file
+		chunk_texts = [chunk[config.FIELD_CHUNK_TEXT] for chunk in chunks]
+		embeddings = None  # Initialize embeddings to None
+		try:
+			embeddings = generate_embeddings(chunk_texts)
+			if embeddings is None or len(embeddings) != len(chunks):
+				# Use helper for TRY301
+				_raise_embedding_error("Embedding generation failed or returned wrong number.")
+		except Exception:
+			logger.exception(f"Failed to generate embeddings for chunks in {file_path_str}")
+			error_count += 1
+			continue  # Skip this file if embeddings fail
+
+		# Ensure embeddings is not None before proceeding to zip
+		if embeddings is None:
+			logger.error(f"Skipping file {file_path_str} due to failed embedding generation (embeddings is None).")
+			error_count += 1
+			continue
+
+		# 4. Prepare data for Milvus insertion (batching)
+		# Now it's safe to zip
+		for chunk, embedding in zip(chunks, embeddings, strict=True):
+			# Shorten ID construction for E501
+			id_prefix = f"{file_path_str}::{chunk[config.FIELD_START_LINE]}::{chunk[config.FIELD_CHUNK_TYPE]}"
+			id_suffix = f"{git_hash[:8]}::{chunk[config.FIELD_ENTITY_NAME] or '-'}"
+			chunk_data = {
+				config.FIELD_ID: f"{id_prefix}::{id_suffix}",
+				config.FIELD_EMBEDDING: embedding.tolist(),  # Milvus expects list
+				config.FIELD_FILE_PATH: file_path_str,
+				config.FIELD_GIT_HASH: git_hash,
+				config.FIELD_CHUNK_TEXT: chunk[config.FIELD_CHUNK_TEXT],
+				config.FIELD_START_LINE: chunk[config.FIELD_START_LINE],
+				config.FIELD_END_LINE: chunk[config.FIELD_END_LINE],
+				config.FIELD_CHUNK_TYPE: chunk[config.FIELD_CHUNK_TYPE],
+				config.FIELD_ENTITY_NAME: chunk.get(config.FIELD_ENTITY_NAME),
+			}
+			all_chunk_data_to_insert.append(chunk_data)
+
+		processed_count += 1
+		if (i + 1) % 50 == 0:  # Log progress every 50 files
+			logger.info(f"Processed {i + 1}/{len(files_to_process)} files...")
 
 	# Batch insert accumulated data into Milvus
 	if all_chunk_data_to_insert:
-		logger.info(f"Inserting {len(all_chunk_data_to_insert)} chunks into Milvus...")
+		logger.info(f"Inserting data for {len(all_chunk_data_to_insert)} chunks into Milvus...")
 		try:
-			# MilvusClient insert takes list of dictionaries
-			res = milvus_client.insert(collection_name=config.COLLECTION_NAME, data=all_chunk_data_to_insert)
-			# Corrected logging for Milvus insert result - Use getattr for safer access
-			insert_count = getattr(res, "insert_count", "N/A")
-			logger.info(f"Milvus insertion result: PKs inserted - {insert_count}")  # Shows count
-		except exceptions.MilvusException:
-			logger.exception("Milvus error during batch insertion")
-			error_count += len(all_chunk_data_to_insert)  # Count all as errors if batch fails
+			# Assuming client.insert can handle a list of dictionaries
+			insert_result = client.insert(collection_name=config.COLLECTION_NAME, data=all_chunk_data_to_insert)
+
+			# Check insert result for success/failures
+			# Insert result check is now implemented
+			insert_count = getattr(insert_result, "insert_count", 0)
+			err_count = getattr(insert_result, "err_count", 0)
+			succ_count = getattr(insert_result, "succ_count", 0)
+			primary_keys = getattr(insert_result, "primary_keys", [])
+
+			expected_count = len(all_chunk_data_to_insert)
+
+			if insert_count == expected_count and err_count == 0:
+				logger.info(f"Successfully inserted {insert_count} entities.")
+			else:
+				logger.warning(
+					f"Milvus insert result mismatch or errors. Expected: {expected_count}, "
+					f"Inserted: {insert_count}, Success: {succ_count}, Errors: {err_count}. "
+					f"Primary Keys ({len(primary_keys)}): {primary_keys[:10]}..."
+				)
+				# Potentially mark as error or handle partially failed batch?
+				# For now, just log warning.
+
 		except Exception:
-			logger.exception("Unexpected error during batch insertion")
-			error_count += len(all_chunk_data_to_insert)
+			logger.exception("Failed to batch insert data into Milvus")
+			# Consider adding partial failure handling if possible
+			error_count += len(files_to_process) - processed_count  # Mark remaining as errors
 
-	logger.info(f"File processing finished. Successfully processed: {processed_count}, Errors: {error_count}")
-
-
-# Example Usage
-if __name__ == "__main__":
-	logging.basicConfig(level=logging.DEBUG)
-	# Assumes running from the project root
-	repo_directory = Path()
-	logger.info("Running vector synchronization...")
-	synchronize_vectors(repo_directory)
-	logger.info("Synchronization process complete.")
+	logger.info(f"File processing complete. Processed: {processed_count}, Errors: {error_count}")

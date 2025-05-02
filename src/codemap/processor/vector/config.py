@@ -1,14 +1,9 @@
 """Configuration constants for the vector processing module."""
 
-from pathlib import Path
-
 # --- Database Configuration ---
-VECTOR_DB_DIR_NAME = ".codemap_cache/vector_db"
-VECTOR_DB_FILE_NAME = "codemap_vectors.db"
-# Ideally, get workspace root dynamically, but hardcode for now if needed
-# Assumes script runs relative to project root or workspace root is findable
-WORKSPACE_ROOT = Path.cwd()  # Use Path.cwd() instead of os.getcwd()
-VECTOR_DB_PATH = WORKSPACE_ROOT / VECTOR_DB_DIR_NAME / VECTOR_DB_FILE_NAME
+# Removed: VECTOR_DB_DIR_NAME, WORKSPACE_ROOT, VECTOR_DB_PATH
+# These are now handled by path_utils.get_cache_path("vector")
+VECTOR_DB_FILE_NAME = "milvus_vector_db.db"
 
 # --- Milvus Collection Configuration ---
 COLLECTION_NAME = "codemap_embeddings"
@@ -34,7 +29,7 @@ FIELD_END_LINE = "end_line"
 
 # --- Chunking Configuration ---
 # Placeholder for potential chunking limits (e.g., max tokens/chars per chunk)
-MAX_CHUNK_TEXT_LENGTH = 8192  # Max length for varchar in schema
+MAX_CHUNK_TEXT_LENGTH = 65535  # Max length for varchar in schema
 MAX_CHUNK_OVERLAP = 50  # Example: if splitting large fallback chunks
 
 # --- Fallback Chunk Types ---
@@ -43,13 +38,3 @@ CHUNK_TYPE_CLASS = "class"
 CHUNK_TYPE_FUNCTION = "function"
 CHUNK_TYPE_METHOD = "method"
 CHUNK_TYPE_FALLBACK = "regex_fallback"
-
-
-def get_vector_db_path() -> Path:
-	"""Returns the calculated path to the Milvus Lite DB file."""
-	return VECTOR_DB_PATH
-
-
-def get_vector_db_dir() -> Path:
-	"""Returns the calculated path to the directory containing the Milvus Lite DB file."""
-	return VECTOR_DB_PATH.parent
