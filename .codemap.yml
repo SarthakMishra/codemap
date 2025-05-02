@@ -2,7 +2,7 @@
 
 # LLM configuration
 llm:
-  model: groq/llama-3.1-8b-instant
+  model: groq/meta-llama/llama-4-maverick-17b-128e-instruct
   # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
   api_base: null
 
