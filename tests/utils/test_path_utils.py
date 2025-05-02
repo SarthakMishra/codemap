@@ -17,7 +17,7 @@ except ImportError:
 
 from codemap.utils.path_utils import (
 	filter_paths_by_gitignore,
-	get_git_root,
+	find_project_root,
 	get_relative_path,
 	normalize_path,
 )
@@ -67,7 +67,7 @@ class TestPathUtils(FileSystemTestBase):
 		start_path = git_root / "src" / "module"
 		start_path.mkdir(parents=True)
 
-		result = get_git_root(start_path)
+		result = find_project_root(start_path)
 		assert result == git_root.resolve()
 
 	def test_get_git_root_found_in_parent(self) -> None:
@@ -78,14 +78,14 @@ class TestPathUtils(FileSystemTestBase):
 		start_path = git_root / "deeply" / "nested" / "folder"
 		start_path.mkdir(parents=True)
 
-		result = get_git_root(start_path)
+		result = find_project_root(start_path)
 		assert result == git_root.resolve()
 
 	def test_get_git_root_not_found(self) -> None:
 		"""Test get_git_root when no .git directory is found."""
 		start_path = self.temp_dir / "not_a_repo"
 		start_path.mkdir(parents=True)
-		result = get_git_root(start_path)
+		result = find_project_root(start_path)
 		assert result is None
 
 	def test_get_git_root_at_root(self) -> None:
@@ -93,7 +93,7 @@ class TestPathUtils(FileSystemTestBase):
 		# This test might behave differently depending on the OS and permissions
 		# It primarily tests the loop termination condition
 		root_path = Path("/")
-		result = get_git_root(root_path)
+		result = find_project_root(root_path)
 		# We expect None unless the filesystem root itself is a git repo (unlikely)
 		assert result is None
 
