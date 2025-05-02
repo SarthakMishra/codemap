@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codemap"
-version = "0.1.0-next.1"
+version = "0..0."
 description = "CLI tool that generates optimized markdown docs and streamline Git workflows"
 readme = "README.md"
 source = "https://github.com/SarthakMishra/codemap"
@@ -216,6 +216,7 @@ version_toml = [
     "pyproject.toml:project.version:nf"
 ]
 major_on_zero = false
+vcs_release = true
 
 [tool.semantic_release.changelog]
 mask_initial_release = true

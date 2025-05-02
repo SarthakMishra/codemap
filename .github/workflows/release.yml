@@ -71,6 +71,7 @@ jobs:
         id: semantic
         uses: python-semantic-release/python-semantic-release@v9.21.0 # Use latest stable version
         with:
+          root_options: "-vv"
           # Use the GITHUB_TOKEN for authentication with the GitHub API
           github_token: ${{ secrets.GITHUB_TOKEN }}
           # Use PAT if GITHUB_TOKEN doesn't have push access
@@ -79,8 +80,6 @@ jobs:
           # Configure committer details for the release commit
           git_committer_name: "github-actions[bot]"
           git_committer_email: "github-actions[bot]@users.noreply.github.com"
-
-          vcs_release: true
           
           # Use branch configuration from pyproject.toml
           # This will properly handle 'next' prerelease token for dev branch
