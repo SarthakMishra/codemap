@@ -3,7 +3,7 @@
 from textwrap import dedent
 
 DEFAULT_CONFIG = {
-	"cache_dir": "codemap_cache",
+	"cache_dir": ".codemap_cache",
 	# LLM configuration
 	"llm": {
 		"model": "openai/gpt-4o-mini",
