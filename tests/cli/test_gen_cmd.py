@@ -36,12 +36,10 @@ class TestGenCommand(FileSystemTestBase):
 	# Mock essential dependencies used by the command
 	@patch("codemap.cli.gen_cmd.setup_logging")
 	@patch("codemap.cli.gen_cmd.ConfigLoader")
-	@patch("codemap.cli.gen_cmd.initialize_processor")
 	@patch("codemap.cli.gen_cmd.GenCommand")  # Mock the class
 	def test_gen_command_defaults(
 		self,
 		mock_gen_command_class: MagicMock,
-		mock_initialize_processor: MagicMock,
 		mock_config_loader: MagicMock,
 		mock_setup_logging: MagicMock,
 	) -> None:
@@ -58,7 +56,6 @@ class TestGenCommand(FileSystemTestBase):
 		assert result.exit_code == 0
 		mock_setup_logging.assert_called_once_with(is_verbose=False)
 		mock_config_loader.assert_called_once_with(None)
-		mock_initialize_processor.assert_called_once_with(self.temp_dir / "dummy_code", mock_config_instance.config)
 
 		# Verify GenConfig passed to GenCommand constructor
 		# Only capture args since kwargs aren't used here
@@ -85,36 +82,10 @@ class TestGenCommand(FileSystemTestBase):
 
 	@patch("codemap.cli.gen_cmd.setup_logging")
 	@patch("codemap.cli.gen_cmd.ConfigLoader")
-	@patch("codemap.cli.gen_cmd.initialize_processor")
-	@patch("codemap.cli.gen_cmd.GenCommand")
-	def test_gen_command_no_process(
-		self,
-		mock_gen_command_class: MagicMock,
-		mock_initialize_processor: MagicMock,
-		mock_config_loader: MagicMock,
-		mock_setup_logging: MagicMock,
-	) -> None:
-		"""Test 'gen' command with --no-process flag."""
-		mock_config_instance = MagicMock(spec=ConfigLoader)
-		mock_config_instance.config = {"gen": {}, "processor": {}}
-		mock_config_loader.return_value = mock_config_instance
-		mock_gen_command_class.return_value = MagicMock(spec=GenCommand)
-
-		result = self.runner.invoke(app, ["gen", "--no-process", str(self.temp_dir / "dummy_code")])
-
-		assert result.exit_code == 0
-		mock_setup_logging.assert_called_once_with(is_verbose=False)
-		mock_initialize_processor.assert_not_called()
-		mock_gen_command_class.return_value.execute.assert_called_once()
-
-	@patch("codemap.cli.gen_cmd.setup_logging")
-	@patch("codemap.cli.gen_cmd.ConfigLoader")
-	@patch("codemap.cli.gen_cmd.initialize_processor")  # Still need to patch
 	@patch("codemap.cli.gen_cmd.GenCommand")
 	def test_gen_command_cli_overrides(
 		self,
 		mock_gen_command_class: MagicMock,
-		_mock_init_proc: MagicMock,
 		mock_config_loader: MagicMock,
 		_mock_setup_logging: MagicMock,
 	) -> None:
@@ -187,12 +158,10 @@ class TestGenCommand(FileSystemTestBase):
 
 	@patch("codemap.cli.gen_cmd.setup_logging")
 	@patch("codemap.cli.gen_cmd.ConfigLoader")
-	@patch("codemap.cli.gen_cmd.initialize_processor")
 	@patch("codemap.cli.gen_cmd.GenCommand")
 	def test_gen_command_invalid_lod(
 		self,
 		mock_gen_command_class: MagicMock,
-		_mock_init_proc: MagicMock,
 		mock_config_loader: MagicMock,
 		_mock_setup_logging: MagicMock,
 	) -> None:
@@ -209,14 +178,12 @@ class TestGenCommand(FileSystemTestBase):
 
 	@patch("codemap.cli.gen_cmd.setup_logging")
 	@patch("codemap.cli.gen_cmd.ConfigLoader")
-	@patch("codemap.cli.gen_cmd.initialize_processor")
 	@patch("codemap.cli.gen_cmd.GenCommand")
 	@patch("codemap.cli.gen_cmd.exit_with_error")  # Mock exit helper
 	def test_gen_command_gen_error(
 		self,
 		mock_exit_with_error: MagicMock,
 		mock_gen_command_class: MagicMock,
-		_mock_init_proc: MagicMock,
 		mock_config_loader: MagicMock,
 		_mock_setup_logging: MagicMock,
 	) -> None:

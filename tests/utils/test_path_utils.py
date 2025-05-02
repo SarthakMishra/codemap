@@ -85,17 +85,16 @@ class TestPathUtils(FileSystemTestBase):
 		"""Test get_git_root when no .git directory is found."""
 		start_path = self.temp_dir / "not_a_repo"
 		start_path.mkdir(parents=True)
-		result = find_project_root(start_path)
-		assert result is None
+		with pytest.raises(FileNotFoundError):
+			find_project_root(start_path)
 
 	def test_get_git_root_at_root(self) -> None:
 		"""Test get_git_root starting from the filesystem root."""
 		# This test might behave differently depending on the OS and permissions
 		# It primarily tests the loop termination condition
 		root_path = Path("/")
-		result = find_project_root(root_path)
-		# We expect None unless the filesystem root itself is a git repo (unlikely)
-		assert result is None
+		with pytest.raises(FileNotFoundError):
+			find_project_root(root_path)
 
 
 @pytest.mark.skipif(pathspec is None, reason="pathspec package not installed")

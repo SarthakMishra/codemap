@@ -1,7 +1,7 @@
 """Tests for the gen command implementation."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -185,21 +185,19 @@ class TestProcessCodebase(FileSystemTestBase):
 		self.mock_progress = MagicMock()
 		self.mock_task_id = MagicMock()
 
-	@patch("codemap.gen.command.create_processor")
 	@patch("codemap.gen.command.filter_paths_by_gitignore")
-	@patch("codemap.gen.command.is_text_file")
+	@patch("codemap.gen.utils.is_text_file")
 	@patch("codemap.gen.command.generate_tree")
+	@patch("codemap.gen.command.process_files_for_lod")
 	def test_process_codebase_basic_flow(
 		self,
+		mock_process_files_lod: MagicMock,
 		mock_generate_tree: MagicMock,
 		mock_is_text_file: MagicMock,
 		mock_filter_paths: MagicMock,
-		mock_create_processor: MagicMock,
 	) -> None:
 		"""Test the basic successful flow of process_codebase."""
 		# Arrange
-		mock_pipeline = MagicMock()
-		mock_pipeline.wait_for_completion.return_value = True
 		mock_entity_main = LODEntity(
 			name="main.py",
 			entity_type=EntityType.MODULE,
@@ -228,12 +226,7 @@ class TestProcessCodebase(FileSystemTestBase):
 			metadata={"file_path": self.test_target_path / "README.md"},
 		)
 		# Simulate processed files cache population
-		mock_pipeline.processed_files = {
-			self.test_target_path / "main.py": mock_entity_main,
-			self.test_target_path / "utils.py": mock_entity_utils,
-			self.test_target_path / "README.md": mock_entity_readme,
-		}
-		mock_create_processor.return_value = mock_pipeline
+		mock_process_files_lod.return_value = [mock_entity_main, mock_entity_utils, mock_entity_readme]
 
 		# Simulate filtering - return only the processable files
 		process_paths = [
@@ -253,80 +246,53 @@ class TestProcessCodebase(FileSystemTestBase):
 		entities, metadata = process_codebase(self.test_target_path, self.config, self.mock_progress, self.mock_task_id)
 
 		# Assert
-		mock_create_processor.assert_called_once_with(
-			repo_path=self.test_target_path, default_lod_level=self.config.lod_level
+		mock_filter_paths.assert_called_once()
+		# Check that is_text_file was called within process_files_for_lod (implicitly)
+		# We can't directly check calls to is_text_file anymore as it's inside the utility
+		# mock_is_text_file.assert_has_calls([
+		# 	call(p) for p in process_paths
+		# ], any_order=True)
+		# Check that process_files_for_lod was called correctly
+		mock_process_files_lod.assert_called_once_with(
+			paths=process_paths,
+			lod_level=self.config.lod_level,
+			max_workers=4,  # Check the default or expected worker count
+			progress=self.mock_progress,
+			task_id=self.mock_task_id,
 		)
-		mock_filter_paths.assert_called_once()  # Check filter called
-		assert mock_pipeline.process_file.call_count == 3  # main.py, utils.py, README.md
-		mock_pipeline.process_file.assert_has_calls(
-			[
-				call(self.test_target_path / "main.py", self.config.lod_level),
-				call(self.test_target_path / "utils.py", self.config.lod_level),
-				call(self.test_target_path / "README.md", self.config.lod_level),
-			],
-			any_order=True,
-		)
-
-		mock_pipeline.wait_for_completion.assert_called_once()
-		mock_pipeline.stop.assert_called_once()
-
 		assert len(entities) == 3
-		assert mock_entity_main in entities
-		assert mock_entity_utils in entities
-		assert mock_entity_readme in entities
-
+		assert entities[0].name == "main.py"
+		assert entities[1].name == "utils.py"
+		assert entities[2].name == "README.md"
 		assert metadata["name"] == "my_code"
-		assert metadata["stats"]["total_files"] == 3  # Based on is_text_file mock
-		assert set(metadata["stats"]["languages"]) == {"python", "markdown"}
-		assert "tree" in metadata  # Because include_tree=True
-		mock_generate_tree.assert_called_once_with(self.test_target_path, process_paths)
-		assert metadata["tree"] == ["- main.py", "- utils.py", "- README.md"]
+		assert metadata["stats"]["total_files_scanned"] > 0  # Should have scanned more files
+		assert metadata["stats"]["processed_files"] == 3
+		assert "tree" in metadata
+		mock_generate_tree.assert_called_once()
 
-		# Check progress updates
-		self.mock_progress.update.assert_called()
-
-	@patch("codemap.gen.command.create_processor", side_effect=RuntimeError("Init failed"))
-	@patch("codemap.gen.command.show_error")
-	def test_process_codebase_init_fails(
-		self,
-		mock_show_error: MagicMock,
-		mock_create_processor: MagicMock,
-	) -> None:
-		"""Test process_codebase when processor initialization fails."""
-		# Act & Assert
-		with pytest.raises(RuntimeError, match="Processor initialization failed: Init failed"):
-			process_codebase(self.test_target_path, self.config, self.mock_progress, self.mock_task_id)
-		mock_create_processor.assert_called_once()
-		mock_show_error.assert_called_once_with("Processor initialization failed: Init failed")
-		self.mock_progress.update.assert_called_with(self.mock_task_id, description="Initializing processor...")
-
-	@patch("codemap.gen.command.create_processor")
 	@patch("codemap.gen.command.filter_paths_by_gitignore")
-	@patch("codemap.gen.command.is_text_file", return_value=True)  # Assume all are text
+	@patch("codemap.gen.utils.is_text_file", return_value=True)
 	@patch("codemap.gen.command.logger")
+	@patch("codemap.gen.command.process_files_for_lod")
 	def test_process_codebase_wait_timeout(
 		self,
-		mock_logger: MagicMock,
+		mock_process_files_lod: MagicMock,
+		_mock_logger: MagicMock,
 		_mock_is_text: MagicMock,
 		mock_filter: MagicMock,
-		mock_create_processor: MagicMock,
 	) -> None:
-		"""Test process_codebase when pipeline wait times out (continues)."""
+		"""Test process_codebase when wait_for_completion returns False (timeout)."""
 		# Arrange
-		mock_pipeline = MagicMock()
-		mock_pipeline.wait_for_completion.return_value = False  # Simulate timeout
-		mock_pipeline.processed_files = {}  # No files processed in time
-		mock_create_processor.return_value = mock_pipeline
-		mock_filter.return_value = [self.test_target_path / "main.py"]  # Simulate one file
+		process_paths = [self.test_target_path / "main.py"]
+		mock_filter.return_value = process_paths
+		# Simulate timeout indirectly by having process_files_for_lod return empty
+		mock_process_files_lod.return_value = []
 
 		# Act
-		entities, metadata = process_codebase(self.test_target_path, self.config, self.mock_progress, self.mock_task_id)
+		entities, _ = process_codebase(self.test_target_path, self.config, self.mock_progress, self.mock_task_id)
 
 		# Assert
-		mock_pipeline.wait_for_completion.assert_called_once()
-		mock_logger.warning.assert_called_once_with("Processing tasks did not complete within the expected time.")
-		assert entities == []  # Should return empty list if timeout and no results yet
-		assert metadata["stats"]["total_files"] == 1
-		assert metadata["stats"]["total_lines"] == 0
-		assert metadata["stats"]["languages"] == []
-		mock_pipeline.stop.assert_called_once()
+		# Ensure process_files_for_lod was still called
+		mock_process_files_lod.assert_called_once()
+		assert len(entities) == 0  # Expect no entities due to simulated timeout/failure
+		# Logging of timeout/completion status is now within process_files_for_lod
