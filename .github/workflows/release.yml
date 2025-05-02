@@ -23,8 +23,6 @@ jobs:
   release:
     name: Semantic Release
     runs-on: ubuntu-latest
-    # Only run release job on push events to main/dev, not on pull requests
-    if: github.event_name == 'push'
     outputs:
       released: ${{ steps.semantic.outputs.released }}
       version: ${{ steps.semantic.outputs.version }}
