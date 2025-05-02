@@ -14,7 +14,7 @@ from codemap.utils.path_utils import get_cache_path
 logger = logging.getLogger(__name__)
 
 # Define a default filename within the component's cache directory
-DEFAULT_DB_FILE_NAME = "codemap_graph.db"
+DEFAULT_DB_FILE_NAME = "graph.db"
 
 
 class KuzuManager:
@@ -34,7 +34,7 @@ class KuzuManager:
 		"""
 		if db_path is None:
 			# Use utility to get the graph cache directory
-			graph_cache_dir = get_cache_path("graph")
+			graph_cache_dir = get_cache_path()
 			# Ensure the directory exists
 			ensure_directory_exists(graph_cache_dir)
 			# Construct the full path
@@ -115,26 +115,21 @@ class KuzuManager:
 	def _create_table_if_not_exists(self, create_statement: str, table_name: str) -> None:
 		"""Helper to create a table only if it doesn't exist."""
 		# Kuzu doesn't have explicit "IF NOT EXISTS" for CREATE TABLE
-		# We need to check if the table exists by querying system tables or trying to query the table
-		# Simple approach: Try to query, if it fails with a specific error, create it.
-		# More robust: Query SHOW TABLES; (check Kuzu documentation for exact system query)
+		# Attempt to create the table directly. If it fails because it already
+		# exists (or for other reasons), log the error but continue.
 		try:
-			# Check if table exists by trying a simple query
-			# Adjust this query based on actual table primary key or structure
-			check_query = f"MATCH (n:{table_name}) RETURN n LIMIT 1;"
-			self.execute_query(check_query)
-			logger.debug(f"Table {table_name} already exists.")
-		except Exception as e:
-			# Check if the error indicates the table doesn't exist
-			# This error message might change between Kuzu versions!
-			if f"Table {table_name} does not exist." in str(e):
-				logger.info(f"Table {table_name} does not exist. Creating table...")
-				self.execute_query(create_statement)
-				logger.info(f"Successfully created table {table_name}.")
+			self.execute_query(create_statement)
+			logger.info(f"Successfully created or verified table {table_name}.")
+		except (RuntimeError, ValueError) as e:
+			# Kuzu might throw different errors. Check if the error indicates it already exists.
+			# This check is brittle and depends on Kuzu's error messages.
+			# Example checks (adapt based on actual Kuzu error messages):
+			if "already exists" in str(e).lower() or "Catalog exception" in str(e):
+				logger.debug(f"Table {table_name} likely already exists: {e}")
 			else:
-				# Re-raise other unexpected errors
-				logger.exception(f"Unexpected error checking table {table_name}")
-				raise
+				# Log other creation errors more visibly but don't necessarily stop schema creation
+				logger.warning(f"Could not create or verify table {table_name}. Error: {e}")
+				# Depending on severity, you might choose to raise e here
 
 	def ensure_schema(self) -> None:
 		"""Define and ensure the graph schema exists in KuzuDB."""
@@ -249,8 +244,17 @@ class KuzuManager:
 			"docstring": docstring if docstring else "",
 			"content_summary": content_summary if content_summary else "",
 		}
-		query_node = "MERGE (e:CodeEntity {entity_id: $entity_id}) SET e += $props"
-		self.execute_query(query_node, {"entity_id": entity_id, "props": entity_props})
+		# Correct SET clause for Kuzu - list properties individually
+		set_clauses = []
+		query_params = {"entity_id": entity_id}
+		for key, value in entity_props.items():
+			if key != "entity_id":  # Don't set the primary key
+				set_clauses.append(f"e.{key} = ${key}")
+				query_params[key] = value
+
+		set_string = ", ".join(set_clauses)
+		query_node = f"MERGE (e:CodeEntity {{entity_id: $entity_id}}) SET {set_string}"
+		self.execute_query(query_node, query_params)
 
 		# Add CONTAINS_ENTITY relationship (File -> Entity)
 		# Only for top-level entities (where parent_entity_id is None)
@@ -297,15 +301,22 @@ class KuzuManager:
 		"""Add a generic relationship between two entities."""
 		# Basic MERGE - assumes relationship doesn't have its own unique properties to match on
 		# If relationships need updates based on properties, logic needs refinement
-		prop_str = "" if not properties else " { " + ", ".join([f"{k}: ${k}" for k in properties]) + " }"
-		query = (
-			f"MATCH (a:CodeEntity {{entity_id: $from_id}}), (b:CodeEntity {{entity_id: $to_id}}) "
-			f"MERGE (a)-[r:{rel_type}{prop_str}]->(b)"
-		)
-
+		prop_set_clauses = []
 		params = {"from_id": from_entity_id, "to_id": to_entity_id}
 		if properties:
-			params.update(properties)
+			for k, v in properties.items():
+				prop_set_clauses.append(f"r.{k} = ${k}")
+				params[k] = v
+
+		prop_set_string = (", ".join(prop_set_clauses)) if prop_set_clauses else ""  # Join properties
+
+		query = (
+			f"MATCH (a:CodeEntity {{entity_id: $from_id}}), (b:CodeEntity {{entity_id: $to_id}}) "
+			f"MERGE (a)-[r:{rel_type}]->(b)"
+			f" SET {prop_set_string}"
+			if prop_set_string
+			else ""  # Add SET clause only if properties exist
+		)
 
 		self.execute_query(query, params)
 

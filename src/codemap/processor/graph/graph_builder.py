@@ -139,7 +139,6 @@ class GraphBuilder:
 				return False
 
 			# Determine language based on file extension
-			file_ext = file_path.suffix.lower()
 			language = get_language_by_extension(file_path)
 			if not language:
 				logger.warning(f"Unsupported language for file: {file_path}")
@@ -155,14 +154,24 @@ class GraphBuilder:
 			# Parse file with TreeSitter
 			rel_file_path = file_path.relative_to(self.repo_path).as_posix()
 			analysis_result = self.analyzer.analyze_file(file_path, content, language)
-			if not analysis_result.get("success", False) or not analysis_result.get("children"):
+
+			# Check if analysis failed
+			if not analysis_result.get("success", False):
+				logger.warning(f"Analysis failed for file: {file_path}. Error: {analysis_result.get('error')}")
+				# Decide if we should still add the file node even if analysis fails
+				# For now, let's return False to indicate processing wasn't fully successful
+				return False
+
+			# Check if entities were found (even if analysis succeeded, might be empty file)
+			entities = analysis_result.get("children", [])
+			if not entities:
 				logger.warning(f"No entities found in file: {file_path}")
-				# Still add the file to track it, even if no entities found
-				self.kuzu_manager.add_code_file(rel_file_path, git_hash or "", file_ext)
-				return True
+				# Add the file node even if no entities found, to track its existence
+				self.kuzu_manager.add_code_file(rel_file_path, git_hash or "", language)
+				return True  # Return True as the file node was added
 
 			# Add file to graph DB
-			self.kuzu_manager.add_code_file(rel_file_path, git_hash or "", file_ext)
+			self.kuzu_manager.add_code_file(rel_file_path, git_hash or "", language)
 
 			# Calculate community ID (file level)
 			# This uses a simple directory-based approach
@@ -200,7 +209,6 @@ class GraphBuilder:
 
 			# Process all entities in the analysis result
 			# Convert to the right format for our _process_entity_recursive method
-			entities = analysis_result.get("children", [])
 			for entity in entities:
 				# Transform the entity into the expected format
 				transformed_entity = self._transform_entity(entity)
