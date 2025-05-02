@@ -1,153 +1,132 @@
 """Module for synchronizing Git state with the KuzuDB graph."""
 
 import logging
-import subprocess
 from pathlib import Path
 
 from codemap.processor.graph.graph_builder import GraphBuilder
 from codemap.processor.graph.kuzu_manager import KuzuManager
+from codemap.processor.utils.git_utils import get_git_tracked_files
+from codemap.processor.utils.path_utils import get_workspace_root
+from codemap.processor.utils.sync_utils import compare_states
 
 logger = logging.getLogger(__name__)
 
-# Constants for git operations
-GIT_TRACKED_STAGE = "0"  # Stage 0 means file is tracked and not in conflict
-GIT_CMD = "/usr/bin/git"  # Full path to git binary for security
-MIN_LS_FILE_PARTS = 4  # Minimum number of parts in ls-files output
+# Removed constants related to Git commands
 
 
 class GraphSynchronizer:
 	"""Compares Git state with KuzuDB and updates the graph."""
 
-	def __init__(self, repo_path: Path, kuzu_manager: KuzuManager, graph_builder: GraphBuilder) -> None:
+	def __init__(self, repo_path: Path | None, kuzu_manager: KuzuManager, graph_builder: GraphBuilder) -> None:
 		"""
 		Initialize the synchronizer with repository and database connections.
 
 		Args:
-		        repo_path: Path to the repository root
-		        kuzu_manager: Manager for KuzuDB operations
-		        graph_builder: Builder for creating graph entities
-
+			repo_path (Path | None): Path to the repository root. If None, it's determined.
+			kuzu_manager (KuzuManager): Manager for KuzuDB operations.
+			graph_builder (GraphBuilder): Builder for creating graph entities.
 		"""
-		self.repo_path = repo_path
+		if repo_path is None:
+			try:
+				self.repo_path = get_workspace_root()
+			except FileNotFoundError:
+				logger.exception("GraphSynchronizer init failed: Could not determine repository path.")
+				raise
+		else:
+			self.repo_path = repo_path
+
 		self.kuzu_manager = kuzu_manager
 		self.graph_builder = graph_builder
-
-	def get_current_files(self) -> set[str]:
-		"""Get current tracked files in the Git repository."""
-		try:
-			# Using a full path to git executable for security
-			result = subprocess.run(  # noqa: S603
-				[GIT_CMD, "ls-files"],
-				cwd=self.repo_path,
-				capture_output=True,
-				text=True,
-				check=True,
-			)
-			files = set(result.stdout.splitlines())
-			logger.debug(f"Found {len(files)} tracked files in Git repository")
-			return files
-		except subprocess.CalledProcessError:
-			logger.exception("Failed to get Git tracked files")
-			return set()
-
-	def get_file_git_hash(self, file_path: str) -> str:
-		"""Get Git hash (blob ID) for a specific file."""
-		try:
-			# Using ls-files with --stage shows the hash
-			result = subprocess.run(  # noqa: S603
-				[GIT_CMD, "ls-files", "--stage", file_path],
-				cwd=self.repo_path,
-				capture_output=True,
-				text=True,
-				check=True,
-			)
-
-			# Parse the output to extract the hash
-			for line in result.stdout.splitlines():
-				parts = line.split()
-				# Expected format: <mode> <hash> <stage>\t<path>
-				if len(parts) >= MIN_LS_FILE_PARTS:
-					# Stage 0 usually means the file is tracked and not in conflict
-					stage = parts[2]
-					if stage == GIT_TRACKED_STAGE:
-						return parts[1]
-
-			logger.warning(f"Could not find git hash for file: {file_path}")
-			return ""
-		except subprocess.CalledProcessError:
-			logger.exception(f"Failed to get Git hash for file {file_path}")
-			return ""
+		logger.info(f"GraphSynchronizer initialized for repo: {self.repo_path}")
 
 	def sync_graph(self) -> bool:
-		"""Synchronize the KuzuDB graph with current Git state."""
+		"""
+		Synchronize the KuzuDB graph with current Git state.
+
+		Returns:
+			bool: True if synchronization was successful (or not needed),
+				  False otherwise.
+		"""
+		logger.info(f"Starting graph synchronization for: {self.repo_path}")
+
+		# 1. Get current Git state (files and hashes)
+		logger.debug("Fetching current Git state...")
+		current_git_files = get_git_tracked_files(self.repo_path)
+		if current_git_files is None:
+			logger.error("Synchronization failed: Could not get Git tracked files.")
+			return False
+		logger.debug(f"Found {len(current_git_files)} files in Git.")
+
+		# 2. Get KuzuDB state (files and hashes)
+		logger.debug("Fetching current KuzuDB state...")
 		try:
-			logger.info("Starting graph synchronization...")
-			# Step 1: Get current files in Git
-			git_files = self.get_current_files()
+			db_file_hashes = self.kuzu_manager.get_all_file_hashes()
+			logger.debug(f"Found {len(db_file_hashes)} files represented in KuzuDB.")
+		except Exception:
+			logger.exception("Synchronization failed: Could not get file hashes from KuzuDB.")
+			return False
 
-			# Step 2: Get current files already in KuzuDB with their hashes
-			db_files = self.kuzu_manager.get_all_file_hashes()
+		# 3. Compare states
+		logger.debug("Comparing Git state with KuzuDB state...")
+		files_to_add, files_to_update, files_to_delete = compare_states(current_git_files, db_file_hashes)
 
-			# Step 3: Find files to add/update and remove
-			file_paths_to_update = set()
-			file_paths_to_remove = set()
+		total_changes = len(files_to_add) + len(files_to_update) + len(files_to_delete)
+		if total_changes == 0:
+			logger.info("Graph database is already up-to-date.")
+			return True
 
-			# Add/update files that are in Git but not in DB or have different hash
-			for file_path in git_files:
-				if file_path not in db_files:
-					# New file, need to add
-					file_paths_to_update.add(file_path)
-				else:
-					# Check if hash changed
-					git_hash = self.get_file_git_hash(file_path)
-					db_hash = db_files[file_path]
-					if git_hash != db_hash and git_hash:
-						# Hash changed, need to update
-						file_paths_to_update.add(file_path)
+		log_message = (
+			f"Synchronization required: {len(files_to_add)} to add, "
+			f"{len(files_to_update)} to update, {len(files_to_delete)} to delete."
+		)
+		logger.info(log_message)
 
-			# Remove files that are in DB but no longer in Git
-			for file_path in db_files:
-				if file_path not in git_files:
-					file_paths_to_remove.add(file_path)
+		# 4. Process deletions
+		if files_to_delete:
+			logger.info(f"Deleting data for {len(files_to_delete)} files from KuzuDB...")
+			deleted_count = 0
+			errors_deleting = 0
+			for file_path in files_to_delete:
+				try:
+					self.kuzu_manager.delete_file_data(file_path)
+					deleted_count += 1
+				except Exception:
+					logger.exception(f"Failed to delete data for file: {file_path}")
+					errors_deleting += 1
+			logger.info(f"Finished deleting files. Deleted: {deleted_count}, Errors: {errors_deleting}")
+			if errors_deleting > 0:
+				logger.warning("Some errors occurred during file data deletion.")
 
-			# Step 4: Process updates and removals
-			if not file_paths_to_update and not file_paths_to_remove:
-				logger.info("No changes detected. Graph is up to date.")
-				return True
-
-			# Update files in graph
-			for file_path in file_paths_to_update:
-				git_hash = self.get_file_git_hash(file_path)
+		# 5. Process additions and updates
+		files_to_process = files_to_add.union(files_to_update)
+		if files_to_process:
+			logger.info(f"Processing {len(files_to_process)} files for graph updates...")
+			processed_count = 0
+			errors_processing = 0
+			for i, file_path_str in enumerate(files_to_process):
+				git_hash = current_git_files.get(file_path_str)
 				if not git_hash:
-					continue  # Skip if we couldn't get a hash
-
-				full_path = self.repo_path / file_path
-				if not full_path.exists() or not full_path.is_file():
-					logger.warning(f"File not found or not a regular file: {full_path}")
+					logger.error(f"Consistency error: Cannot find hash for file to process: {file_path_str}. Skipping.")
+					errors_processing += 1
 					continue
 
-				# First remove any existing data for this file
-				if file_path in db_files:
-					self.kuzu_manager.delete_file_data(file_path)
+				logger.debug(f"Processing file {i + 1}/{len(files_to_process)}: {file_path_str}")
+				try:
+					file_path_obj = self.repo_path / file_path_str
+					success = self.graph_builder.process_file(file_path_obj, git_hash)
+					if success:
+						processed_count += 1
+					else:
+						logger.warning(f"Failed to process file: {file_path_str}")
+						errors_processing += 1
+				except Exception:
+					logger.exception(f"Error processing file: {file_path_str}")
+					errors_processing += 1
 
-				# Then add the current version
-				success = self.graph_builder.process_file(full_path, git_hash)
-				if success:
-					logger.info(f"Updated file in graph: {file_path}")
-				else:
-					logger.warning(f"Failed to update file in graph: {file_path}")
+			logger.info(f"Finished processing files. Processed: {processed_count}, Errors: {errors_processing}")
+			if errors_processing > 0:
+				logger.error("Synchronization completed with errors during file processing.")
+				return False
 
-			# Remove files from graph
-			for file_path in file_paths_to_remove:
-				self.kuzu_manager.delete_file_data(file_path)
-				logger.info(f"Removed file from graph: {file_path}")
-
-			# Log a summary of the changes
-			logger.info(
-				f"Graph synchronization completed. "
-				f"Updated: {len(file_paths_to_update)}, Removed: {len(file_paths_to_remove)}"
-			)
-			return True
-		except Exception:
-			logger.exception("Failed during graph synchronization")
-			return False
+		logger.info("Graph synchronization finished successfully.")
+		return True

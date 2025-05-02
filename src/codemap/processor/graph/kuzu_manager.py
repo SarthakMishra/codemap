@@ -8,38 +8,54 @@ import kuzu
 from kuzu import QueryResult
 
 from codemap.processor.tree_sitter.base import EntityType
+from codemap.processor.utils.file_utils import ensure_directory_exists
+from codemap.processor.utils.path_utils import get_cache_path
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_DB_PATH = ".codemap_cache/graph_db/codemap_graph.kuzu"
+# Define a default filename within the component's cache directory
+DEFAULT_DB_FILE_NAME = "codemap_graph.db"
 
 
 class KuzuManager:
 	"""Manages the KuzuDB instance, schema, and data operations."""
 
-	def __init__(self, db_path: str = DEFAULT_DB_PATH) -> None:
+	def __init__(self, db_path: str | None = None) -> None:
 		"""
 		Initialize the KuzuManager with a database path.
 
-		Args:
-		        db_path: Path to the KuzuDB database file. Defaults to DEFAULT_DB_PATH.
+		If db_path is None, it defaults to a standard location within the
+		.codemap_cache directory.
 
+		Args:
+			db_path (Optional[str]): Path to the KuzuDB database file.
+									 Defaults to None.
 		"""
-		self.db_path = db_path
+		if db_path is None:
+			# Use utility to get the graph cache directory
+			graph_cache_dir = get_cache_path("graph")
+			# Ensure the directory exists
+			ensure_directory_exists(graph_cache_dir)
+			# Construct the full path
+			self.db_path = str(graph_cache_dir / DEFAULT_DB_FILE_NAME)
+			logger.info(f"No DB path provided, using default: {self.db_path}")
+		else:
+			# If a path is provided, ensure its directory exists
+			db_file_path = Path(db_path)
+			ensure_directory_exists(db_file_path.parent)
+			self.db_path = db_path
+			logger.info(f"Using provided DB path: {self.db_path}")
+
 		self.db: kuzu.Database | None = None
 		self.conn: kuzu.Connection | None = None
-		self._ensure_db_directory()
-		self._connect()
-		self.ensure_schema()
-
-	def _ensure_db_directory(self) -> None:
-		"""Ensure the directory for the KuzuDB database file exists."""
-		db_dir = Path(self.db_path).parent
-		if not db_dir.exists():
-			logger.info(f"Creating KuzuDB directory: {db_dir}")
-			db_dir.mkdir(parents=True, exist_ok=True)
-		# Ensure the directory is added to .gitignore (or handled by a global .codemap_cache entry)
-		# Ideally, add ".codemap_cache/" to the main .gitignore
+		try:
+			self._connect()
+			self.ensure_schema()
+		except Exception:
+			logger.exception(f"Failed to initialize KuzuManager at {self.db_path}")
+			# Ensure partial connections are cleaned up
+			self.close()
+			raise  # Re-raise the exception
 
 	def _connect(self) -> None:
 		"""Establish connection to the KuzuDB database."""
