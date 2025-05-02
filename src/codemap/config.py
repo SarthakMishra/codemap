@@ -48,6 +48,11 @@ DEFAULT_CONFIG = {
 		],
 		# Default LOD level for processing
 		"default_lod_level": "signatures",
+		# Vector database configuration
+		"vector": {
+			"summarize_bodies": False,  # Whether to summarize function/method bodies
+			"min_body_length_for_summary": 1000,  # Minimum characters to trigger summarization
+		},
 	},
 	# Commit feature configuration
 	"commit": {
