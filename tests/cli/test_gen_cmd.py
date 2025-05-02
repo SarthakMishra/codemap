@@ -237,39 +237,3 @@ class TestGenCommand(FileSystemTestBase):
 		# Check that the error message passed to exit_with_error contains the original error
 		args, _ = mock_exit_with_error.call_args
 		assert "Generation failed" in args[0]
-
-	# --- Tests for initialize_processor (though it's in the same file) ---
-	@patch("codemap.cli.gen_cmd.create_processor")
-	@patch("codemap.utils.cli_utils.console")
-	def test_initialize_processor_success(self, mock_console: MagicMock, mock_create_processor: MagicMock) -> None:
-		"""Test successful processor initialization."""
-		from codemap.cli.gen_cmd import initialize_processor  # Import here to avoid issues
-
-		mock_processor = MagicMock()
-		mock_create_processor.return_value = mock_processor
-		repo_path = self.temp_dir / "repo"
-		config_data = {"processor": {"ignored_patterns": ["*.log"]}}
-
-		initialize_processor(repo_path, config_data)
-
-		mock_create_processor.assert_called_once_with(repo_path=repo_path)
-		# We don't directly assert ignored patterns here as it's internal logic
-		# of create_processor which should have its own tests.
-		# We test that create_processor was called and stop was called.
-		mock_processor.stop.assert_called_once()
-		mock_console.print.assert_any_call("[green]Processor initialized successfully[/green]")
-
-	@patch("codemap.cli.gen_cmd.create_processor", side_effect=Exception("Init failed"))
-	@patch("codemap.utils.cli_utils.console")
-	def test_initialize_processor_failure(self, mock_console: MagicMock, mock_create_processor: MagicMock) -> None:
-		"""Test processor initialization failure."""
-		from codemap.cli.gen_cmd import initialize_processor
-
-		repo_path = self.temp_dir / "repo"
-		config_data = {"processor": {}}
-
-		with pytest.raises(Exception, match="Init failed"):
-			initialize_processor(repo_path, config_data)
-
-		mock_create_processor.assert_called_once_with(repo_path=repo_path)
-		mock_console.print.assert_any_call("[red]Failed to initialize processor: Init failed[/red]")

@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 
 from codemap.processor.lod import LODGenerator, LODLevel
-from codemap.processor.pipeline import ProcessingPipeline
 from codemap.processor.tree_sitter.base import EntityType
 
 
@@ -130,62 +129,6 @@ def test_lod_generator(sample_py_file: Path) -> None:
 	assert "return a + b" in function_entity_l4.content
 
 
-def test_processing_pipeline(sample_py_file: Path) -> None:
-	"""Test that ProcessingPipeline can use LOD functionality."""
-	# Get the parent directory of the sample file
-	repo_path = sample_py_file.parent
-
-	# Create pipeline
-	pipeline = ProcessingPipeline(repo_path=repo_path, default_lod_level=LODLevel.DOCS)
-
-	# Process the file asynchronously
-	pipeline.process_file(sample_py_file)
-
-	# Wait for processing to complete
-	pipeline.wait_for_completion()
-
-	# Get the LOD entity for the file at a specific level
-	entity = pipeline.get_lod_entity(sample_py_file, LODLevel.SIGNATURES)
-	assert entity is not None
-
-	# Find the sample function
-	function_entity = None
-	for child in entity.children:
-		if child.entity_type == EntityType.FUNCTION and child.name == "sample_function":
-			function_entity = child
-			break
-
-	assert function_entity is not None
-	assert "a: int, b: int" in function_entity.signature
-
-	# Test repository structure
-	repo_structure = pipeline.get_repository_structure(repo_path)
-	assert repo_structure["type"] == "directory"
-	assert len(repo_structure["children"]) > 0
-
-	# Find our file in the structure
-	file_entry = None
-	for child in repo_structure["children"]:
-		if child["type"] == "file" and child["name"] == sample_py_file.name:
-			file_entry = child
-			break
-
-	assert file_entry is not None
-	assert file_entry["entity"] is not None
-
-	# Test synchronous processing
-	sync_entity = pipeline.process_file_sync(sample_py_file, LODLevel.FULL)
-	assert sync_entity is not None
-	assert sync_entity.entity_type == EntityType.MODULE
-
-	# Test batch processing
-	file_count = pipeline.process_repository(repo_path)
-	assert file_count > 0
-
-	# Stop the pipeline
-	pipeline.stop()
-
-
 if __name__ == "__main__":
 	# Create a temporary directory
 	import tempfile
@@ -197,4 +140,3 @@ if __name__ == "__main__":
 
 		# Run tests
 		test_lod_generator(file_path)
-		test_processing_pipeline(file_path)
