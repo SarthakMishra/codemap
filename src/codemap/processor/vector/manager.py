@@ -32,19 +32,21 @@ def _raise_embedding_error(message: str) -> Never:
 	raise ValueError(message)
 
 
-def synchronize_vectors(repo_path: Path | None = None) -> None:
+def synchronize_vectors(repo_path: Path | None = None, current_git_files: GitFileInfo | None = None) -> None:
 	"""
-	Synchronizes the Milvus vector database with the current Git state.
+	Synchronizes the Milvus vector database with the provided Git state.
 
-	1. Gets current tracked files and hashes from Git.
-	2. Gets existing file paths and hashes from Milvus.
-	3. Determines files to add, update, or delete.
-	4. Processes changes: chunks, embeds, and updates Milvus.
+	1. Gets existing file paths and hashes from Milvus.
+	2. Determines files to add, update, or delete based on provided Git state.
+	3. Processes changes: chunks, embeds, and updates Milvus.
 
 	Args:
-		repo_path (Path | None, optional): The path to the repository root.
-										   If None, attempts to find it automatically.
-										   Defaults to None.
+	        repo_path (Path | None, optional): The path to the repository root.
+	            If None, attempts to find it automatically. Defaults to None.
+	        current_git_files (GitFileInfo | None, optional):
+	            A dictionary mapping file paths to their Git blob hashes.
+	            If None, it will be fetched from the repository.
+
 	"""
 	if repo_path is None:
 		try:
@@ -71,13 +73,16 @@ def synchronize_vectors(repo_path: Path | None = None) -> None:
 
 	logger.info(f"Starting vector synchronization for repository: {repo_path}")
 
-	# 1. Get Git state
-	logger.debug("Fetching current Git state...")
-	current_git_files = get_git_tracked_files(repo_path)
+	# 1. Get Git state (use provided or fetch)
 	if current_git_files is None:
-		logger.error("Synchronization failed: Could not get Git tracked files.")
-		return
-	logger.debug(f"Found {len(current_git_files)} files in Git.")
+		logger.debug("Fetching current Git state...")
+		current_git_files = get_git_tracked_files(repo_path)
+		if current_git_files is None:
+			logger.error("Synchronization failed: Could not get Git tracked files.")
+			return
+		logger.debug(f"Found {len(current_git_files)} files in Git.")
+	else:
+		logger.debug(f"Using provided Git state with {len(current_git_files)} files.")
 
 	# 2. Get Milvus state
 	logger.debug("Fetching current Milvus state...")
@@ -208,7 +213,9 @@ def _process_files(
 	"""
 	Reads, chunks, embeds, and inserts/updates data for the given files.
 
-	Handles deleting old entries for updated files before inserting new ones.
+	Handles deleting old entries for updated files before inserting new
+	ones.
+
 	"""
 	# First, delete existing entries for files that need updating
 	if files_to_update:
