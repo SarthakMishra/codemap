@@ -21,7 +21,7 @@ def _initialize_milvus_client() -> MilvusClient | None:
 	"""Initializes and returns a new MilvusClient instance."""
 	global _milvus_client  # noqa: PLW0603
 	try:
-		vector_cache_dir = get_cache_path("vector")
+		vector_cache_dir = get_cache_path()
 		ensure_directory_exists(vector_cache_dir)
 		db_file = vector_cache_dir / config.VECTOR_DB_FILE_NAME
 		db_path = str(db_file)

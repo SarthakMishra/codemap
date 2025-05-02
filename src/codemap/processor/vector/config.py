@@ -3,7 +3,7 @@
 # --- Database Configuration ---
 # Removed: VECTOR_DB_DIR_NAME, WORKSPACE_ROOT, VECTOR_DB_PATH
 # These are now handled by path_utils.get_cache_path("vector")
-VECTOR_DB_FILE_NAME = "milvus_vector_db.db"
+VECTOR_DB_FILE_NAME = "vector.db"
 
 # --- Milvus Collection Configuration ---
 COLLECTION_NAME = "codemap_embeddings"
