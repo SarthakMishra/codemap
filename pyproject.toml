@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "codemap"
-version = "2.0.0"
+version = "0.0.0"
 description = "CLI tool that generates optimized markdown docs and streamline Git workflows"
 readme = "README.md"
 source = "https://github.com/SarthakMishra/codemap"
@@ -217,8 +217,11 @@ known_third_party = ["litellm", "numpy", "pygments", "dotenv", "yaml", "question
 version_variables = [
     "src/codemap/__init__.py:__version__"
 ]
+version_toml = [
+    "pyproject.toml:project.version:nf"
+]
+major_on_zero = false
 
-# Branch configuration following the project's Git flow
 # Main branch - stable production releases
 [tool.semantic_release.branches.main]
 match = "^main$"
