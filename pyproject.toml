@@ -161,8 +161,8 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105", "PT019", "ANN001", "D102"]
-"models/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
-"models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
+"ai_models/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
+"ai_models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 "src/codemap/utils/pr_strategies.py" = ["ARG002"]  # Allow unused arguments in strategy interface methods
 
