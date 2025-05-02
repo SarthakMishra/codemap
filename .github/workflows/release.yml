@@ -123,11 +123,10 @@ jobs:
 
       - name: Publish package to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
+        with: {}
           # OIDC (Trusted Publishing) is configured via the job's environment
           # and permissions settings. No user/password required here.
           # Ensure PyPI project has a Trusted Publisher configured for:
           # Workflow: release.yml
           # Environment: pypi
           # See: https://docs.pypi.org/trusted-publishers/
-          skip_existing: true # Optional: Skip if version already exists on PyPI 
