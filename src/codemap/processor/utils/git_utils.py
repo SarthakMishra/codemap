@@ -54,6 +54,7 @@ def get_git_tracked_files(repo_path: Path) -> dict[str, str] | None:
 	Returns:
 	    dict[str, str] | None: A dictionary mapping file paths (relative to repo_path)
 	                          to their Git blob hashes. Returns None on failure.
+
 	"""
 	command = ["git", "ls-files", "-s", "--full-name"]
 	stdout, _, returncode = _run_git_command(command, repo_path)
@@ -99,6 +100,7 @@ def get_file_git_hash(repo_path: Path, file_path: str) -> str | None:
 	Returns:
 	    str | None: The Git blob hash of the file, or None if an error occurs
 	                or the file is not found/tracked.
+
 	"""
 	full_file_path = repo_path / file_path
 	if not full_file_path.is_file():

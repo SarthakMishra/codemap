@@ -30,6 +30,7 @@ def compare_states(
 	        - files_to_add: Set of file paths present in current_files but not db_files.
 	        - files_to_update: Set of file paths present in both, but with different hashes.
 	        - files_to_delete: Set of file paths present in db_files but not current_files.
+
 	"""
 	current_paths = set(current_files.keys())
 	db_paths = set(db_files.keys())
