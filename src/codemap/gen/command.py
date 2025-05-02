@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codemap.processor import LODEntity, create_processor
-from codemap.processor.pipeline import is_text_file
 from codemap.utils.cli_utils import console, show_error
+from codemap.utils.file_utils import is_text_file
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
 from .models import GenConfig
