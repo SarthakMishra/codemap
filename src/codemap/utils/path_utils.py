@@ -138,32 +138,50 @@ def find_project_root(start_path: Path | None = None) -> Path:
 	raise FileNotFoundError(msg)
 
 
-def get_cache_path(component_name: str, workspace_root: Path | None = None) -> Path:
+def get_cache_path(component_name: str | None = None, workspace_root: Path | None = None) -> Path:
 	"""
-	Get the cache path for a specific component (e.g., graph, vector).
+	Get the cache path for a specific component or the root cache directory.
 
 	Args:
-	    component_name (str): The name of the component requiring a cache directory.
+	    component_name (str | None, optional): The name of the component requiring a
+	                                           cache directory (e.g., 'graph', 'vector').
+	                                           If None, the root cache directory path
+	                                           is returned. Defaults to None.
 	    workspace_root (Path | None, optional): The workspace root path.
-	                                            If None, it will be determined automatically.
-	                                            Defaults to None.
+	                                            If None, it will be determined automatically
+	                                            using `find_project_root()`. Defaults to None.
 
 	Returns:
-	    Path: The absolute path to the component's cache directory.
+	    Path: The absolute path to the component's cache directory if `component_name`
+	          is provided, otherwise the absolute path to the root cache directory.
+
+	Raises:
+	    FileNotFoundError: If `workspace_root` is None and `find_project_root()` fails.
+	    # Config related errors might also be raised by ConfigLoader
 
 	"""
 	if workspace_root is None:
 		workspace_root = find_project_root()
 
 	# Get ConfigLoader instance, potentially passing the repo_root
+	# Ensure ConfigLoader handles initialization correctly if called multiple times
 	config_loader = ConfigLoader.get_instance(repo_root=workspace_root)
 
-	# Get cache directory from config, falling back to default
-	cache_dir_name = config_loader.get("cache_dir", DEFAULT_CONFIG["cache_dir"])
+	# Get cache directory name from config, falling back to default
+	# Ensure DEFAULT_CONFIG is accessible here
+	cache_dir_name = config_loader.get("cache_dir", DEFAULT_CONFIG.get("cache_dir", ".codemap_cache"))
 
 	cache_root = workspace_root / cache_dir_name
+
+	if component_name is None:
+		# Ensure the root cache directory exists
+		cache_root.mkdir(parents=True, exist_ok=True)
+		logger.debug(f"Root cache path: {cache_root}")
+		return cache_root
+
+	# Calculate the specific component's cache path
 	component_cache_path = cache_root / component_name
-	# Ensure the cache directory exists
+	# Ensure the component cache directory exists
 	component_cache_path.mkdir(parents=True, exist_ok=True)
 	logger.debug(f"Cache path for component '{component_name}': {component_cache_path}")
 	return component_cache_path
