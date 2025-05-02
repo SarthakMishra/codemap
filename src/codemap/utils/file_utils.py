@@ -61,6 +61,7 @@ def ensure_directory_exists(dir_path: Path) -> None:
 
 	Args:
 	    dir_path (Path): The path to the directory.
+
 	"""
 	if not dir_path.exists():
 		logger.info(f"Creating directory: {dir_path}")

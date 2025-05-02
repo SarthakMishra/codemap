@@ -114,6 +114,7 @@ def find_project_root(start_path: Path | None = None) -> Path:
 	Raises:
 	    FileNotFoundError: If the project root cannot be determined based on
 	                       the presence of the '.git' directory.
+
 	"""
 	if start_path is None:
 		current_dir = Path.cwd()
@@ -149,6 +150,7 @@ def get_cache_path(component_name: str, workspace_root: Path | None = None) -> P
 
 	Returns:
 	    Path: The absolute path to the component's cache directory.
+
 	"""
 	if workspace_root is None:
 		workspace_root = find_project_root()
