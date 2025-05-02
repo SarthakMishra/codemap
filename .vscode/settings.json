@@ -15,5 +15,7 @@
         "**/vendor/**",
         "**/scripts/**",
         "**/typings/**"
-    ]
+    ],
+    "terminal.integrated.suggest.enabled": true,
+    "terminal.integrated.suggest.enableExtensionCompletions": true
 }
