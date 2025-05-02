@@ -1,3 +1,3 @@
 """CodeMap - AI-powered developer toolkit."""
 
-__version__ = "2.1.0-next.1"
+__version__ = "0.1.0-next.1"
