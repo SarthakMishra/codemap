@@ -2,16 +2,9 @@
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np  # Import numpy at the top
 import pytest
 
 from codemap.processor.pipeline import ProcessingPipeline
-
-# Import necessary components from codemap
-# Need to import these later inside the fixture due to patching
-# from codemap.processor.pipeline import ProcessingPipeline
-# from codemap.utils.config_loader import ConfigLoader
-from codemap.processor.vector.schema import config as vector_config
 
 # --- Fixtures ---
 
@@ -33,9 +26,8 @@ def mock_config_loader(mocker):
 	mock_cls = mocker.patch("codemap.processor.pipeline.ConfigLoader")
 	mock_instance = mock_cls.return_value
 	mock_instance.config = {
-		"embedding": {"model_name": "mock-model"},
+		"embedding": {},
 		"graph_db": {"path": "mock_kuzu.db"},  # Example path
-		"vector_db": {"uri": "mock_milvus.db"},  # Example URI
 		# Add other necessary mock config values
 	}
 	return mock_instance  # Return the configured instance
@@ -55,24 +47,9 @@ def mock_kuzu_manager(mocker):
 	mock_instance = mock_cls.return_value
 	mock_instance.execute_query.return_value = []
 	mock_instance.get_all_file_hashes.return_value = {}
+	mock_instance.query_vector_index.return_value = []
+	mock_instance.close = mocker.MagicMock()
 	return mock_instance
-
-
-@pytest.fixture
-def mock_milvus_client(mocker):
-	"""Mocks the get_milvus_client function to return a functional mock."""
-	# Remove spec=MilvusClient to allow setting __bool__
-	mock_client_instance = mocker.MagicMock()
-	mock_client_instance.search.return_value = [[]]
-	mock_client_instance.query_iterator.return_value = iter([])
-	mock_client_instance.has_collection.return_value = True
-	mock_client_instance.release = mocker.MagicMock()
-	mock_client_instance.close = mocker.MagicMock()
-	# IMPORTANT: Ensure boolean check passes
-	mock_client_instance.__bool__ = lambda _self: True
-
-	mocker.patch("codemap.processor.pipeline.get_milvus_client", return_value=mock_client_instance)
-	return mock_client_instance
 
 
 @pytest.fixture
@@ -94,16 +71,10 @@ def mock_graph_synchronizer(mocker):
 
 
 @pytest.fixture
-def mock_synchronize_vectors(mocker):
-	"""Mocks the synchronize_vectors function."""
-	return mocker.patch("codemap.processor.pipeline.synchronize_vectors")
-
-
-@pytest.fixture
 def mock_generate_embeddings(mocker):
 	"""Mocks the generate_embeddings function."""
-	mock = mocker.patch("codemap.processor.pipeline.generate_embeddings")
-	mock.return_value = np.array([0.1, 0.2])  # Default mock embedding
+	mock = mocker.patch("codemap.processor.pipeline.generate_embedding")
+	mock.return_value = [0.1, 0.2]
 	return mock
 
 
@@ -113,10 +84,8 @@ def processing_pipeline(
 	mock_config_loader,  # Use the specific fixture
 	mock_analyzer,  # Use the specific fixture
 	mock_kuzu_manager,  # Use the specific fixture
-	mock_milvus_client,  # Use the specific fixture (patches get_milvus_client)
 	mock_graph_builder,  # Use the specific fixture
 	mock_graph_synchronizer,  # Use the specific fixture
-	mock_synchronize_vectors,  # Use the specific fixture
 	mock_generate_embeddings,  # Use the specific fixture
 	mocker,  # Inject mocker for patching find_project_root
 ):
@@ -131,20 +100,17 @@ def processing_pipeline(
 	# Verify mocks were used correctly during initialization
 	assert pipeline.analyzer is mock_analyzer
 	assert pipeline.kuzu_manager is mock_kuzu_manager
-	assert pipeline.milvus_client is mock_milvus_client
 	assert pipeline.graph_builder is mock_graph_builder
 	assert pipeline.graph_synchronizer is mock_graph_synchronizer
-	assert pipeline.has_vector_db is True  # Crucial check
+	assert pipeline.has_vector_db is True
 
 	# Store mocks in a dictionary for convenience in tests
 	mocks = {
 		"config_loader": mock_config_loader,
 		"analyzer": mock_analyzer,
 		"kuzu_manager": mock_kuzu_manager,
-		"milvus_client": mock_milvus_client,
 		"graph_builder": mock_graph_builder,
 		"graph_synchronizer": mock_graph_synchronizer,
-		"sync_vectors": mock_synchronize_vectors,
 		"generate_embeddings": mock_generate_embeddings,
 	}
 
@@ -162,7 +128,6 @@ def test_pipeline_initialization(processing_pipeline, mock_repo_path) -> None:
 	assert pipeline.config is not None
 	assert pipeline.analyzer is mocks["analyzer"]
 	assert pipeline.kuzu_manager is mocks["kuzu_manager"]
-	assert pipeline.milvus_client is mocks["milvus_client"]
 	assert pipeline.graph_builder is mocks["graph_builder"]
 	assert pipeline.graph_synchronizer is mocks["graph_synchronizer"]
 	assert pipeline.has_vector_db is True
@@ -172,7 +137,6 @@ def test_pipeline_initialization(processing_pipeline, mock_repo_path) -> None:
 	# We primarily care that the instances were assigned
 	# Check sync functions not called due to sync_on_init=False
 	mocks["graph_synchronizer"].sync_graph.assert_not_called()
-	mocks["sync_vectors"].assert_not_called()
 
 
 @patch("codemap.processor.pipeline.find_project_root")
@@ -185,7 +149,6 @@ def test_pipeline_init_finds_root(mock_find_root, mock_repo_path, mocker) -> Non
 		patch("codemap.processor.pipeline.ConfigLoader"),
 		patch("codemap.processor.pipeline.TreeSitterAnalyzer"),
 		patch("codemap.processor.pipeline.KuzuManager"),
-		patch("codemap.processor.pipeline.get_milvus_client"),
 		patch("codemap.processor.pipeline.GraphBuilder"),
 		patch("codemap.processor.pipeline.GraphSynchronizer"),
 		# No need to patch sync_vectors etc. here as sync_on_init=False
@@ -202,16 +165,12 @@ def test_pipeline_sync_databases(processing_pipeline, mocker) -> None:
 	"""Test the sync_databases method coordination."""
 	pipeline, mocks = processing_pipeline
 
-	# Ensure the vector DB flag is True before calling sync (verified in fixture)
-	assert pipeline.has_vector_db is True
-
 	# Setup mock git state
 	git_state = {"file1.py": "hash1", "file2.py": "hash2"}
 	mock_get_git = mocker.patch("codemap.processor.pipeline.get_git_tracked_files", return_value=git_state)
 
 	# Reset the specific mocks we will assert on
 	mocks["graph_synchronizer"].sync_graph.reset_mock()
-	mocks["sync_vectors"].reset_mock()
 
 	# Call the method under test
 	pipeline.sync_databases()
@@ -220,10 +179,6 @@ def test_pipeline_sync_databases(processing_pipeline, mocker) -> None:
 	mock_get_git.assert_called_once_with(pipeline.repo_path)
 	# Assert graph sync was called on the mock instance
 	mocks["graph_synchronizer"].sync_graph.assert_called_once_with(git_state)
-	# Assert vector sync was called (using the mock patch object)
-	mocks["sync_vectors"].assert_called_once()
-	# Optional: Check args passed to synchronize_vectors mock
-	mocks["sync_vectors"].assert_called_once_with(repo_path=pipeline.repo_path, current_git_files=git_state)
 
 
 def test_pipeline_sync_databases_git_fail(processing_pipeline, mocker) -> None:
@@ -235,7 +190,6 @@ def test_pipeline_sync_databases_git_fail(processing_pipeline, mocker) -> None:
 
 	# Reset mocks
 	mocks["graph_synchronizer"].sync_graph.reset_mock()
-	mocks["sync_vectors"].reset_mock()
 
 	# Call the method
 	pipeline.sync_databases()
@@ -244,50 +198,54 @@ def test_pipeline_sync_databases_git_fail(processing_pipeline, mocker) -> None:
 	mock_get_git.assert_called_once_with(pipeline.repo_path)
 	# Sync methods should NOT have been called if git fails
 	mocks["graph_synchronizer"].sync_graph.assert_not_called()
-	mocks["sync_vectors"].assert_not_called()
 
 
 def test_pipeline_semantic_search(processing_pipeline) -> None:
-	"""Test semantic search calls embedder and milvus client."""
+	"""Test semantic search calls embedder and kuzu manager."""
 	# Unpack the tuple returned by the fixture
 	pipeline, mocks = processing_pipeline
 
 	query = "find function"
 	k = 3
-	mock_embedding = np.array([0.5, 0.5, 0.5])
-	search_results_raw = [
-		[  # Milvus returns list of lists of hits
-			{"id": "hit1", "distance": 0.9, "entity": {"field": "value1"}},
-			{"id": "hit2", "distance": 0.8, "entity": {"field": "value2"}},
-		]
+	mock_query_embedding = [0.5, 0.5, 0.5]
+	mock_vector_results = [{"entity_id": "entity1", "distance": 0.9}, {"entity_id": "entity2", "distance": 0.8}]
+	mock_metadata_results = [
+		["entity1", "func_a", "FUNCTION", 10, 20, "def func_a():", "doc a", "summary a", "file1.py"],
+		["entity2", "func_b", "FUNCTION", 30, 40, "def func_b():", "doc b", "summary b", "file2.py"],
 	]
 
 	# Reset mocks to ensure clean test state
 	mocks["generate_embeddings"].reset_mock()
-	mocks["milvus_client"].search.reset_mock()
+	mocks["kuzu_manager"].query_vector_index.reset_mock()
+	mocks["kuzu_manager"].execute_query.reset_mock()
 
 	# Set return values
-	mocks["generate_embeddings"].return_value = mock_embedding
-	mocks["milvus_client"].search.return_value = search_results_raw
+	mocks["generate_embeddings"].return_value = mock_query_embedding
+	mocks["kuzu_manager"].query_vector_index.return_value = mock_vector_results
+	mocks["kuzu_manager"].execute_query.return_value = mock_metadata_results
 
-	# Mock patch the semantic_search method to access generate_embeddings directly
-	with patch("codemap.processor.vector.embedder.generate_embeddings", mocks["generate_embeddings"]):
-		results = pipeline.semantic_search(query, k=k)
+	# Call the method under test
+	results = pipeline.semantic_search(query, k=k)
 
+	assert results is not None
 	assert len(results) == 2
-	assert results[0]["id"] == "hit1"
+	assert results[0]["id"] == "entity1"
 	assert results[0]["distance"] == 0.9
-	assert results[0]["metadata"] == {"field": "value1"}
-	assert results[1]["id"] == "hit2"
+	assert results[0]["metadata"]["name"] == "func_a"
+	assert results[0]["metadata"]["file_path"] == "file1.py"
+	assert results[1]["id"] == "entity2"
+	assert results[1]["metadata"]["name"] == "func_b"
 
-	# Check that Milvus was called with appropriate parameters
-	mocks["milvus_client"].search.assert_called_once()
-	# Check that search parameters contain expected values
-	call_args = mocks["milvus_client"].search.call_args
-	assert call_args is not None
-	_, kwargs = call_args
-	assert kwargs["collection_name"] == vector_config.COLLECTION_NAME
-	assert kwargs["limit"] == k
+	# Check mocks were called
+	mocks["generate_embeddings"].assert_called_once_with(query)
+	mocks["kuzu_manager"].query_vector_index.assert_called_once_with(mock_query_embedding, k)
+	# Check execute_query was called (for metadata)
+	mocks["kuzu_manager"].execute_query.assert_called_once()
+	# Optionally, check the constructed metadata query string if needed
+	metadata_query_call = mocks["kuzu_manager"].execute_query.call_args[0][0]
+	assert "MATCH (e:CodeEntity {entity_id: 'entity1'})" in metadata_query_call
+	assert "UNION MATCH (e:CodeEntity {entity_id: 'entity2'})" in metadata_query_call
+	assert "RETURN e.entity_id, e.name" in metadata_query_call  # Check some return fields
 
 
 def test_pipeline_graph_query(processing_pipeline) -> None:
@@ -300,6 +258,9 @@ def test_pipeline_graph_query(processing_pipeline) -> None:
 	expected_results = [["node1"], ["node2"]]
 	mocks["kuzu_manager"].execute_query.return_value = expected_results
 
+	# Reset mock *after* pipeline init and *before* the call under test
+	mocks["kuzu_manager"].execute_query.reset_mock()
+
 	results = pipeline.graph_query(cypher, params)
 
 	assert results == expected_results
@@ -307,7 +268,7 @@ def test_pipeline_graph_query(processing_pipeline) -> None:
 
 
 def test_graph_enhanced_search(processing_pipeline) -> None:
-	"""Test the graph enhanced search method combining milvus and kuzu."""
+	"""Test the graph enhanced search method combining Kuzu vector search and graph traversal."""
 	# Unpack the tuple returned by the fixture
 	pipeline, mocks = processing_pipeline
 
@@ -315,21 +276,52 @@ def test_graph_enhanced_search(processing_pipeline) -> None:
 	query = "find function calling another function"
 	k = 5
 
-	# Mock semantic search results
+	# Mock semantic search results (new format)
 	semantic_results = [
-		{"id": "hit1", "distance": 0.9, "metadata": {"kuzu_entity_id": "entity1"}},
-		{"id": "hit2", "distance": 0.8, "metadata": {"kuzu_entity_id": "entity2"}},
+		{
+			"id": "entity1",
+			"distance": 0.9,
+			"metadata": {"entity_id": "entity1", "name": "func_a", "file_path": "file1.py"},
+		},
+		{
+			"id": "entity2",
+			"distance": 0.8,
+			"metadata": {"entity_id": "entity2", "name": "func_b", "file_path": "file2.py"},
+		},
 	]
 
 	# Mock graph query results for additional context
 	graph_context_results = [
-		["entity1", "function_name1", "file_path1", "content1"],
-		["entity2", "function_name2", "file_path2", "content2"],
+		[
+			"entity1",
+			"entity3",
+			["CodeEntity"],
+			{"entity_id": "entity3", "name": "func_c", "file_path": "file1.py", "start_line": 5, "end_line": 8},
+		],
+		[
+			"entity2",
+			"entity4",
+			["CodeEntity"],
+			{"entity_id": "entity4", "name": "class_d", "file_path": "file2.py", "start_line": 15, "end_line": 25},
+		],
+		[
+			"entity1",
+			"entity1",
+			["CodeEntity"],
+			{"entity_id": "entity1", "name": "func_a", "file_path": "file1.py"},
+		],
+		[
+			"entity2",
+			"entity2",
+			["CodeEntity"],
+			{"entity_id": "entity2", "name": "func_b", "file_path": "file2.py"},
+		],
 	]
 
 	# Setup mocks
 	with patch.object(pipeline, "semantic_search", return_value=semantic_results) as mock_semantic_search:
 		mocks["kuzu_manager"].execute_query.return_value = graph_context_results
+		mocks["kuzu_manager"].execute_query.reset_mock()
 
 		# Call the method under test
 		results = pipeline.graph_enhanced_search(query, k_vector=k)
@@ -339,13 +331,18 @@ def test_graph_enhanced_search(processing_pipeline) -> None:
 		mocks["kuzu_manager"].execute_query.assert_called_once()
 
 		# Verify the results have been enhanced with graph context
+		assert results is not None
 		assert len(results) == 2
 		# Access data within the 'vector_hit' key
-		assert results[0]["vector_hit"]["id"] == "hit1"
-		assert results[1]["vector_hit"]["id"] == "hit2"
+		assert results[0]["vector_hit"]["id"] == "entity1"
+		assert results[1]["vector_hit"]["id"] == "entity2"
 		# Check that graph context was added (structure might vary)
 		assert "graph_context" in results[0]
 		assert len(results[0]["graph_context"]) > 0  # Assuming context was found
+		# Check one of the graph context nodes
+		context_node_ids = {node["id"] for node in results[0]["graph_context"]}
+		assert "entity1" in context_node_ids  # Check initial node is included
+		assert "entity3" in context_node_ids  # Check related node is included
 
 
 def test_get_repository_structure(processing_pipeline) -> None:
@@ -354,12 +351,13 @@ def test_get_repository_structure(processing_pipeline) -> None:
 	pipeline, mocks = processing_pipeline
 
 	# Mock query result representing repo structure
+	# Updated format: id, labels, name, path, parent_dir_id, file_parent_dir_id
 	mock_query_result = [
-		["directory::.", "repo_root", ".", None],  # Root node
-		["directory::src", "src", "src", "directory::."],  # src directory under root
-		["directory::src/util", "util", "src/util", "directory::src"],  # util directory under src
-		["file::src/main.py", "main.py", "src/main.py", "directory::src"],  # file under src
-		["file::src/util/helper.py", "helper.py", "src/util/helper.py", "directory::src/util"],  # file under util
+		["dir::.", ["CodeCommunity"], ".", ".", None, None],  # Root node
+		["dir::src", ["CodeCommunity"], "src", "src", "dir::.", None],
+		["dir::src/util", ["CodeCommunity"], "util", "src/util", "dir::src", None],
+		["file::src/main.py", ["CodeFile"], "main.py", "src/main.py", None, "dir::src"],
+		["file::src/util/helper.py", ["CodeFile"], "helper.py", "src/util/helper.py", None, "dir::src/util"],
 	]
 
 	mocks["kuzu_manager"].execute_query.return_value = mock_query_result
@@ -369,11 +367,11 @@ def test_get_repository_structure(processing_pipeline) -> None:
 
 	# If the method returns None (possible implementation change), skip detailed assertions
 	if structure is None:
-		return
+		pytest.fail("get_repository_structure returned None unexpectedly")
 
 	# Verify the structure
 	assert "name" in structure
-	assert structure["name"] == "repo_root"
+	assert structure["name"] == "."
 	assert "path" in structure
 	assert structure["path"] == "."
 	assert "type" in structure
@@ -415,22 +413,9 @@ def test_stop_method(processing_pipeline) -> None:
 
 	# Reset the mocks to ensure clean state
 	mocks["kuzu_manager"].close.reset_mock()
-	if hasattr(mocks["milvus_client"], "release"):
-		mocks["milvus_client"].release.reset_mock()
-	if hasattr(mocks["milvus_client"], "close"):
-		mocks["milvus_client"].close.reset_mock()
 
 	# Call the stop method
 	pipeline.stop()
 
 	# Verify Kuzu connection is closed
 	mocks["kuzu_manager"].close.assert_called_once()
-
-	# Verify Milvus client is released or closed
-	# We need to handle different client APIs which might use different method names
-	if hasattr(mocks["milvus_client"], "close"):
-		assert mocks["milvus_client"].close.call_count > 0  # Check close was called
-
-
-# Need numpy imported for the main fixture
-pytest.importorskip("numpy")
