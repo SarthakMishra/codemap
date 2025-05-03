@@ -9,6 +9,32 @@ DEFAULT_CONFIG = {
 		"model": "openai/gpt-4o-mini",
 		"api_base": None,
 	},
+	# Embedding configuration
+	"embedding": {
+		"model_name": "sentence-transformers/all-MiniLM-L6-v2",
+		"dimension": 384,
+	},
+	# Sync configuration
+	"sync": {
+		# Patterns to exclude from syncing (in addition to .gitignore)
+		"exclude_patterns": [
+			r"^node_modules/",
+			r"^\.venv/",
+			r"^venv/",
+			r"^env/",
+			r"^__pycache__/",
+			r"^\.mypy_cache/",
+			r"^\.pytest_cache/",
+			r"^\.ruff_cache/",
+			r"^dist/",
+			r"^build/",
+			r"^\.git/",
+			r"\.pyc$",
+			r"\.pyo$",
+			r"\.so$",
+			r"\.dll$",
+		],
+	},
 	# Gen command configuration
 	"gen": {
 		# Maximum content length per file (0 for unlimited)
@@ -69,7 +95,7 @@ DEFAULT_CONFIG = {
 			"max_chunks_before_consolidation": 20,
 			"max_file_size_for_llm": 100000,  # 100KB
 			"max_log_diff_size": 1000,
-			"model_name": "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
+			"model_name": "sentence-transformers/all-MiniLM-L6-v2",
 			"default_code_extensions": [
 				"js",
 				"jsx",
