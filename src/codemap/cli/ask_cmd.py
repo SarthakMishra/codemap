@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import typer
 from rich.prompt import Prompt
@@ -78,13 +78,13 @@ def ask_command(
 					continue
 
 				result = command.run(question=user_input)
-				print_ask_result(result)
+				print_ask_result(cast("dict[str, Any]", result))
 		else:
 			# Single question mode
 			if question is None:
 				exit_with_error("Internal error: Question is unexpectedly None in single-question mode.")
 			result = command.run(question=cast("str", question))
-			print_ask_result(result)
+			print_ask_result(cast("dict[str, Any]", result))
 
 	except Exception as e:
 		logger.exception("An error occurred during the ask command.")

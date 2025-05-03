@@ -6,14 +6,13 @@ import logging
 import sys
 from pathlib import Path
 
-import typer  # type: ignore[import]
+import typer
 
 from codemap import __version__
 from codemap.cli.ask_cmd import ask_command
 from codemap.cli.commit_cmd import commit_command
 from codemap.cli.gen_cmd import gen_command
 from codemap.cli.pr_cmd import pr_command
-from codemap.cli.sync_cmd import sync_command
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,6 @@ app.command(name="gen")(gen_command)
 app.command(name="commit")(commit_command)
 app.command(name="pr")(pr_command)
 app.command(name="ask")(ask_command)
-app.command(name="sync")(sync_command)
 
 
 def main() -> int:
