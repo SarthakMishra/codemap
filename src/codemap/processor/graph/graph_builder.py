@@ -9,6 +9,7 @@ from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer, get_langu
 from codemap.processor.tree_sitter.base import EntityType
 
 logger = logging.getLogger(__name__)
+TARGET_FILE_LOG = "src/codemap/utils/config_loader.py"  # Target file for detailed logging
 
 
 class EntityMetadata(TypedDict, total=False):
@@ -90,6 +91,9 @@ class GraphBuilder:
 						parent_id=entity_id,
 						community_id=community_id,
 					)
+
+			if entity.get("name") == "ConfigLoader" and entity.get("entity_type") == EntityType.CLASS:
+				logger.debug(f"GRAPH_BUILDER: Successfully added/updated ConfigLoader CLASS node with ID: {entity_id}")
 		except Exception:
 			logger.exception(f"Failed to process entity {entity.get('name', 'unknown')} in {file_path}")
 

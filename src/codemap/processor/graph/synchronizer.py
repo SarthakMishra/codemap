@@ -7,137 +7,189 @@ from codemap.processor.graph.graph_builder import GraphBuilder
 from codemap.processor.graph.kuzu_manager import KuzuManager
 from codemap.processor.utils.git_utils import get_git_tracked_files
 from codemap.processor.utils.sync_utils import compare_states
-from codemap.utils.path_utils import find_project_root
 
 logger = logging.getLogger(__name__)
 
-# Removed constants related to Git commands
+# Constant for expected number of columns in _get_db_file_hashes query result
+EXPECTED_HASH_QUERY_COLUMNS = 2
 
 
 class GraphSynchronizer:
-	"""Compares Git state with KuzuDB and updates the graph."""
+	"""Handles synchronization of the Kuzu graph database with Git state."""
 
-	def __init__(self, repo_path: Path | None, kuzu_manager: KuzuManager, graph_builder: GraphBuilder) -> None:
+	def __init__(
+		self,
+		repo_path: Path,
+		kuzu_manager: KuzuManager,
+		graph_builder: GraphBuilder,
+	) -> None:
 		"""
-		Initialize the synchronizer with repository and database connections.
+		Initialize the GraphSynchronizer.
 
 		Args:
-		        repo_path (Path | None): Path to the repository root. If None, it's determined.
-		        kuzu_manager (KuzuManager): Manager for KuzuDB operations.
-		        graph_builder (GraphBuilder): Builder for creating graph entities.
+		    repo_path: Path to the repository root.
+		    kuzu_manager: Instance of KuzuManager.
+		    graph_builder: Instance of GraphBuilder.
 
 		"""
-		if repo_path is None:
-			try:
-				self.repo_path = find_project_root()
-			except FileNotFoundError:
-				logger.exception("GraphSynchronizer init failed: Could not determine repository path.")
-				raise
-		else:
-			self.repo_path = repo_path
-
+		self.repo_path = repo_path
 		self.kuzu_manager = kuzu_manager
 		self.graph_builder = graph_builder
-		logger.info(f"GraphSynchronizer initialized for repo: {self.repo_path}")
 
 	def sync_graph(self, current_git_files: dict[str, str] | None = None) -> bool:
 		"""
-		Synchronize the KuzuDB graph with the provided Git state.
+		Synchronizes the Kuzu graph database with the current Git state.
 
 		Args:
-		        current_git_files (dict[str, str] | None, optional):
-		                A dictionary mapping file paths to Git hashes.
-		                If None, it will be fetched from the repository.
-		                Defaults to None.
+		    current_git_files: A dictionary mapping file paths to their Git hashes.
+		                       If None, it will be fetched.
 
 		Returns:
-		        bool: True if synchronization was successful (or not needed),
-		                  False otherwise.
+		    True if synchronization was successful (or no changes needed), False otherwise.
 
 		"""
-		logger.info(f"Starting graph synchronization for: {self.repo_path}")
-
-		# 1. Get Git state (use provided or fetch)
+		# Handle case where current_git_files might be None if called directly
 		if current_git_files is None:
-			logger.debug("Fetching current Git state...")
+			logger.warning("sync_graph called without current_git_files, fetching...")
 			current_git_files = get_git_tracked_files(self.repo_path)
 			if current_git_files is None:
-				logger.error("Synchronization failed: Could not get Git tracked files.")
+				logger.error("Graph sync failed: Could not get Git tracked files.")
 				return False
-			logger.debug(f"Found {len(current_git_files)} files in Git.")
-		else:
-			logger.debug(f"Using provided Git state with {len(current_git_files)} files.")
 
-		# 2. Get KuzuDB state (files and hashes)
-		logger.debug("Fetching current KuzuDB state...")
-		try:
-			db_file_hashes = self.kuzu_manager.get_all_file_hashes()
-			logger.debug(f"Found {len(db_file_hashes)} files represented in KuzuDB.")
-		except Exception:
-			logger.exception("Synchronization failed: Could not get file hashes from KuzuDB.")
+		logger.info("Starting Kuzu graph synchronization...")
+		all_success = True
+
+		# 1. Get existing nodes from Kuzu
+		existing_db_files = self._get_db_file_hashes()
+		if existing_db_files is None:
+			logger.error("Graph sync failed: Could not retrieve existing file hashes from Kuzu.")
 			return False
 
-		# 3. Compare states
-		logger.debug("Comparing Git state with KuzuDB state...")
-		files_to_add, files_to_update, files_to_delete = compare_states(current_git_files, db_file_hashes)
+		# Log details about states being compared (use f-strings and maybe sample)
+		git_files_count = len(current_git_files)
+		db_files_count = len(existing_db_files)
+		logger.debug(f"Comparing Git state ({git_files_count} entries) with Kuzu state ({db_files_count} entries).")
+		if git_files_count > 0:
+			logger.debug(f"  Git sample: {dict(list(current_git_files.items())[:5])}")
+		if db_files_count > 0:
+			logger.debug(f"  Kuzu sample: {dict(list(existing_db_files.items())[:5])}")
+
+		# 2. Compare states
+		files_to_add, files_to_update, files_to_delete = compare_states(current_git_files, existing_db_files)
 
 		total_changes = len(files_to_add) + len(files_to_update) + len(files_to_delete)
 		if total_changes == 0:
-			logger.info("Graph database is already up-to-date.")
+			logger.info("Kuzu graph database is already up-to-date.")
 			return True
 
 		log_message = (
-			f"Synchronization required: {len(files_to_add)} to add, "
+			f"Kuzu synchronization required: {len(files_to_add)} to add, "
 			f"{len(files_to_update)} to update, {len(files_to_delete)} to delete."
 		)
 		logger.info(log_message)
 
-		# 4. Process deletions
+		# 3. Process deletions
 		if files_to_delete:
-			logger.info(f"Deleting data for {len(files_to_delete)} files from KuzuDB...")
-			deleted_count = 0
-			errors_deleting = 0
-			for file_path in files_to_delete:
-				try:
-					self.kuzu_manager.delete_file_data(file_path)
-					deleted_count += 1
-				except Exception:
-					logger.exception(f"Failed to delete data for file: {file_path}")
-					errors_deleting += 1
-			logger.info(f"Finished deleting files. Deleted: {deleted_count}, Errors: {errors_deleting}")
-			if errors_deleting > 0:
-				logger.warning("Some errors occurred during file data deletion.")
+			logger.info(f"Deleting {len(files_to_delete)} files/communities from Kuzu...")
+			delete_success = self._delete_files_from_graph(files_to_delete)
+			if not delete_success:
+				logger.warning("Errors occurred during Kuzu deletion phase.")
+				all_success = False  # Mark sync as potentially incomplete
 
-		# 5. Process additions and updates
+		# 4. Process additions and updates
 		files_to_process = files_to_add.union(files_to_update)
 		if files_to_process:
-			logger.info(f"Processing {len(files_to_process)} files for graph updates...")
+			logger.info(f"Processing {len(files_to_process)} files for Kuzu addition/update...")
 			processed_count = 0
-			errors_processing = 0
-			for i, file_path_str in enumerate(files_to_process):
-				git_hash = current_git_files.get(file_path_str)
-				if not git_hash:
-					logger.error(f"Consistency error: Cannot find hash for file to process: {file_path_str}. Skipping.")
-					errors_processing += 1
+			error_count = 0
+			for file_path_str in files_to_process:
+				log_prefix = f"File '{file_path_str}'"  # Simplified log prefix
+
+				file_path = self.repo_path / file_path_str
+				if not file_path.is_file():
+					logger.warning(f"Skipping {log_prefix}: File not found at expected location {file_path}")
+					error_count += 1
 					continue
 
-				logger.debug(f"Processing file {i + 1}/{len(files_to_process)}: {file_path_str}")
+				# --- Delete existing nodes for updated files before adding new ones ---
+				# This ensures relationships are updated correctly.
+				if file_path_str in files_to_update:
+					logger.debug(f"Deleting existing nodes for updated file: {file_path_str}")
+					# Use the same delete function, passing only the single file
+					if not self._delete_files_from_graph({file_path_str}):
+						logger.warning(
+							f"Failed to delete existing nodes for updated file: {file_path_str}. Skipping update."
+						)
+						error_count += 1
+						continue  # Skip processing this file if deletion failed
+
+				# Add/update file using GraphBuilder
 				try:
-					file_path_obj = self.repo_path / file_path_str
-					success = self.graph_builder.process_file(file_path_obj, git_hash)
-					if success:
-						processed_count += 1
-					else:
-						logger.warning(f"Failed to process file: {file_path_str}")
-						errors_processing += 1
+					self.graph_builder.process_file(file_path)
+					processed_count += 1
+
 				except Exception:
-					logger.exception(f"Error processing file: {file_path_str}")
-					errors_processing += 1
+					logger.exception(f"Error processing {log_prefix} for Kuzu graph.")
+					error_count += 1
+					all_success = False
 
-			logger.info(f"Finished processing files. Processed: {processed_count}, Errors: {errors_processing}")
-			if errors_processing > 0:
-				logger.error("Synchronization completed with errors during file processing.")
-				return False
+			log_message_processed = (
+				f"Kuzu processing finished. Processed: {processed_count}, Errors/Skipped: {error_count}"
+			)
+			logger.info(log_message_processed)
 
-		logger.info("Graph synchronization finished successfully.")
-		return True
+		logger.info(f"Kuzu graph synchronization finished. Overall success status: {all_success}")
+		return all_success
+
+	def _get_db_file_hashes(self) -> dict[str, str] | None:
+		"""Retrieves all file paths and their hashes currently stored in Kuzu."""
+		try:
+			query = "MATCH (f:CodeFile) RETURN f.file_path, f.git_hash"
+			results = self.kuzu_manager.execute_query(query)
+			if results is None:
+				logger.error("Failed to retrieve file hashes from Kuzu.")
+				return None
+			# Use constant for checking number of columns
+			return {row[0]: row[1] for row in results if len(row) == EXPECTED_HASH_QUERY_COLUMNS and row[0] and row[1]}
+		except Exception:
+			logger.exception("Error retrieving file hashes from Kuzu")
+			return None
+
+	def _delete_files_from_graph(self, files_to_delete: set[str]) -> bool:
+		"""Deletes CodeFile nodes and associated CodeCommunity nodes (if empty) for given paths."""
+		if not files_to_delete:
+			return True
+		success = True
+		# Note: Kuzu doesn't easily support deleting based on a list parameter directly in WHERE IN.
+		# Iterate and delete one by one or construct a complex query. Iteration is simpler.
+		for file_path_str in files_to_delete:
+			log_prefix = f"File '{file_path_str}'"  # Simplified log prefix
+
+			try:
+				# Delete the CodeFile node and its relationships
+				# Using DETACH DELETE handles relationships automatically
+				delete_file_query = "MATCH (f:CodeFile {file_path: $path}) DETACH DELETE f"
+				params = {"path": file_path_str}
+				result = self.kuzu_manager.execute_query(delete_file_query, params)
+				# Check result? KuzuPy doesn't return counts easily on DELETE. Assume success if no exception.
+				if result is None:  # Query execution failed
+					logger.warning(f"Kuzu query execution failed when trying to delete {log_prefix}.")
+					success = False
+
+				# Optional: Add logic here to check if the parent CodeCommunity is now empty
+				# and delete it if necessary. This requires more complex queries involving
+				# relationship counts or checking for remaining children.
+				# Example (conceptual):
+				# MATCH (parent:CodeCommunity)<-[:BELONGS_TO_COMMUNITY]-(f:CodeFile {file_path: $path})
+				# WITH parent
+				# MATCH (parent)-[:CONTAINS_FILE]->(childFile:CodeFile)
+				# WITH parent, count(childFile) AS fileCount
+				# MATCH (parent)-[:CONTAINS_COMMUNITY]->(childCommunity:CodeCommunity)
+				# WITH parent, fileCount, count(childCommunity) AS communityCount
+				# WHERE fileCount = 0 AND communityCount = 0
+				# DETACH DELETE parent
+
+			except Exception:
+				logger.exception(f"Error deleting {log_prefix} from Kuzu graph.")
+				success = False
+		return success

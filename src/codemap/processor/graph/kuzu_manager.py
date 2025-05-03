@@ -108,7 +108,15 @@ class KuzuManager:
 				results.append(query_result.get_next())
 			logger.debug(f"Query returned {len(results)} rows.")
 			return results
-		except Exception:
+		except Exception as e:
+			# Check if it's the expected "already exists" error
+			error_msg = str(e).lower()
+			if "already exists in catalog" in error_msg or "binder exception" in error_msg:
+				# Log expected schema creation conflicts at DEBUG level
+				logger.debug(f"Kuzu query failed (likely schema already exists): {query} - {e}")
+				# Re-raise the specific error for helpers to catch
+				raise
+			# Log unexpected query errors as exceptions
 			logger.exception(f"Failed to execute KuzuDB query: {query}")
 			return None
 
@@ -130,6 +138,17 @@ class KuzuManager:
 				# Log other creation errors more visibly but don't necessarily stop schema creation
 				logger.warning(f"Could not create or verify table {table_name}. Error: {e}")
 				# Depending on severity, you might choose to raise e here
+
+	def _create_rel_table_if_not_exists(self, create_statement: str, table_name: str) -> None:
+		"""Helper to create a relationship table only if it doesn't exist."""
+		try:
+			self.execute_query(create_statement)
+			logger.info(f"Successfully created or verified relationship table {table_name}.")
+		except (RuntimeError, ValueError) as e:
+			if "already exists" in str(e).lower() or "Catalog exception" in str(e):
+				logger.debug(f"Relationship table {table_name} likely already exists: {e}")
+			else:
+				logger.warning(f"Could not create or verify relationship table {table_name}. Error: {e}")
 
 	def ensure_schema(self) -> None:
 		"""Define and ensure the graph schema exists in KuzuDB."""
@@ -192,19 +211,11 @@ class KuzuManager:
 
 		# Create Node Tables
 		for name, stmt in node_tables.items():
-			try:
-				self._create_table_if_not_exists(stmt, name)
-			except Exception:
-				logger.exception(f"Failed during schema creation for node table {name}")
-				return  # Stop if schema creation fails
+			self._create_table_if_not_exists(stmt, name)
 
 		# Create Relationship Tables
 		for name, (_, _, _, stmt) in rel_tables.items():
-			try:
-				self._create_table_if_not_exists(stmt, name)
-			except Exception:
-				logger.exception(f"Failed during schema creation for rel table {name}")
-				return  # Stop if schema creation fails
+			self._create_rel_table_if_not_exists(stmt, name)
 
 		logger.info("KuzuDB schema ensured.")
 
