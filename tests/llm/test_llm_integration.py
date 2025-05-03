@@ -9,10 +9,11 @@ from pathlib import Path
 import pytest
 from dotenv import load_dotenv
 
-from src.codemap.git.commit_generator import DiffChunkData, MessageGenerator
-from src.codemap.git.commit_generator.prompts import DEFAULT_PROMPT_TEMPLATE
-from src.codemap.llm import create_client
-from src.codemap.utils.config_loader import ConfigLoader
+from codemap.git.commit_generator import MessageGenerator
+from codemap.git.commit_generator.prompts import DEFAULT_PROMPT_TEMPLATE
+from codemap.git.diff_splitter import DiffChunk
+from codemap.llm import create_client
+from codemap.utils.config_loader import ConfigLoader
 from tests.base import LLMTestBase
 from tests.helpers import create_diff_chunk
 
@@ -49,9 +50,9 @@ class TestLLMIntegration(LLMTestBase):
 		else:
 			logger.warning("Warning: %s not found", env_file)
 
-	def _create_test_diff_chunk(self) -> DiffChunkData:
+	def _create_test_diff_chunk(self) -> DiffChunk:
 		"""Create a test diff chunk for OpenRouter API testing."""
-		return DiffChunkData(
+		return DiffChunk(
 			files=[".env.example"],
 			content="""diff --git a/.env.example b/.env.example
 index 105c41b..fdcb59a 100644
@@ -84,7 +85,7 @@ index 105c41b..fdcb59a 100644
 			config_loader=config_loader,
 		)
 
-	def _generate_and_verify_message(self, generator: MessageGenerator, chunk: DiffChunkData) -> tuple[str, bool]:
+	def _generate_and_verify_message(self, generator: MessageGenerator, chunk: DiffChunk) -> tuple[str, bool]:
 		"""Generate a message and verify the output."""
 		logger.info("Attempting to generate message with chunk")
 
@@ -138,3 +139,51 @@ index 105c41b..fdcb59a 100644
 		# Verify results
 		assert message == expected_response, f"Expected '{expected_response}' but got '{message}'"
 		assert is_llm is True, "Expected is_llm to be True"
+
+	@pytest.mark.integration
+	def test_openai_commit_message_generation(self) -> None:
+		"""Test generating a commit message using OpenAI."""
+		# Arrange
+		generator = self._create_message_generator()
+		chunk = DiffChunk(
+			files=["test.py"],
+			content="""diff --git a/test.py b/test.py
+index 123..456 100644
+--- a/test.py
++++ b/test.py
+@@ -1,1 +1,1 @@
+-print("hello")
++print("world")
+""",
+		)
+
+		# Act
+		message, used_llm = generator.generate_message(chunk)
+
+		# Assert - just check variables are of expected type
+		assert isinstance(message, str)
+		assert isinstance(used_llm, bool)
+
+	@pytest.mark.integration
+	def test_groq_commit_message_generation(self) -> None:
+		"""Test generating a commit message using Groq."""
+		# Arrange
+		generator = self._create_message_generator(model="groq/llama3-8b-8192")
+		chunk = DiffChunk(
+			files=["README.md"],
+			content="""diff --git a/README.md b/README.md
+index abc..def 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-Old text
++New documentation
+""",
+		)
+
+		# Act
+		message, used_llm = generator.generate_message(chunk)
+
+		# Assert - just check variables are of expected type
+		assert isinstance(message, str)
+		assert isinstance(used_llm, bool)
