@@ -14,7 +14,7 @@ from codemap.db.engine import get_session
 from codemap.db.models import ChatHistory
 from codemap.llm import create_client
 from codemap.processor.pipeline import ProcessingPipeline
-from codemap.utils.cli_utils import loading_spinner  # Import spinner
+from codemap.utils.cli_utils import loading_spinner, progress_indicator
 from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import SYSTEM_PROMPT
@@ -58,7 +58,6 @@ class AskCommand:
 			{"role": "system", "content": SYSTEM_PROMPT}
 		]  # Initialize message history
 
-		self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_path)
 		self.db_client = DatabaseClient()  # Uses config path by default
 		self.llm_client = create_client(
 			repo_path=self.repo_path,
@@ -68,13 +67,19 @@ class AskCommand:
 		)
 		# Initialize ProcessingPipeline correctly
 		try:
-			with loading_spinner("Initializing processing pipeline..."):
+			# Show a spinner while initializing the pipeline
+			with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
+				# Get ConfigLoader instance first, ensuring it knows the repo root
+				self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_path)
 				self.pipeline = ProcessingPipeline(
-					repo_path=self.repo_path,
-					config_loader=self.config_loader,
-					sync_on_init=False,  # Avoid potentially long sync on every ask
+					repo_path=self.repo_path,  # Pipeline still needs repo_path directly
+					config_loader=self.config_loader,  # Pass the correctly initialized loader
+					sync_on_init=False,  # Keep sync off during 'ask' init
+					progress=None,  # No progress context with spinner style
+					task_id=None,  # No task_id with spinner style
 				)
-			logger.info("ProcessingPipeline initialized correctly.")
+			# Progress context manager handles completion message
+			logger.info("ProcessingPipeline initialization attempt complete.")
 		except Exception:
 			logger.exception("Failed to initialize ProcessingPipeline")
 			self.pipeline = None
