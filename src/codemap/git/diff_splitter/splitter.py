@@ -347,6 +347,7 @@ class DiffSplitter:
 
 		Raises:
 		    ValueError: If semantic splitting fails and fallback is not possible.
+
 		"""
 		if not self.are_sentence_transformers_available():
 			logger.warning("Sentence transformers unavailable. Falling back to file-based splitting.")
