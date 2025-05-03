@@ -224,6 +224,7 @@ index 2345678..bcdefgh 100645
 		expected_fallback_chunks = [
 			DiffChunk(
 				files=["file1.py"],
+				# Content should ONLY be the diff for file1.py
 				content=(
 					"diff --git a/file1.py b/file1.py\n"
 					"index 1234567..abcdefg 100644\n"
@@ -237,6 +238,7 @@ index 2345678..bcdefgh 100645
 			),
 			DiffChunk(
 				files=["file2.py"],
+				# Content should ONLY be the diff for file2.py
 				content=(
 					"diff --git a/file2.py b/file2.py\n"
 					"index 2345678..bcdefgh 100645\n"
