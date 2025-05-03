@@ -10,9 +10,11 @@ def create_collection_schema() -> CollectionSchema:
 	# Define fields based on config and todo/vectors.md
 	id_field = FieldSchema(
 		name=config.FIELD_ID,
-		dtype=DataType.INT64,
+		dtype=DataType.VARCHAR,
 		is_primary=True,
-		auto_id=True,  # Let Milvus handle ID generation
+		auto_id=False,
+		max_length=36,
+		description="Unique UUID identifier for the chunk",
 	)
 
 	embedding_field = FieldSchema(
@@ -31,7 +33,6 @@ def create_collection_schema() -> CollectionSchema:
 		dtype=DataType.VARCHAR,
 		max_length=512,  # Max entity name length
 		description="Name of the code entity (class, function, etc.) or filename for fallback",
-		default_value="",  # Allow empty for fallback chunks
 	)
 
 	chunk_type_field = FieldSchema(
@@ -41,10 +42,11 @@ def create_collection_schema() -> CollectionSchema:
 		description="Type of chunk (module, class, function, regex_fallback)",
 	)
 
+	# Field for the chunk text content
 	chunk_text_field = FieldSchema(
 		name=config.FIELD_CHUNK_TEXT,
 		dtype=DataType.VARCHAR,
-		max_length=config.MAX_CHUNK_TEXT_LENGTH,  # Configurable max length
+		max_length=config.MAX_CHUNK_TEXT_LENGTH,  # Use reverted config
 		description="The actual text content that was embedded (potentially truncated)",
 	)
 
@@ -55,9 +57,10 @@ def create_collection_schema() -> CollectionSchema:
 		description="Git blob hash of the file version",
 	)
 
+	# Field for the starting line number
 	start_line_field = FieldSchema(
 		name=config.FIELD_START_LINE,
-		dtype=DataType.INT32,
+		dtype=DataType.INT64,
 		description="Starting line number of the chunk/entity in the file",
 	)
 
@@ -67,21 +70,32 @@ def create_collection_schema() -> CollectionSchema:
 		description="Ending line number of the chunk/entity in the file",
 	)
 
+	# Field for the corresponding Kuzu node ID
+	kuzu_id_field = FieldSchema(
+		name="kuzu_entity_id",  # Use the same name used in manager.py
+		dtype=DataType.VARCHAR,
+		max_length=512,  # Allow reasonably long Kuzu IDs
+		description="Internal ID linking this chunk to its corresponding node in the Kuzu graph",
+	)
+
 	# Create the schema
 	return CollectionSchema(
 		fields=[
 			id_field,
 			embedding_field,
 			file_path_field,
-			entity_name_field,
-			chunk_type_field,
-			chunk_text_field,
 			git_hash_field,
+			chunk_text_field,
 			start_line_field,
 			end_line_field,
+			chunk_type_field,
+			entity_name_field,
+			kuzu_id_field,
 		],
-		description="Collection of code chunk embeddings for CodeMap semantic search",
-		enable_dynamic_field=False,  # Explicit schema is preferred
+		primary_field=config.FIELD_ID,
+		auto_id=False,
+		enable_dynamic_field=False,
+		description="Code chunks with metadata",
 	)
 
 
