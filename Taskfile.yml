@@ -98,12 +98,12 @@ tasks:
   test:
     desc: Run all tests
     cmds:
-      - task: test:pytest
-
-  test:pytest:
-    desc: Run pytest only
-    cmds:
-      - uv run pytest {{.TESTS_DIR}} -n logical
+    - |
+      if [ -z "{{.CLI_ARGS}}" ]; then
+        uv run pytest {{.TESTS_DIR}} -n logical --no-cov
+      else
+        uv run pytest {{.CLI_ARGS}} -p no:xdist --no-cov
+      fi
 
   test:coverage:
     desc: Run tests with coverage analysis
