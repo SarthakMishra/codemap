@@ -7,14 +7,16 @@ import numpy as np
 from sentence_transformers import SentenceTransformer
 from tenacity import retry, stop_after_attempt, wait_fixed
 
+from codemap.config import DEFAULT_CONFIG
+
 if TYPE_CHECKING:
 	import numpy as np
 
 logger = logging.getLogger(__name__)
 
-# Configuration
-MODEL_NAME = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
-EMBEDDING_DIMENSION = 384
+# Configuration from DEFAULT_CONFIG
+MODEL_NAME = DEFAULT_CONFIG["embedding"]["model_name"]
+EMBEDDING_DIMENSION = DEFAULT_CONFIG["embedding"]["dimension"]
 MAX_EMBEDDING_ATTEMPTS = 3
 RETRY_WAIT_SECONDS = 2
 
@@ -26,12 +28,14 @@ def _get_embedding_model() -> SentenceTransformer:
 	"""Loads and returns the SentenceTransformer model (singleton)."""
 	global _embedding_model  # noqa: PLW0603
 	if _embedding_model is None:
-		logger.info(f"Loading sentence transformer model: {MODEL_NAME}...")
+		logger.info("Loading sentence transformer model: %s...", MODEL_NAME)
 		try:
 			_embedding_model = SentenceTransformer(MODEL_NAME)
-			logger.info("Sentence transformer model loaded successfully.")
+			# Break the long line into multiple lines
+			model_dimension = _embedding_model.get_sentence_embedding_dimension()
+			logger.info("Sentence transformer model loaded successfully with dimension %d", model_dimension)
 		except Exception:
-			logger.exception(f"Failed to load sentence transformer model: {MODEL_NAME}")
+			logger.exception("Failed to load sentence transformer model: %s", MODEL_NAME)
 			# Re-raise to prevent returning None, as the model is essential
 			raise
 	return _embedding_model
@@ -56,25 +60,30 @@ def generate_embedding(text: str) -> list[float] | None:
 
 	try:
 		model = _get_embedding_model()
+		logger.debug(f"Generating embedding for text (length: {len(text)}, preview: '{text[:100]}...')")
 		# Encode returns a numpy array
 		embedding_tensor = model.encode(text, convert_to_tensor=True)
 		embedding_array: np.ndarray = embedding_tensor.cpu().numpy()
 
-		# Check dimension (optional but good practice)
-		if embedding_array.shape[0] != EMBEDDING_DIMENSION:
-			logger.error(
-				f"Embedding dimension mismatch. Expected {EMBEDDING_DIMENSION}, got {embedding_array.shape[0]}"
+		# Check dimension
+		embedding_dimension = embedding_array.shape[0]
+		# Declare global before using it
+		global EMBEDDING_DIMENSION  # noqa: PLW0603
+		if embedding_dimension != EMBEDDING_DIMENSION:
+			logger.warning(
+				f"Embedding dimension mismatch. Expected {EMBEDDING_DIMENSION}, got {embedding_dimension}. "
+				f"Updating EMBEDDING_DIMENSION to match the model."
 			)
-			return None
+			EMBEDDING_DIMENSION = embedding_dimension
 
 		# Convert numpy array to list of floats
 		embedding_list = embedding_array.tolist()
-		logger.debug(f"Successfully generated embedding for text: '{text[:50]}...'")
+		logger.debug(f"Successfully generated embedding with dimension {len(embedding_list)}")
 		return embedding_list
 
-	except Exception:
+	except Exception:  # No need to capture the exception as 'e' if not used
 		# Logger exception handles the traceback
-		logger.exception(f"Failed to generate embedding for text: '{text[:50]}...'")
+		logger.exception("Failed to generate embedding for text")
 		# Return None here; the @retry decorator will handle retries
 		return None
 

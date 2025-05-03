@@ -1,8 +1,11 @@
 """Utilities for interacting with Git."""
 
 import logging
+import re
 import subprocess
 from pathlib import Path
+
+from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -42,11 +45,81 @@ def _run_git_command(command: list[str], cwd: Path) -> tuple[str, str, int]:
 		raise
 
 
+def _get_exclude_patterns() -> list[str]:
+	"""
+	Get the list of path patterns to exclude from processing.
+
+	Returns:
+	        List of regex patterns for paths to exclude
+
+	"""
+	config_loader = ConfigLoader.get_instance()
+
+	# Get exclude patterns from config, falling back to defaults if not present
+	config_patterns = config_loader.get("sync.exclude_patterns", [])
+
+	# Default patterns to exclude
+	default_patterns = [
+		r"^node_modules/",
+		r"^\.venv/",
+		r"^venv/",
+		r"^env/",
+		r"^__pycache__/",
+		r"^\.mypy_cache/",
+		r"^\.pytest_cache/",
+		r"^\.ruff_cache/",
+		r"^dist/",
+		r"^build/",
+		r"^\.git/",
+		r"\.pyc$",
+		r"\.pyo$",
+		r"\.so$",
+		r"\.dll$",
+		r"\.lib$",
+		r"\.a$",
+		r"\.o$",
+		r"\.class$",
+		r"\.jar$",
+	]
+
+	# Combine config patterns with defaults, giving precedence to config
+	patterns = list(config_patterns)
+
+	# Only add default patterns that aren't already covered
+	for pattern in default_patterns:
+		if pattern not in patterns:
+			patterns.append(pattern)
+
+	return patterns
+
+
+def _should_exclude_path(file_path: str) -> bool:
+	"""
+	Check if a file path should be excluded from processing based on patterns.
+
+	Args:
+	        file_path: The file path to check
+
+	Returns:
+	        True if the path should be excluded, False otherwise
+
+	"""
+	exclude_patterns = _get_exclude_patterns()
+
+	for pattern in exclude_patterns:
+		if re.search(pattern, file_path):
+			logger.debug(f"Excluding file from processing due to pattern '{pattern}': {file_path}")
+			return True
+
+	return False
+
+
 def get_git_tracked_files(repo_path: Path) -> dict[str, str] | None:
 	"""
 	Get all tracked files in the Git repository with their blob hashes.
 
 	Uses 'git ls-files -s' which shows staged files with mode, hash, stage, path.
+	Respects .gitignore rules by using --exclude-standard flag.
 
 	Args:
 	    repo_path (Path): The path to the root of the Git repository.
@@ -56,7 +129,7 @@ def get_git_tracked_files(repo_path: Path) -> dict[str, str] | None:
 	                          to their Git blob hashes. Returns None on failure.
 
 	"""
-	command = ["git", "ls-files", "-s", "--full-name"]
+	command = ["git", "ls-files", "-s", "--full-name", "--exclude-standard"]
 	stdout, _, returncode = _run_git_command(command, repo_path)
 
 	if returncode != 0:
@@ -85,7 +158,7 @@ def get_git_tracked_files(repo_path: Path) -> dict[str, str] | None:
 			stage = int(stage_str)
 
 			# We are interested in committed files (stage 0)
-			if stage == 0:
+			if stage == 0 and not _should_exclude_path(file_path):
 				tracked_files[file_path] = blob_hash
 		except ValueError:
 			logger.warning(f"Could not parse line: {line}")
