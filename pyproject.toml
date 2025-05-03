@@ -36,10 +36,10 @@ dependencies = [
     "packaging>=24.2",
     "requests-unixsocket>=0.4.1",
     "pathspec>=0.12.1",
-    "pymilvus>=2.5.8",
     "kuzu>=0.9.0",
     "unidiff>=0.7.5",
     "sqlmodel>=0.0.24",
+    "tenacity>=9.1.2",
 ]
 
 [dependency-groups]
@@ -150,6 +150,7 @@ ignore = [
     "ERA001", # Found commented-out code
     "G004", # Logging statement uses f-string
     "TD003", # Missing link in to-do
+    "TRY301", # Abstract raise to an inner function
     # Disable rules that conflict with tab indentation
     "E101",  # Indentation contains mixed spaces and tabs
     "W191",  # indentation contains tabs
@@ -159,19 +160,23 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
 "tests/*" = [
-    "S101", 
-    "PLR2004", 
-    "ANN002",
-    "ANN003",
-    "SLF001",
-    "S108",
-    "S105",
-    "PT019",
-    "ANN001",
-    "ANN201",
-    "ANN202",
-    "D102",
-    "ARG001"]
+    "S101",  # Use of assert detected (security risk in production)
+    "PLR2004",  # Magic value comparison (should use constant)
+    "ANN002",  # Missing type annotation for argument
+    "ANN003",  # Missing type annotation for return value
+    "SLF001",  # Private member accessed (name starts with underscore)
+    "S108",  # File permissions set too openly (security risk)
+    "S105",  # Hardcoded password/token (security risk)
+    "PT019",  # Fixture without return type annotation
+    "ANN001",  # Missing type annotation for function argument
+    "ANN201",  # Missing return type annotation for public function
+    "ANN202",  # Missing return type annotation for private function
+    "D102",  # Missing docstring in public method
+    "ARG001",  # Unused function argument
+    "E501",  # Line too long (>120 characters)
+    "N806",  # Variable in function should be lowercase
+    "BLE001", # Do not catch blind exceptions
+]
 "ai_models/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
 "ai_models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
