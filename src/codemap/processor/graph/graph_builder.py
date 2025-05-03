@@ -7,6 +7,7 @@ from typing import Any, TypedDict
 from codemap.processor.graph.kuzu_manager import KuzuManager
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer, get_language_by_extension
 from codemap.processor.tree_sitter.base import EntityType
+from codemap.processor.utils.embedding_utils import generate_embedding
 
 logger = logging.getLogger(__name__)
 TARGET_FILE_LOG = "src/codemap/utils/config_loader.py"  # Target file for detailed logging
@@ -53,11 +54,38 @@ class GraphBuilder:
 		start_line = entity.get("start_line", 0)
 		return f"{rel_path}:{start_line}:{type_name}:{entity_name}"
 
+	def _get_entity_code_content(self, entity_metadata: dict, full_file_content: str) -> str | None:
+		"""Extracts the code content for a given entity using byte offsets."""
+		location = entity_metadata.get("location")
+		if not location:
+			return None
+
+		start_byte = location.get("start_byte")
+		end_byte = location.get("end_byte")
+
+		if start_byte is None or end_byte is None:
+			return None
+
+		try:
+			# Ensure bytes are within bounds
+			start_byte = max(0, start_byte)
+			end_byte = min(len(full_file_content.encode("utf-8")), end_byte)
+			if start_byte >= end_byte:
+				return ""  # Return empty string if range is invalid
+
+			# Decode the relevant slice
+			return full_file_content.encode("utf-8")[start_byte:end_byte].decode("utf-8", errors="ignore")
+		except Exception:
+			logger.exception(f"Error extracting code content for entity: {entity_metadata.get('name')}")
+			return None
+
 	def _process_entity_recursive(
 		self,
 		entity: EntityMetadata,
+		raw_entity: dict,
 		file_path: Path,
 		file_lang: str,
+		full_file_content: str,
 		parent_id: str | None = None,
 		community_id: str | None = None,
 	) -> None:
@@ -66,7 +94,7 @@ class GraphBuilder:
 			entity_id = self._generate_entity_id(file_path, entity)
 			rel_file_path = file_path.relative_to(self.repo_path).as_posix()
 
-			# Create entity in graph DB
+			# Create entity in graph DB (without embedding initially)
 			self.kuzu_manager.add_code_entity(
 				entity_id=entity_id,
 				file_path=rel_file_path,
@@ -81,13 +109,54 @@ class GraphBuilder:
 				community_id=community_id,
 			)
 
+			# Generate and add embedding if content is available
+			try:
+				# Check if the entity type is relevant for embedding
+				relevant_types_for_embedding = {
+					EntityType.FUNCTION,
+					EntityType.METHOD,
+					EntityType.CLASS,
+					EntityType.INTERFACE,
+					EntityType.MODULE,  # Add others if needed
+				}
+				if entity.get("entity_type") in relevant_types_for_embedding:
+					start_byte = entity.get("start_line", 0)
+					end_byte = entity.get("end_line", 0)
+					if start_byte is not None and end_byte is not None:
+						# Extract code content using byte offsets
+						code_content = full_file_content[start_byte:end_byte]
+
+						if code_content:
+							embedding = generate_embedding(code_content)
+							if embedding is not None:
+								self.kuzu_manager.add_embedding(entity_id, embedding)
+							else:
+								logger.warning(f"Failed to generate embedding for {entity_id}")
+						else:
+							logger.debug(f"No code content found for embedding {entity_id}")
+					else:
+						logger.debug(f"Missing byte offsets for embedding {entity_id}")
+				else:
+					# Use .get() to safely access the entity type and avoid error if missing
+					entity_type_name = entity.get("entity_type", EntityType.UNKNOWN).name
+					logger.debug(f"Skipping embedding for non-relevant entity type {entity_type_name} for {entity_id}")
+
+			except Exception:
+				# Catch potential errors during embedding generation or storage
+				logger.exception(f"Error generating or adding embedding for entity {entity_id}")
+
 			# Process child entities
-			if children := entity.get("children"):
-				for child in children:
+			# Need the raw children from the analyzer result to get byte offsets
+			if raw_children := raw_entity.get("children"):
+				for raw_child in raw_children:
+					# Transform child before recursing
+					transformed_child = self._transform_entity(raw_child)
 					self._process_entity_recursive(
-						entity=child,
+						entity=transformed_child,
+						raw_entity=raw_child,
 						file_path=file_path,
 						file_lang=file_lang,
+						full_file_content=full_file_content,
 						parent_id=entity_id,
 						community_id=community_id,
 					)
@@ -171,11 +240,11 @@ class GraphBuilder:
 			if not entities:
 				logger.warning(f"No entities found in file: {file_path}")
 				# Add the file node even if no entities found, to track its existence
-				self.kuzu_manager.add_code_file(rel_file_path, git_hash or "", language)
+				self.kuzu_manager.add_code_file(rel_file_path, git_hash if git_hash else "", language)
 				return True  # Return True as the file node was added
 
 			# Add file to graph DB
-			self.kuzu_manager.add_code_file(rel_file_path, git_hash or "", language)
+			self.kuzu_manager.add_code_file(rel_file_path, git_hash if git_hash else "", language)
 
 			# Calculate community ID (file level)
 			# This uses a simple directory-based approach
@@ -214,12 +283,12 @@ class GraphBuilder:
 			# Process all entities in the analysis result
 			# Convert to the right format for our _process_entity_recursive method
 			for entity in entities:
-				# Transform the entity into the expected format
-				transformed_entity = self._transform_entity(entity)
 				self._process_entity_recursive(
-					entity=transformed_entity,
+					entity=self._transform_entity(entity),
+					raw_entity=entity,
 					file_path=file_path,
 					file_lang=language,
+					full_file_content=content,
 					parent_id=None,  # Top-level entity
 					community_id=file_community_id,
 				)
@@ -254,9 +323,9 @@ class GraphBuilder:
 				"content_summary": entity.get("content", "")[:100] if entity.get("content") else "",
 			}
 
-			# Transform children recursively
-			if children := entity.get("children"):
-				transformed["children"] = [self._transform_entity(child) for child in children]
+			# Recursively transform children if they exist
+			if "children" in entity:
+				pass
 
 			return transformed
 		except Exception:
