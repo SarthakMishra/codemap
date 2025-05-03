@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codemap.git.diff_splitter import DiffChunk
@@ -15,11 +16,15 @@ from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
 from .schemas import COMMIT_MESSAGE_SCHEMA
+from .utils import clean_message_for_linting, lint_commit_message
 
 if TYPE_CHECKING:
 	from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+MAX_DEBUG_CONTENT_LENGTH = 100
+EXPECTED_PARTS_COUNT = 2  # Type+scope and description
 
 
 class CommitMessageGenerator:
@@ -126,48 +131,74 @@ class CommitMessageGenerator:
 
 		Returns:
 		    Formatted commit message string
-
 		"""
 
-		def _validate_type(value: Any, expected_type: type, field_name: str) -> None:  # noqa: ANN401
-			"""Helper to validate type and raise TypeError."""
-			if value is not None and not isinstance(value, expected_type):
-				msg = f"Invalid type for {field_name}"
-				raise TypeError(msg)
-
-		def _raise_missing_fields() -> None:
-			"""Helper to raise ValueError for missing required fields."""
-			logger.warning("LLM response missing required fields (type/description).")
-			msg = "Missing required fields in LLM JSON response"
+		def _raise_validation_error(message: str) -> None:
+			"""Helper to raise ValueError with consistent message."""
+			logger.warning("LLM response validation failed: %s", message)
+			msg = message
 			raise ValueError(msg)
 
 		try:
 			# Try to parse the content as JSON
+			debug_content = (
+				content[:MAX_DEBUG_CONTENT_LENGTH] + "..." if len(content) > MAX_DEBUG_CONTENT_LENGTH else content
+			)
+			logger.debug("Parsing JSON content: %s", debug_content)
+
+			# Handle both direct JSON objects and strings containing JSON
+			if not content.strip().startswith("{"):
+				# Extract JSON if it's wrapped in other text
+				import re
+
+				json_match = re.search(r"({.*})", content, re.DOTALL)
+				if json_match:
+					content = json_match.group(1)
+
 			message_data = json.loads(content)
+			logger.debug("Parsed JSON: %s", message_data)
 
 			# Basic Schema Validation
-			if (
-				not isinstance(message_data, dict)
-				or not message_data.get("type")
-				or not message_data.get("description")
-			):
-				_raise_missing_fields()
+			if not isinstance(message_data, dict):
+				_raise_validation_error("JSON response is not an object")
+
+			if not message_data.get("type") or not message_data.get("description"):
+				_raise_validation_error("Missing required fields in JSON response")
 
 			# Extract components with validation/defaults
-			commit_type = message_data["type"]
-			scope = message_data.get("scope")
-			description = message_data["description"]
-			body = message_data.get("body")
-			is_breaking = message_data.get("breaking", False)
-			footers = message_data.get("footers", [])
+			commit_type = str(message_data["type"]).lower().strip()
 
-			# Ensure basic types are correct using the helper
-			_validate_type(commit_type, str, "type")
-			_validate_type(description, str, "description")
-			_validate_type(scope, str, "scope")
-			_validate_type(body, str, "body")
-			_validate_type(is_breaking, bool, "breaking flag")
-			_validate_type(footers, list, "footers")
+			# Check for valid commit type (from the config)
+			valid_types = self._config_loader.get_commit_convention().get("types", [])
+			if valid_types and commit_type not in valid_types:
+				logger.warning("Invalid commit type: %s. Valid types: %s", commit_type, valid_types)
+				# Try to find a valid type as fallback
+				if "feat" in valid_types:
+					commit_type = "feat"
+				elif "fix" in valid_types:
+					commit_type = "fix"
+				elif len(valid_types) > 0:
+					commit_type = valid_types[0]
+				logger.debug("Using fallback commit type: %s", commit_type)
+
+			scope = message_data.get("scope")
+			if scope is not None:
+				scope = str(scope).lower().strip()
+
+			description = str(message_data["description"]).lower().strip()
+
+			# Ensure description doesn't start with another type prefix
+			for valid_type in valid_types:
+				if description.startswith(f"{valid_type}:"):
+					# Remove the duplicate type prefix from description
+					description = description.split(":", 1)[1].strip()
+					logger.debug("Removed duplicate type prefix from description: %s", description)
+					break
+
+			body = message_data.get("body")
+			if body is not None:
+				body = str(body).strip()
+			is_breaking = bool(message_data.get("breaking", False))
 
 			# Format the header
 			header = f"{commit_type}"
@@ -177,6 +208,31 @@ class CommitMessageGenerator:
 				header += "!"
 			header += f": {description}"
 
+			# Ensure compliance with commit format regex
+			# The regex requires a space after the colon, and the format should be <type>(<scope>)!: <description>
+			if ": " not in header:
+				parts = header.split(":")
+				if len(parts) == EXPECTED_PARTS_COUNT:
+					header = f"{parts[0]}: {parts[1].strip()}"
+
+			# Validation check against regex pattern
+			import re
+
+			from codemap.git.commit_linter.constants import COMMIT_REGEX
+
+			# If header doesn't match the expected format, log and try to fix it
+			if not COMMIT_REGEX.match(header):
+				logger.warning("Generated header doesn't match commit format: %s", header)
+				# As a fallback, recreate with a simpler format
+				simple_header = f"{commit_type}"
+				if scope:
+					simple_header += f"({scope})"
+				if is_breaking:
+					simple_header += "!"
+				simple_header += f": {description}"
+				header = simple_header
+				logger.debug("Fixed header to: %s", header)
+
 			# Build the complete message
 			message_parts = [header]
 
@@ -185,12 +241,17 @@ class CommitMessageGenerator:
 				message_parts.append("")  # Empty line between header and body
 				message_parts.append(body)
 
-			# Add breaking change footers
-			breaking_change_footers = [
-				footer
-				for footer in footers
-				if footer.get("token", "").upper() in ("BREAKING CHANGE", "BREAKING-CHANGE")
-			]
+			# Carefully filter only breaking change footers
+			footers = message_data.get("footers", [])
+			breaking_change_footers = []
+
+			if isinstance(footers, list):
+				breaking_change_footers = [
+					footer
+					for footer in footers
+					if isinstance(footer, dict)
+					and footer.get("token", "").upper() in ("BREAKING CHANGE", "BREAKING-CHANGE")
+				]
 
 			if breaking_change_footers:
 				if not body:
@@ -203,14 +264,13 @@ class CommitMessageGenerator:
 					value = footer.get("value", "")
 					message_parts.append(f"{token}: {value}")
 
-			return "\n".join(message_parts)
+			message = "\n".join(message_parts)
+			logger.debug("Formatted commit message: %s", message)
+			return message
 
-		except (json.JSONDecodeError, TypeError, AttributeError, ValueError) as e:
-			# If parsing or validation fails, return the content as-is
-			logger.warning(
-				"Could not parse/validate JSON response: %s. Using raw content: %s", e, content[:100] + "..."
-			)
-			# Return the raw content, stripped, as fallback
+		except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
+			# If parsing or validation fails, return the content as-is, but cleaned
+			logger.warning("Error formatting JSON to commit message: %s. Using raw content.", str(e))
 			return content.strip()
 
 	def fallback_generation(self, chunk: DiffChunk) -> str:
@@ -355,60 +415,44 @@ class CommitMessageGenerator:
 		return self.client.generate_text(prompt=prompt, json_schema=COMMIT_MESSAGE_SCHEMA)
 
 	def generate_message_with_linting(
-		self,
-		chunk: DiffChunk,
-		max_retries: int = 3,
-	) -> tuple[str, bool, bool]:
+		self, chunk: DiffChunk, retry_count: int = 1, max_retries: int = 3
+	) -> tuple[str, bool, bool, list[str]]:
 		"""
-		Generate a commit message with linting and regeneration attempts.
+		Generate a commit message with linting verification.
 
 		Args:
-		    chunk: Diff chunk object to generate message for
-		    max_retries: Maximum number of regeneration retries for invalid messages
+			chunk: The DiffChunk to generate a message for
+			retry_count: Current retry count (default: 1)
+			max_retries: Maximum number of retries for linting (default: 3)
 
 		Returns:
-		    Tuple of (message, was_generated_by_llm, passed_linting)
-
+			Tuple of (message, used_llm, passed_linting, lint_messages)
 		"""
-		# First attempt to generate a message
-		message, used_llm = self.generate_message(chunk)
+		# First, generate the initial message
+		initial_lint_messages: list[str] = []  # Store initial messages
+		try:
+			message, used_llm = self.generate_message(chunk)
+			logger.debug("Generated initial message: %s", message)
 
-		# If not generated by LLM, skip linting
-		if not used_llm:
-			logger.debug("Message was not generated by LLM, skipping linting.")
-			return message, used_llm, True
+			# Clean the message before linting
+			message = clean_message_for_linting(message)
 
-		# Clean the message before linting
-		# Assuming clean_message_for_linting and lint_commit_message are accessible
-		# Either keep them in utils or move them here as private methods
-		from .utils import clean_message_for_linting, lint_commit_message  # Keep imports local for now
+			# Check if the message passes linting
+			is_valid, initial_lint_messages = lint_commit_message(message, self.repo_root)
+			logger.debug("Lint result: valid=%s, messages=%s", is_valid, initial_lint_messages)
 
-		message = clean_message_for_linting(message)
+			if is_valid or retry_count >= max_retries:
+				# Return empty list if valid, or initial messages if max retries reached
+				return message, used_llm, is_valid, [] if is_valid else initial_lint_messages
 
-		# Lint the message
-		is_valid, lint_messages = lint_commit_message(message, self.repo_root)
+			# Prepare the diff content
+			diff_content = chunk.content
+			if not diff_content:
+				diff_content = "Empty diff (likely modified binary files)"
 
-		# If valid, return immediately
-		if is_valid:
-			logger.debug("Generated message passed linting checks.")
-			return message, used_llm, True
-
-		# Log the linting issues
-		logger.warning("Commit message failed linting: %s", message)
-		for lint_msg in lint_messages:
-			logger.warning("Lint issue: %s", lint_msg)
-
-		# Try to regenerate with more explicit instructions
-		retries_left = max_retries
-		regenerated_message = message
-
-		while retries_left > 0 and not is_valid:
-			retries_left -= 1
+			logger.info("Regenerating message with linting feedback (attempt %d/%d)", retry_count, max_retries)
 
 			try:
-				# Get diff content directly from chunk object
-				diff_content = chunk.content
-
 				# Prepare the enhanced prompt for regeneration
 				lint_template = get_lint_prompt_template()
 				enhanced_prompt = prepare_lint_prompt(
@@ -416,37 +460,33 @@ class CommitMessageGenerator:
 					diff_content=diff_content,
 					file_info=self.extract_file_info(chunk),  # Use self
 					convention=self.get_commit_convention(),  # Use self
-					lint_messages=lint_messages,
+					lint_messages=initial_lint_messages,  # Use initial messages for feedback
 				)
 
-				# Use a loading spinner to show regeneration progress
-				with loading_spinner(f"Commit message failed linting, regenerating (attempts left: {retries_left})..."):
-					# Use the client to generate text with enhanced prompt
-					# Call _call_llm_api directly (or client.generate_text if preferred)
-					# Note: _call_llm_api uses COMMIT_MESSAGE_SCHEMA, lint prompt might not need it.
-					# Using client.generate_text without schema for the lint prompt.
-					result = self.client.generate_text(prompt=enhanced_prompt, json_schema=None)
-					regenerated_message = self.format_json_to_commit_message(result)
+				# Generate message with the enhanced prompt
+				regenerated_message = self._call_llm_api(enhanced_prompt)
+				logger.debug("Regenerated message (RAW LLM output): %s", regenerated_message)
 
-				# Clean and Lint the regenerated message
-				regenerated_message = clean_message_for_linting(regenerated_message)
-				is_valid, lint_messages = lint_commit_message(regenerated_message, self.repo_root)
+				# Format from JSON to commit message format
+				regenerated_message = self.format_json_to_commit_message(regenerated_message)
+				logger.debug("Formatted message: %s", regenerated_message)
 
-				if is_valid:
-					logger.info("Successfully regenerated a valid commit message.")
-					break
+				# Clean and recheck linting
+				cleaned_message = clean_message_for_linting(regenerated_message)
+				logger.debug("Cleaned message for linting: %s", cleaned_message)
 
-				logger.warning("Regenerated message still failed linting: %s", regenerated_message)
-				for lint_msg in lint_messages:
-					logger.warning("Lint issue: %s", lint_msg)
+				# Check if the message passes linting
+				final_is_valid, final_lint_messages = lint_commit_message(cleaned_message, self.repo_root)
+				logger.debug("Regenerated lint result: valid=%s, messages=%s", final_is_valid, final_lint_messages)
 
+				# Return final result and messages (empty if valid)
+				return cleaned_message, True, final_is_valid, [] if final_is_valid else final_lint_messages
 			except Exception:
+				# If regeneration fails, log it and return the original message and its lint errors
 				logger.exception("Error during message regeneration")
-				# Break out of the loop on error
-				break
-
-		# If we exhausted retries or had an error, return the last message with linting status
-		if not is_valid and retries_left == 0:
-			logger.warning("Exhausted all regeneration attempts. Using the last generated message.")
-
-		return regenerated_message, used_llm, is_valid
+				return message, used_llm, False, initial_lint_messages  # Return original message and errors
+		except Exception:
+			# If generation fails completely, use a fallback (fallback doesn't lint, so return True, empty messages)
+			logger.exception("Error during message generation")
+			message = self.fallback_generation(chunk)
+			return message, False, True, []  # Fallback assumes valid, no lint messages

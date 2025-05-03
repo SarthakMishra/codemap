@@ -9,8 +9,12 @@ from typing import TYPE_CHECKING
 import questionary
 import typer
 
+from codemap.git.commit_generator.utils import (
+	clean_message_for_linting,
+	lint_commit_message,
+)  # Import needed for re-linting edits
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
-from codemap.git.interactive import ChunkAction, ChunkResult, CommitUI
+from codemap.git.interactive import ChunkAction, CommitUI
 from codemap.git.utils import (
 	GitDiff,
 	GitError,
@@ -237,10 +241,14 @@ class CommitCommand:
 			message = ""
 			used_llm = False
 			passed_linting = True  # Assume true unless linting happens and fails
+			lint_messages: list[str] = []  # Initialize lint messages list
 
 			# Generate message (potentially with linting retries)
 			try:
-				message, used_llm, passed_linting = self.message_generator.generate_message_with_linting(chunk)
+				# Generate message using the updated method
+				message, used_llm, passed_linting, lint_messages = self.message_generator.generate_message_with_linting(
+					chunk
+				)
 				chunk.description = message
 				chunk.is_llm_generated = used_llm
 			except (LLMError, RuntimeError) as e:
@@ -248,94 +256,72 @@ class CommitCommand:
 				self.ui.show_error(f"Error generating message: {e}")
 				# Offer to skip or exit after generation error
 				if not questionary.confirm("Skip this chunk and continue?", default=True).ask():
-					self.error_state = "failed"
-					return False
-				self.ui.show_skipped(chunk.files)
-				return True  # Skip chunk and continue
-
-			# --- Handle Linting Failures After Retries ---
-			if used_llm and not passed_linting:
-				self.ui.show_warning("LLM failed to generate a valid commit message after retries.")
-				# Lint messages should have been shown during the generation loop
-				# Offer options: Edit, Commit Anyway, Skip, Exit
-				lint_fail_options = [
-					("Edit message", "edit"),
-					("Commit anyway (with lint errors)", "commit_anyway"),
-					("Skip this chunk", "skip"),
-					("Exit", "exit"),
-				]
-				# Use questionary directly
-				action = questionary.select(
-					"Linting failed. What would you like to do?",
-					choices=[opt[0] for opt in lint_fail_options],
-				).ask()  # Use ask() to get the selected string
-
-				if action == lint_fail_options[0][0]:  # Edit
-					final_message = self.ui.edit_message(message)
-					if self._perform_commit(chunk, final_message):
-						break  # Committed successfully
-					return False  # Commit failed
-				if action == lint_fail_options[1][0]:  # Commit Anyway
-					logger.warning("Committing message with lint errors: %s", message)
-					if self._perform_commit(chunk, message):
-						break  # Committed successfully
-					return False  # Commit failed
-				if action == lint_fail_options[2][0]:  # Skip
-					self.ui.show_skipped(chunk.files)
-					return True  # Continue to next chunk
-				if action == lint_fail_options[3][0]:  # Exit
-					if self.ui.confirm_exit():
-						self.error_state = "aborted"
-						raise typer.Exit
-					continue  # Go back to prompt for this chunk
-				# Should not happen
-				continue
-
-			# --- Normal UI Flow (Generation OK or Fallback, Linting Passed) ---
-			# Get user action via UI for the generated/fallback message
-			result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
-
-			if result.action == ChunkAction.COMMIT:
-				logger.debug("User chose to commit.")
-				# Linting might have already passed, or user is committing fallback/edited message
-				# Re-linting edited messages might be desired, but skipped here for simplicity
-				final_message = result.message or chunk.description or ""  # Use generated/edited message
-				if not final_message:
-					self.ui.show_error("Cannot commit with an empty message.")
-					continue  # Re-prompt for action
-
-				if self._perform_commit(chunk, final_message):
-					break  # Committed successfully, move to next chunk
-				return False  # Commit failed, stop processing
-
-			if result.action == ChunkAction.SKIP:
-				logger.debug("User chose to skip.")
-				self.ui.show_skipped(chunk.files)
-				break  # Skipped, move to next chunk
-
-			if result.action == ChunkAction.REGENERATE:
-				logger.debug("User chose to regenerate.")
-				if not chunk.is_llm_generated:
-					self.ui.show_warning("Cannot regenerate fallback message. Please edit or skip.")
-				# Continue loop to regenerate message
-				chunk.description = None  # Clear to force regeneration
-				chunk.is_llm_generated = False
-				continue
-
-			if result.action == ChunkAction.EXIT:
-				logger.debug("User chose to exit.")
-				if self.ui.confirm_exit():
-					logger.info("Exiting commit process at user request.")
 					self.error_state = "aborted"
-					raise typer.Exit
-				logger.info("User cancelled exit.")
-				# Continue loop to re-prompt for the current chunk
-				continue
-			# Should not happen, but handle defensively
-			logger.error("Unknown action from UI: %s", result.action)
-			break  # Exit loop for safety
+					return False  # Abort
+				# If user chooses to skip after generation error, we continue to the next chunk
+				return True
 
-		return True  # Continue processing other chunks
+			# -------- Handle Linting Result and User Action ---------
+			if not passed_linting:
+				# Display the diff chunk info first
+				self.ui.display_chunk(chunk, index, total_chunks)
+				# Display the failed message and lint errors
+				self.ui.display_failed_lint_message(message, lint_messages, used_llm)
+				# Ask user what to do on failure
+				action = self.ui.get_user_action_on_lint_failure()
+			else:
+				# Display the valid message and diff chunk
+				self.ui.display_chunk(chunk, index, total_chunks)  # Pass correct index and total
+				# Ask user what to do with the valid message
+				action = self.ui.get_user_action()
+
+			# -------- Process User Action ---------
+			if action == ChunkAction.COMMIT:
+				# Commit with the current message (which is valid if we got here via the 'else' block)
+				if self._perform_commit(chunk, message):
+					return True  # Continue to next chunk
+				self.error_state = "failed"
+				return False  # Abort on commit failure
+			if action == ChunkAction.EDIT:
+				edited_message = self.ui.edit_message(message)  # Pass current message for editing
+				# Clean and re-lint the edited message
+				cleaned_edited_message = clean_message_for_linting(edited_message)
+				edited_is_valid, edited_lint_messages = lint_commit_message(cleaned_edited_message, self.repo_root)
+				if edited_is_valid:
+					# Commit with the user-edited, now valid message
+					if self._perform_commit(chunk, cleaned_edited_message):
+						return True  # Continue to next chunk
+					self.error_state = "failed"
+					return False  # Abort on commit failure
+				# If edited message is still invalid, show errors and loop back
+				self.ui.show_warning("Edited message still failed linting.")
+				# Update state for the next loop iteration to show the edited (but invalid) message
+				message = edited_message
+				passed_linting = False
+				lint_messages = edited_lint_messages
+				# No need to update used_llm as it's now user-edited
+				chunk.description = message  # Update chunk description for next display
+				chunk.is_llm_generated = False  # Mark as not LLM-generated
+				continue  # Go back to the start of the while loop
+			if action == ChunkAction.REGENERATE:
+				self.ui.show_regenerating()
+				chunk.description = None  # Clear description before regenerating
+				chunk.is_llm_generated = False
+				continue  # Go back to the start of the while loop to regenerate
+			if action == ChunkAction.SKIP:
+				self.ui.show_skipped(chunk.files)
+				return True  # Continue to next chunk
+			if action == ChunkAction.EXIT:
+				if self.ui.confirm_exit():
+					self.error_state = "aborted"
+					# Returning False signals to stop processing chunks
+					return False
+				# If user cancels exit, loop back to show the chunk again
+				continue
+
+			# Should not be reached
+			logger.error("Unhandled action in _process_chunk: %s", action)
+			return False
 
 	def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
 		"""
@@ -372,7 +358,7 @@ class CommitCommand:
 			else:
 				# Non-interactive mode: generate and attempt commit
 				try:
-					message, _, passed_linting = self.message_generator.generate_message_with_linting(chunk)
+					message, _, passed_linting, _ = self.message_generator.generate_message_with_linting(chunk)
 					if not passed_linting:
 						logger.warning("Generated message failed linting in non-interactive mode: %s", message)
 						# Decide behavior: skip, commit anyway, fail? Let's skip for now.

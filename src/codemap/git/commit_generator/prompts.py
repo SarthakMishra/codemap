@@ -184,10 +184,15 @@ def prepare_lint_prompt(
 	# Create specific feedback for linting issues
 	lint_feedback = "\n".join([f"- {msg}" for msg in lint_messages])
 
-	# Get the conventional commits spec from the DEFAULT_PROMPT_TEMPLATE
-	conventional_commits_spec = DEFAULT_PROMPT_TEMPLATE.split("# Conventional Commits 1.0.0")[1].split(
-		"---\n\nYou are a helpful assistant"
-	)[0]
+	# Extract conventional commits guidelines from the template
+	# Instead of trying to extract from DEFAULT_PROMPT_TEMPLATE, just use the formatted rules directly
+	conventional_commits_spec = """
+1. **Type:** Must be lowercase and one of the allowed types.
+2. **Scope:** Optional, lowercase noun describing the section.
+3. **Description:** Imperative, present tense summary.
+4. **Body:** Optional explanation of why and how.
+5. **Breaking Change:** Indicated with ! or BREAKING CHANGE footer.
+"""
 
 	# Create an enhanced context with linting feedback
 	context = {
@@ -196,7 +201,7 @@ def prepare_lint_prompt(
 		"convention": convention,
 		"schema": COMMIT_MESSAGE_SCHEMA,
 		"lint_feedback": lint_feedback,
-		"conventional_commits_spec": "# Conventional Commits 1.0.0" + conventional_commits_spec,
+		"conventional_commits_spec": conventional_commits_spec,
 	}
 
 	try:
