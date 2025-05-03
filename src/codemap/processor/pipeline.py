@@ -13,24 +13,29 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import numpy as np
-
+# Import Progress and TaskID for type hinting
 from codemap.processor.graph.graph_builder import GraphBuilder
 from codemap.processor.graph.kuzu_manager import KuzuManager
 from codemap.processor.graph.synchronizer import GraphSynchronizer
 from codemap.processor.tree_sitter import TreeSitterAnalyzer
+from codemap.processor.utils.embedding_utils import MODEL_NAME as EMBEDDING_MODEL_NAME
+from codemap.processor.utils.embedding_utils import generate_embedding
 from codemap.processor.utils.git_utils import get_git_tracked_files
-from codemap.processor.vector.client import get_milvus_client
-from codemap.processor.vector.embedder import generate_embeddings
-from codemap.processor.vector.manager import synchronize_vectors
-from codemap.processor.vector.schema import config as vector_config
+from codemap.processor.utils.sync_utils import compare_states
 from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.file_utils import read_file_content
 from codemap.utils.path_utils import find_project_root
 
+if TYPE_CHECKING:
+	from collections.abc import Callable
+
+	from rich.progress import Progress, TaskID
+
 logger = logging.getLogger(__name__)
+
+EXPECTED_METADATA_COLUMNS = 9  # entity_id, name, type, start, end, sig, doc, summary, file_path
 
 
 class ProcessingPipeline:
@@ -49,6 +54,8 @@ class ProcessingPipeline:
 		repo_path: Path | None = None,
 		config_loader: ConfigLoader | None = None,
 		sync_on_init: bool = True,
+		progress: Progress | None = None,
+		task_id: TaskID | None = None,
 	) -> None:
 		"""
 		Initialize the unified processing pipeline.
@@ -57,6 +64,8 @@ class ProcessingPipeline:
 		        repo_path: Path to the repository root. If None, it will be determined.
 		        config_loader: Application configuration loader. If None, a default one is created.
 		        sync_on_init: If True, run database synchronization during initialization.
+		        progress: Optional rich Progress instance for unified status display.
+		        task_id: Optional rich TaskID for the main initialization/sync task.
 
 		"""
 		self.repo_path = repo_path or find_project_root()
@@ -72,9 +81,7 @@ class ProcessingPipeline:
 		# --- Initialize Shared Components ---
 		self.analyzer = TreeSitterAnalyzer()  # Assumes Analyzer doesn't need config for now
 		# Store embedding model name for later use with generate_embeddings
-		self.embedding_model_name = self.config.get("embedding", {}).get(
-			"model_name", vector_config.EMBEDDING_MODEL_NAME
-		)
+		self.embedding_model_name = self.config.get("embedding", {}).get("model_name", EMBEDDING_MODEL_NAME)
 
 		# --- Initialize KuzuDB Components ---
 		kuzu_db_path = self.config.get("graph", {}).get("database_path")  # Allow override from config
@@ -83,15 +90,8 @@ class ProcessingPipeline:
 		self.graph_synchronizer = GraphSynchronizer(self.repo_path, self.kuzu_manager, self.graph_builder)
 		logger.info("KuzuDB components initialized.")
 
-		# --- Initialize Milvus Components ---
-		self.milvus_client = get_milvus_client()  # Ensures singleton connection and collection existence
-		if not self.milvus_client:
-			# Handle error: Milvus connection failed
-			logger.error("Failed to initialize Milvus client. Vector operations will be unavailable.")
-			self.has_vector_db = False
-		else:
-			logger.info("Milvus components initialized.")
-			self.has_vector_db = True
+		# Milvus components removed, vector search handled by Kuzu
+		self.has_vector_db = True  # Keep flag for now, indicates vector capability exists
 
 		# --- Check if initial sync is needed (only if sync_on_init is False) ---
 		if not sync_on_init:
@@ -129,17 +129,28 @@ class ProcessingPipeline:
 
 				if needs_sync:
 					logger.info("Triggering database synchronization due to empty Kuzu graph or failed check.")
-					self.sync_databases()  # Run the full sync if needed
+					# Pass progress context if available
+					self.sync_databases(progress=progress, task_id=task_id)
 				else:
 					logger.info("Initial synchronization skipped based on Kuzu check.")
+					# If not syncing, update progress description if context is provided
+					if progress and task_id:
+						progress.update(task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).")
 
 			except Exception:
 				logger.exception("Error checking Kuzu state for initial sync. Skipping automatic sync.")
+				# Update progress if context is provided
+				if progress and task_id:
+					progress.update(task_id, description="[yellow]⚠[/yellow] Pipeline initialized (sync check failed).")
 		elif sync_on_init:  # Explicitly handle sync_on_init=True case
 			logger.info("`sync_on_init` is True. Performing database synchronization...")
-			self.sync_databases()
+			# Pass progress context if available
+			self.sync_databases(progress=progress, task_id=task_id)
 			logger.info("Synchronization triggered by `sync_on_init` complete.")
 		# --- End Check ---
+		# Update progress if context is provided
+		elif progress and task_id:
+			progress.update(task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).")
 
 		logger.info(f"ProcessingPipeline initialized for repo: {self.repo_path}")
 
@@ -154,167 +165,354 @@ class ProcessingPipeline:
 				logger.exception("Error closing KuzuDB connection.")
 			self.kuzu_manager = None
 
-		if self.milvus_client:
-			try:
-				# Use the standard close method if available
-				if hasattr(self.milvus_client, "close"):
-					self.milvus_client.close()
-					logger.info("Milvus client connection closed.")
-				else:
-					logger.warning("Could not find close method on Milvus client.")
-			except Exception:
-				logger.exception("Error closing Milvus client connection.")
-			self.milvus_client = None
-
 		logger.info("ProcessingPipeline stopped.")
 
 	# --- Synchronization ---
 
-	def sync_databases(self) -> None:
+	def sync_databases(self, progress: Progress | None = None, task_id: TaskID | None = None) -> None:
 		"""
 		Synchronize both KuzuDB and Milvus databases with the Git repository state.
 
 		Fetches Git state once and passes it to both synchronizers.
 
+		Args:
+		    progress: Optional rich Progress instance for status updates.
+		    task_id: Optional rich TaskID for the main sync task.
+
 		"""
 		logger.info("Starting database synchronization...")
+		if progress and task_id is not None:
+			progress.update(task_id, description="Preparing for synchronization...", completed=0)
 
 		# Fetch Git state once
 		logger.debug("Fetching current Git state...")
+		if progress and task_id:
+			progress.update(task_id, description="Fetching Git state...", completed=5)
+
 		current_git_files = get_git_tracked_files(self.repo_path)
 		if current_git_files is None:
 			logger.error("Synchronization failed: Could not get Git tracked files.")
+			if progress and task_id:
+				progress.update(task_id, description="[red]Error:[/red] Failed to get Git state.")
 			return
-		logger.debug(f"Found {len(current_git_files)} files in Git.")
+
+		git_files_count = len(current_git_files)
+		logger.debug(f"Found {git_files_count} files in Git.")
+		if progress and task_id:
+			progress.update(task_id, description=f"Found {git_files_count} Git files.", completed=10)
+
+		# Determine files to process *before* potentially updating progress total
+		try:
+			# Use the public method now
+			if progress and task_id:
+				progress.update(task_id, description="Querying database state...", completed=15)
+
+			existing_db_files = self.graph_synchronizer.get_db_file_hashes()
+			if existing_db_files is None:
+				logger.error("Graph sync failed: Could not retrieve existing file hashes from Kuzu.")
+				if progress and task_id:
+					progress.update(task_id, description="[red]Error:[/red] Failed querying DB state")
+				return  # Return None as per function signature
+
+			if progress and task_id:
+				progress.update(task_id, description="Comparing Git and DB states...", completed=20)
+
+			files_to_add, files_to_update, files_to_delete = compare_states(current_git_files, existing_db_files)
+			files_to_process_count = len(files_to_add) + len(files_to_update)
+
+			# --- DEBUG LOGGING ---
+			logger.debug(
+				f"Sync comparison: Add={len(files_to_add)}, "
+				f"Update={len(files_to_update)}, "
+				f"Delete={len(files_to_delete)}, "
+				f"Process={files_to_process_count}"
+			)
+			# --- END DEBUG ---
+
+		except Exception:
+			logger.exception("Error comparing Git state with DB state.")
+			if progress and task_id:
+				progress.update(task_id, description="[red]Error:[/red] Failed comparing states")
+			return  # Abort sync
+
+		if progress and task_id:
+			description = (
+				f"Found {len(files_to_add)} to add, {len(files_to_update)} to update, {len(files_to_delete)} to delete"
+			)
+			progress.update(task_id, description=description, completed=25)
 
 		sync_errors = False
 
 		# --- Sync Graph Database ---
 		try:
 			logger.info("Synchronizing Kuzu graph database...")
-			sync_success_graph = self.graph_synchronizer.sync_graph(current_git_files)
+			if progress and task_id:
+				progress.update(task_id, description="Starting graph database sync...", completed=30)
+
+			# Pass progress context down
+			sync_success_graph = self.graph_synchronizer.sync_graph(
+				current_git_files,
+				progress=progress,
+				task_id=task_id,
+			)
+
 			if sync_success_graph:
 				logger.info("Kuzu graph database synchronization completed successfully.")
+				if progress and task_id:
+					progress.update(task_id, completed=100, description="[green]✓[/green] Synchronization complete.")
 			else:
 				logger.warning("Kuzu graph database synchronization failed or had issues.")
 				sync_errors = True
+				if progress and task_id:
+					progress.update(
+						task_id, completed=100, description="[yellow]⚠[/yellow] Sync completed with warnings."
+					)
 		except Exception:
 			logger.exception("Error during Kuzu graph synchronization.")
+			if progress and task_id:
+				progress.update(task_id, description="[red]Error:[/red] Graph sync failed.", completed=100)
 			sync_errors = True
 
-		# --- Sync Vector Database ---
-		if self.milvus_client:
-			try:
-				logger.info("Synchronizing Milvus vector database...")
-				# Use the standalone function, passing repo path and fetched git state
-				synchronize_vectors(
-					repo_path=self.repo_path,
-					current_git_files=current_git_files,
-					kuzu_manager=self.kuzu_manager,
-				)
-				logger.info("Milvus vector database synchronization completed successfully.")
-			except Exception:
-				logger.exception("Error during Milvus vector synchronization.")
-				sync_errors = True
-		else:
-			logger.warning("Vector database not initialized, skipping Milvus synchronization.")
-
+		# Final status reporting
 		if sync_errors:
 			logger.error("Database synchronization process finished with errors.")
 		else:
 			logger.info("Database synchronization process finished successfully.")
 
+	def sync_databases_simple(self, progress_callback: Callable[[int], None] | None = None) -> bool:
+		"""
+		Synchronize databases with a simple callback-based progress reporting.
+
+		Args:
+		        progress_callback: Optional function that accepts an integer percentage (0-100)
+		                                                to update progress display
+
+		Returns:
+		        True if synchronization was successful, False otherwise
+
+		"""
+		logger.info("Starting database synchronization (simple mode)...")
+		if progress_callback:
+			progress_callback(5)  # Start at 5%
+
+		# Fetch Git state
+		logger.debug("Fetching current Git state...")
+		current_git_files = get_git_tracked_files(self.repo_path)
+		if current_git_files is None:
+			logger.error("Synchronization failed: Could not get Git tracked files.")
+			return False
+
+		if progress_callback:
+			progress_callback(15)
+
+		logger.debug(f"Found {len(current_git_files)} files in Git.")
+
+		# Get DB state and compare
+		try:
+			existing_db_files = self.graph_synchronizer.get_db_file_hashes()
+			if existing_db_files is None:
+				logger.error("Graph sync failed: Could not retrieve existing file hashes from Kuzu.")
+				return False
+
+			if progress_callback:
+				progress_callback(25)
+
+			# Compare states to determine changes
+			files_to_add, files_to_update, files_to_delete = compare_states(current_git_files, existing_db_files)
+			files_to_process_count = len(files_to_add) + len(files_to_update)
+
+			if progress_callback:
+				progress_callback(35)
+
+			# Log change summary
+			logger.debug(
+				f"Sync comparison: Add={len(files_to_add)}, "
+				f"Update={len(files_to_update)}, "
+				f"Delete={len(files_to_delete)}, "
+				f"Process={files_to_process_count}"
+			)
+
+		except Exception:
+			logger.exception("Error comparing Git state with DB state.")
+			return False
+
+		sync_success = True
+
+		# Process deletions (if any)
+		if files_to_delete:
+			logger.info(f"Deleting {len(files_to_delete)} files...")
+			try:
+				success = self.graph_synchronizer.delete_files_from_graph(files_to_delete)
+				if not success:
+					logger.warning("Some files could not be deleted.")
+					sync_success = False
+			except Exception:
+				logger.exception("Error during file deletion.")
+				sync_success = False
+
+			if progress_callback:
+				progress_callback(45)
+
+		# Process additions and updates
+		files_to_process = files_to_add.union(files_to_update)
+		if files_to_process:
+			logger.info(f"Processing {len(files_to_process)} files...")
+
+			# Setup progress reporting
+			processed = 0
+			total = len(files_to_process)
+			progress_start = 50
+			progress_end = 95
+			progress_range = progress_end - progress_start
+
+			# Process each file
+			for file_path_str in files_to_process:
+				file_path = self.repo_path / file_path_str
+				if not file_path.is_file():
+					logger.warning(f"File not found: {file_path}")
+					processed += 1
+					continue
+
+				# Delete existing data if this is an update
+				if file_path_str in files_to_update:
+					self.graph_synchronizer.delete_file_from_graph(file_path_str)
+
+				# Process the file
+				try:
+					git_hash = current_git_files.get(file_path_str)
+					self.graph_builder.process_file(file_path, git_hash=git_hash)
+				except Exception:
+					logger.exception(f"Error processing file: {file_path}")
+					sync_success = False
+
+				# Update progress
+				processed += 1
+				if progress_callback:
+					percent = int(progress_start + (processed / total) * progress_range)
+					progress_callback(percent)
+
+			# Rebuild vector index
+			if progress_callback:
+				progress_callback(96)
+
+			try:
+				logger.info("Rebuilding vector index...")
+				if self.kuzu_manager is not None:  # Add None check
+					if not self.kuzu_manager.drop_vector_index():
+						logger.warning("Failed to drop vector index.")
+
+					if self.kuzu_manager.create_vector_index():
+						logger.info("Vector index rebuilt successfully.")
+					else:
+						logger.error("Failed to rebuild vector index.")
+				else:
+					logger.error("Cannot rebuild vector index: KuzuManager is None")
+					sync_success = False
+			except Exception:
+				logger.exception("Error rebuilding vector index.")
+				sync_success = False
+
+			if progress_callback:
+				progress_callback(100)
+
+		logger.info(f"Synchronization finished. Success: {sync_success}")
+		return sync_success
+
 	# --- Retrieval Methods ---
 
-	def semantic_search(self, query: str, k: int = 5, filters: str | None = None) -> list[dict[str, Any]] | None:
+	def semantic_search(self, query: str, k: int = 5) -> list[dict[str, Any]] | None:
 		"""
-		Perform semantic search for code chunks similar to the query using Milvus.
+		Perform semantic search for code entities similar to the query using Kuzu vector index.
 
 		Args:
 		        query: The search query string.
 		        k: The number of top similar results to retrieve.
-		        filters: Optional Milvus filter expression string (e.g., "language == 'python'").
+		        # filters: Kuzu filter support via projected graphs might be added later.
 
 		Returns:
 		        A list of search result dictionaries (including metadata and distance),
-		        or None if an error occurs or Milvus is unavailable.
+		        or None if an error occurs or KuzuManager is unavailable.
 
 		"""
-		if not self.milvus_client:
-			logger.error("Milvus client not available for semantic search.")
+		if not self.kuzu_manager:
+			logger.error("KuzuManager not available for semantic search.")
 			return None
 
-		logger.debug("Performing semantic search for query: '%s', k=%d, filters='%s'", query, k, filters)
+		logger.debug("Performing semantic search for query: '%s', k=%d", query, k)
 
 		try:
 			# 1. Generate query embedding
-			query_embedding = generate_embeddings(query)  # Pass only query
+			query_embedding = generate_embedding(query)  # Use new embedding function
 			if query_embedding is None:
 				logger.error("Failed to generate embedding for query.")
 				return None
 
-			# Prepare embedding for Milvus
-			# For single query, query_embedding will be a numpy array
-			if isinstance(query_embedding, np.ndarray):
-				search_vectors = [query_embedding.tolist()]
-			else:
-				# If it's already a list or another format, use it directly
-				search_vectors = [query_embedding]
+			# 2. Query Kuzu vector index
+			vector_results = self.kuzu_manager.query_vector_index(query_embedding, k)
+			if vector_results is None:
+				logger.error("Kuzu vector index query failed.")
+				return None
+			if not vector_results:
+				logger.debug("Kuzu vector index query returned no results.")
+				return []
 
-			# 2. Prepare search parameters for MilvusClient.search
-			search_params = {
-				"metric_type": vector_config.METRIC_TYPE,
-				"params": {"nprobe": 10},  # Example search param, adjust as needed
-				"anns_field": vector_config.FIELD_EMBEDDING,  # Moved inside
-			}
-			output_fields = [
-				vector_config.FIELD_ID,
-				vector_config.FIELD_FILE_PATH,
-				vector_config.FIELD_ENTITY_NAME,
-				vector_config.FIELD_CHUNK_TYPE,
-				vector_config.FIELD_START_LINE,
-				vector_config.FIELD_END_LINE,
-				vector_config.FIELD_CHUNK_TEXT,
-				"kuzu_entity_id",  # Ensure this is stored in Milvus metadata
-			]
-
-			# 3. Execute search using MilvusClient signature
-			results = self.milvus_client.search(
-				collection_name=vector_config.COLLECTION_NAME,
-				data=search_vectors,
-				filter=filters or "",
-				limit=k,
-				search_params=search_params,
-				output_fields=output_fields,
+			# 3. Fetch metadata for each result ID from Kuzu
+			entity_ids = [res["entity_id"] for res in vector_results]
+			# Important: Kuzu parameter substitution for lists in WHERE IN might require specific formatting
+			# or might not be directly supported in all contexts. Using multiple queries or MATCH with OR is safer.
+			# Let's construct a MATCH query with OR for simplicity and safety.
+			if not entity_ids:
+				return []
+			match_clauses = [f"(e:CodeEntity {{entity_id: '{eid}'}})" for eid in entity_ids]
+			match_query = (
+				"MATCH "
+				+ "\nUNION MATCH ".join(match_clauses)
+				+ "\nRETURN e.entity_id, e.name, e.entity_type, "
+				+ "e.start_line, e.end_line, e.signature, "
+				+ "e.docstring, e.content_summary, e.file_path"
 			)
+
+			metadata_results = self.kuzu_manager.execute_query(match_query)
+			if metadata_results is None:
+				logger.error("Failed to fetch metadata for vector search results from Kuzu.")
+				return None  # Or maybe return results without metadata?
+
+			# Create a lookup map for metadata
+			metadata_map = {
+				row[0]: {
+					"entity_id": row[0],
+					"name": row[1],
+					"entity_type": row[2],
+					"start_line": row[3],
+					"end_line": row[4],
+					"signature": row[5],
+					"docstring": row[6],
+					"content_summary": row[7],
+					"file_path": row[8],
+					# Add other fields as needed, e.g., chunk_text if stored/derivable
+				}
+				for row in metadata_results
+				if len(row) == EXPECTED_METADATA_COLUMNS
+			}
 
 			# 4. Format results
 			formatted_results = []
-
-			# Results is a list (for multiple query vectors), access the first element
-			if results and len(results) > 0:
-				for hit in results[0]:  # Search result for the first query vector
-					# Create a dictionary with result information
-					result_dict = {
-						"id": hit.get("id") if isinstance(hit, dict) else getattr(hit, "id", None),
-						"distance": hit.get("distance") if isinstance(hit, dict) else getattr(hit, "distance", 0.0),
-						"metadata": {},
-					}
-
-					# Extract entity information based on result format
-					if isinstance(hit, dict):
-						# If hit is a dictionary
-						result_dict["metadata"] = hit.get("entity", {})
-					else:
-						# If hit is a pymilvus.Hit object
-						entity = getattr(hit, "entity", None)
-						if entity is not None:
-							if hasattr(entity, "to_dict"):
-								result_dict["metadata"] = entity.to_dict()
-							else:
-								result_dict["metadata"] = entity
-
-					formatted_results.append(result_dict)
+			for vector_hit in vector_results:
+				entity_id = vector_hit["entity_id"]
+				metadata = metadata_map.get(entity_id)
+				if metadata:
+					formatted_results.append(
+						{
+							"id": entity_id,  # Use Kuzu entity_id as the primary ID
+							"distance": vector_hit["distance"],
+							"metadata": metadata,
+							# Note: 'kuzu_entity_id' is now just 'id' and also present within metadata
+						}
+					)
+				else:
+					# Log warning but don't add metadata if lookup failed
+					logger.warning(f"Metadata not found for vector hit with entity_id: {entity_id}")
+					# Added pass to fix linter error
 
 			logger.debug("Semantic search found %d results.", len(formatted_results))
 			return formatted_results
@@ -384,17 +582,17 @@ class ProcessingPipeline:
 		seed_entity_ids = []
 		milvus_hit_map = {}  # Store original hits for later merging
 		for hit in initial_hits:
-			metadata = hit.get("metadata", {})
-			entity_id = metadata.get("kuzu_entity_id")
+			entity_id = hit.get("id")  # Get ID from the top level of the new semantic_search result
 
 			if entity_id:
 				seed_entity_ids.append(entity_id)
 				milvus_hit_map[entity_id] = hit
 			else:
-				logger.warning(f"Could not determine Kuzu entity ID for Milvus hit: {hit.get('id')}")
+				# If ID is missing from semantic search result, log appropriately
+				logger.warning(f"Could not determine entity ID for semantic search hit: {hit}")
 
 		if not seed_entity_ids:
-			logger.warning("Graph-enhanced search: No corresponding Kuzu entity IDs found for initial hits.")
+			logger.warning("Graph-enhanced search: No entity IDs found in initial semantic search hits.")
 			# Return only the initial vector hits if no graph mapping possible
 			return initial_hits
 
@@ -427,7 +625,7 @@ class ProcessingPipeline:
 		# Initialize with original hits
 		for entity_id, hit_data in milvus_hit_map.items():
 			augmented_results_map[entity_id] = {
-				"vector_hit": hit_data,
+				"vector_hit": hit_data,  # Store the original hit under 'vector_hit'
 				"graph_context": [],
 			}
 
