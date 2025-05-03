@@ -59,5 +59,23 @@ def clean_message_for_linting(message: str) -> str:
 		if message.lower().startswith(prefix):
 			message = message[len(prefix) :].strip()
 
-	# Remove multi-line formatting by joining lines (keep message in single paragraph)
-	return " ".join(message.splitlines())
+	# Process multi-line content carefully to preserve format
+	lines = message.splitlines()
+	if len(lines) > 0:
+		# Keep the header line as is (first line)
+		header = lines[0]
+		# Join the rest into a body (if any)
+		if len(lines) > 1:
+			# Check if there's already a blank line between header and body
+			body_start = 2 if lines[1].strip() == "" else 1
+
+			if len(lines) > body_start:
+				# Join body lines with proper line breaks
+				body = "\n".join(lines[body_start:])
+				# Return header + blank line + body
+				return f"{header}\n\n{body}"
+
+		# Just return the header if no body
+		return header
+
+	return message
