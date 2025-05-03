@@ -78,7 +78,7 @@ commit:
     scopes: []
 
     # Maximum length for commit message subject line
-    max_length: 72
+    max_length: 120
   
   # Commit lint rules to match .commitlintrc
   lint:
