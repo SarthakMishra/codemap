@@ -25,6 +25,8 @@ logger = logging.getLogger(__name__)
 # Define a constant for truncation length
 MAX_CONTEXT_LENGTH = 8000
 
+MAX_CONTEXT_RESULTS = 10
+
 
 class AskResult(TypedDict):
 	"""Structured result for the ask command."""
@@ -82,7 +84,7 @@ class AskCommand:
 
 		logger.info(f"AskCommand initialized for session {self.session_id}")
 
-	def _retrieve_context(self, query: str, limit: int = 5) -> list[dict[str, Any]]:
+	def _retrieve_context(self, query: str, limit: int = MAX_CONTEXT_RESULTS) -> list[dict[str, Any]]:
 		"""Retrieve relevant code chunks based on the query."""
 		if not self.pipeline:
 			logger.warning("ProcessingPipeline not available, no context will be retrieved.")
@@ -154,7 +156,7 @@ class AskCommand:
 			return AskResult(answer="Processing pipeline not available.", context=[])
 
 		# Retrieve relevant context first
-		context = self._retrieve_context(question, limit=5)
+		context = self._retrieve_context(question, limit=MAX_CONTEXT_RESULTS)
 
 		# Format context for inclusion in prompt
 		context_text = format_content_for_context(context)
