@@ -66,20 +66,31 @@ def get_git_tracked_files(repo_path: Path) -> dict[str, str] | None:
 	tracked_files: dict[str, str] = {}
 	lines = stdout.splitlines()
 	for line in lines:
-		parts = line.split()
-		if len(parts) >= MIN_GIT_LS_FILES_PARTS:
-			# Format: <mode> <blob-hash> <stage>\t<file-path>
-			# We only care about stage 0 (committed/tracked)
-			stage = parts[2]
-			if stage == "0":
-				git_hash = parts[1]
-				# Path can contain spaces, so join remaining parts
-				file_path = " ".join(parts[3:]).strip()
-				# Ensure consistent path separators
-				normalized_path = str(Path(file_path).as_posix())
-				tracked_files[normalized_path] = git_hash
-		else:
-			logger.warning(f"Skipping malformed line in git ls-files output: {line}")
+		if not line:
+			continue
+		try:
+			parts = line.split()
+			if len(parts) < MIN_GIT_LS_FILES_PARTS:
+				logger.warning(f"Skipping malformed line in git ls-files output: {line}")
+				continue
+
+			# Extract mode, hash, stage, and path
+			_mode, blob_hash, stage_str = parts[:3]
+			file_path = " ".join(parts[3:])  # Handle spaces in filenames
+
+			# Unquote path if necessary (git ls-files quotes paths with special chars)
+			if file_path.startswith('"') and file_path.endswith('"'):
+				file_path = file_path[1:-1].encode("latin-1").decode("unicode_escape")
+
+			stage = int(stage_str)
+
+			# We are interested in committed files (stage 0)
+			if stage == 0:
+				tracked_files[file_path] = blob_hash
+		except ValueError:
+			logger.warning(f"Could not parse line: {line}")
+		except IndexError:
+			logger.warning(f"Index error parsing line: {line}")
 
 	logger.info(f"Found {len(tracked_files)} tracked files in Git repository: {repo_path}")
 	return tracked_files
