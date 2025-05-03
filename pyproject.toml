@@ -36,10 +36,10 @@ dependencies = [
     "packaging>=24.2",
     "requests-unixsocket>=0.4.1",
     "pathspec>=0.12.1",
-    "kuzu>=0.9.0",
     "unidiff>=0.7.5",
     "sqlmodel>=0.0.24",
     "tenacity>=9.1.2",
+    "hnswlib>=0.8.0",
 ]
 
 [dependency-groups]
