@@ -93,11 +93,55 @@ class ProcessingPipeline:
 			logger.info("Milvus components initialized.")
 			self.has_vector_db = True
 
-		# --- Initial Synchronization ---
-		if sync_on_init:
-			logger.info("Performing initial database synchronization...")
+		# --- Check if initial sync is needed (only if sync_on_init is False) ---
+		if not sync_on_init:
+			try:
+				# Check Kuzu graph emptiness
+				kuzu_check_query = "MATCH (f:CodeFile) RETURN count(f)"
+				kuzu_result = self.kuzu_manager.execute_query(kuzu_check_query)
+
+				needs_sync = False  # Default to not needing sync unless proven empty
+				if kuzu_result and isinstance(kuzu_result, (list, tuple)) and len(kuzu_result) > 0:
+					count_val = None
+					if isinstance(kuzu_result[0], (list, tuple)) and len(kuzu_result[0]) > 0:
+						count_val = kuzu_result[0][0]
+					elif isinstance(kuzu_result[0], int):  # Handle direct count result
+						count_val = kuzu_result[0]
+
+					if count_val == 0:
+						logger.info("Kuzu graph appears empty. Triggering initial synchronization.")
+						needs_sync = True
+					elif count_val is not None:
+						logger.info(
+							f"Found {count_val} files in Kuzu. Skipping initial sync triggered by emptiness check."
+						)
+					else:  # Unexpected result format, log but don't force sync
+						logger.warning(
+							(
+								f"Unexpected Kuzu count result format: {kuzu_result}.",
+								"Assuming sync not needed based on this check.",
+							)
+						)
+
+				else:  # Query failed or returned empty/unexpected result
+					logger.warning("Could not determine Kuzu graph state from count query. Assuming sync is needed.")
+					needs_sync = True  # Force sync if we can't verify state
+
+				if needs_sync:
+					logger.info("Triggering database synchronization due to empty Kuzu graph or failed check.")
+					self.sync_databases()  # Run the full sync if needed
+				else:
+					logger.info("Initial synchronization skipped based on Kuzu check.")
+
+			except Exception:
+				logger.exception("Error checking Kuzu state for initial sync. Skipping automatic sync.")
+		elif sync_on_init:  # Explicitly handle sync_on_init=True case
+			logger.info("`sync_on_init` is True. Performing database synchronization...")
 			self.sync_databases()
-			logger.info("Initial synchronization complete.")
+			logger.info("Synchronization triggered by `sync_on_init` complete.")
+		# --- End Check ---
+
+		logger.info(f"ProcessingPipeline initialized for repo: {self.repo_path}")
 
 	def stop(self) -> None:
 		"""Stops the pipeline and releases resources."""
@@ -159,11 +203,15 @@ class ProcessingPipeline:
 			sync_errors = True
 
 		# --- Sync Vector Database ---
-		if self.has_vector_db:
+		if self.milvus_client:
 			try:
 				logger.info("Synchronizing Milvus vector database...")
 				# Use the standalone function, passing repo path and fetched git state
-				synchronize_vectors(repo_path=self.repo_path, current_git_files=current_git_files)
+				synchronize_vectors(
+					repo_path=self.repo_path,
+					current_git_files=current_git_files,
+					kuzu_manager=self.kuzu_manager,
+				)
 				logger.info("Milvus vector database synchronization completed successfully.")
 			except Exception:
 				logger.exception("Error during Milvus vector synchronization.")
@@ -192,7 +240,7 @@ class ProcessingPipeline:
 		        or None if an error occurs or Milvus is unavailable.
 
 		"""
-		if not self.milvus_client or not self.has_vector_db:
+		if not self.milvus_client:
 			logger.error("Milvus client not available for semantic search.")
 			return None
 
@@ -213,31 +261,30 @@ class ProcessingPipeline:
 				# If it's already a list or another format, use it directly
 				search_vectors = [query_embedding]
 
-			# 2. Prepare search parameters
+			# 2. Prepare search parameters for MilvusClient.search
 			search_params = {
 				"metric_type": vector_config.METRIC_TYPE,
 				"params": {"nprobe": 10},  # Example search param, adjust as needed
+				"anns_field": vector_config.FIELD_EMBEDDING,  # Moved inside
 			}
 			output_fields = [
 				vector_config.FIELD_ID,
 				vector_config.FIELD_FILE_PATH,
 				vector_config.FIELD_ENTITY_NAME,
 				vector_config.FIELD_CHUNK_TYPE,
-				vector_config.FIELD_CHUNK_TEXT,  # Include text for context
-				vector_config.FIELD_GIT_HASH,
 				vector_config.FIELD_START_LINE,
 				vector_config.FIELD_END_LINE,
+				vector_config.FIELD_CHUNK_TEXT,
 				"kuzu_entity_id",  # Ensure this is stored in Milvus metadata
 			]
 
-			# 3. Execute search
+			# 3. Execute search using MilvusClient signature
 			results = self.milvus_client.search(
 				collection_name=vector_config.COLLECTION_NAME,
 				data=search_vectors,
-				anns_field=vector_config.FIELD_EMBEDDING,
-				param=search_params,
+				filter=filters or "",
 				limit=k,
-				expr=filters,
+				search_params=search_params,
 				output_fields=output_fields,
 			)
 
