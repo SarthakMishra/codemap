@@ -39,6 +39,7 @@ dependencies = [
     "pymilvus>=2.5.8",
     "kuzu>=0.9.0",
     "unidiff>=0.7.5",
+    "sqlmodel>=0.0.24",
 ]
 
 [dependency-groups]
