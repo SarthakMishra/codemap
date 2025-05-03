@@ -28,7 +28,7 @@ def count_tokens(file_path: Path) -> int:
 		return 0
 
 
-def read_file_content(file_path: Path | str) -> str:
+def read_file_content(file_path: Path | str) -> str | None:
 	"""
 	Read content from a file with proper error handling.
 
@@ -36,23 +36,31 @@ def read_file_content(file_path: Path | str) -> str:
 	    file_path: Path to the file to read
 
 	Returns:
-	    Content of the file as string
-
-	Raises:
-	    OSError: If the file cannot be read
-	    UnicodeDecodeError: If the file content cannot be decoded as UTF-8
+	    Content of the file as string, or None if the file cannot be read
 
 	"""
 	path_obj = Path(file_path)
 	try:
 		with path_obj.open("r", encoding="utf-8") as f:
 			return f.read()
+	except FileNotFoundError:
+		# Handle case where file was tracked but has been deleted
+		logger.debug(f"File not found: {path_obj} - possibly deleted since last tracked")
+		return None
 	except UnicodeDecodeError:
 		# Try to read as binary and then decode with error handling
 		logger.warning("File %s contains non-UTF-8 characters, attempting to decode with errors='replace'", path_obj)
-		with path_obj.open("rb") as f:
-			content = f.read()
-			return content.decode("utf-8", errors="replace")
+		try:
+			with path_obj.open("rb") as f:
+				content = f.read()
+				return content.decode("utf-8", errors="replace")
+		except (OSError, FileNotFoundError):
+			logger.debug(f"Unable to read file as binary: {path_obj}")
+			return None
+	except OSError as e:
+		# Handle other file access errors
+		logger.debug(f"Error reading file {path_obj}: {e}")
+		return None
 
 
 def ensure_directory_exists(dir_path: Path) -> None:
