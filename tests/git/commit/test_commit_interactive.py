@@ -4,6 +4,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
+from codemap.git.diff_splitter import DiffChunk
 from codemap.git.interactive import ChunkAction, CommitUI
 from tests.base import GitTestBase
 
@@ -77,7 +78,7 @@ class TestCommitUI(GitTestBase):
 		action = self.ui.get_user_action()
 
 		# Assert: Correct action was returned
-		assert action == ChunkAction.ACCEPT
+		assert action == ChunkAction.COMMIT
 
 	@patch("rich.prompt.Prompt.ask")
 	def test_edit_message(self, mock_ask: Mock) -> None:
@@ -99,22 +100,22 @@ class TestCommitUI(GitTestBase):
 	@patch.object(CommitUI, "display_chunk")
 	@patch.object(CommitUI, "get_user_action")
 	@patch.object(CommitUI, "edit_message")
-	def test_process_chunk_accept(self, mock_edit: Mock, mock_action: Mock, mock_display: Mock) -> None:
+	def test_process_chunk_commit(self, mock_edit: Mock, mock_action: Mock, mock_display: Mock) -> None:
 		"""
-		Test that process_chunk returns correct ChunkResult for ACCEPT action.
+		Test that process_chunk returns COMMIT action correctly.
 
 		Verifies the behavior when a user accepts a commit chunk without
 		editing.
 
 		"""
 		# Arrange: Set up mocks
-		mock_action.return_value = ChunkAction.ACCEPT
+		mock_action.return_value = ChunkAction.COMMIT
 
 		# Act: Process the chunk
 		result = self.ui.process_chunk(self.mock_chunk, 0, 1)
 
 		# Assert: Result matches expectations
-		assert result.action == ChunkAction.ACCEPT
+		assert result.action == ChunkAction.COMMIT
 		assert result.message == "Test commit message"
 		mock_display.assert_called_once()
 		mock_edit.assert_not_called()
@@ -124,7 +125,7 @@ class TestCommitUI(GitTestBase):
 	@patch.object(CommitUI, "edit_message")
 	def test_process_chunk_edit(self, mock_edit: Mock, mock_action: Mock, mock_display: Mock) -> None:
 		"""
-		Test that process_chunk returns correct ChunkResult for EDIT action.
+		Test that process_chunk returns COMMIT action after editing.
 
 		Verifies the behavior when a user chooses to edit the commit message.
 
@@ -137,7 +138,7 @@ class TestCommitUI(GitTestBase):
 		result = self.ui.process_chunk(self.mock_chunk, 0, 1)
 
 		# Assert: Result matches expectations
-		assert result.action == ChunkAction.ACCEPT
+		assert result.action == ChunkAction.COMMIT
 		assert result.message == "Edited message"
 		mock_display.assert_called_once()
 		mock_edit.assert_called_once()
@@ -145,17 +146,17 @@ class TestCommitUI(GitTestBase):
 	@patch.object(CommitUI, "display_chunk")
 	@patch.object(CommitUI, "get_user_action")
 	def test_process_chunk_other_actions(self, mock_action: Mock, mock_display: Mock) -> None:
-		"""Test that process_chunk returns correct ChunkResult for other actions."""
-		# Test cases
-		test_cases = [ChunkAction.SKIP, ChunkAction.ABORT, ChunkAction.REGENERATE]
+		"""Test that process_chunk returns other actions directly."""
+		# Arrange
+		chunk = DiffChunk(files=["file1.py"], content="diff content", description="Initial desc")
+		actions_to_test = [ChunkAction.SKIP, ChunkAction.REGENERATE, ChunkAction.EXIT]
 
-		for action in test_cases:
+		for action in actions_to_test:
 			mock_action.return_value = action
-			result = self.ui.process_chunk(self.mock_chunk, 0, 1)
+			result = self.ui.process_chunk(chunk)
 
-			# Verify display_chunk was called
-			mock_display.assert_called_once_with(self.mock_chunk, 0, 1)
-			mock_display.reset_mock()  # Reset for next iteration
-
+			# Assert
 			assert result.action == action
 			assert result.message is None
+			mock_display.assert_called_once_with(chunk, 0, 1)
+			mock_display.reset_mock()  # Reset for next iteration

@@ -117,7 +117,7 @@ class TestCommitWorkflow(GitTestBase):
 		"""
 		# Arrange: Set up mocks
 		mock_perform_commit.return_value = True
-		self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.ACCEPT, "Test message")
+		self.mock_ui.process_chunk.return_value = ChunkResult(ChunkAction.COMMIT, "Test message")
 
 		# Act: Call the method
 		result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)
