@@ -19,11 +19,9 @@ from codemap.cli.commit_cmd import (
 	GenerationMode,
 	RunConfig,
 	_load_prompt_template,
-	process_chunk_interactively,
 	setup_message_generator,
 )
 from codemap.git.commit_generator import CommitMessageGenerator
-from codemap.git.commit_generator.schemas import DiffChunkData
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter, SemanticSplitStrategy
 from codemap.git.utils import GitDiff
 from codemap.llm import LLMError
@@ -292,10 +290,10 @@ class TestMessageGenerator(LLMTestBase):
 				repo_root=repo_root, llm_client=mock_llm_client, prompt_template="", config_loader=mock_config_loader
 			)
 
-			# Create a test chunk - convert to DiffChunkData to match expected type
+			# Create a test chunk
 			files = ["docs/README.md"]
 			content = "diff content for README.md"
-			chunk_data = DiffChunkData(
+			chunk = DiffChunk(
 				files=files,
 				content=content,
 			)
@@ -305,7 +303,7 @@ class TestMessageGenerator(LLMTestBase):
 				patch.object(generator, "extract_file_info", return_value={}),
 				patch.object(generator.client, "generate_text", side_effect=LLMError("API call failed")),
 			):
-				message = generator.fallback_generation(chunk_data)
+				message = generator.fallback_generation(chunk)
 
 			# Assert: Verify fallback message format
 			assert message.startswith("docs: update")
@@ -332,7 +330,7 @@ class TestMessageGenerator(LLMTestBase):
 			)
 
 			# Create test data using DiffChunkData
-			chunk_data = DiffChunkData(
+			chunk_data = DiffChunk(
 				files=["src/feature.py"],
 				content=(
 					"diff --git a/src/feature.py b/src/feature.py\n"
@@ -379,7 +377,7 @@ class TestMessageGenerator(LLMTestBase):
 			)
 
 			# Create test data using DiffChunkData
-			chunk_data = DiffChunkData(
+			chunk_data = DiffChunk(
 				files=["docs/README.md"],
 				content=(
 					"diff --git a/docs/README.md b/docs/README.md\n"
@@ -426,8 +424,8 @@ class TestMessageGenerator(LLMTestBase):
 			# Mock the linter to indicate the message is valid
 			mock_lint_result = (True, [])
 
-			# Create test data using DiffChunkData
-			chunk_data = DiffChunkData(
+			# Create test data using DiffChunk
+			chunk = DiffChunk(
 				files=["src/feature.py"],
 				content=(
 					"diff --git a/src/feature.py b/src/feature.py\n"
@@ -438,7 +436,8 @@ class TestMessageGenerator(LLMTestBase):
 			)
 
 			# Act: Generate a message and check linting
-			from codemap.git.commit_generator.utils import generate_message_with_linting
+			# Note: After refactoring, generate_message_with_linting moved from utils
+			# to the CommitMessageGenerator class
 
 			# Patching the linting function directly
 			with (
@@ -446,10 +445,8 @@ class TestMessageGenerator(LLMTestBase):
 				patch.object(generator.client, "generate_text", return_value="feat(core): add new feature function"),
 				patch.object(generator, "extract_file_info", return_value={}),
 			):
-				# We're using the utility function directly here since the class method might have changed
-				message, used_llm, is_valid = generate_message_with_linting(
-					chunk=chunk_data, generator=generator, repo_root=repo_root
-				)
+				# We should now test the method on the generator instance
+				message, used_llm, is_valid = generator.generate_message_with_linting(chunk=chunk)
 
 			# Assert: Verify the message and linting results
 			assert used_llm is True
@@ -476,10 +473,9 @@ class TestMessageGenerator(LLMTestBase):
 
 			# Create lint results - first invalid, then valid
 			invalid_lint_result = (False, ["Invalid format, subject line too long"])
-			valid_lint_result = (True, [])
 
-			# Create test data using DiffChunkData
-			chunk_data = DiffChunkData(
+			# Create test data using DiffChunk
+			chunk = DiffChunk(
 				files=["src/feature.py"],
 				content=(
 					"diff --git a/src/feature.py b/src/feature.py\n"
@@ -490,12 +486,8 @@ class TestMessageGenerator(LLMTestBase):
 			)
 
 			# Act: Generate a message with linting
-			from codemap.git.commit_generator.utils import generate_message_with_linting
-
-			lint_mock = Mock(side_effect=[invalid_lint_result, valid_lint_result])
-
 			with (
-				patch("codemap.git.commit_generator.utils.lint_commit_message", lint_mock),
+				patch("codemap.git.commit_generator.utils.lint_commit_message", return_value=invalid_lint_result),
 				patch.object(
 					generator.client,
 					"generate_text",
@@ -508,9 +500,8 @@ class TestMessageGenerator(LLMTestBase):
 				patch.object(generator, "extract_file_info", return_value={}),
 				patch("codemap.git.commit_generator.utils.prepare_lint_prompt", return_value="mocked lint prompt"),
 			):
-				message, used_llm, is_valid = generate_message_with_linting(
-					chunk=chunk_data, generator=generator, repo_root=repo_root
-				)
+				# We should now test CommitMessageGenerator.generate_message_with_linting
+				message, used_llm, is_valid = generator.generate_message_with_linting(chunk=chunk)
 
 			# Assert: Verify the message and linting results
 			assert used_llm is True
@@ -698,39 +689,8 @@ class TestInteractiveCommit(GitTestBase):
 		process.
 
 		"""
-		# Arrange: Create test data
-		chunk = DiffChunk(
-			files=["src/feature.py"],
-			content="diff content",
-		)
-
-		# Mock dependencies
-		mock_generator = Mock(spec=CommitMessageGenerator)
-		mock_generator.generate_message.return_value = ("feat: add new feature", True)
-
-		context = MagicMock()
-		context.chunk = chunk
-		context.index = 0
-		context.total = 1
-		context.generator = mock_generator
-		context.mode = GenerationMode.SMART
-
-		# Act/Assert: Mock questionary for user input
-		with (
-			patch("codemap.cli.commit_cmd.questionary.select") as mock_select,
-			patch("codemap.cli.commit_cmd.print_chunk_summary"),
-			patch("codemap.cli.commit_cmd.console"),
-			patch("codemap.cli.commit_cmd.generate_commit_message", return_value=("feat: add new feature", True)),
-			patch("codemap.cli.commit_cmd._commit_with_message"),
-		):
-			# Configure the mock select to return a mock that has an ask method
-			mock_select.return_value.ask.return_value = "commit"
-
-			# Run the function
-			result = process_chunk_interactively(context)
-
-			# Verify result
-			assert result == "continue"
+		# Skip this test after refactoring as process_chunk_interactively was removed
+		pytest.skip("process_chunk_interactively was removed during refactoring")
 
 
 def test_cli_command_execution() -> None:
@@ -752,7 +712,7 @@ def test_cli_command_execution() -> None:
 		mock_untracked.return_value = ["file3.py"]
 
 		mock_splitter = mock_splitter_cls.return_value
-		mock_splitter.split_diff.return_value = [Mock(spec=DiffChunk)]
+		mock_splitter.split_diff.return_value = ([Mock(spec=DiffChunk)], [])
 
 		# We don't need to test run directly, but verify components were called
 		# So we'll just ensure that the process setup is working correctly
@@ -843,7 +803,7 @@ def test_message_convention_customization() -> None:
 
 		# Test each case by mocking the LLM response to each expected message
 		for test_case in test_chunks:
-			chunk_data = DiffChunkData(
+			chunk_data = DiffChunk(
 				files=test_case["files"],
 				content=test_case["content"],
 			)
@@ -919,7 +879,7 @@ def test_multiple_llm_providers() -> None:
 			)
 
 			# Create test chunk using DiffChunkData
-			chunk_data = DiffChunkData(
+			chunk_data = DiffChunk(
 				files=["src/feature.py"],
 				content="mock diff content",
 			)
@@ -1005,7 +965,7 @@ def test_openrouter_configuration() -> None:
 		)
 
 		# Create test data using DiffChunkData
-		chunk_data = DiffChunkData(
+		chunk_data = DiffChunk(
 			files=["src/api.py"],
 			content="diff content",
 		)
@@ -1054,7 +1014,7 @@ def test_model_with_multiple_slashes() -> None:
 		)
 
 		# Create test data using DiffChunkData
-		chunk_data = DiffChunkData(
+		chunk_data = DiffChunk(
 			files=["src/api.py"],
 			content="diff content",
 		)
@@ -1225,3 +1185,78 @@ index 3456789..cdefghi 100645
 		semantic_chunks = mock_split(diff)
 		assert semantic_chunks == expected_chunks
 		mock_split.assert_called_once_with(diff)
+
+
+# Constants
+TEST_REPO_PATH = "tests/fixtures/sample_repo"
+
+# Sample data
+sample_chunk = DiffChunk(files=["file1.py"], content="diff content")
+sample_chunk_data = DiffChunk(files=["file1.py"], content="diff content")
+
+
+@pytest.fixture
+def mock_generator():
+	"""Create a mock generator for testing fallback generation."""
+	return Mock(spec=CommitMessageGenerator)
+
+
+def test_fallback_generation_basic(mock_generator):
+	"""Test basic fallback generation."""
+	# Arrange
+	chunk = DiffChunk(files=["src/main.py"], content="+ new line")
+	# Act
+	message = mock_generator.fallback_generation(chunk)
+	# Assert
+	assert message == "chore: update src/main.py"
+
+
+def test_fallback_generation_with_fix_keyword(mock_generator):
+	"""Test fallback generation detects 'fix' keyword."""
+	# Arrange
+	chunk = DiffChunk(files=["src/utils.py"], content="- old line\n+ fix bug 123")
+	# Act
+	message = mock_generator.fallback_generation(chunk)
+	# Assert
+	assert message == "fix: update src/utils.py"
+
+
+def test_fallback_generation_with_test_file(mock_generator):
+	"""Test fallback generation detects test files."""
+	# Arrange
+	chunk = DiffChunk(files=["tests/test_main.py"], content="+ assert True")
+	# Act
+	message = mock_generator.fallback_generation(chunk)
+	# Assert
+	assert message == "test: update tests/test_main.py"
+
+
+def test_fallback_generation_multiple_files(mock_generator):
+	"""Test fallback generation with multiple files."""
+	# Arrange
+	chunk = DiffChunk(files=["src/main.py", "src/utils.py"], content="+ changes")
+	# Act
+	message = mock_generator.fallback_generation(chunk)
+	# Assert
+	# Expects common path 'src'
+	assert message == "chore: update files in src"
+
+
+def test_fallback_generation_with_chunk_description(mock_generator):
+	"""Test fallback uses specific chunk description if available."""
+	# Arrange
+	chunk = DiffChunk(files=["file.py"], content="", description="feat: add new button")
+	# Act
+	message = mock_generator.fallback_generation(chunk)
+	# Assert
+	assert message == "feat: add new button"
+
+
+def test_fallback_generation_with_non_specific_description(mock_generator):
+	"""Test fallback ignores non-specific chunk descriptions."""
+	# Arrange
+	chunk = DiffChunk(files=["file.py"], content="+ changes", description="update files")
+	# Act
+	message = mock_generator.fallback_generation(chunk)
+	# Assert
+	assert message == "chore: update file.py"  # Should ignore 'update files' description
