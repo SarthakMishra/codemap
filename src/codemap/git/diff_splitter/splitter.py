@@ -7,19 +7,17 @@ from typing import cast
 
 import numpy as np
 
+from codemap.config import DEFAULT_CONFIG
 from codemap.git.utils import GitDiff
 from codemap.utils.cli_utils import console, loading_spinner
 
-from .constants import MAX_FILE_SIZE_FOR_LLM, MAX_LOG_DIFF_SIZE, MODEL_NAME
 from .schemas import DiffChunk
 from .strategies import EmbeddingModel, FileSplitStrategy, SemanticSplitStrategy
 from .utils import (
 	calculate_semantic_similarity,
 	filter_valid_files,
-	get_language_specific_patterns,
 	is_test_environment,
 )
-from .utils import extract_code_from_diff as _extract_code_from_diff
 
 logger = logging.getLogger(__name__)
 
@@ -33,15 +31,49 @@ class DiffSplitter:
 	_sentence_transformers_available = None
 	_model_available = None
 
-	def __init__(self, repo_root: Path) -> None:
+	def __init__(
+		self,
+		repo_root: Path,
+		# Defaults are now sourced from DEFAULT_CONFIG
+		similarity_threshold: float = DEFAULT_CONFIG["commit"]["diff_splitter"]["similarity_threshold"],
+		directory_similarity_threshold: float = DEFAULT_CONFIG["commit"]["diff_splitter"][
+			"directory_similarity_threshold"
+		],
+		min_chunks_for_consolidation: int = DEFAULT_CONFIG["commit"]["diff_splitter"]["min_chunks_for_consolidation"],
+		max_chunks_before_consolidation: int = DEFAULT_CONFIG["commit"]["diff_splitter"][
+			"max_chunks_before_consolidation"
+		],
+		max_file_size_for_llm: int = DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"],
+		max_log_diff_size: int = DEFAULT_CONFIG["commit"]["diff_splitter"]["max_log_diff_size"],
+		model_name: str = DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"],
+	) -> None:
 		"""
 		Initialize the diff splitter.
 
 		Args:
 		    repo_root: Root directory of the Git repository
+		    similarity_threshold: Threshold for grouping by content similarity.
+		    directory_similarity_threshold: Threshold for directory similarity.
+		    min_chunks_for_consolidation: Min chunks to trigger consolidation.
+		    max_chunks_before_consolidation: Max chunks allowed before forced consolidation.
+		    max_file_size_for_llm: Max file size (bytes) to process for LLM context.
+		        Defaults to value from `DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"]` if None.
+		    max_log_diff_size: Max diff size (bytes) to log in debug mode.
+		        Defaults to value from `DEFAULT_CONFIG["commit"]["diff_splitter"]["max_log_diff_size"]` if None.
+		    model_name: Name of the sentence-transformer model to use.
+		        Defaults to value from `DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"]` if None.
 
 		"""
 		self.repo_root = repo_root
+		# Store thresholds
+		self.similarity_threshold = similarity_threshold
+		self.directory_similarity_threshold = directory_similarity_threshold
+		self.min_chunks_for_consolidation = min_chunks_for_consolidation
+		self.max_chunks_before_consolidation = max_chunks_before_consolidation
+		# Store other settings
+		self.max_file_size_for_llm = max_file_size_for_llm
+		self.max_log_diff_size = max_log_diff_size
+		self.model_name = model_name
 
 		# Do NOT automatically check availability - let the command class do this explicitly
 		# This avoids checks happening during initialization without visible loading states
@@ -81,55 +113,99 @@ class DiffSplitter:
 			return False
 
 	@classmethod
-	def _check_model_availability(cls, model_name: str = MODEL_NAME) -> bool:
+	def are_sentence_transformers_available(cls) -> bool:
 		"""
-		Check if the embedding model is available.
+		Check if sentence transformers are available.
+
+		Returns:
+		    True if sentence transformers are available, False otherwise
+		"""
+		return cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
+
+	@classmethod
+	def is_model_available(cls) -> bool:
+		"""
+		Check if embedding model is available.
+
+		Returns:
+		    True if embedding model is available, False otherwise
+		"""
+		return bool(cls._model_available)
+
+	@classmethod
+	def set_model_available(cls, value: bool) -> None:
+		"""
+		Set model availability flag.
 
 		Args:
-		    model_name: Name of the model to check
+		    value: Boolean indicating if model is available
+		"""
+		cls._model_available = value
+
+	@classmethod
+	def get_embedding_model(cls) -> EmbeddingModel | None:
+		"""
+		Get the embedding model.
+
+		Returns:
+		    The embedding model or None if not available
+		"""
+		return cls._embedding_model
+
+	@classmethod
+	def set_embedding_model(cls, model: EmbeddingModel) -> None:
+		"""
+		Set the embedding model.
+
+		Args:
+		    model: The embedding model to set
+		"""
+		cls._embedding_model = model
+
+	def _check_model_availability(self) -> bool:
+		"""
+		Check if the embedding model is available using the instance's configured model name.
 
 		Returns:
 		    True if model is available, False otherwise
 
 		"""
-		if not DiffSplitter._sentence_transformers_available:
+		# Use class method to access class-level cache check
+		if not self.__class__.are_sentence_transformers_available():
 			return False
 
 		try:
 			from sentence_transformers import SentenceTransformer
 
-			# Create model instance if not already created
-			if DiffSplitter._embedding_model is None:
-				logger.debug("Loading embedding model: %s", model_name)
+			# Use class method to access class-level cache
+			if self.__class__.get_embedding_model() is None:
+				# Use self.model_name from instance configuration
+				logger.debug("Loading embedding model: %s", self.model_name)
 
 				try:
-					# Use a simpler loading approach without Progress bar
-					# to avoid "Only one live display may be active at once" error
 					console.print("Loading embedding model...")
-
-					# Load the model without progress tracking
-					DiffSplitter._embedding_model = SentenceTransformer(model_name)
-
+					# Load the model using self.model_name
+					model = SentenceTransformer(self.model_name)
+					self.__class__.set_embedding_model(cast("EmbeddingModel", model))
 					console.print("[green]✓[/green] Model loaded successfully")
-
-					logger.debug("Initialized embedding model: %s", model_name)
-					# Explicitly set the class variable to True when model loads successfully
-					cls._model_available = True
+					logger.debug("Initialized embedding model: %s", self.model_name)
+					# Set class-level flag via class method
+					self.__class__.set_model_available(True)
 					return True
 				except ImportError as e:
 					logger.exception("Missing dependencies for embedding model")
 					console.print(f"[red]Error: Missing dependencies: {e}[/red]")
-					cls._model_available = False
+					self.__class__.set_model_available(False)
 					return False
 				except MemoryError:
 					logger.exception("Not enough memory to load embedding model")
 					console.print("[red]Error: Not enough memory to load embedding model[/red]")
-					cls._model_available = False
+					self.__class__.set_model_available(False)
 					return False
 				except ValueError as e:
 					logger.exception("Invalid model configuration")
 					console.print(f"[red]Error: Invalid model configuration: {e}[/red]")
-					cls._model_available = False
+					self.__class__.set_model_available(False)
 					return False
 				except RuntimeError as e:
 					error_msg = str(e)
@@ -140,21 +216,21 @@ class DiffSplitter:
 					else:
 						logger.exception("Runtime error when loading model")
 						console.print(f"[red]Error loading model: {error_msg}[/red]")
-					cls._model_available = False
+					self.__class__.set_model_available(False)
 					return False
 				except Exception as e:
 					logger.exception("Unexpected error loading embedding model")
 					console.print(f"[red]Unexpected error loading model: {e}[/red]")
-					cls._model_available = False
+					self.__class__.set_model_available(False)
 					return False
 			# If we already have a model loaded, make sure to set the flag to True
-			cls._model_available = True
+			self.__class__.set_model_available(True)
 			return True
 		except Exception as e:
 			# This is the outer exception handler for any unexpected errors
-			logger.exception("Failed to load embedding model %s", model_name)
+			logger.exception("Failed to load embedding model %s", self.model_name)
 			console.print(f"[red]Failed to load embedding model: {e}[/red]")
-			cls._model_available = False
+			self.__class__.set_model_available(False)
 			return False
 
 	def split_diff(self, diff: GitDiff) -> tuple[list[DiffChunk], list[str]]:
@@ -171,19 +247,17 @@ class DiffSplitter:
 		    ValueError: If semantic splitting is not available or fails
 
 		"""
-		filtered_large_files = []
-
 		if not diff.files:
-			return [], filtered_large_files
+			return [], []
 
 		# In test environments, log the diff content for debugging
 		if is_test_environment():
 			logger.debug("Processing diff in test environment with %d files", len(diff.files) if diff.files else 0)
-			if diff.content and len(diff.content) < MAX_LOG_DIFF_SIZE:  # Only log short diffs to avoid spamming logs
+			if diff.content and len(diff.content) < self.max_log_diff_size:  # Use configured max log size
 				logger.debug("Diff content: %s", diff.content)
 
 		# Check for excessively large diff content and handle appropriately
-		if diff.content and len(diff.content) > MAX_FILE_SIZE_FOR_LLM:
+		if diff.content and len(diff.content) > self.max_file_size_for_llm:
 			logger.warning("Diff content is very large (%d bytes). Processing might be limited.", len(diff.content))
 
 			# Try to extract file names directly from the diff content for large diffs
@@ -195,191 +269,70 @@ class DiffSplitter:
 				# Override diff.files with extracted file list to bypass content processing
 				diff.files = files_to_process
 
-				# Optional: Clear the content to avoid processing it
-				original_content_size = len(diff.content)
-				diff.content = ""
-				logger.info("Cleared %d bytes of diff content to avoid payload limits", original_content_size)
-
 		# Process files in the diff
 		if diff.files:
-			diff.files, large_files = filter_valid_files(diff.files, is_test_environment())
-			filtered_large_files.extend(large_files)
+			# Filter for valid files (existence, tracked status), max_size check removed here
+			diff.files, _ = filter_valid_files(diff.files, is_test_environment())
+			# filtered_large_files list is no longer populated or used here
 
 		if not diff.files:
 			logger.warning("No valid files to process after filtering")
-			return [], filtered_large_files
+			return [], []  # Return empty lists
 
 		# Set up availability flags if not already set
-		cls = type(self)
-		cls._sentence_transformers_available = (
-			cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
-		)
-
-		if not cls._sentence_transformers_available:
+		# Use class method to check sentence transformers availability
+		if not self.__class__.are_sentence_transformers_available():
 			msg = (
 				"Semantic splitting is not available. sentence-transformers package is required. "
 				"Install with: pip install sentence-transformers numpy"
 			)
 			raise ValueError(msg)
 
-		# Try to load the model
+		# Try to load the model using the instance method
 		with loading_spinner("Loading embedding model..."):
-			cls._model_available = cls._model_available or cls._check_model_availability()
+			# Use self._check_model_availability() - it uses self.model_name internally
+			if not self.__class__.is_model_available():
+				self._check_model_availability()
 
-		if not cls._model_available:
-			msg = (
-				"Semantic splitting failed: embedding model could not be loaded. "
-				"Check logs for details or try a different model."
-			)
+		if not self.__class__.is_model_available():
+			msg = "Semantic splitting failed: embedding model could not be loaded. Check logs for details."
 			raise ValueError(msg)
 
-		# Use semantic splitting
-		chunks = self._split_semantic(diff)
-		return chunks, filtered_large_files
+		try:
+			return self._split_semantic(diff), []
+		except Exception as e:
+			logger.exception("Semantic splitting failed")
+			console.print(f"[red]Semantic splitting failed: {e}[/red]")
 
-	def _extract_code_from_diff(self, diff_content: str) -> tuple[str, str]:
+			# Try basic splitting as a fallback
+			logger.warning("Falling back to basic file splitting")
+			console.print("[yellow]Falling back to basic file splitting[/yellow]")
+			# Return empty list for filtered_large_files as it's no longer tracked here
+			return self._create_basic_file_chunk(diff), []
+
+	def _create_basic_file_chunk(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
-		Extract old and new code from diff content.
+		Create a basic chunk per file without semantic analysis.
 
 		Args:
-		    diff_content: Git diff content
+		    diff: GitDiff object to split
 
 		Returns:
-		    Tuple of (old_code, new_code)
+		    List of DiffChunk objects, one per file
 
 		"""
-		return _extract_code_from_diff(diff_content)
+		chunks = []
 
-	def _semantic_hunk_splitting(self, file_path: str, diff_content: str) -> list[str]:
-		"""
-		Split a diff into semantic hunks based on code structure, preserving hunk integrity.
+		if diff.files:
+			# Create a basic chunk, one per file in this strategy, no semantic grouping
+			strategy = FileSplitStrategy()
+			chunks = strategy.split(diff)
 
-		Args:
-		    file_path: Path to the file
-		    diff_content: Git diff content for a single file
-
-		Returns:
-		    List of diff chunk strings, where each chunk contains one or more full hunks.
-
-		"""
-		if not diff_content.strip():
-			return []  # Return empty list if diff content is empty
-
-		# Extract language-specific patterns
-		extension = Path(file_path).suffix.lower()
-		patterns = [re.compile(p) for p in get_language_specific_patterns(extension.lstrip("."))]
-
-		if not patterns:
-			logger.debug("No language patterns found for %s, returning whole diff as one chunk", extension)
-			return [diff_content]
-
-		diff_lines = diff_content.splitlines()
-		raw_hunks: list[list[str]] = []
-		current_hunk_lines: list[str] = []
-		is_first_hunk = True
-
-		# Split into raw hunks (including headers and file context lines)
-		for line in diff_lines:
-			if line.startswith("@@ "):
-				if not is_first_hunk and current_hunk_lines:  # Don't add if it's the first @@ and list is empty
-					raw_hunks.append(current_hunk_lines)
-					current_hunk_lines = [line]  # Start new hunk with the @@ line
-				else:
-					current_hunk_lines.append(line)  # Add first @@ line or lines before first @@
-				is_first_hunk = False
-			else:
-				current_hunk_lines.append(line)  # Add non-@@ lines
-
-		if current_hunk_lines:
-			raw_hunks.append(current_hunk_lines)
-
-		if not raw_hunks:
-			logger.debug("No hunks found in diff content for %s", file_path)
-			return [diff_content]  # Return original content if parsing fails
-
-		# Process hunks to create semantic chunks
-		final_chunks: list[list[str]] = []
-		current_semantic_chunk_lines: list[str] = []
-
-		for hunk_lines in raw_hunks:
-			hunk_has_boundary = False
-			# Check added lines within this hunk for semantic boundaries
-			for line in hunk_lines:
-				if line.startswith("+"):
-					added_line_content = line[1:]  # Check content without the '+'
-					if any(pattern.match(added_line_content) for pattern in patterns):
-						hunk_has_boundary = True
-						break  # Found a boundary in this hunk
-
-			# Decision: Start a new semantic chunk IF the current hunk has a boundary
-			# AND we already have lines accumulated in the current semantic chunk.
-			if hunk_has_boundary and current_semantic_chunk_lines:
-				final_chunks.append(current_semantic_chunk_lines)  # Finalize previous semantic chunk
-				current_semantic_chunk_lines = hunk_lines  # Start new semantic chunk with current hunk
-			else:
-				# Otherwise, append the current hunk to the ongoing semantic chunk
-				current_semantic_chunk_lines.extend(hunk_lines)
-
-		# Add the last accumulated semantic chunk
-		if current_semantic_chunk_lines:
-			final_chunks.append(current_semantic_chunk_lines)
-
-		# Join the lines back into strings for each chunk
-		result_chunks = ["\n".join(chunk_lines) for chunk_lines in final_chunks]
-
-		# Handle the case where splitting results in no usable chunks (e.g., only headers split)
-		if not result_chunks or all(not c.strip() for c in result_chunks):
-			logger.debug("Semantic splitting resulted in empty chunks for %s, returning whole diff.", file_path)
-			return [diff_content]
-
-		logger.debug("Split %s into %d semantic chunks", file_path, len(result_chunks))
-		return result_chunks
-
-	def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
-		"""
-		Enhance semantic splitting by analyzing code structure.
-
-		This method now aims to return a SINGLE chunk per file, using semantic
-		splitting internally perhaps for description generation, but not for splitting.
-
-		Args:
-		    diff: GitDiff object to split (should contain only one file)
-
-		Returns:
-		    A list containing at most one DiffChunk.
-
-		"""
-		if not diff.content or not diff.files:
-			return []
-
-		# This function should now only handle single-file diffs
-		if len(diff.files) != 1:
-			logger.warning("_enhance_semantic_split called with %d files, expected 1. Skipping.", len(diff.files))
-			# Optionally, handle multi-file diffs by falling back to file splitting
-			# return FileSplitStrategy().split(diff)
-			return []
-
-		file_path = diff.files[0]
-
-		# --- Removed semantic hunk splitting logic for chunk creation ---
-		# semantic_chunks_content = self._semantic_hunk_splitting(file_path, diff.content)
-		# if not semantic_chunks_content:
-		# 	return [DiffChunk(files=[file_path], content=diff.content, description=f"Changes in {file_path}")]
-
-		# Simply return one chunk containing the full diff content for the file.
-		# Semantic analysis might still happen elsewhere (e.g., for description generation)
-		# but we don't split the chunk itself here.
-		return [
-			DiffChunk(
-				files=[file_path],
-				content=diff.content,  # Use the original full diff content
-				description=f"Changes in {file_path}",  # Basic description, can be enhanced later
-			)
-		]
+		return chunks
 
 	def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
-		Split a diff semantically considering code structure.
+		Split a diff semantically based on content and patterns.
 
 		Args:
 		    diff: GitDiff object to split
@@ -388,76 +341,39 @@ class DiffSplitter:
 		    List of DiffChunk objects based on semantic analysis
 
 		"""
-		# Try semantic strategy first
-		try:
-			# Apply semantic splitting
-			semantic_strategy = SemanticSplitStrategy(embedding_model=cast("EmbeddingModel", self._embedding_model))
-			chunks = semantic_strategy.split(diff)
+		if not diff.files:
+			return []
 
-			if chunks:
-				return chunks
+		if not diff.content and len(diff.files) == 1:
+			# Create a simple chunk for this single file
+			return [
+				DiffChunk(
+					files=[diff.files[0]],
+					content="",  # Empty content
+					description=f"New file: {diff.files[0]}",
+				)
+			]
 
-			# If semantic splitting produced no chunks, log a warning and continue to fallbacks
-			logger.warning(
-				"Semantic splitting failed to produce any chunks. Falling back to simpler strategies. "
-				"This commonly happens with large refactoring operations."
+		# Check if semantic splitting is viable by checking transformers availability
+		if self.__class__.are_sentence_transformers_available():
+			# Apply semantic splitting, passing configured thresholds
+			semantic_strategy = SemanticSplitStrategy(
+				embedding_model=cast("EmbeddingModel", self.__class__.get_embedding_model()),
+				similarity_threshold=self.similarity_threshold,
+				directory_similarity_threshold=self.directory_similarity_threshold,
+				min_chunks_for_consolidation=self.min_chunks_for_consolidation,
+				max_chunks_before_consolidation=self.max_chunks_before_consolidation,
+				max_file_size_for_llm=self.max_file_size_for_llm,
 			)
-		except (ValueError, RuntimeError, TypeError, KeyError, IndexError) as e:
-			# Log specific exceptions from semantic splitting and fall back
-			logger.warning("Semantic splitting encountered an error: %s. Falling back to simpler strategies.", e)
+			return semantic_strategy.split(diff)
 
-		# First fallback: directory-based grouping
-		logger.info("Using directory-based grouping as fallback strategy")
-		dir_chunks = []
-
-		try:
-			# Group files by directory
-			files_by_dir = {}
-			for file in diff.files:
-				dir_path = str(Path(file).parent)
-				if dir_path not in files_by_dir:
-					files_by_dir[dir_path] = []
-				files_by_dir[dir_path].append(file)
-
-			# Create one chunk per directory
-			for dir_path, files in files_by_dir.items():
-				if files:
-					display_name = dir_path if dir_path != "." else "root directory"
-					dir_chunks.append(
-						DiffChunk(
-							files=files,
-							content=diff.content,
-							description=f"Changes in {display_name}",
-						)
-					)
-
-			if dir_chunks:
-				return dir_chunks
-		except (ValueError, KeyError, TypeError, AttributeError, OSError) as dir_error:
-			logger.warning("Directory-based fallback failed: %s", dir_error)
-
-		# Second fallback: file-based splitting
-		logger.info("Using file-based splitting as final fallback strategy")
-		file_strategy = FileSplitStrategy()
-		chunks = file_strategy.split(diff)
-
-		if chunks:
-			return chunks
-
-		# Last resort: create one chunk per file if all else fails
-		logger.info("File splitting produced no chunks. Creating basic chunks (one per file).")
-		return [
-			DiffChunk(
-				files=[file],
-				content=f"File: {file}\n{diff.content}",
-				description=f"Changes in {file}",
-			)
-			for file in diff.files
-		]
+		# If sentence transformers aren't available, fall back to basic file-based chunks
+		logger.warning("Sentence transformers not available, falling back to basic file splitting")
+		return self._create_basic_file_chunk(diff)
 
 	def _calculate_semantic_similarity(self, text1: str, text2: str) -> float:
 		"""
-		Calculate semantic similarity between two text segments.
+		Calculate semantic similarity between two texts using the embedding model.
 
 		Args:
 		    text1: First text
@@ -467,73 +383,87 @@ class DiffSplitter:
 		    Similarity score between 0 and 1
 
 		"""
-		if not text1 or not text2:
-			return 0.0
-
 		# Check if embedding model is available
-		cls = type(self)
-		cls._sentence_transformers_available = (
-			cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
-		)
-
-		if not cls._sentence_transformers_available:
+		if not self.__class__.are_sentence_transformers_available():
 			logger.debug("Sentence transformers not available, returning zero similarity")
 			return 0.0
 
-		cls._model_available = cls._model_available or cls._check_model_availability()
+		# Call instance method self._check_model_availability()
+		if not self.__class__.is_model_available():
+			self._check_model_availability()
 
-		if not cls._model_available or cls._embedding_model is None:
+		if not self.__class__.is_model_available() or self.__class__.get_embedding_model() is None:
 			logger.debug("Embedding model not available, returning zero similarity")
 			return 0.0
 
-		try:
-			# Encode both texts
-			embeddings = cls._embedding_model.encode([text1, text2])
-
-			# Calculate cosine similarity using utility function
-			return calculate_semantic_similarity(embeddings[0].tolist(), embeddings[1].tolist())
-
-		except (ValueError, TypeError, IndexError, RuntimeError) as e:
-			logger.warning("Error calculating semantic similarity: %s", e)
+		# Assign to local variable after check guarantees it's not None
+		embedding_model_maybe_none = self.__class__.get_embedding_model()
+		if embedding_model_maybe_none is None:
+			# This case should have been caught earlier, but log just in case
+			logger.error("Embedding model unexpectedly None after availability check")
 			return 0.0
 
-	@classmethod
-	def encode_chunks(cls, chunks: list[str]) -> dict[str, np.ndarray]:
+		embedding_model = embedding_model_maybe_none  # Now we know it's not None
+
+		try:
+			# Get embeddings for both texts
+			emb1 = embedding_model.encode([text1])[0]
+			emb2 = embedding_model.encode([text2])[0]
+
+			# Calculate similarity using numpy
+			return calculate_semantic_similarity(emb1.tolist(), emb2.tolist())
+		except (ValueError, TypeError, IndexError, RuntimeError) as e:
+			logger.warning("Failed to calculate semantic similarity: %s", e)
+			return 0.0
+
+	def encode_chunks(self, chunks: list[str]) -> dict[str, np.ndarray]:
 		"""
-		Encode text chunks into embeddings.
+		Encode a list of text chunks using the embedding model.
 
 		Args:
-		    chunks: List of text chunks
+		    chunks: List of text chunks to encode
 
 		Returns:
-		    Dict with keys 'embeddings' containing numpy array of embeddings
+		    Dictionary with embeddings array
 
 		"""
 		# Ensure the model is initialized
-		cls._sentence_transformers_available = (
-			cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
-		)
-		if cls._sentence_transformers_available:
-			cls._model_available = cls._model_available or cls._check_model_availability(model_name=MODEL_NAME)
+		if self.__class__.are_sentence_transformers_available() and not self.__class__.is_model_available():
+			self._check_model_availability()
 
-		if not cls._model_available:
+		if not self.__class__.is_model_available():
 			logger.debug("Embedding model not available, returning empty embeddings")
 			return {"embeddings": np.array([])}
 
+		# Skip empty chunks
 		if not chunks:
+			logger.debug("No chunks to encode")
 			return {"embeddings": np.array([])}
 
-		# At this point we know model is initialized and available
-		if cls._embedding_model is None:
+		# Use class method for class cache access
+		if self.__class__.get_embedding_model() is None:
 			logger.debug("Embedding model is None but was marked as available, reinitializing")
-			cls._model_available = cls._check_model_availability(model_name=MODEL_NAME)
-			if not cls._model_available:
-				return {"embeddings": np.array([])}
+			# Re-check availability using instance method
+			self._check_model_availability()
 
-		# Use runtime check instead of assert
-		if cls._embedding_model is None:
-			logger.error("Embedding model is None but should be initialized at this point")
+		# Check again after potential re-initialization and assign to local variable
+		if self.__class__.get_embedding_model() is None:
+			logger.error("Embedding model is still None after re-check")
 			return {"embeddings": np.array([])}
 
-		embeddings = cls._embedding_model.encode(chunks)
-		return {"embeddings": embeddings}
+		# Explicitly cast after the check
+		embedding_model_maybe_none = self.__class__.get_embedding_model()
+		if embedding_model_maybe_none is None:
+			logger.error("Embedding model unexpectedly None in encode_chunks")
+			return {"embeddings": np.array([])}
+
+		embedding_model = embedding_model_maybe_none  # Now we know it's not None
+
+		try:
+			logger.debug("Encoding %d chunks", len(chunks))
+			embeddings = embedding_model.encode(chunks)
+			logger.debug("Successfully encoded %d chunks to shape %s", len(chunks), embeddings.shape)
+			return {"embeddings": embeddings}
+		except Exception:
+			logger.exception("Error encoding chunks")
+			return {"embeddings": np.array([])}  # Return empty on error
