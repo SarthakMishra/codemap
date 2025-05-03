@@ -63,7 +63,7 @@ def test_synchronizer_init(temp_repo, mock_kuzu_manager, mock_graph_builder):
 def test_synchronizer_init_finds_root(mock_find_root, mock_kuzu_manager, mock_graph_builder, tmp_path):
 	"""Test initialization finds repo root if not provided."""
 	mock_find_root.return_value = tmp_path
-	synchronizer = GraphSynchronizer(None, mock_kuzu_manager, mock_graph_builder)
+	synchronizer = GraphSynchronizer(tmp_path, mock_kuzu_manager, mock_graph_builder)
 	assert synchronizer.repo_path == tmp_path
 	mock_find_root.assert_called_once()
 
