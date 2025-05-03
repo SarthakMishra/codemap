@@ -1,14 +1,10 @@
 """Formatter for the ask command output."""
 
-import json
+from typing import Any
 
 from rich import print as rich_print
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.syntax import Syntax
-
-# Assuming AskResult is defined in command.py or a shared types file
-from .command import AskResult  # Import the specific type
 
 
 def format_ask_response(response_text: str | None) -> Markdown:
@@ -16,7 +12,7 @@ def format_ask_response(response_text: str | None) -> Markdown:
 	Formats the AI's response text using Rich Markdown.
 
 	Args:
-	    response_text (str | None): The text response from the AI.
+	    response_text (Optional[str]): The text response from the AI.
 
 	Returns:
 	    Markdown: A Rich Markdown object ready for printing.
@@ -29,12 +25,12 @@ def format_ask_response(response_text: str | None) -> Markdown:
 	return Markdown(response_text)
 
 
-def print_ask_result(result: AskResult) -> None:
+def print_ask_result(result: dict[str, Any]) -> None:
 	"""
 	Prints the structured result of the ask command using Rich.
 
 	Args:
-	    result (AskResult): The structured result containing 'answer' and 'context'.
+	    result (Dict[str, Any]): The structured result containing 'answer' and 'context'.
 
 	"""
 	answer = result.get("answer")
@@ -43,45 +39,66 @@ def print_ask_result(result: AskResult) -> None:
 	# Print the main answer
 	rich_print(Panel(format_ask_response(answer), title="[bold green]Answer[/]", border_style="green"))
 
-	# Print the context used
+	# Print the context used if there are any items
 	if context:
-		rich_print(Panel("[bold yellow]Context Used:[/]"))
-		for i, tool_call_info in enumerate(context):
-			func_name = tool_call_info.get("function_name", "Unknown Function")
-			args = tool_call_info.get("arguments", "{}")
-			response_str = tool_call_info.get("response", "No response")
+		# Build a single string with all context items as a numbered list
+		context_list = []
+		for i, item in enumerate(context, 1):
+			file_path = item.get("file_path", "Unknown")
+			start_line = item.get("start_line", -1)
+			end_line = item.get("end_line", -1)
+			distance = item.get("distance", -1.0)
 
-			# Try to parse arguments and response for better formatting
-			try:
-				args_dict = json.loads(args)
-				args_formatted = json.dumps(args_dict, indent=2)
-			except json.JSONDecodeError:
-				args_formatted = args
+			# Create the list item text
+			location = f"{file_path}"
+			if start_line > 0 and end_line > 0:
+				location += f" (lines {start_line}-{end_line})"
 
-			content_panel = None
-			try:
-				response_data = json.loads(response_str)
-				if isinstance(response_data, dict) and "error" in response_data:
-					content_panel = Panel(f"[red]Error:[/red] {response_data['error']}", border_style="red")
-				else:
-					# Pretty print JSON response
-					response_formatted = json.dumps(response_data, indent=2)
-					content_panel = Syntax(response_formatted, "json", theme="default", line_numbers=False)
-			except json.JSONDecodeError:
-				# Handle non-JSON or truncated responses
-				if response_str.endswith("... [truncated]"):
-					content_panel = Panel(
-						f"{response_str}", border_style="dim yellow", title="[dim yellow]Truncated Response[/]"
-					)
-				else:
-					content_panel = Panel(response_str, border_style="dim")  # Plain text response
+			# Format with relevance info
+			relevance = f"(similarity: {1 - distance:.2f})" if distance >= 0 else ""
+			list_item = f"[bold cyan]{i}.[/bold cyan] {location} [dim]{relevance}[/dim]"
+			context_list.append(list_item)
 
-			tool_panel_title = f"[bold cyan]Tool Call {i + 1}:[/] [yellow]{func_name}[/]".strip()
-			args_syntax = Syntax(args_formatted, "json", theme="default", line_numbers=False)
+		# Join all list items into a single string
+		context_content = "\n".join(context_list)
 
-			rich_print(Panel(args_syntax, title=f"{tool_panel_title} - Arguments", border_style="cyan", padding=(1, 2)))
-			if content_panel:
-				rich_print(
-					Panel(content_panel, title=f"{tool_panel_title} - Response", border_style="blue", padding=(1, 2))
-				)
-			rich_print()  # Add spacing between tool calls
+		# Print a single panel with all context items
+		rich_print(
+			Panel(context_content, title="[bold yellow]Context Used[/]", border_style="yellow", title_align="center")
+		)
+
+		rich_print()  # Add space after context
+
+
+def format_content_for_context(context_items: list[dict[str, Any]]) -> str:
+	"""
+	Format context items into a string suitable for inclusion in prompts.
+
+	Args:
+	    context_items: List of context dictionaries with file_path, start_line, end_line, and content
+
+	Returns:
+	    Formatted string with code snippets and file information
+
+	"""
+	if not context_items:
+		return "No relevant code found in the repository."
+
+	formatted_parts = []
+
+	for i, item in enumerate(context_items, 1):
+		# Extract file information
+		file_path = item.get("file_path", "Unknown file")
+		start_line = item.get("start_line", -1)
+		end_line = item.get("end_line", -1)
+		content = item.get("content", "")
+
+		# Create a header with file info
+		header = f"[{i}] {file_path}"
+		if start_line > 0 and end_line > 0:
+			header += f" (lines {start_line}-{end_line})"
+
+		# Format the code snippet with the header
+		formatted_parts.append(f"{header}\n{'-' * len(header)}\n{content}\n")
+
+	return "\n\n".join(formatted_parts)
