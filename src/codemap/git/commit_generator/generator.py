@@ -131,6 +131,7 @@ class CommitMessageGenerator:
 
 		Returns:
 		    Formatted commit message string
+
 		"""
 
 		def _raise_validation_error(message: str) -> None:
@@ -421,12 +422,13 @@ class CommitMessageGenerator:
 		Generate a commit message with linting verification.
 
 		Args:
-			chunk: The DiffChunk to generate a message for
-			retry_count: Current retry count (default: 1)
-			max_retries: Maximum number of retries for linting (default: 3)
+		        chunk: The DiffChunk to generate a message for
+		        retry_count: Current retry count (default: 1)
+		        max_retries: Maximum number of retries for linting (default: 3)
 
 		Returns:
-			Tuple of (message, used_llm, passed_linting, lint_messages)
+		        Tuple of (message, used_llm, passed_linting, lint_messages)
+
 		"""
 		# First, generate the initial message
 		initial_lint_messages: list[str] = []  # Store initial messages

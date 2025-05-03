@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 import questionary
 import typer
 
-from codemap.git.commit_generator.utils import (
+from codemap.git.commit_generator.utils import (  # Import needed for re-linting edits
 	clean_message_for_linting,
 	lint_commit_message,
-)  # Import needed for re-linting edits
+)
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.interactive import ChunkAction, CommitUI
 from codemap.git.utils import (
