@@ -1,5 +1,6 @@
 """Strategies for splitting git diffs into logical chunks."""
 
+import dataclasses
 import logging
 import re
 from collections.abc import Sequence
@@ -16,7 +17,6 @@ from codemap.git.utils import GitDiff
 
 from .constants import (
 	MAX_FILES_PER_GROUP,
-	RELATED_FILE_PATTERNS,
 )
 from .schemas import DiffChunk
 from .utils import (
@@ -230,14 +230,12 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not diff.files:
 			return []
 
-		# 1. Generate chunks for each file individually first
+		# 1. Generate initial chunks for each file
 		initial_file_chunks: list[DiffChunk] = []
 		for file_path in diff.files:
-			# Create a temporary GitDiff containing only the current file but the full content
-			# This allows _enhance_semantic_split to parse the relevant part
 			single_file_diff_view = GitDiff(
 				files=[file_path],
-				content=diff.content,  # Full content needed for parsing context
+				content=diff.content,  # Full content for parsing
 				is_staged=diff.is_staged,
 			)
 			enhanced_chunks = self._enhance_semantic_split(single_file_diff_view)
@@ -249,18 +247,48 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not initial_file_chunks:
 			return []
 
-		# 2. Consolidate chunks originating from the *same file* if multiple were created
-		#    (e.g., due to large file splitting). This simplifies grouping logic.
+		# 2. Consolidate chunks from the same file first
 		consolidated_chunks = self._consolidate_small_chunks(initial_file_chunks)
 
-		# 3. Group remaining chunks by relatedness and similarity
-		processed_files: set[str] = set()
-		final_semantic_chunks: list[DiffChunk] = []
-		self._group_related_files(consolidated_chunks, processed_files, final_semantic_chunks)
-		self._process_remaining_chunks(consolidated_chunks, processed_files, final_semantic_chunks)
+		# 3. Group remaining chunks
+		processed_indices: set[int] = set()
+		final_chunks: list[DiffChunk] = []
 
-		# 4. Final consolidation check (optional, based on number of chunks)
-		return self._consolidate_if_needed(final_semantic_chunks)
+		# First pass: Group by related file patterns
+		for i, chunk1 in enumerate(consolidated_chunks):
+			if i in processed_indices:
+				continue
+			if not chunk1.files:  # Skip chunks without files
+				processed_indices.add(i)
+				final_chunks.append(chunk1)
+				continue
+
+			related_group = [chunk1]
+			processed_indices.add(i)
+
+			for j in range(i + 1, len(consolidated_chunks)):
+				if j in processed_indices:
+					continue
+				chunk2 = consolidated_chunks[j]
+				if not chunk2.files:  # Skip chunks without files
+					continue
+
+				# Check relation between first files of each chunk
+				if are_files_related(chunk1.files[0], chunk2.files[0], self.related_file_patterns):
+					related_group.append(chunk2)
+					processed_indices.add(j)
+
+			self._create_semantic_chunk(related_group, final_chunks)
+
+		# Second pass: Group remaining by similarity
+		remaining_chunks = [
+			consolidated_chunks[i] for i in range(len(consolidated_chunks)) if i not in processed_indices
+		]
+		if remaining_chunks:
+			self._group_by_content_similarity(remaining_chunks, final_chunks)
+
+		# 4. Final consolidation check
+		return self._consolidate_if_needed(final_chunks)
 
 	def _validate_embedding_model(self) -> None:
 		"""Validate that the embedding model is available."""
@@ -342,18 +370,137 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		    List of compiled regex pattern pairs
 
 		"""
-		compiled_patterns = []
-		for p1_str, p2_str in RELATED_FILE_PATTERNS:
-			try:
-				# Compile with flags if needed, e.g., re.IGNORECASE
-				p1 = re.compile(p1_str)
-				p2 = re.compile(p2_str)
-				compiled_patterns.append((p1, p2))
-			except re.error as e:
-				# Log or handle regex compilation errors if necessary
-				logger.warning("Failed to compile regex pair: ('%s', '%s'). Error: %s", p1_str, p2_str, e)
+		# Pre-compile regex for efficiency and validation
+		related_file_patterns = []
+		# Define patterns using standard strings with escaped backreferences
+		default_patterns: list[tuple[str, str]] = [
+			# --- General Code + Test Files ---
+			# Python
+			("^(.*)\\.py$", "\\\\1_test\\.py$"),
+			("^(.*)\\.py$", "test_\\\\1\\.py$"),
+			("^(.*)\\.py$", "\\\\1_spec\\.py$"),
+			("^(.*)\\.py$", "spec_\\\\1\\.py$"),
+			# JavaScript / TypeScript (including JSX/TSX)
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.(test|spec)\\.(js|jsx|ts|tsx)$"),
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.stories\\.(js|jsx|ts|tsx)$"),  # Storybook
+			("^(.*)\\.(js|ts)$", "\\\\1\\.d\\.ts$"),  # JS/TS + Declaration files
+			# Ruby
+			("^(.*)\\.rb$", "\\\\1_spec\\.rb$"),
+			("^(.*)\\.rb$", "\\\\1_test\\.rb$"),
+			("^(.*)\\.rb$", "spec/.*_spec\\.rb$"),  # Common RSpec structure
+			# Java
+			("^(.*)\\.java$", "\\\\1Test\\.java$"),
+			("src/main/java/(.*)\\.java$", "src/test/java/\\\\1Test\\.java$"),  # Maven/Gradle structure
+			# Go
+			("^(.*)\\.go$", "\\\\1_test\\.go$"),
+			# C#
+			("^(.*)\\.cs$", "\\\\1Tests?\\.cs$"),
+			# PHP
+			("^(.*)\\.php$", "\\\\1Test\\.php$"),
+			("^(.*)\\.php$", "\\\\1Spec\\.php$"),
+			("src/(.*)\\.php$", "tests/\\\\1Test\\.php$"),  # Common structure
+			# Rust
+			("src/(lib|main)\\.rs$", "tests/.*\\.rs$"),  # Main/Lib and integration tests
+			("src/(.*)\\.rs$", "src/\\\\1_test\\.rs$"),  # Inline tests (less common for grouping)
+			# Swift
+			("^(.*)\\.swift$", "\\\\1Tests?\\.swift$"),
+			# Kotlin
+			("^(.*)\\.kt$", "\\\\1Test\\.kt$"),
+			("src/main/kotlin/(.*)\\.kt$", "src/test/kotlin/\\\\1Test\\.kt$"),  # Common structure
+			# --- Frontend Component Bundles ---
+			# JS/TS Components + Styles (CSS, SCSS, LESS, CSS Modules)
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.(css|scss|less)$"),
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.module\\.(css|scss|less)$"),
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.styles?\\.(js|ts)$"),  # Styled Components / Emotion convention
+			# Vue Components + Styles
+			("^(.*)\\.vue$", "\\\\1\\.(css|scss|less)$"),
+			("^(.*)\\.vue$", "\\\\1\\.module\\.(css|scss|less)$"),
+			# Svelte Components + Styles/Scripts
+			("^(.*)\\.svelte$", "\\\\1\\.(css|scss|less)$"),
+			("^(.*)\\.svelte$", "\\\\1\\.(js|ts)$"),
+			# Angular Components (more specific structure)
+			("^(.*)\\.component\\.ts$", "\\\\1\\.component\\.html$"),
+			("^(.*)\\.component\\.ts$", "\\\\1\\.component\\.(css|scss|less)$"),
+			("^(.*)\\.component\\.ts$", "\\\\1\\.component\\.spec\\.ts$"),  # Component + its test
+			("^(.*)\\.service\\.ts$", "\\\\1\\.service\\.spec\\.ts$"),  # Service + its test
+			("^(.*)\\.module\\.ts$", "\\\\1\\.routing\\.module\\.ts$"),  # Module + routing
+			# --- Implementation / Definition / Generation ---
+			# C / C++ / Objective-C
+			("^(.*)\\.h$", "\\\\1\\.c$"),
+			("^(.*)\\.h$", "\\\\1\\.m$"),
+			("^(.*)\\.hpp$", "\\\\1\\.cpp$"),
+			("^(.*)\\.h$", "\\\\1\\.cpp$"),  # Allow .h with .cpp
+			("^(.*)\\.h$", "\\\\1\\.mm$"),
+			# Protocol Buffers / gRPC
+			("^(.*)\\.proto$", "\\\\1\\.pb\\.(go|py|js|java|rb|cs|ts)$"),
+			("^(.*)\\.proto$", "\\\\1_pb2?\\.py$"),  # Python specific proto generation
+			("^(.*)\\.proto$", "\\\\1_grpc\\.pb\\.(go|js|ts)$"),  # gRPC specific
+			# Interface Definition Languages (IDL)
+			("^(.*)\\.idl$", "\\\\1\\.(h|cpp|cs|java)$"),
+			# API Specifications (OpenAPI/Swagger)
+			("(openapi|swagger)\\.(yaml|yml|json)$", ".*\\.(go|py|js|java|rb|cs|ts)$"),  # Spec + generated code
+			("^(.*)\\.(yaml|yml|json)$", "\\\\1\\.generated\\.(go|py|js|java|rb|cs|ts)$"),  # Another convention
+			# --- Web Development (HTML Centric) ---
+			("^(.*)\\.html$", "\\\\1\\.(js|ts)$"),
+			("^(.*)\\.html$", "\\\\1\\.(css|scss|less)$"),
+			# --- Mobile Development ---
+			# iOS (Swift)
+			("^(.*)\\.swift$", "\\\\1\\.storyboard$"),
+			("^(.*)\\.swift$", "\\\\1\\.xib$"),
+			# Android (Kotlin/Java)
+			("^(.*)\\.(kt|java)$", "res/layout/.*\\.(xml)$"),  # Code + Layout XML (Path sensitive)
+			("AndroidManifest\\.xml$", ".*\\.(kt|java)$"),  # Manifest + Code
+			("build\\.gradle(\\.kts)?$", ".*\\.(kt|java)$"),  # Gradle build + Code
+			# --- Configuration Files ---
+			# Package Managers
+			("package\\.json$", "(package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml)$"),
+			("requirements\\.txt$", "(setup\\.py|setup\\.cfg|pyproject\\.toml)$"),
+			("pyproject\\.toml$", "(setup\\.py|setup\\.cfg|poetry\\.lock|uv\\.lock)$"),
+			("Gemfile$", "Gemfile\\.lock$"),
+			("Cargo\\.toml$", "Cargo\\.lock$"),
+			("composer\\.json$", "composer\\.lock$"),  # PHP Composer
+			("go\\.mod$", "go\\.sum$"),  # Go Modules
+			("pom\\.xml$", ".*\\.java$"),  # Maven + Java
+			("build\\.gradle(\\.kts)?$", ".*\\.(java|kt)$"),  # Gradle + Java/Kotlin
+			# Linters / Formatters / Compilers / Type Checkers
+			(
+				"package\\.json$",
+				"(tsconfig\\.json|\\.eslintrc(\\..*)?|\\.prettierrc(\\..*)?|\\.babelrc(\\..*)?|webpack\\.config\\.js|vite\\.config\\.(js|ts))$",
+			),
+			("pyproject\\.toml$", "(\\.flake8|\\.pylintrc|\\.isort\\.cfg|mypy\\.ini)$"),
+			# Docker
+			("Dockerfile$", "(\\.dockerignore|docker-compose\\.yml)$"),
+			("docker-compose\\.yml$", "\\.env$"),
+			# CI/CD
+			("\\.github/workflows/.*\\.yml$", ".*\\.(sh|py|js|ts|go)$"),  # Workflow + scripts
+			("\\.gitlab-ci\\.yml$", ".*\\.(sh|py|js|ts|go)$"),
+			("Jenkinsfile$", ".*\\.(groovy|sh|py)$"),
+			# IaC (Terraform)
+			("^(.*)\\.tf$", "\\\\1\\.tfvars$"),
+			("^(.*)\\.tf$", "\\\\1\\.tf$"),  # Group TF files together
+			# --- Documentation ---
+			("README\\.md$", ".*$"),  # README often updated with any change
+			("^(.*)\\.md$", "\\\\1\\.(py|js|ts|go|java|rb|rs|php|swift|kt)$"),  # Markdown doc + related code
+			("docs/.*\\.md$", "src/.*$"),  # Documentation in docs/ related to src/
+			# --- Data Science / ML ---
+			("^(.*)\\.ipynb$", "\\\\1\\.py$"),  # Notebook + Python script
+			("^(.*)\\.py$", "data/.*\\.(csv|json|parquet)$"),  # Script + Data file (path sensitive)
+			# --- General Fallbacks (Use with caution) ---
+			# Files with same base name but different extensions (already covered by some specifics)
+			# ("^(.*)\\..*$", "\\1\\..*$"), # Potentially too broad, rely on specifics above
+		]
 
-		return compiled_patterns
+		for pattern1_str, pattern2_str in default_patterns:
+			try:
+				# Compile with IGNORECASE for broader matching
+				pattern1 = re.compile(pattern1_str, re.IGNORECASE)
+				pattern2 = re.compile(pattern2_str, re.IGNORECASE)
+				related_file_patterns.append((pattern1, pattern2))
+			except re.error as e:
+				# Log only if pattern compilation fails
+				logger.warning(f"Failed to compile regex pair: ({pattern1_str!r}, {pattern2_str!r}). Error: {e}")
+
+		return related_file_patterns
 
 	def _get_code_embedding(self, content: str) -> list[float] | None:
 		"""
@@ -751,72 +898,82 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			)
 		)
 
-	def _consolidate_small_chunks(self, chunks: list[DiffChunk]) -> list[DiffChunk]:
+	def _should_merge_chunks(self, chunk1: DiffChunk, chunk2: DiffChunk) -> bool:
+		"""Determine if two chunks should be merged."""
+		# Condition 1: Same single file
+		same_file = len(chunk1.files) == 1 and chunk1.files == chunk2.files
+
+		# Condition 2: Related single files
+		related_files = (
+			len(chunk1.files) == 1
+			and len(chunk2.files) == 1
+			and are_files_related(chunk1.files[0], chunk2.files[0], self.related_file_patterns)
+		)
+
+		# Return True if either condition is met
+		return same_file or related_files
+
+	def _consolidate_small_chunks(self, initial_chunks: list[DiffChunk]) -> list[DiffChunk]:
 		"""
-		Consolidate small chunks into larger, more meaningful groups.
+		Merge small or related chunks together.
 
 		First, consolidates chunks originating from the same file.
 		Then, consolidates remaining single-file chunks by directory.
 
 		Args:
-		    chunks: List of diff chunks to consolidate
+		    initial_chunks: List of diff chunks to consolidate
 
 		Returns:
 		    Consolidated list of chunks
 
 		"""
 		# Use instance variable for threshold
-		if len(chunks) < self.min_chunks_for_consolidation:
-			return chunks
+		if len(initial_chunks) < self.min_chunks_for_consolidation:
+			return initial_chunks
 
-		# --- Step 1: Consolidate chunks from the same file ----
-		file_groups: dict[str, list[DiffChunk]] = {}
-		other_chunks: list[DiffChunk] = []  # Chunks with multiple files or no files
+		# Consolidate small chunks for the same file or related files
+		consolidated_chunks = []
+		processed_indices = set()
 
-		for chunk in chunks:
-			if len(chunk.files) == 1:
-				file_path = chunk.files[0]
-				if file_path not in file_groups:
-					file_groups[file_path] = []
-				file_groups[file_path].append(chunk)
-			else:
-				other_chunks.append(chunk)  # Keep multi-file chunks separate for now
+		for i, chunk1 in enumerate(initial_chunks):
+			if i in processed_indices:
+				continue
 
-		consolidated_same_file_chunks: list[DiffChunk] = []
-		for file_path, file_chunk_list in file_groups.items():
-			if len(file_chunk_list) > 1:
-				# Merge chunks for this file
-				# Ensure headers aren't duplicated excessively
-				# Find the first chunk's content to extract the header
-				first_chunk_content = file_chunk_list[0].content
-				header_parts = first_chunk_content.split("@@", 1)
-				first_header = header_parts[0] if len(header_parts) > 0 else ""  # Extract header before first @@
+			merged_chunk = chunk1
+			processed_indices.add(i)
 
-				combined_hunks = []
-				for c in file_chunk_list:
-					# Try to extract content starting from the first hunk marker @@
-					hunk_parts = c.content.split("@@", 1)
-					hunk_content = "@@" + hunk_parts[1].strip() if len(hunk_parts) > 1 and hunk_parts[1] else ""
-					if hunk_content:
-						combined_hunks.append(hunk_content)
+			# Check subsequent chunks for merging
+			for j in range(i + 1, len(initial_chunks)):
+				if j in processed_indices:
+					continue
 
-				# Combine header and the stripped hunks
-				combined_content = first_header.strip() + "\n" + "\n".join(combined_hunks)
+				chunk2 = initial_chunks[j]
 
-				# Use the description from the first chunk or generate a default one
-				description = file_chunk_list[0].description or f"Changes in {file_path}"
-				consolidated_same_file_chunks.append(
-					DiffChunk(files=[file_path], content=combined_content, description=description)
-				)
-			else:
-				# Keep single chunks as they are
-				consolidated_same_file_chunks.extend(file_chunk_list)
+				# Check if chunks should be merged (same file or related)
+				if self._should_merge_chunks(merged_chunk, chunk2):
+					# Combine files if merging related chunks, not just same file chunks
+					new_files = merged_chunk.files
+					if (
+						len(merged_chunk.files) == 1
+						and len(chunk2.files) == 1
+						and merged_chunk.files[0] != chunk2.files[0]
+					):
+						new_files = sorted(set(merged_chunk.files + chunk2.files))
 
-		# Combine same-file consolidated chunks and the multi-file chunks
-		final_chunks = consolidated_same_file_chunks + other_chunks
+					# Merge content and potentially other attributes
+					# Ensure a newline between merged content if needed
+					separator = "\n" if merged_chunk.content and chunk2.content else ""
+					merged_chunk = dataclasses.replace(
+						merged_chunk,
+						files=new_files,
+						content=merged_chunk.content + separator + chunk2.content,
+						description=merged_chunk.description,  # Keep first description
+					)
+					processed_indices.add(j)
 
-		logger.debug("Consolidated (file-level only) from %d to %d chunks", len(chunks), len(final_chunks))
-		return final_chunks
+			consolidated_chunks.append(merged_chunk)
+
+		return consolidated_chunks
 
 	def _split_by_semantic_patterns(self, patched_file: PatchedFile, patterns: list[str]) -> list[DiffChunk]:
 		"""

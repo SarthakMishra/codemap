@@ -337,44 +337,32 @@ class DiffSplitter:
 
 	def _split_semantic(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
-		Split a diff semantically based on content and patterns.
+		Perform semantic splitting, falling back if needed.
 
 		Args:
 		    diff: GitDiff object to split
 
 		Returns:
-		    List of DiffChunk objects based on semantic analysis
+		    List of DiffChunk objects
 
+		Raises:
+		    ValueError: If semantic splitting fails and fallback is not possible.
 		"""
-		if not diff.files:
-			return []
+		if not self.are_sentence_transformers_available():
+			logger.warning("Sentence transformers unavailable. Falling back to file-based splitting.")
+			# Directly use FileSplitStrategy when ST is unavailable
+			file_splitter = FileSplitStrategy()
+			return file_splitter.split(diff)
 
-		if not diff.content and len(diff.files) == 1:
-			# Create a simple chunk for this single file
-			return [
-				DiffChunk(
-					files=[diff.files[0]],
-					content="",  # Empty content
-					description=f"New file: {diff.files[0]}",
-				)
-			]
-
-		# Check if semantic splitting is viable by checking transformers availability
-		if self.__class__.are_sentence_transformers_available():
-			# Apply semantic splitting, passing configured thresholds
-			semantic_strategy = SemanticSplitStrategy(
-				embedding_model=cast("EmbeddingModel", self.__class__.get_embedding_model()),
-				similarity_threshold=self.similarity_threshold,
-				directory_similarity_threshold=self.directory_similarity_threshold,
-				min_chunks_for_consolidation=self.min_chunks_for_consolidation,
-				max_chunks_before_consolidation=self.max_chunks_before_consolidation,
-				max_file_size_for_llm=self.max_file_size_for_llm,
-			)
+		# Existing logic for semantic splitting when ST is available
+		try:
+			semantic_strategy = SemanticSplitStrategy(embedding_model=self._embedding_model)
 			return semantic_strategy.split(diff)
-
-		# If sentence transformers aren't available, fall back to basic file-based chunks
-		logger.warning("Sentence transformers not available, falling back to basic file splitting")
-		return self._create_basic_file_chunk(diff)
+		except Exception:
+			logger.exception("Semantic splitting failed: %s. Falling back to file splitting.")
+			# Fallback to FileSplitStrategy on any semantic splitting error
+			file_splitter = FileSplitStrategy()
+			return file_splitter.split(diff)
 
 	def _calculate_semantic_similarity(self, text1: str, text2: str) -> float:
 		"""
