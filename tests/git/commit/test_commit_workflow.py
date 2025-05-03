@@ -110,6 +110,7 @@ class TestCommitWorkflow(unittest.TestCase):
 		Test _process_chunk with COMMIT action.
 
 		Verifies commit is performed when user accepts.
+
 		"""
 		# Arrange: Mock UI to return COMMIT action
 		self.mock_ui.get_user_action.return_value = ChunkAction.COMMIT
@@ -132,6 +133,7 @@ class TestCommitWorkflow(unittest.TestCase):
 		Test _process_chunk with SKIP action.
 
 		Verifies skip action is handled correctly.
+
 		"""
 		# Arrange: Mock UI to return SKIP action
 		self.mock_ui.get_user_action.return_value = ChunkAction.SKIP
