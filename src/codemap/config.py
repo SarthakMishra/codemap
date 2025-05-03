@@ -256,4 +256,8 @@ DEFAULT_CONFIG = {
 			"use_workflow_templates": True,
 		},
 	},
+	# Ask command configuration
+	"ask": {
+		"interactive_chat": False,  # Default to non-interactive mode
+	},
 }
