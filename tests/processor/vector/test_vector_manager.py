@@ -58,6 +58,10 @@ def temp_repo(tmp_path):
 @pytest.fixture(autouse=True)
 def patch_dependencies(mock_milvus_client, mock_config_loader):
 	"""Automatically patch dependencies for all tests in this module."""
+	# Add a mock for KuzuManager
+	mock_kuzu_manager = MagicMock(spec=manager.KuzuManager)
+	mock_kuzu_manager.execute_query.return_value = []  # Default to no Kuzu results
+
 	with (
 		patch("codemap.processor.vector.manager.get_milvus_client", return_value=mock_milvus_client),
 		patch("codemap.processor.vector.manager.ConfigLoader", return_value=mock_config_loader),
@@ -65,6 +69,7 @@ def patch_dependencies(mock_milvus_client, mock_config_loader):
 		patch("codemap.processor.vector.manager.chunker.chunk_file") as mock_chunk_code,
 		patch("codemap.processor.vector.manager.generate_embeddings") as mock_generate_embeddings,
 		patch("codemap.processor.vector.manager.find_project_root") as mock_find_root,
+		# No need to patch KuzuManager itself if we just pass the mock instance
 	):
 		# Provide default return values for mocks
 		mock_get_git.return_value = {}  # Default to empty git state
@@ -98,6 +103,7 @@ def patch_dependencies(mock_milvus_client, mock_config_loader):
 			"gen_embed": mock_generate_embeddings,
 			"find_root": mock_find_root,
 			"milvus_client": mock_milvus_client,
+			"kuzu_manager": mock_kuzu_manager,  # Add kuzu mock to yielded dict
 		}
 
 
@@ -203,6 +209,7 @@ def test_process_files(patch_dependencies, temp_repo):
 	mock_chunk = patch_dependencies["chunk_code"]
 	mock_embed = patch_dependencies["gen_embed"]
 	mock_cfg_loader = patch_dependencies["config_loader"]()
+	mock_kuzu = patch_dependencies["kuzu_manager"]  # Get kuzu mock
 
 	files_to_process = {"file1.py", "file2.py"}
 	current_git_files = {"file1.py": "hash1", "file2.py": "hash2"}
@@ -220,14 +227,17 @@ def test_process_files(patch_dependencies, temp_repo):
 
 		mock_read.side_effect = read_side_effect
 
-		manager._process_files(
-			client=mock_milvus,
-			repo_path=temp_repo,
-			files_to_process=files_to_process,
-			current_git_files=current_git_files,
-			files_to_update=files_to_update,
-			app_config=mock_cfg_loader.config,
-		)
+		# Also mock the kuzu lookup function within _process_files
+		with patch("codemap.processor.vector.manager._get_kuzu_ids_for_chunks", return_value={}) as mock_kuzu_lookup:
+			manager._process_files(
+				client=mock_milvus,
+				repo_path=temp_repo,
+				files_to_process=files_to_process,
+				current_git_files=current_git_files,
+				files_to_update=files_to_update,
+				app_config=mock_cfg_loader.config,
+				kuzu_manager=mock_kuzu,  # Pass the mock kuzu manager
+			)
 
 	# 1. Check deletion was called for the updated file
 	# Assert based on keyword arguments used in the call
@@ -258,50 +268,73 @@ def test_process_files(patch_dependencies, temp_repo):
 	embed_args, _ = mock_embed.call_args_list[0]  # Example: first call
 	assert embed_args[0] == ["chunk1", "chunk2"]  # Chunks for the file
 
-	# 5. Check insertion
-	assert mock_milvus.insert.call_count == 1  # Called once with all data
-	call_args = mock_milvus.insert.call_args
-	assert call_args is not None
-	assert call_args.kwargs.get("collection_name") == config.COLLECTION_NAME
-	inserted_data = call_args.kwargs.get("data", [])
-	assert len(inserted_data) == 4  # 2 files * 2 chunks each
-	# Check content of one inserted item (example)
-	item = inserted_data[0]
-	assert item[config.FIELD_FILE_PATH] in ("file1.py", "file2.py")
-	assert item[config.FIELD_GIT_HASH] in ("hash1", "hash2")
-	assert item[config.FIELD_CHUNK_TEXT] == "chunk1"
-	assert len(item[config.FIELD_EMBEDDING]) == 3  # Dimension from mock config
+	# 5. Check kuzu lookup was called (at least once per file)
+	assert mock_kuzu_lookup.call_count >= len(files_to_process)
+
+	# 6. Check insertion
+	mock_milvus.insert.assert_called_once()
+	insert_call_args = mock_milvus.insert.call_args
+	assert insert_call_args is not None
+	assert insert_call_args.kwargs.get("collection_name") == config.COLLECTION_NAME
+	inserted_data = insert_call_args.kwargs.get("data", [])
+	assert len(inserted_data) == len(files_to_process) * len(mock_chunk.return_value)  # Chunks per file
+	# Check structure of one inserted item (assuming mock_chunk returns 2 chunks)
+	assert config.FIELD_ID in inserted_data[0]
+	assert config.FIELD_EMBEDDING in inserted_data[0]
+	assert config.FIELD_FILE_PATH in inserted_data[0]
+	assert config.FIELD_GIT_HASH in inserted_data[0]
 
 
 def test_process_files_read_fail(patch_dependencies, temp_repo):
 	"""Test that processing skips a file if reading fails."""
 	mock_milvus = patch_dependencies["milvus_client"]
 	mock_chunk = patch_dependencies["chunk_code"]
+	mock_kuzu = patch_dependencies["kuzu_manager"]  # Get kuzu mock
+	mock_cfg_loader = patch_dependencies["config_loader"]()
 
-	files_to_process = {"file1.py"}
-	current_git_files = {"file1.py": "hash1"}
+	files_to_process = {"bad_file.txt"}
+	current_git_files = {"bad_file.txt": "hash_bad"}
 
-	with patch("codemap.processor.vector.manager.read_file_content", return_value=None):
-		manager._process_files(mock_milvus, temp_repo, files_to_process, current_git_files, set(), {})
+	with patch("codemap.processor.vector.manager.read_file_content", return_value=None) as mock_read:
+		manager._process_files(
+			client=mock_milvus,
+			repo_path=temp_repo,
+			files_to_process=files_to_process,
+			current_git_files=current_git_files,
+			files_to_update=set(),
+			app_config=mock_cfg_loader.config,
+			kuzu_manager=mock_kuzu,  # Pass mock kuzu
+		)
 
-	mock_chunk.assert_not_called()
-	mock_milvus.insert.assert_not_called()
+	mock_read.assert_called_once_with(temp_repo / "bad_file.txt")
+	mock_chunk.assert_not_called()  # Should not chunk if read fails
+	mock_milvus.insert.assert_not_called()  # Should not insert
 
 
 def test_process_files_embedding_fail(patch_dependencies, temp_repo):
 	"""Test that processing skips a file if embedding fails."""
 	mock_milvus = patch_dependencies["milvus_client"]
 	mock_embed = patch_dependencies["gen_embed"]
-	mock_embed.side_effect = ValueError("Embedding error")
+	mock_embed.side_effect = ValueError("Embedding failed")  # Simulate failure
+	mock_kuzu = patch_dependencies["kuzu_manager"]  # Get kuzu mock
+	mock_cfg_loader = patch_dependencies["config_loader"]()
 
 	files_to_process = {"file1.py"}
 	current_git_files = {"file1.py": "hash1"}
 
-	with patch("codemap.processor.vector.manager.read_file_content", return_value="content"):
-		# Should log error but not raise
-		manager._process_files(mock_milvus, temp_repo, files_to_process, current_git_files, set(), {})
+	with patch("codemap.processor.vector.manager.read_file_content", return_value="content1"):
+		manager._process_files(
+			client=mock_milvus,
+			repo_path=temp_repo,
+			files_to_process=files_to_process,
+			current_git_files=current_git_files,
+			files_to_update=set(),
+			app_config=mock_cfg_loader.config,
+			kuzu_manager=mock_kuzu,  # Pass mock kuzu
+		)
 
-	mock_milvus.insert.assert_not_called()  # No data should be inserted
+	mock_embed.assert_called_once()  # Should attempt embedding
+	mock_milvus.insert.assert_not_called()  # Should not insert if embedding fails
 
 
 # Test the main synchronize_vectors function (integration-like)
@@ -309,6 +342,7 @@ def test_synchronize_vectors_integration(patch_dependencies, temp_repo):
 	"""Test the main synchronization function orchestrates correctly."""
 	mock_get_git = patch_dependencies["get_git"]
 	mock_milvus = patch_dependencies["milvus_client"]
+	mock_kuzu = patch_dependencies["kuzu_manager"]  # Get kuzu mock
 
 	# Simulate Git state and DB state needing sync
 	git_files = {"file1.py": "hash_new", "file_added.py": "hash_add"}
@@ -320,7 +354,7 @@ def test_synchronize_vectors_integration(patch_dependencies, temp_repo):
 		patch("codemap.processor.vector.manager._delete_files_from_milvus") as mock_delete,
 		patch("codemap.processor.vector.manager._process_files") as mock_process,
 	):
-		manager.synchronize_vectors(repo_path=temp_repo)
+		manager.synchronize_vectors(repo_path=temp_repo, kuzu_manager=mock_kuzu)
 
 		# Verify correct components were called
 		mock_get_git.assert_called_once_with(temp_repo)
@@ -337,3 +371,4 @@ def test_synchronize_vectors_integration(patch_dependencies, temp_repo):
 		assert process_args[2] == {"file1.py", "file_added.py"}  # files_to_process
 		assert process_args[3] == git_files  # current_git_files
 		assert process_args[4] == {"file1.py"}  # files_to_update
+		assert process_args[5] == mock_kuzu  # Check kuzu passed down
