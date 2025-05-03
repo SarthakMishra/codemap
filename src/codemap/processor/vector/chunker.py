@@ -154,10 +154,10 @@ def _chunk_with_treesitter(
 				config.FIELD_FILE_PATH: str(file_path),
 				config.FIELD_ENTITY_NAME: file_path.name + " (module overview)",
 				config.FIELD_CHUNK_TYPE: config.CHUNK_TYPE_MODULE,
-				config.FIELD_CHUNK_TEXT: module_chunk_combined_text[: config.MAX_CHUNK_TEXT_LENGTH],
 				config.FIELD_GIT_HASH: git_hash,
 				config.FIELD_START_LINE: 1,
 				config.FIELD_END_LINE: module_end_line,  # Approximate end line for module info
+				config.FIELD_CHUNK_TEXT: module_chunk_combined_text,
 			}
 		)
 
@@ -167,6 +167,7 @@ def _chunk_with_treesitter(
 
 	while nodes_to_visit:
 		node = nodes_to_visit.pop(0)
+		final_chunk_text = ""  # Initialize to prevent unbound error
 
 		if node.id in visited_node_ids or handler.should_skip_node(node):
 			continue
@@ -178,7 +179,6 @@ def _chunk_with_treesitter(
 		start_line = node.start_point[0] + 1
 		end_line = node.end_point[0] + 1
 
-		chunk_text = ""
 		chunk_type = ""
 		entity_name_for_chunk = name
 		process_children = False  # Flag to control adding children to the visit queue
@@ -229,7 +229,7 @@ def _chunk_with_treesitter(
 					class_chunk_parts.append("\n--- Members ---")  # Add a separator
 					class_chunk_parts.extend(member_signatures)
 
-			chunk_text = "\n\n".join(filter(None, class_chunk_parts))
+			"\n\n".join(filter(None, class_chunk_parts))
 			process_children = True  # Keep processing children (methods) individually
 
 		# --- Function/Method Chunk ---
@@ -310,33 +310,24 @@ def _chunk_with_treesitter(
 			final_body_text = summarized_body if summarized_body else body_text
 			# --- End Summarization Logic ---
 
-			# Combine parts, ensuring separation and stripping whitespace
-			parts = [signature]
-			if docstring:
-				parts.append(docstring.strip())
-			if final_body_text:  # Use the potentially summarized body
-				# Add a clear separator for the body/summary
-				parts.append("---\\nImplementation Summary:" if summarized_body else "---\\nImplementation:")
-				parts.append(final_body_text)  # Already stripped or summarized
-			chunk_text = "\\n\\n".join(filter(None, parts))  # Join non-empty parts with double newline
-
-			process_children = False  # Don't typically chunk things inside a function/method body
+			# Combine parts, ensure final text respects potential max length
+			# Use signature, docstring, and final_body_text
+			final_chunk_text = f"{signature}\n\n{docstring or ''}\n\n{final_body_text}"
+			final_chunk_text = final_chunk_text[: config.MAX_CHUNK_TEXT_LENGTH]
+			chunk_type = entity_type
 
 		# --- Create Chunk if relevant type identified ---
 		if chunk_type:
-			final_chunk_text = chunk_text[: config.MAX_CHUNK_TEXT_LENGTH]
-			if final_chunk_text:  # Only add chunk if there is text content
-				chunks.append(
-					{
-						config.FIELD_FILE_PATH: str(file_path),
-						config.FIELD_ENTITY_NAME: entity_name_for_chunk,
-						config.FIELD_CHUNK_TYPE: chunk_type,
-						config.FIELD_CHUNK_TEXT: final_chunk_text,
-						config.FIELD_GIT_HASH: git_hash,
-						config.FIELD_START_LINE: start_line,
-						config.FIELD_END_LINE: end_line,
-					}
-				)
+			chunk_data = {
+				config.FIELD_FILE_PATH: str(file_path),
+				config.FIELD_ENTITY_NAME: entity_name_for_chunk,
+				config.FIELD_CHUNK_TYPE: chunk_type,
+				config.FIELD_GIT_HASH: git_hash,
+				config.FIELD_START_LINE: start_line,
+				config.FIELD_END_LINE: end_line,
+				config.FIELD_CHUNK_TEXT: final_chunk_text,
+			}
+			chunks.append(chunk_data)
 
 		# --- Add children to visit stack conditionally ---
 		if process_children and node.children:
@@ -399,10 +390,10 @@ def _chunk_with_regex(file_path: Path, file_content: str, git_hash: str) -> list
 				config.FIELD_FILE_PATH: str(file_path),
 				config.FIELD_ENTITY_NAME: file_path.name,  # Use filename as entity for fallback
 				config.FIELD_CHUNK_TYPE: config.CHUNK_TYPE_FALLBACK,
-				config.FIELD_CHUNK_TEXT: chunk_text_final,
 				config.FIELD_GIT_HASH: git_hash,
 				config.FIELD_START_LINE: start_line,
 				config.FIELD_END_LINE: end_line,
+				config.FIELD_CHUNK_TEXT: chunk_text_final,
 			}
 			chunks.append(chunk_data)
 

@@ -7,8 +7,8 @@ VECTOR_DB_FILE_NAME = "vector.db"
 
 # --- Milvus Collection Configuration ---
 COLLECTION_NAME = "codemap_embeddings"
-METRIC_TYPE = "COSINE"  # Or "IP"
-INDEX_TYPE = "FLAT"  # Milvus Lite only supports FLAT
+METRIC_TYPE = "L2"
+INDEX_TYPE = "FLAT"  # Recommended for Milvus Lite
 
 # --- Embedding Model Configuration ---
 # Use the model already specified in the main config or commit logic
@@ -29,7 +29,7 @@ FIELD_END_LINE = "end_line"
 
 # --- Chunking Configuration ---
 # Placeholder for potential chunking limits (e.g., max tokens/chars per chunk)
-MAX_CHUNK_TEXT_LENGTH = 65535  # Max length for varchar in schema
+MAX_CHUNK_TEXT_LENGTH = 16384  # Max length for VARCHAR fields storing text chunks
 MAX_CHUNK_OVERLAP = 50  # Example: if splitting large fallback chunks
 
 # --- Fallback Chunk Types ---
