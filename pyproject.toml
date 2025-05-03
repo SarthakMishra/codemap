@@ -149,6 +149,7 @@ ignore = [
     "TC001",  # Move application import into a type-checking block
     "ERA001", # Found commented-out code
     "G004", # Logging statement uses f-string
+    "TD003", # Missing link in to-do
     # Disable rules that conflict with tab indentation
     "E101",  # Indentation contains mixed spaces and tabs
     "W191",  # indentation contains tabs
