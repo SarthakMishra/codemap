@@ -321,7 +321,7 @@ def stage_files(files: list[str]) -> None:
 			error_msg = "; ".join(errors)
 			msg = f"Errors while staging files: {error_msg}"
 			logger.error(msg)
-			raise GitError(msg)  # noqa: TRY301
+			raise GitError(msg)
 
 	except GitError:
 		# Pass through GitError exceptions
