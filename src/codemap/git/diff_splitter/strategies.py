@@ -819,7 +819,8 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		return final_chunks
 
 	def _split_by_semantic_patterns(self, patched_file: PatchedFile, patterns: list[str]) -> list[DiffChunk]:
-		"""Split a PatchedFile's content by grouping hunks based on semantic patterns.
+		"""
+		Split a PatchedFile's content by grouping hunks based on semantic patterns.
 
 		This method groups consecutive hunks together until a hunk is encountered
 		that contains an added line matching one of the semantic boundary patterns.
@@ -832,6 +833,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		Returns:
 		    List of DiffChunk objects, potentially splitting the file into multiple chunks.
+
 		"""
 		compiled_patterns = [re.compile(p) for p in patterns]
 		file_path = patched_file.path  # Or target_file? Need consistency

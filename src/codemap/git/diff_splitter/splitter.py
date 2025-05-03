@@ -119,6 +119,7 @@ class DiffSplitter:
 
 		Returns:
 		    True if sentence transformers are available, False otherwise
+
 		"""
 		return cls._sentence_transformers_available or cls._check_sentence_transformers_availability()
 
@@ -129,6 +130,7 @@ class DiffSplitter:
 
 		Returns:
 		    True if embedding model is available, False otherwise
+
 		"""
 		return bool(cls._model_available)
 
@@ -139,6 +141,7 @@ class DiffSplitter:
 
 		Args:
 		    value: Boolean indicating if model is available
+
 		"""
 		cls._model_available = value
 
@@ -149,6 +152,7 @@ class DiffSplitter:
 
 		Returns:
 		    The embedding model or None if not available
+
 		"""
 		return cls._embedding_model
 
@@ -159,6 +163,7 @@ class DiffSplitter:
 
 		Args:
 		    model: The embedding model to set
+
 		"""
 		cls._embedding_model = model
 
