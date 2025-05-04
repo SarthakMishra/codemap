@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from codemap.db.engine import get_engine, get_session
 from codemap.db.models import ChatHistory
+from tests.conftest import skip_db_tests
 
 
 def test_chat_history_model():
@@ -38,6 +39,7 @@ def test_chat_history_timestamp_default():
 
 
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_chat_history_db_interaction():
 	"""Test ChatHistory database interactions."""
 	# Create a fresh sample chat history

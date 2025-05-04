@@ -8,6 +8,7 @@ from sqlmodel import Session, select
 from codemap.db.client import DatabaseClient
 from codemap.db.engine import get_engine
 from codemap.db.models import ChatHistory
+from tests.conftest import skip_db_tests
 
 # Removed mock_config_loader fixture as initialization no longer relies on cache_dir config
 # Removed test_client_init_with_explicit_path and test_client_init_with_config_path
@@ -20,6 +21,7 @@ from codemap.db.models import ChatHistory
 
 # Mark test as async because DatabaseClient init is now async
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_client_add_chat_message():
 	"""Test adding a chat message using the client."""
 	# Create client instance - this will trigger async initialization
@@ -60,6 +62,7 @@ async def test_client_add_chat_message():
 
 # Mark test as async because DatabaseClient init is now async
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_client_get_chat_history():
 	"""Test retrieving chat history using the client."""
 	client = DatabaseClient()
@@ -106,6 +109,7 @@ async def test_client_get_chat_history():
 
 # Mark test as async because DatabaseClient init is now async
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_client_update_chat_response():
 	"""Test updating the AI response for a chat message."""
 	client = DatabaseClient()

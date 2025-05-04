@@ -51,6 +51,7 @@ jobs:
         PATH: ${{ github.workspace }}/.venv/bin:${{ env.PATH }}
         PYTHONPATH: ${{ github.workspace }}
         SKIP_GIT_TESTS: "1"  # Skip git-dependent tests in CI environment
+        SKIP_DB_TESTS: "1"  # Skip database-dependent tests in CI environment
       run: task test:coverage:xml
     
     - name: Upload coverage reports to Codecov

@@ -25,6 +25,12 @@ skip_git_tests = pytest.mark.skipif(
 	os.environ.get("SKIP_GIT_TESTS") == "1", reason="Git-dependent tests are skipped in CI environment"
 )
 
+# Skip database-dependent tests when SKIP_DB_TESTS environment variable is set
+skip_db_tests = pytest.mark.skipif(
+	os.environ.get("SKIP_DB_TESTS") == "1",
+	reason="Database-dependent tests are skipped in environments without PostgreSQL",
+)
+
 
 @pytest.fixture(autouse=True)
 def cleanup_docs_dir() -> Generator[None, None, None]:
