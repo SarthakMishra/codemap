@@ -1,51 +1,51 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/</loc>
+         <loc>https://codemap.run/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/acknowledgements/</loc>
+         <loc>https://codemap.run/acknowledgements/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/installation/</loc>
+         <loc>https://codemap.run/installation/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/contributing/</loc>
+         <loc>https://codemap.run/contributing/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/contributing/code-of-conduct/</loc>
+         <loc>https://codemap.run/contributing/code-of-conduct/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/contributing/guidelines/</loc>
+         <loc>https://codemap.run/contributing/guidelines/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/usage/</loc>
+         <loc>https://codemap.run/usage/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/usage/commit/</loc>
+         <loc>https://codemap.run/usage/commit/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/usage/configuration/</loc>
+         <loc>https://codemap.run/usage/configuration/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/usage/generate/</loc>
+         <loc>https://codemap.run/usage/generate/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/usage/llm-support/</loc>
+         <loc>https://codemap.run/usage/llm-support/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
     <url>
-         <loc>https://sarthakmishra.github.io/codemap/usage/pr/</loc>
+         <loc>https://codemap.run/usage/pr/</loc>
          <lastmod>2025-05-04</lastmod>
     </url>
 </urlset>
