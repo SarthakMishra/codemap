@@ -26,8 +26,6 @@ This document provides guidelines for contributing to the project. Please read i
     - [Automatic Releases](#automatic-releases)
     - [Release Preparation](#release-preparation)
     - [Hotfix Process](#hotfix-process)
-  - [Code of Conduct {#code-of-conduct-link}](#code-of-conduct-code-of-conduct-link)
-  - [License {#license-link}](#license-license-link)
   - [Questions?](#questions)
 
 ## How Can I Contribute?
@@ -61,7 +59,7 @@ If you'd like to contribute code (bug fixes, new features), please follow the wo
 
 ## Getting Started
 
-Before you start coding, make sure you have set up your development environment correctly by following the [Development Setup Guide](development.md).
+Before you start coding, make sure you have set up your development environment correctly by following the [Development Setup Guide](index.md).
 
 ## Branching Strategy (Simplified Git Flow)
 
@@ -138,6 +136,7 @@ gitGraph
 ### Workflow Examples
 
 1.  **New Feature Development**:
+
     ```bash
     # Start from the dev branch
     git checkout dev
@@ -156,6 +155,7 @@ gitGraph
     ```
 
 2.  **Release Preparation**:
+
     ```bash
     git checkout dev
     git pull origin dev
@@ -210,7 +210,7 @@ gitGraph
     cd codemap
     git remote add upstream https://github.com/SarthakMishra/codemap.git
     ```
-2.  **Setup:** Follow the [Development Setup](development.md) instructions.
+2.  **Setup:** Follow the [Development Setup](index.md) instructions.
 3.  **Branch:** Create a new branch based on the correct base branch (`dev` for features/improvements, `main` only for agreed-upon hotfixes).
     ```bash
     # For features/improvements
@@ -306,13 +306,6 @@ Maintainers will create `release/*` branches off `dev` when ready to stabilize f
 
 Critical bugs in `main` are fixed using `hotfix/*` branches, which are merged directly back into `main` to trigger a patch release.
 
-## Code of Conduct {#code-of-conduct-link}
-
-Please read and adhere to our [Code of Conduct](code-of-conduct.md).
-
-## License {#license-link}
-
-By contributing, you agree that your contributions will be licensed under the [MIT License](license.md).
 
 ## Questions?
 
