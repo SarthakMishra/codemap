@@ -1,0 +1,118 @@
+site_name: Codemap
+site_url: https://sarthakmishra.github.io/codemap
+site_author: Sarthak Mishra
+site_description: A CLI tool that generates optimized markdown docs and streamline Git workflows
+
+# Repository
+repo_name: SarthakMishra/codemap
+repo_url: https://github.com/SarthakMishra/codemap
+
+# Copyright
+copyright: Copyright &copy; 2025 Sarthak Mishra
+
+# Navigation
+nav:
+  - Home: 
+    - Overview: index.md
+    - Installation: installation.md
+    - Usage:
+      - Overview: usage/index.md
+      - Generate Docs (`gen`): usage/generate.md
+      - Smart Commit (`commit`): usage/commit.md
+      - Pull Requests (`pr`): usage/pr.md
+      - Configuration: usage/configuration.md
+      - LLM Support: usage/llm-support.md
+  - Contributing: 
+    - Overview: contributing/index.md
+    - Contributing Guidelines: contributing/guidelines.md
+    - Code of Conduct: contributing/code-of-conduct.md
+  - Acknowledgements: acknowledgements.md
+
+# Theme
+theme:
+  name: material
+  icon:
+    logo: material/library
+  features:
+    - announce.dismiss
+    - content.action.edit
+    - content.action.view
+    - content.code.annotate
+    - content.code.copy
+    # - content.code.select
+    # - content.footnote.tooltips
+    # - content.tabs.link
+    - content.tooltips
+    # - header.autohide
+    # - navigation.expand
+    - navigation.footer
+    - navigation.indexes
+    # - navigation.instant
+    # - navigation.instant.prefetch
+    # - navigation.instant.progress
+    # - navigation.prune
+    - navigation.sections
+    - navigation.tabs
+    # - navigation.tabs.sticky
+    - navigation.top
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+    # - toc.integrate
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/link
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/toggle-switch-off
+        name: Switch to system preference
+  font:
+    text: Geist
+    code: Geist Mono
+
+# Markdown Extensions
+markdown_extensions:
+  - pymdownx.blocks.caption
+  - pymdownx.blocks.admonition
+  - pymdownx.highlight:
+      use_pygments: true
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      # make exceptions to highlighting of code:
+      custom_fences:
+          - name: mermaid
+            class: mermaid
+            format: !!python/name:mermaid2.fence_mermaid_custom
+
+# Additional configuration
+extra:
+  status:
+    new: Recently added
+    deprecated: Deprecated
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/SarthakMishra
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/codemap/
+    - icon: fontawesome/brands/linkedin
+      link: https://www.linkedin.com/in/itssarthakmishra/
+    - icon: fontawesome/brands/x-twitter
+      link: https://x.com/MishraMishry
+
+plugins: 
+  - search
+  - mermaid2
