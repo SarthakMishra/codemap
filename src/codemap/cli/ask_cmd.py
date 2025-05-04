@@ -1,9 +1,11 @@
 """CLI command for asking questions about the codebase using RAG."""
 
+# Need asyncio for the async command
 import logging
 from pathlib import Path
 from typing import Annotated, Any, cast
 
+import asyncer
 import typer
 from rich.prompt import Prompt
 
@@ -15,7 +17,9 @@ from codemap.utils.config_loader import ConfigLoader
 logger = logging.getLogger(__name__)
 
 
-def ask_command(
+# Make the command function async
+@asyncer.runnify
+async def ask_command(
 	question: Annotated[
 		str | None, typer.Argument(help="Your question about the codebase (omit for interactive mode).")
 	] = None,
@@ -66,6 +70,9 @@ def ask_command(
 			api_key=api_key,
 		)
 
+		# Perform async initialization before running any commands
+		await command.initialize()
+
 		if is_interactive:
 			typer.echo("Starting interactive chat session. Type 'exit' or 'quit' to end.")
 			while True:
@@ -77,13 +84,15 @@ def ask_command(
 				if not user_input.strip():
 					continue
 
-				result = command.run(question=user_input)
+				# Use await for the async run method
+				result = await command.run(question=user_input)
 				print_ask_result(cast("dict[str, Any]", result))
 		else:
 			# Single question mode
 			if question is None:
 				exit_with_error("Internal error: Question is unexpectedly None in single-question mode.")
-			result = command.run(question=cast("str", question))
+			# Use await for the async run method
+			result = await command.run(question=cast("str", question))
 			print_ask_result(cast("dict[str, Any]", result))
 
 	except Exception as e:

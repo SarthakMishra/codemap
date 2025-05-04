@@ -68,8 +68,10 @@ app.command(name="ask")(ask_command)
 
 def main() -> int:
 	"""Run the CLI application."""
+	# Typer's app() will handle running sync/async commands appropriately
 	return app()
 
 
 if __name__ == "__main__":
+	# Keep the standard synchronous entry point call
 	sys.exit(main())
