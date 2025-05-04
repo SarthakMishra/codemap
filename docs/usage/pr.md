@@ -29,9 +29,11 @@ cm pr create [PATH] [OPTIONS]
 ```
 
 **Arguments:**
+
 - `PATH`: Path to the codebase to analyze (defaults to current directory)
 
 **Options:**
+
 - `--branch`, `-b`: Target branch name
 - `--type`, `-t`: Branch type (e.g., feature, release, hotfix, bugfix). Valid types depend on workflow strategy.
 - `--base`: Base branch for the PR (defaults to repo default or workflow-defined default)
@@ -53,17 +55,21 @@ cm pr update [PATH] [OPTIONS]
 ```
 
 **Arguments:**
+
 - `PATH`: Path to the codebase to analyze (defaults to current directory)
 
 **Options:**
+
 - `--pr`: PR number to update (required if not updating PR for current branch)
 - `--title`: New PR title
 - `--desc`, `-d`: New PR description (file path or text)
-> [!Note]
-> --no-commit is NOT an option for 'update'
 - `--force-push`, `-f`: Force push the branch (use with caution)
 - `--non-interactive`: Run in non-interactive mode
 - `--verbose`, `-v`: Enable verbose logging
+
+/// warning
+--no-commit is NOT an option for 'update'
+///
 
 ## Git Workflow Strategies
 
