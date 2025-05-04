@@ -84,8 +84,8 @@ class ProcessingPipeline:
 
 		# --- Initialize Shared Components (Synchronous) --- #
 		self.analyzer = TreeSitterAnalyzer()
-		self.chunker = TreeSitterChunker(config_loader=self.config_loader)  # Pass ConfigLoader to chunker
-		self.db_client = DatabaseClient(db_path=self.config.get("database_path"))
+		self.chunker = TreeSitterChunker(config_loader=self.config_loader)
+		self.db_client = DatabaseClient()
 
 		# --- Load Configuration --- #
 		# Get embedding configuration

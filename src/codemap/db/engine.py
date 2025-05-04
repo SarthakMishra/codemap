@@ -1,58 +1,84 @@
 """Handles SQLModel engine creation and session management for CodeMap."""
 
+import asyncio  # Added for running async ensure_postgres_running
 import logging
 from collections.abc import Generator
 from contextlib import contextmanager
-from pathlib import Path
 
-from sqlalchemy.engine import Engine  # Import Engine for type hint
+from sqlalchemy.engine import Engine
 from sqlmodel import Session, SQLModel, create_engine
-from sqlmodel.pool import StaticPool
+
+# Removed StaticPool import as it's SQLite specific
+# Import necessary docker utilities and constants
+from codemap.utils.docker_utils import (
+	POSTGRES_ENV,
+	POSTGRES_HOST_PORT,
+	ensure_postgres_running,
+)
 
 # Import models to ensure they are registered with SQLModel metadata
 
 logger = logging.getLogger(__name__)
 
-_engine_cache: dict[Path, Engine] = {}
+_engine_cache: dict[str, Engine] = {}  # Cache key will be the db url string
+_engine_lock = asyncio.Lock()  # Lock for async engine creation/check
 
 
-def get_engine(db_path: str | Path, echo: bool = False) -> Engine:
+# Updated function signature: removed db_path, no longer needed for Postgres
+async def get_engine(echo: bool = False) -> Engine:
 	"""
-	Gets or creates the SQLAlchemy engine for the given database path.
+	Gets or creates the SQLAlchemy engine for the PostgreSQL database.
+
+	Ensures the PostgreSQL Docker container is running before creating the engine.
 
 	Args:
-	    db_path (str | Path): The path to the SQLite database file.
-	    echo (bool): Whether to echo SQL statements to the log.
+	        echo (bool): Whether to echo SQL statements to the log.
 
 	Returns:
-	    Engine: The SQLAlchemy Engine instance.
+	        Engine: The SQLAlchemy Engine instance.
+
+	Raises:
+	        RuntimeError: If the PostgreSQL container cannot be started or connection fails.
 
 	"""
-	db_path = Path(db_path).resolve()  # Use resolved absolute path as key
-	if db_path in _engine_cache:
-		return _engine_cache[db_path]
+	# Construct the PostgreSQL connection URL
+	# Uses values imported from docker_utils
+	db_user = POSTGRES_ENV.get("POSTGRES_USER", "postgres")
+	db_password = POSTGRES_ENV.get("POSTGRES_PASSWORD", "postgres")
+	db_name = POSTGRES_ENV.get("POSTGRES_DB", "codemap")
+	db_host = "localhost"  # Assuming Docker runs on localhost
+	db_port = POSTGRES_HOST_PORT
 
-	# Ensure the directory exists
-	try:
-		db_path.parent.mkdir(parents=True, exist_ok=True)
-	except OSError:
-		logger.exception(f"Error creating database directory {db_path.parent}")
-		raise
+	database_url = f"postgresql+psycopg2://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
 
-	sqlite_url = f"sqlite:///{db_path}"
-	# Necessary for SQLite usage in multi-threaded apps (like web servers or task queues)
-	connect_args = {"check_same_thread": False}
+	async with _engine_lock:
+		if database_url in _engine_cache:
+			return _engine_cache[database_url]
 
-	# Create the engine
-	engine = create_engine(
-		sqlite_url,
-		echo=echo,
-		connect_args=connect_args,
-		poolclass=StaticPool,  # Recommended for SQLite
-	)
-	_engine_cache[db_path] = engine
-	logger.info(f"SQLModel engine created and cached for database at: {db_path}")
-	return engine
+		# Ensure PostgreSQL container is running
+		logger.info("Checking and ensuring PostgreSQL container is running...")
+		success, message = await ensure_postgres_running()
+		if not success:
+			logger.error(f"Failed to ensure PostgreSQL is running: {message}")
+			# Consider a more specific exception type
+			msg = f"PostgreSQL service setup failed: {message}"
+			raise RuntimeError(msg)
+		logger.info("PostgreSQL container check successful.")
+
+		# Create the engine (using synchronous create_engine for now)
+		# Removed connect_args and poolclass specific to SQLite
+		try:
+			engine = create_engine(database_url, echo=echo)
+			# Test connection - optional but good practice
+			with engine.connect():
+				logger.info("Successfully connected to PostgreSQL.")
+
+			_engine_cache[database_url] = engine
+			logger.info(f"SQLModel engine created and cached for PostgreSQL at: {db_host}:{db_port}/{db_name}")
+			return engine
+		except Exception:
+			logger.exception(f"Failed to create PostgreSQL engine or connect to {database_url}")
+			raise  # Re-raise the original exception
 
 
 def create_db_and_tables(engine_instance: Engine) -> None:

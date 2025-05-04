@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import Any, TypedDict
 
 from litellm import completion
-from sqlalchemy.exc import SQLAlchemyError
 
 from codemap.db.client import DatabaseClient
-from codemap.db.engine import get_session
-from codemap.db.models import ChatHistory
 from codemap.llm import create_client
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import loading_spinner, progress_indicator
@@ -309,20 +306,14 @@ class AskCommand:
 			# Extract answer from response
 			answer = self._extract_answer_from_response(response)
 
-			# Update DB with answer
+			# Update DB with answer using the dedicated client method
 			if db_entry_id and answer:
-				try:
-					# Access the engine directly from the database client
-					with get_session(engine_instance=self.db_client.engine) as session:
-						db_entry = session.get(ChatHistory, db_entry_id)
-						if db_entry:
-							db_entry.ai_response = answer
-							session.commit()
-							logger.debug(f"Updated DB entry {db_entry_id} with AI response")
-				except (SQLAlchemyError, TypeError, AttributeError) as e:
-					logger.warning(f"Failed to update DB entry {db_entry_id} with AI response: {e}")
+				# The update_chat_response method handles its own exceptions and returns success/failure
+				success = self.db_client.update_chat_response(message_id=db_entry_id, ai_response=answer)
+				if not success:
+					logger.warning(f"Failed to update DB entry {db_entry_id} via client method.")
 
 			return AskResult(answer=answer, context=context)
-		except Exception as e:
+		except Exception as e:  # Keep the outer exception for LLM call errors
 			logger.exception("Error during LLM completion")
 			return AskResult(answer=f"Error: {e!s}", context=context)

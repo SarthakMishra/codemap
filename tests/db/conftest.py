@@ -1,8 +1,6 @@
 """Fixtures for database tests."""
 
-import os
-import tempfile
-from pathlib import Path
+import asyncio
 
 import pytest
 from sqlmodel import Session
@@ -11,31 +9,43 @@ from codemap.db.engine import create_db_and_tables, get_engine
 from codemap.db.models import ChatHistory
 
 
-@pytest.fixture
-def temp_db_path():
-	"""Creates a temporary database path that will be cleaned up after tests."""
-	fd, path = tempfile.mkstemp(suffix=".db")
-	os.close(fd)  # Close file descriptor to avoid resource leaks
-	db_path = Path(path)
-	yield db_path
-	# Clean up after tests
-	if db_path.exists():
-		db_path.unlink()
+@pytest.fixture(scope="session")
+def event_loop():
+	"""Create an instance of the default event loop for session scope fixtures."""
+	loop = asyncio.get_event_loop_policy().new_event_loop()
+	yield loop
+	loop.close()
 
 
-@pytest.fixture
-def test_engine(temp_db_path):
-	"""Creates a test database engine using a temporary file."""
+@pytest.fixture(scope="session")
+async def test_engine():
+	"""
+	Creates a test database engine for PostgreSQL.
+
+	Relies on get_engine to ensure the container is running. Scope is
+	session to avoid starting/stopping container repeatedly.
+
+	"""
 	# Set echo=True to see SQL statements during tests (useful for debugging)
-	return get_engine(temp_db_path, echo=True)
+	return await get_engine(echo=True)
+	# Optionally add logic here to ensure container is ready if get_engine doesn't suffice
+	# For now, assume get_engine handles it.
+	# No explicit cleanup needed here if engine is managed externally/by docker_utils
 
 
 @pytest.fixture
-def test_session(test_engine):
+async def test_session(test_engine):
 	"""Creates a test database session with tables."""
+	# Ensure tables exist for this engine instance (idempotent)
+	# create_db_and_tables is sync, call it directly
 	create_db_and_tables(test_engine)
+
+	# Use a synchronous session for now, matching the sync create_engine in get_engine
+	# If get_engine is changed to create_async_engine, this needs to change too.
 	with Session(test_engine) as session:
 		yield session
+		# Rollback any changes made during the test
+		session.rollback()
 
 
 @pytest.fixture

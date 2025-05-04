@@ -26,7 +26,7 @@ POSTGRES_IMAGE = "postgres:latest"
 POSTGRES_CONTAINER_NAME = "codemap-postgres"
 POSTGRES_HOST_PORT = 5432
 POSTGRES_ENV = {"POSTGRES_PASSWORD": "postgres", "POSTGRES_USER": "postgres", "POSTGRES_DB": "codemap"}
-POSTGRES_STORAGE_PATH = "./postgres_data"
+POSTGRES_STORAGE_PATH = "./codemap_cache/postgres_data"
 
 
 async def is_docker_running() -> bool:

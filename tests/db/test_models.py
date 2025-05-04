@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime
 
+import pytest
 from sqlmodel import select
 
 from codemap.db.models import ChatHistory
@@ -35,7 +36,8 @@ def test_chat_history_timestamp_default():
 	assert before <= chat_time <= after
 
 
-def test_chat_history_db_interaction(test_session, sample_chat_history):
+@pytest.mark.asyncio
+async def test_chat_history_db_interaction(test_session, sample_chat_history):
 	"""Test ChatHistory database interactions."""
 	# Add to session
 	test_session.add(sample_chat_history)

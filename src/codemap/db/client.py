@@ -1,14 +1,13 @@
 """Client interface for interacting with the database in CodeMap."""
 
+import asyncio
 import logging
-from pathlib import Path
 
 from sqlalchemy import asc
+from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import select
 
-from codemap.utils.config_loader import ConfigLoader
-
-from .engine import create_db_and_tables, get_engine, get_session
+from .engine import create_db_and_tables, get_engine, get_session  # get_engine is now async
 from .models import ChatHistory
 
 logger = logging.getLogger(__name__)
@@ -17,34 +16,54 @@ logger = logging.getLogger(__name__)
 class DatabaseClient:
 	"""Provides high-level methods to interact with the CodeMap database."""
 
-	def __init__(self, db_path: str | None = None) -> None:
+	def __init__(self) -> None:
 		"""
 		Initializes the database client.
 
-		If db_path is not provided, it reads the cache_dir from the configuration
-		and constructs the path as cache_dir/codemap.db.
-		It also ensures the database engine is initialized and tables are created.
-
-		Args:
-		    db_path (Optional[str]): Explicit path to the database file. Overrides config if provided.
+		It ensures the database engine is initialized asynchronously and
+		tables are created. The engine connects to the PostgreSQL database
+		managed by docker_utils.
 
 		"""
-		if db_path is None:
-			# Use ConfigLoader to get the cache_dir
-			config = ConfigLoader.get_instance()
-			cache_dir = config.get("cache_dir")
-			if not cache_dir:
-				msg = "'cache_dir' not found in configuration. Cannot determine default database path."
-				raise ValueError(msg)
-			# Construct path relative to cache_dir
-			db_path_obj = Path(cache_dir) / "codemap.db"
-		else:
-			# Use the explicitly provided path
-			db_path_obj = Path(db_path)
+		self.engine = None  # Initialize engine as None
+		# Initialize asynchronously
+		asyncio.run(self._initialize_engine())
 
-		self.engine = get_engine(db_path_obj)
-		create_db_and_tables(self.engine)  # Ensure tables exist on initialization
-		logger.info(f"Database client initialized using path: {db_path_obj}")
+	async def _initialize_engine(self) -> None:
+		"""Asynchronously gets the engine and creates tables."""
+		if self.engine is None:
+			try:
+				self.engine = await get_engine()  # Await the async function
+				# create_db_and_tables is synchronous, run it after engine is ready
+				create_db_and_tables(self.engine)
+				logger.info("Database client initialized with PostgreSQL engine.")
+			except RuntimeError:
+				logger.exception("Failed to initialize database engine")
+				# Decide how to handle this error - maybe raise, maybe set engine to None?
+				# For now, re-raising to make the failure explicit.
+				raise
+			except Exception:
+				logger.exception("An unexpected error occurred during database initialization")
+				raise
+
+	# Ensure engine is initialized before DB operations
+	def _ensure_engine_initialized(self) -> None:
+		if self.engine is None:
+			# This case should ideally be prevented by __init__ or handled differently.
+			# Running async code synchronously here can be problematic.
+			# Option 1: Make all methods async (better design)
+			# Option 2: Block here (simpler for now, but not ideal)
+			logger.warning("Engine was not initialized. Attempting synchronous initialization.")
+			try:
+				asyncio.run(self._initialize_engine())
+			except Exception as e:  # Catch specific exception for chaining
+				logger.exception("Failed synchronous initialization attempt")
+				msg = "Database engine could not be initialized"
+				raise RuntimeError(msg) from e  # Chain the original exception
+			if self.engine is None:
+				# Still None after attempt
+				msg = "Database engine failed to initialize."
+				raise RuntimeError(msg)
 
 	def add_chat_message(
 		self,
@@ -68,6 +87,12 @@ class DatabaseClient:
 		    ChatHistory: The newly created chat history record.
 
 		"""
+		self._ensure_engine_initialized()  # Check engine before use
+		if self.engine is None:
+			# This should ideally not happen if _ensure_engine_initialized worked
+			msg = "Database engine is not initialized after check."
+			logger.error(msg)
+			raise RuntimeError(msg)
 		chat_entry = ChatHistory(
 			session_id=session_id,
 			user_query=user_query,
@@ -98,12 +123,17 @@ class DatabaseClient:
 		    List[ChatHistory]: A list of chat history records.
 
 		"""
+		self._ensure_engine_initialized()  # Check engine before use
+		if self.engine is None:
+			# This should ideally not happen if _ensure_engine_initialized worked
+			msg = "Database engine is not initialized after check."
+			logger.error(msg)
+			raise RuntimeError(msg)
 		statement = (
 			select(ChatHistory)
 			.where(ChatHistory.session_id == session_id)
-			# Without this ignore, pyright incorrectly complains that ChatHistory.timestamp is
-			# a datetime object rather than a SQLAlchemy Column
-			.order_by(asc(ChatHistory.timestamp))  # type: ignore # noqa: PGH003
+			# Using type ignore as the linter incorrectly flags the type
+			.order_by(asc(ChatHistory.timestamp))  # type: ignore[arg-type]
 			.limit(limit)
 		)
 		try:
@@ -114,3 +144,37 @@ class DatabaseClient:
 		except Exception:
 			logger.exception("Error retrieving chat history")
 			raise
+
+	def update_chat_response(self, message_id: int, ai_response: str) -> bool:
+		"""
+		Updates the AI response for a specific chat message.
+
+		Args:
+		        message_id (int): The primary key ID of the chat message to update.
+		        ai_response (str): The new AI response text.
+
+		Returns:
+		        bool: True if the update was successful, False otherwise.
+
+		"""
+		self._ensure_engine_initialized()  # Internal check
+		if self.engine is None:
+			logger.error("Cannot update chat response: Database engine not initialized.")
+			return False
+
+		try:
+			with get_session(self.engine) as session:
+				db_entry = session.get(ChatHistory, message_id)
+				if db_entry:
+					db_entry.ai_response = ai_response
+					session.commit()
+					logger.debug(f"Updated DB entry {message_id} with AI response.")
+					return True
+				logger.warning(f"Chat message with ID {message_id} not found for update.")
+				return False
+		except SQLAlchemyError:
+			logger.exception(f"Database error updating chat response for message ID {message_id}")
+			return False
+		except Exception:
+			logger.exception(f"Unexpected error updating chat response for message ID {message_id}")
+			return False
