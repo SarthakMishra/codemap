@@ -1,5 +1,6 @@
 """Client interface for interacting with the database in CodeMap."""
 
+import asyncio
 import logging
 
 from sqlalchemy import asc
@@ -19,18 +20,35 @@ class DatabaseClient:
 		"""
 		Initializes the database client.
 
-		It sets up the client in an uninitialized state. The actual initialization
-		needs to be performed by calling the async initialize() method.
+		It sets up the client in an uninitialized state. The actual
+		initialization needs to be performed by calling the async initialize()
+		method or waiting for _initialize_engine_if_needed to run when
+		required.
+
 		"""
 		self.engine = None  # Initialize engine as None
 		self.initialized = False  # Flag to track initialization status
-		# Remove asyncio.run call
+		self._init_task = None  # Store reference to initialization task
+
+		# Initialize engine in event loop if possible
+		try:
+			if asyncio.get_event_loop().is_running():
+				self._init_task = asyncio.create_task(self.initialize())
+			else:
+				# In sync context, create a new event loop to initialize
+				loop = asyncio.new_event_loop()
+				loop.run_until_complete(self.initialize())
+				loop.close()
+		except RuntimeError:
+			# No event loop available, will initialize on first use
+			logger.debug("No event loop available during DatabaseClient init, will initialize on demand")
 
 	async def initialize(self) -> None:
 		"""
 		Asynchronously initialize the database client.
 
 		This should be called after creating the client and before using it.
+
 		"""
 		await self._initialize_engine()
 		self.initialized = True
@@ -53,11 +71,17 @@ class DatabaseClient:
 				logger.exception("An unexpected error occurred during database initialization")
 				raise
 
+	async def _initialize_engine_if_needed(self) -> None:
+		"""Ensure engine is initialized before use."""
+		if not self.initialized or self.engine is None:
+			await self.initialize()
+
 	async def cleanup(self) -> None:
 		"""
 		Asynchronously cleanup the database client resources.
 
 		This should be called before discarding the client.
+
 		"""
 		if self.engine:
 			# No need to close Engine in SQLAlchemy 2.0, but dispose will close connections
@@ -68,11 +92,13 @@ class DatabaseClient:
 		logger.info("Database client cleaned up")
 
 	# Ensure engine is initialized before DB operations
-	def _ensure_engine_initialized(self) -> None:
+	async def _ensure_engine_initialized(self) -> None:
 		if not self.initialized or self.engine is None:
-			msg = "Database client is not initialized. Call initialize() method first."
-			logger.error(msg)
-			raise RuntimeError(msg)
+			await self._initialize_engine_if_needed()
+			if not self.initialized or self.engine is None:
+				msg = "Database client initialization failed."
+				logger.error(msg)
+				raise RuntimeError(msg)
 
 	def add_chat_message(
 		self,
@@ -96,12 +122,20 @@ class DatabaseClient:
 		    ChatHistory: The newly created chat history record.
 
 		"""
-		self._ensure_engine_initialized()  # Check engine before use
+		# Ensure engine is initialized - run in a new event loop if needed
+		if not self.initialized or self.engine is None:
+			loop = asyncio.new_event_loop()
+			try:
+				loop.run_until_complete(self._ensure_engine_initialized())
+			finally:
+				loop.close()
+
 		if self.engine is None:
 			# This should ideally not happen if _ensure_engine_initialized worked
 			msg = "Database engine is not initialized after check."
 			logger.error(msg)
 			raise RuntimeError(msg)
+
 		chat_entry = ChatHistory(
 			session_id=session_id,
 			user_query=user_query,
@@ -132,12 +166,20 @@ class DatabaseClient:
 		    List[ChatHistory]: A list of chat history records.
 
 		"""
-		self._ensure_engine_initialized()  # Check engine before use
+		# Ensure engine is initialized - run in a new event loop if needed
+		if not self.initialized or self.engine is None:
+			loop = asyncio.new_event_loop()
+			try:
+				loop.run_until_complete(self._ensure_engine_initialized())
+			finally:
+				loop.close()
+
 		if self.engine is None:
 			# This should ideally not happen if _ensure_engine_initialized worked
 			msg = "Database engine is not initialized after check."
 			logger.error(msg)
 			raise RuntimeError(msg)
+
 		statement = (
 			select(ChatHistory)
 			.where(ChatHistory.session_id == session_id)
@@ -166,7 +208,14 @@ class DatabaseClient:
 		        bool: True if the update was successful, False otherwise.
 
 		"""
-		self._ensure_engine_initialized()  # Internal check
+		# Ensure engine is initialized - run in a new event loop if needed
+		if not self.initialized or self.engine is None:
+			loop = asyncio.new_event_loop()
+			try:
+				loop.run_until_complete(self._ensure_engine_initialized())
+			finally:
+				loop.close()
+
 		if self.engine is None:
 			logger.error("Cannot update chat response: Database engine not initialized.")
 			return False

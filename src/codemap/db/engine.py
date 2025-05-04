@@ -41,6 +41,7 @@ async def get_engine(echo: bool = False) -> Engine:
 
 	Raises:
 	        RuntimeError: If neither PostgreSQL nor SQLite can be initialized.
+
 	"""
 	# Check if we should skip Docker and use SQLite (for testing or non-Docker environments)
 	use_sqlite = os.environ.get("CODEMAP_USE_SQLITE", "").lower() in ("true", "1", "yes")

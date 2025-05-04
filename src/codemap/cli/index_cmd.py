@@ -1,7 +1,9 @@
-"""CLI command for indexing repositories.
+"""
+CLI command for indexing repositories.
 
-Contains the logic for the 'codemap index' command, including initialization,
-synchronization, and the optional file watching mode.
+Contains the logic for the 'codemap index' command, including
+initialization, synchronization, and the optional file watching mode.
+
 """
 
 import asyncio

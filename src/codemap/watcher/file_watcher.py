@@ -31,6 +31,7 @@ class FileChangeHandler(FileSystemEventHandler):
 		    callback: An async function to call when changes are detected.
 		    debounce_delay: Minimum time (seconds) between callback triggers.
 		    event_loop: The asyncio event loop to use, or None to use the current one.
+
 		"""
 		self.callback = callback
 		self.debounce_delay = debounce_delay
@@ -103,6 +104,7 @@ class FileChangeHandler(FileSystemEventHandler):
 
 		Args:
 		    event: The file system event.
+
 		"""
 		if event.is_directory:
 			return  # Ignore directory events for now, focus on file changes
@@ -137,6 +139,7 @@ class Watcher:
 		    path_to_watch: The directory path to monitor.
 		    on_change_callback: Async function to call upon detecting changes.
 		    debounce_delay: Delay in seconds to avoid rapid firing of callbacks.
+
 		"""
 		self.observer = Observer()
 		self.path_to_watch = Path(path_to_watch).resolve()

@@ -362,6 +362,7 @@ class ProcessingPipeline:
 
 		Args:
 		    debounce_delay: Delay in seconds before triggering sync after a file change.
+
 		"""
 		if not self.repo_path:
 			logger.error("Cannot initialize watcher without a repository path.")
@@ -387,9 +388,11 @@ class ProcessingPipeline:
 			self.watcher = None
 
 	async def start_watcher(self) -> None:
-		"""Start the file watcher in the background.
+		"""
+		Start the file watcher in the background.
 
 		`initialize_watcher` must be called first.
+
 		"""
 		if not self.watcher:
 			logger.error("Watcher not initialized. Call initialize_watcher() first.")
