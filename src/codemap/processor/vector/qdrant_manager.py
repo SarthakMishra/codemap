@@ -340,7 +340,7 @@ class QdrantManager:
 				if not batch_ids:
 					logger.debug("[QdrantManager Get IDs] No more IDs returned by scroll. Stopping.")
 					break
-				all_ids.extend(batch_ids)
+				all_ids.extend([cast("str | int | uuid.UUID", point_id) for point_id in batch_ids])
 				# Assign the returned offset ID - type is likely PointId but linter struggles
 				next_offset = next_offset_id  # No ignore needed if next_offset is Any
 				if next_offset is None:

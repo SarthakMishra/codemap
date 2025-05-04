@@ -256,7 +256,7 @@ class TestProcessCodebase(FileSystemTestBase):
 		mock_process_files_lod.assert_called_once_with(
 			paths=process_paths,
 			lod_level=self.config.lod_level,
-			max_workers=4,  # Check the default or expected worker count
+			max_workers=8,  # Updated to match the actual implementation
 			progress=self.mock_progress,
 			task_id=self.mock_task_id,
 		)

@@ -132,6 +132,7 @@ def prepare_prompt(
 	diff_content: str,
 	file_info: dict[str, Any],
 	convention: dict[str, Any],
+	extra_context: dict[str, Any] | None = None,
 ) -> str:
 	"""
 	Prepare the prompt for the LLM.
@@ -141,6 +142,7 @@ def prepare_prompt(
 	    diff_content: Diff content to include
 	    file_info: Information about files in the diff
 	    convention: Commit convention settings
+	    extra_context: Optional additional context values for the template
 
 	Returns:
 	    Formatted prompt
@@ -152,6 +154,10 @@ def prepare_prompt(
 		"convention": convention,
 		"schema": COMMIT_MESSAGE_SCHEMA,
 	}
+
+	# Add any extra context values
+	if extra_context:
+		context.update(extra_context)
 
 	try:
 		return template.format(**context)

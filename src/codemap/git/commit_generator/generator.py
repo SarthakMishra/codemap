@@ -10,8 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codemap.git.diff_splitter import DiffChunk
-from codemap.llm import LLMClient, LLMError
-from codemap.utils.cli_utils import loading_spinner
+from codemap.llm import LLMClient
 from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
@@ -114,12 +113,23 @@ class CommitMessageGenerator:
 		# Get the diff content directly from the chunk object
 		diff_content = chunk.content
 
+		# Create a context dict with default values for template variables
+		context = {
+			"diff": diff_content,
+			"files": file_info,
+			"convention": convention,
+			"schema": COMMIT_MESSAGE_SCHEMA,
+			"original_message": "",  # Default value for original_message
+			"lint_errors": "",  # Default value for lint_errors
+		}
+
 		# Prepare and return the prompt
 		return prepare_prompt(
 			template=self.prompt_template,
 			diff_content=diff_content,
 			file_info=file_info,
 			convention=convention,
+			extra_context=context,  # Pass the context with default values
 		)
 
 	def format_json_to_commit_message(self, content: str) -> str:
@@ -354,49 +364,30 @@ class CommitMessageGenerator:
 
 	def generate_message(self, chunk: DiffChunk) -> tuple[str, bool]:
 		"""
-		Generate a commit message for a single chunk.
+		Generate a commit message for a diff chunk.
 
 		Args:
-		    chunk: Diff chunk object to generate message for
+		    chunk: Diff chunk to generate message for
 
 		Returns:
-		    Tuple of (commit_message, was_generated_by_llm)
+		    Generated message and success flag
 
 		"""
-		existing_desc = chunk.description
-
-		# Check for existing description
-		if existing_desc and isinstance(existing_desc, str):
-			is_generic = existing_desc.startswith(("chore: update", "fix: update", "docs: update", "test: update"))
-			is_llm_gen = getattr(chunk, "is_llm_generated", False) if isinstance(chunk, DiffChunk) else False
-
-			if not is_generic and is_llm_gen:
-				logger.debug("Chunk already has LLM-generated description: '%s'", existing_desc)
-				return existing_desc, True  # Assume it was LLM generated previously
-
-		# Try to generate a message using LLM
+		# Prepare prompt with chunk data
 		try:
-			# Prepare prompt for the model
 			prompt = self._prepare_prompt(chunk)
+			logger.debug("Prompt prepared successfully")
 
-			with loading_spinner("Generating commit message..."):
-				result = self._call_llm_api(prompt=prompt)
+			# Generate message using configured LLM provider
+			message = self._call_llm_api(prompt)
+			logger.debug("LLM generated message: %s", message)
 
-			# Format the JSON into a conventional commit message
-			message = self.format_json_to_commit_message(result)
-
-			# Mark the chunk if possible
-			if isinstance(chunk, DiffChunk):
-				chunk.is_llm_generated = True  # Mark original object if it's the class type
-
+			# Return generated message with success flag
 			return message, True
-
-		except (LLMError, ValueError, RuntimeError):
-			# Handle errors gracefully
+		except Exception:
 			logger.exception("Error during LLM generation")
-			logger.info("Falling back to simple message generation.")
-			message = self.fallback_generation(chunk)
-			return message, False
+			# Fall back to heuristic generation
+			return self.fallback_generation(chunk), False
 
 	def _call_llm_api(self, prompt: str) -> str:
 		"""

@@ -378,6 +378,8 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			# Python
 			("^(.*)\\.py$", "\\\\1_test\\.py$"),
 			("^(.*)\\.py$", "test_\\\\1\\.py$"),
+			("^(.*)\\.(py)$", "\\\\1_test\\.\\\\2$"),  # For file.py and file_test.py pattern
+			("^(.*)\\.(py)$", "\\\\1Test\\.\\\\2$"),  # For file.py and fileTest.py pattern
 			("^(.*)\\.py$", "\\\\1_spec\\.py$"),
 			("^(.*)\\.py$", "spec_\\\\1\\.py$"),
 			# JavaScript / TypeScript (including JSX/TSX)

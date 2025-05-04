@@ -24,6 +24,8 @@ CodeMap is an AI-powered developer toolkit. Generate optimized docs, analyze cod
 - 🌳 Repository structure visualization
 - 🔄 Smart Git commit assistance with AI-generated messages
 - 🔃 AI-powered PR creation and management
+- 💬 Ask questions about your codebase using RAG
+- 🔍 Index and search your repository for semantic understanding
 
 ## Installation
 
@@ -96,6 +98,89 @@ pipx uninstall codemap
 
 # If installed with pip
 pip uninstall codemap
+```
+
+## Index Repository Command
+
+Index and watch repositories for efficient vector-based search and semantic understanding. This command processes your codebase into a vector database for use with other features like the `ask` command.
+
+### Command Options
+
+```bash
+codemap index [PATH] [OPTIONS]
+```
+
+**Arguments:**
+- `PATH`: Path to the repository root directory (defaults to current directory)
+
+**Options:**
+- `--sync/--no-sync`: Synchronize the vector database with the current Git state on startup (default: sync)
+- `--watch`, `-w`: Keep running and watch for file changes, automatically syncing the index
+- `--log-level`, `-L`: Set the logging level (e.g., DEBUG, INFO, WARNING)
+- `--verbose`, `-v`: Enable verbose logging
+- `--config`, `-c`: Path to custom configuration file
+
+### Examples
+
+```bash
+# Index the current directory (one-time)
+codemap index
+# Or using the alias:
+cm index
+
+# Index with file watching enabled
+codemap index --watch
+
+# Skip initial sync but enable watching
+codemap index --no-sync --watch
+
+# Index a specific repository with verbose output
+codemap index /path/to/repo --verbose
+
+# Set specific logging level
+codemap index --log-level DEBUG
+```
+
+## Ask Questions About Your Codebase
+
+Use the `ask` command to query your codebase using natural language and get AI-powered answers based on your code's content and structure.
+
+### Command Options
+
+```bash
+codemap ask [QUESTION] [OPTIONS]
+```
+
+**Arguments:**
+- `QUESTION`: Your question about the codebase (omit for interactive mode)
+
+**Options:**
+- `--path`, `-p`: Path to the repository root (defaults to current directory)
+- `--model`: LLM model to use (e.g., 'openai/gpt-4o-mini'). Overrides config.
+- `--api-base`: Override the LLM API base URL
+- `--api-key`: Override the LLM API key (use environment variables for security)
+- `--interactive`, `-i`: Start an interactive chat session
+- `--verbose`, `-v`: Enable verbose logging
+
+### Examples
+
+```bash
+# Ask a single question
+codemap ask "How does the configuration loader work?"
+# Or using the alias:
+cm ask "What does the file watcher module do?"
+
+# Start an interactive chat session
+codemap ask --interactive
+
+# Specify a repository path
+codemap ask "Explain the vector database schema" -p /path/to/repo
+
+# Use a specific LLM model
+codemap ask "What is the purpose of the ProcessingPipeline?" --model anthropic/claude-3-sonnet
+
+# Enable verbose logging
+codemap ask "List all available CLI commands" -v
 ```
 
 ## Generate Markdown Docs
@@ -520,6 +605,15 @@ processor:
     - "**/build/**"
   default_lod_level: signatures  # Default LOD for background processing
 
+# Ask Command Configuration ('ask' command)
+ask:
+  interactive_chat: false        # Start an interactive chat session by default
+  model: null                    # LLM model to use (falls back to global llm.model)
+  
+# Index Command Configuration ('index' command)
+watcher:
+  debounce_delay: 2.0            # Delay in seconds for file watcher to debounce changes
+
 # Commit Feature Configuration ('commit' command)
 commit:
   strategy: semantic             # Diff splitting strategy: file, hunk, semantic
@@ -636,7 +730,7 @@ ANTHROPIC_API_BASE=your_custom_url
 
 3. **LLM Settings**
     *   Use the global `llm` section for default model and API base.
-    *   Override with `--model` in `commit` or `pr` commands.
+    *   Override with `--model` in `commit`, `pr`, or `ask` commands.
     *   Set custom API bases (e.g., `llm.api_base`) for self-hosted or proxy services.
 
 4. **Commit Conventions & Linting**
@@ -655,6 +749,14 @@ ANTHROPIC_API_BASE=your_custom_url
     *   Enable/disable semantic analysis (`gen.semantic_analysis`, `--semantic`).
     *   Toggle the directory tree (`gen.include_tree`, `--tree`).
     *   Configure the Mermaid entity graph (`gen.include_entity_graph`, `gen.mermaid_*` options, and corresponding flags).
+
+7. **File Watching and Indexing**
+    *   Adjust `watcher.debounce_delay` to control how quickly the file watcher responds to changes.
+    *   Use the `index` command with `--watch` flag to keep the vector database in sync with code changes.
+
+8. **Ask Command Settings**
+    *   Configure `ask.interactive_chat` to enable interactive mode by default.
+    *   Override the model with `ask.model` or use the global `llm.model`.
 
 ### Output Structure
 
