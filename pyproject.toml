@@ -12,9 +12,18 @@ changelog = "CHANGELOG.md"
 authors = [
     { name="Sarthak Mishra", email="hi@sarthakmishra.com" },
 ]
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["cli", "markdown", "git", "documentation", "codebase"]
-requires-python = ">=3.12,<3.13"
+classifiers = [
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Build Tools",
+  
+  "License :: OSI Approved :: MIT License",
+
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.12"
 dependencies = [
     "litellm>=1.67.0",
     "numpy>=2.2.5",
@@ -26,7 +35,6 @@ dependencies = [
     "rich>=14.0.0",
     "typer>=0.15.2",
     "typing-extensions>=4.13.2",
-    "sentence-transformers>=4.1.0",
     "tree-sitter>=0.24.0",
     "tree-sitter-language-pack>=0.7.2",
     "pandas>=2.2.3",
@@ -39,8 +47,20 @@ dependencies = [
     "unidiff>=0.7.5",
     "sqlmodel>=0.0.24",
     "tenacity>=9.1.2",
-    "hnswlib>=0.8.0",
+    "qdrant-client>=1.14.2",
+    "voyageai>=0.3.2",
+    "sentence-transformers>=4.1.0",
+    "httpx>=0.28.1",
+    "docker>=7.1.0",
+    "asyncer>=0.0.8",
 ]
+
+[project.urls]
+Homepage = "https://github.com/SarthakMishra/codemap.git"
+Changelog = "https://github.com/SarthakMishra/codemap/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/SarthakMishra/codemap/blob/main/README.md"
+Repository = "https://github.com/SarthakMishra/codemap.git"
+Issues = "https://github.com/SarthakMishra/codemap/issues"
 
 [dependency-groups]
 dev = [
