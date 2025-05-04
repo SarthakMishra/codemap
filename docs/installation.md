@@ -1,10 +1,12 @@
 # Installation
 
-> [!Important]
-> CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
+/// warning
+CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows users, we recommend using Windows Subsystem for Linux (WSL).
+///
 
-> [!Tip]
-> After installation, you can use either `codemap` or the shorter alias `cm` to run the commands.
+/// tip
+After installation, you can use either `codemap` or the shorter alias `cm` to run the commands.
+///
 
 ## Installation using pipx (Recommended)
 

@@ -15,24 +15,6 @@ Explore the documentation sections to learn more:
 
 - [Installation](installation.md)
 - [Usage Guide](usage/index.md)
-- [Configuration](configuration.md)
-- [Development Setup](development.md)
-- [Contributing](contributing.md)
-
-# Welcome to MkDocs
-
-For full documentation visit [mkdocs.org](https://www.mkdocs.org).
-
-## Commands
-
-* `mkdocs new [dir-name]` - Create a new project.
-* `mkdocs serve` - Start the live-reloading docs server.
-* `mkdocs build` - Build the documentation site.
-* `mkdocs -h` - Print help message and exit.
-
-## Project layout
-
-    mkdocs.yml    # The configuration file.
-    docs/
-        index.md  # The documentation homepage.
-        ...       # Other markdown pages, images and other files.
+- [Configuration](usage/configuration.md)
+- [Development Setup](contributing/index.md)
+- [Contributing Guide](contributing/guidelines.md)
