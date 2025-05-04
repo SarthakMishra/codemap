@@ -79,7 +79,7 @@ def generate_message(
 
 	"""
 	if hasattr(generator, "generate_message_with_linting") and not use_simple_mode:
-		message, used_llm, _ = generator.generate_message_with_linting(chunk)
+		message, used_llm, _, _ = generator.generate_message_with_linting(chunk)
 	else:
 		message, used_llm = generator.generate_message(chunk)
 	return message, used_llm

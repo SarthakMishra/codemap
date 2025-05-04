@@ -6,26 +6,32 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import questionary
 import typer
 
+from codemap.git.commit_generator.utils import (  # Import needed for re-linting edits
+	clean_message_for_linting,
+	lint_commit_message,
+)
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
-from codemap.git.interactive import ChunkAction, ChunkResult, CommitUI
+from codemap.git.interactive import ChunkAction, CommitUI
 from codemap.git.utils import (
 	GitDiff,
 	GitError,
 	commit_only_files,
+	get_current_branch,
 	get_repo_root,
 	get_staged_diff,
 	get_unstaged_diff,
 	get_untracked_files,
 	stage_files,
+	switch_branch,
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import loading_spinner
 
 from . import (
 	CommitMessageGenerator,
-	DiffChunkData,  # Add this import for the alias
 )
 from .prompts import DEFAULT_PROMPT_TEMPLATE
 
@@ -58,8 +64,6 @@ class CommitCommand:
 
 			# Store the current branch at initialization to ensure we don't switch branches unexpectedly
 			try:
-				from codemap.git.pr_generator.utils import get_current_branch
-
 				self.original_branch = get_current_branch()
 			except (ImportError, GitError):
 				self.original_branch = None
@@ -165,13 +169,8 @@ class CommitCommand:
 			logger.exception("LLM message generation failed")
 			logger.warning("LLM error: %s", str(e))
 			with loading_spinner("Falling back to simple message generation..."):
-				# Convert DiffChunk to DiffChunkData before passing to fallback_generation
-				description = getattr(chunk, "description", None)
-				chunk_dict = DiffChunkData(files=chunk.files, content=chunk.content)
-				# Add description only if it exists to match TypedDict total=False
-				if description is not None:
-					chunk_dict["description"] = description
-				message = self.message_generator.fallback_generation(chunk_dict)
+				# Directly use the chunk object with fallback_generation
+				message = self.message_generator.fallback_generation(chunk)
 				chunk.description = message
 				# Mark as not LLM-generated
 				chunk.is_llm_generated = False
@@ -212,7 +211,7 @@ class CommitCommand:
 
 	def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
 		"""
-		Process a single chunk.
+		Process a single chunk interactively.
 
 		Args:
 		    chunk: DiffChunk to process
@@ -220,159 +219,225 @@ class CommitCommand:
 		    total_chunks: The total number of chunks
 
 		Returns:
-		    True if processing should continue, False to abort
+		    True if processing should continue, False to abort or on failure.
 
 		Raises:
-		    RuntimeError: If Git operations fail
-		    typer.Exit: If user chooses to exit
+		    typer.Exit: If user chooses to exit.
 
 		"""
-		# Add logging here
 		logger.debug(
-			"Processing chunk - Chunk ID: %s, Index: %d/%d, Initial Desc: %s",
+			"Processing chunk - Chunk ID: %s, Index: %d/%d, Files: %s",
 			id(chunk),
-			index + 1,  # Display 1-based index
+			index + 1,
 			total_chunks,
-			getattr(chunk, "description", "<None>"),
+			chunk.files,
 		)
 
-		# Remove any chunk.index and chunk.total attributes if they exist
-		if hasattr(chunk, "index"):
-			delattr(chunk, "index")
-		if hasattr(chunk, "total"):
-			delattr(chunk, "total")
+		# Clear previous generation state if any
+		chunk.description = None
+		chunk.is_llm_generated = False
 
-		while True:  # Loop to handle regeneration
-			# Generate commit message
-			self._generate_commit_message(chunk)
+		while True:  # Loop to allow regeneration/editing
+			message = ""
+			used_llm = False
+			passed_linting = True  # Assume true unless linting happens and fails
+			lint_messages: list[str] = []  # Initialize lint messages list
 
-			# Get user action via UI
-			result: ChunkResult = self.ui.process_chunk(chunk, index, total_chunks)
-
-			if result.action == ChunkAction.ABORT:
-				# Mark as an intended abort (UI.confirm_abort will raise typer.Exit if confirmed)
-				self.error_state = "aborted"
-
-				# In production, if confirm_abort returns, it means user declined to abort
-				# In tests, mock will return the mocked value and not raise - both cases are handled
-				if self.ui.confirm_abort():
-					# In tests with a mock that returns True
-					return False
-
-				# If we get here, user declined to abort in production, or mock returned False in testing
-				continue
-
-			if result.action == ChunkAction.SKIP:
-				self.ui.show_skipped(chunk.files)
+			# Generate message (potentially with linting retries)
+			try:
+				# Generate message using the updated method
+				message, used_llm, passed_linting, lint_messages = self.message_generator.generate_message_with_linting(
+					chunk
+				)
+				chunk.description = message
+				chunk.is_llm_generated = used_llm
+			except (LLMError, RuntimeError) as e:
+				logger.exception("Failed during message generation for chunk")
+				self.ui.show_error(f"Error generating message: {e}")
+				# Offer to skip or exit after generation error
+				if not questionary.confirm("Skip this chunk and continue?", default=True).ask():
+					self.error_state = "aborted"
+					return False  # Abort
+				# If user chooses to skip after generation error, we continue to the next chunk
 				return True
 
-			if result.action == ChunkAction.REGENERATE:
-				# Clear the existing description to force regeneration
-				chunk.description = None
-				chunk.is_llm_generated = False
-				self.ui.show_regenerating()
-				continue  # Go back to the start of the loop
+			# -------- Handle Linting Result and User Action ---------
+			if not passed_linting:
+				# Display the diff chunk info first
+				self.ui.display_chunk(chunk, index, total_chunks)
+				# Display the failed message and lint errors
+				self.ui.display_failed_lint_message(message, lint_messages, used_llm)
+				# Ask user what to do on failure
+				action = self.ui.get_user_action_on_lint_failure()
+			else:
+				# Display the valid message and diff chunk
+				self.ui.display_chunk(chunk, index, total_chunks)  # Pass correct index and total
+				# Ask user what to do with the valid message
+				action = self.ui.get_user_action()
 
-			# For ACCEPT or EDIT actions: perform the commit
-			message = result.message or chunk.description or "Update files"
-			success = self._perform_commit(chunk, message)
-			if not success:
+			# -------- Process User Action ---------
+			if action == ChunkAction.COMMIT:
+				# Commit with the current message (which is valid if we got here via the 'else' block)
+				if self._perform_commit(chunk, message):
+					return True  # Continue to next chunk
 				self.error_state = "failed"
-			return success
+				return False  # Abort on commit failure
+			if action == ChunkAction.EDIT:
+				edited_message = self.ui.edit_message(message)  # Pass current message for editing
+				# Clean and re-lint the edited message
+				cleaned_edited_message = clean_message_for_linting(edited_message)
+				edited_is_valid, edited_lint_messages = lint_commit_message(cleaned_edited_message, self.repo_root)
+				if edited_is_valid:
+					# Commit with the user-edited, now valid message
+					if self._perform_commit(chunk, cleaned_edited_message):
+						return True  # Continue to next chunk
+					self.error_state = "failed"
+					return False  # Abort on commit failure
+				# If edited message is still invalid, show errors and loop back
+				self.ui.show_warning("Edited message still failed linting.")
+				# Update state for the next loop iteration to show the edited (but invalid) message
+				message = edited_message
+				passed_linting = False
+				lint_messages = edited_lint_messages
+				# No need to update used_llm as it's now user-edited
+				chunk.description = message  # Update chunk description for next display
+				chunk.is_llm_generated = False  # Mark as not LLM-generated
+				continue  # Go back to the start of the while loop
+			if action == ChunkAction.REGENERATE:
+				self.ui.show_regenerating()
+				chunk.description = None  # Clear description before regenerating
+				chunk.is_llm_generated = False
+				continue  # Go back to the start of the while loop to regenerate
+			if action == ChunkAction.SKIP:
+				self.ui.show_skipped(chunk.files)
+				return True  # Continue to next chunk
+			if action == ChunkAction.EXIT:
+				if self.ui.confirm_exit():
+					self.error_state = "aborted"
+					# Returning False signals to stop processing chunks
+					return False
+				# If user cancels exit, loop back to show the chunk again
+				continue
+
+			# Should not be reached
+			logger.error("Unhandled action in _process_chunk: %s", action)
+			return False
 
 	def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
 		"""
-		Process all chunks interactively or automatically.
+		Process all generated chunks.
 
 		Args:
-		    chunks: List of diff chunks to process
-		    grand_total: The total number of chunks across all batches
-		    interactive: Whether to process interactively or automatically
+		    chunks: List of DiffChunk objects to process
+		    grand_total: Total number of chunks initially generated
+		    interactive: Whether to run in interactive mode
 
 		Returns:
-		    True if successful, False if failed or aborted
+		    True if all chunks were processed successfully, False otherwise
 
 		"""
+		if not chunks:
+			self.ui.show_error("No diff chunks found to process.")
+			return False
+
+		success = True
 		for i, chunk in enumerate(chunks):
 			if interactive:
-				if not self._process_chunk(chunk, i, grand_total):
-					# _process_chunk sets error_state and returns False on failure/abort
-					return False
+				try:
+					if not self._process_chunk(chunk, i, grand_total):
+						success = False
+						break
+				except typer.Exit:
+					# User chose to exit via typer.Exit(), which is expected
+					success = False  # Indicate not all chunks were processed
+					break
+				except RuntimeError as e:
+					self.ui.show_error(f"Runtime error processing chunk: {e}")
+					success = False
+					break
 			else:
-				# Non-interactive mode: commit all chunks automatically
-				self._generate_commit_message(chunk)
-				if not self._perform_commit(chunk, chunk.description or "Update files"):
-					self.error_state = "failed"
-					return False
+				# Non-interactive mode: generate and attempt commit
+				try:
+					message, _, passed_linting, _ = self.message_generator.generate_message_with_linting(chunk)
+					if not passed_linting:
+						logger.warning("Generated message failed linting in non-interactive mode: %s", message)
+						# Decide behavior: skip, commit anyway, fail? Let's skip for now.
+						self.ui.show_skipped(chunk.files)
+						continue
+					if not self._perform_commit(chunk, message):
+						success = False
+						break
+				except (LLMError, RuntimeError, GitError) as e:
+					self.ui.show_error(f"Error processing chunk non-interactively: {e}")
+					success = False
+					break
 
-		# If loop completes without returning False, it was successful
-		self.ui.show_all_committed()
-		return True
+		return success
 
 	def run(self) -> bool:
 		"""
-		Run the commit command.
+		Run the commit command workflow.
 
 		Returns:
-		    True if successful, False otherwise
-
-		Note:
-		    May raise typer.Exit when users abort
+		    True if the process completed (even if aborted), False on unexpected error.
 
 		"""
 		try:
-			# 1. Get changes
-			with loading_spinner("Analyzing repository changes..."):
-				change_diffs = self._get_changes()
+			with loading_spinner("Analyzing changes..."):
+				changes = self._get_changes()
 
-			if not change_diffs:
-				self.ui.show_error("No changes detected to commit.")
-				return True  # Success, nothing to do
+			if not changes:
+				self.ui.show_message("No changes detected to commit.")
+				return True
 
-			# Combine all changes into one diff for splitting
-			# This simplifies logic, assuming splitter can handle combined diff
-			combined_files = [f for diff in change_diffs for f in diff.files]
-			combined_content = "\n".join(diff.content for diff in change_diffs if diff.content)
-			combined_diff = GitDiff(files=combined_files, content=combined_content)
+			# Combine all diffs for splitting
+			all_files = [f for diff in changes for f in diff.files or []]
+			# Filter unique files while preserving order
+			unique_files = list(dict.fromkeys(all_files))
+			all_content = "\n".join([diff.content for diff in changes if diff.content])
+			combined_diff = GitDiff(files=unique_files, content=all_content, is_staged=False)
 
-			# 2. Split the combined diff
-			with loading_spinner("Organizing changes semantically..."):
-				chunks, filtered_files = self.splitter.split_diff(combined_diff)
+			# Split the combined diff
+			chunks, _ = self.splitter.split_diff(combined_diff)
+			total_chunks = len(chunks)
+			logger.info("Split %d files into %d chunks.", len(unique_files), total_chunks)
 
-			# 3. Handle filtered files warning
-			if filtered_files:
-				self.ui.show_error(f"Skipped {len(filtered_files)} large files from analysis due to size limits.")
-
-			# 4. Check if there are chunks to process
 			if not chunks:
-				self.ui.show_error("No processable changes found after analysis.")
-				return True  # Success, nothing to commit after filtering/splitting
-
-			# 5. Process all chunks
-			grand_total = len(chunks)
-			if not self.process_all_chunks(chunks, grand_total):
-				# Error state is set within process_all_chunks or _process_chunk
+				self.ui.show_error("Failed to split changes into manageable chunks.")
 				return False
 
-		except typer.Exit:
-			self.error_state = "aborted"
-			raise
-		except (RuntimeError, ValueError, GitError) as e:
+			# Process chunks
+			success = self.process_all_chunks(chunks, total_chunks)
+
+			if self.error_state == "aborted":
+				self.ui.show_message("Commit process aborted by user.")
+				return True  # Abort is considered a valid exit
+			if self.error_state == "failed":
+				self.ui.show_error("Commit process failed due to errors.")
+				return False
+			if not success:
+				# If process_all_chunks returned False without setting error_state
+				self.ui.show_error("Commit process failed.")
+				return False
+			self.ui.show_all_done()
+			return True
+
+		except RuntimeError as e:
 			self.ui.show_error(str(e))
-			self.error_state = "failed"
-			logger.exception("Commit command failed.")  # Log the exception
 			return False
-		else:
-			# Check if we need to restore the original branch
+		except Exception as e:
+			self.ui.show_error(f"An unexpected error occurred: {e}")
+			logger.exception("Unexpected error in commit command run loop")
+			return False
+		finally:
+			# Restore original branch if it was changed
 			if self.original_branch:
 				try:
-					from codemap.git.pr_generator.utils import checkout_branch, get_current_branch
-
-					current_branch = get_current_branch()
-					if current_branch != self.original_branch:
-						self.ui.show_success(f"Restoring original branch: {self.original_branch}")
-						checkout_branch(self.original_branch)
-				except (ImportError, GitError) as e:
-					logger.warning("Failed to restore original branch: %s", str(e))
-
-			return True
+					# get_current_branch is already imported
+					# switch_branch is imported from codemap.git.utils now
+					current = get_current_branch()
+					if current != self.original_branch:
+						logger.info("Restoring original branch: %s", self.original_branch)
+						switch_branch(self.original_branch)
+				except (GitError, Exception) as e:
+					logger.warning("Could not restore original branch %s: %s", self.original_branch, e)

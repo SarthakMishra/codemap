@@ -1,5 +1,11 @@
 # CodeMap configuration file
 
+# LLM configuration
+llm:
+  model: groq/llama-3.3-70b-versatile
+  # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
+  api_base: null
+
 # Generation configuration
 gen:
   # Maximum content length per file (0 for unlimited)
@@ -11,7 +17,7 @@ gen:
   # Whether to include directory tree in output
   include_tree: true
   # Whether to include entity relationship graph in output
-  include_entity_graph: true
+  include_entity_graph: false
   # Enable semantic analysis using LSP
   semantic_analysis: true
   # Output file for generated documentation (Overrides output_dir if present)
@@ -41,6 +47,10 @@ processor:
     - "**/build/**"
   # Default LOD level for processing
   default_lod_level: signatures
+  # Vector database configuration
+  vector:
+    summarize_bodies: true
+    min_body_length_for_summary: 1000
 
 # Commit feature configuration
 commit:
@@ -68,7 +78,7 @@ commit:
     scopes: []
 
     # Maximum length for commit message subject line
-    max_length: 72
+    max_length: 120
   
   # Commit lint rules to match .commitlintrc
   lint:
@@ -143,11 +153,3 @@ pr:
   content:
     title_strategy: llm
     description_strategy: llm
-    # Add other existing pr settings below if they exist
-    # ... existing code ...
-
-# LLM configuration
-llm:
-  model: groq/meta-llama/llama-4-scout-17b-16e-instruct
-  # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
-  api_base: null

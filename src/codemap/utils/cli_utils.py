@@ -50,6 +50,14 @@ def setup_logging(*, is_verbose: bool) -> None:
 	    is_verbose: Whether to enable debug logging.
 
 	"""
+	# Suppress certain warnings regardless of verbose mode
+	import warnings
+
+	# Suppress SyntaxWarnings from Qdrant client (invalid escape sequences)
+	warnings.filterwarnings(
+		"ignore", message=r"invalid escape sequence", category=SyntaxWarning, module=r"qdrant_client\..*"
+	)
+
 	# Set log level based on verbosity
 	# In verbose mode, use DEBUG or the level specified in LOG_LEVEL env var
 	# In non-verbose mode, only show ERROR and above
@@ -76,6 +84,7 @@ def setup_logging(*, is_verbose: bool) -> None:
 		logging.getLogger("requests").setLevel(logging.ERROR)
 		logging.getLogger("openai").setLevel(logging.ERROR)
 		logging.getLogger("tqdm").setLevel(logging.ERROR)
+		logging.getLogger("qdrant_client").setLevel(logging.ERROR)
 
 		# Set codemap loggers to ERROR level
 		logging.getLogger("codemap").setLevel(logging.ERROR)

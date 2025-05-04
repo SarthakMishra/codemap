@@ -1,23 +1,22 @@
 """Strategies for splitting git diffs into logical chunks."""
 
+import dataclasses
 import logging
 import re
 from collections.abc import Sequence
+from io import StringIO
 from pathlib import Path
 from re import Pattern
 from typing import Any, Protocol
 
 import numpy as np
+from unidiff import Hunk, PatchedFile, PatchSet
 
+from codemap.config import DEFAULT_CONFIG
 from codemap.git.utils import GitDiff
 
 from .constants import (
-	DEFAULT_CODE_EXTENSIONS,
-	DEFAULT_SIMILARITY_THRESHOLD,
-	MAX_CHUNKS_BEFORE_CONSOLIDATION,
-	MAX_FILE_SIZE_FOR_LLM,
 	MAX_FILES_PER_GROUP,
-	MIN_CHUNKS_FOR_CONSOLIDATION,
 )
 from .schemas import DiffChunk
 from .utils import (
@@ -25,7 +24,6 @@ from .utils import (
 	calculate_semantic_similarity,
 	create_chunk_description,
 	determine_commit_type,
-	extract_code_from_diff,
 	get_language_specific_patterns,
 	is_test_environment,
 )
@@ -135,19 +133,45 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		embedding_model: EmbeddingModel | None = None,
 		code_extensions: set[str] | None = None,
 		related_file_patterns: list[tuple[Pattern, Pattern]] | None = None,
+		similarity_threshold: float = 0.4,
+		directory_similarity_threshold: float = 0.3,
+		min_chunks_for_consolidation: int = 2,
+		max_chunks_before_consolidation: int = 20,
+		max_file_size_for_llm: int | None = None,
 	) -> None:
 		"""
 		Initialize the SemanticSplitStrategy.
 
 		Args:
 		    embedding_model: Optional embedding model instance
-		    code_extensions: Optional set of code file extensions
+		    code_extensions: Optional set of code file extensions. Defaults to config.
 		    related_file_patterns: Optional list of related file patterns
+		    similarity_threshold: Threshold for grouping by content similarity.
+		    directory_similarity_threshold: Threshold for directory similarity.
+		    min_chunks_for_consolidation: Min chunks to trigger consolidation.
+		    max_chunks_before_consolidation: Max chunks allowed before forced consolidation.
+		    max_file_size_for_llm: Max file size for LLM processing.
 
 		"""
 		super().__init__(embedding_model)
-		# Set up file extensions that are likely to contain code
-		self.code_extensions = code_extensions or DEFAULT_CODE_EXTENSIONS
+		# Store thresholds and settings
+		self.similarity_threshold = similarity_threshold
+		self.directory_similarity_threshold = directory_similarity_threshold
+		self.min_chunks_for_consolidation = min_chunks_for_consolidation
+		self.max_chunks_before_consolidation = max_chunks_before_consolidation
+		# Use default from config if not provided
+		self.max_file_size_for_llm = (
+			max_file_size_for_llm
+			if max_file_size_for_llm is not None
+			else DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"]
+		)
+
+		# Set up file extensions, defaulting to config if None is passed
+		self.code_extensions = (
+			code_extensions
+			if code_extensions is not None
+			else set(DEFAULT_CONFIG["commit"]["diff_splitter"]["default_code_extensions"])
+		)
 		# Initialize patterns for related files
 		self.related_file_patterns = related_file_patterns or self._initialize_related_file_patterns()
 
@@ -188,9 +212,10 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				# Process files in this directory in batches of 3-5
 				for i in range(0, len(files), 3):
 					batch = files[i : i + 3]
+					# Create a new GitDiff for the batch, ensuring content is passed
 					batch_diff = GitDiff(
 						files=batch,
-						content=diff.content,  # Keep same content
+						content=diff.content,  # Pass the original full diff content
 						is_staged=diff.is_staged,
 					)
 					all_chunks.extend(self._process_group(batch_diff))
@@ -205,15 +230,15 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not diff.files:
 			return []
 
-		# 1. Create one chunk per file initially
+		# 1. Generate initial chunks for each file
 		initial_file_chunks: list[DiffChunk] = []
 		for file_path in diff.files:
-			file_diff = GitDiff(
+			single_file_diff_view = GitDiff(
 				files=[file_path],
-				content=diff.content,
+				content=diff.content,  # Full content for parsing
 				is_staged=diff.is_staged,
 			)
-			enhanced_chunks = self._enhance_semantic_split(file_diff)
+			enhanced_chunks = self._enhance_semantic_split(single_file_diff_view)
 			if enhanced_chunks:
 				initial_file_chunks.extend(enhanced_chunks)
 			else:
@@ -222,18 +247,48 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not initial_file_chunks:
 			return []
 
-		# 2. Consolidate chunks from the same file (though step 1 should make this rare)
-		#    and potentially by directory if that logic is re-enabled later.
+		# 2. Consolidate chunks from the same file first
 		consolidated_chunks = self._consolidate_small_chunks(initial_file_chunks)
 
-		# 3. Group remaining chunks by relatedness and similarity
-		processed_files: set[str] = set()
-		final_semantic_chunks: list[DiffChunk] = []
-		self._group_related_files(consolidated_chunks, processed_files, final_semantic_chunks)
-		self._process_remaining_chunks(consolidated_chunks, processed_files, final_semantic_chunks)
+		# 3. Group remaining chunks
+		processed_indices: set[int] = set()
+		final_chunks: list[DiffChunk] = []
+
+		# First pass: Group by related file patterns
+		for i, chunk1 in enumerate(consolidated_chunks):
+			if i in processed_indices:
+				continue
+			if not chunk1.files:  # Skip chunks without files
+				processed_indices.add(i)
+				final_chunks.append(chunk1)
+				continue
+
+			related_group = [chunk1]
+			processed_indices.add(i)
+
+			for j in range(i + 1, len(consolidated_chunks)):
+				if j in processed_indices:
+					continue
+				chunk2 = consolidated_chunks[j]
+				if not chunk2.files:  # Skip chunks without files
+					continue
+
+				# Check relation between first files of each chunk
+				if are_files_related(chunk1.files[0], chunk2.files[0], self.related_file_patterns):
+					related_group.append(chunk2)
+					processed_indices.add(j)
+
+			self._create_semantic_chunk(related_group, final_chunks)
+
+		# Second pass: Group remaining by similarity
+		remaining_chunks = [
+			consolidated_chunks[i] for i in range(len(consolidated_chunks)) if i not in processed_indices
+		]
+		if remaining_chunks:
+			self._group_by_content_similarity(remaining_chunks, final_chunks)
 
 		# 4. Final consolidation check
-		return self._consolidate_if_needed(final_semantic_chunks)
+		return self._consolidate_if_needed(final_chunks)
 
 	def _validate_embedding_model(self) -> None:
 		"""Validate that the embedding model is available."""
@@ -301,7 +356,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		"""Consolidate chunks if we have too many small ones."""
 		has_single_file_chunks = any(len(chunk.files) == 1 for chunk in semantic_chunks)
 
-		if len(semantic_chunks) > MAX_CHUNKS_BEFORE_CONSOLIDATION and has_single_file_chunks:
+		if len(semantic_chunks) > self.max_chunks_before_consolidation and has_single_file_chunks:
 			return self._consolidate_small_chunks(semantic_chunks)
 
 		return semantic_chunks
@@ -315,67 +370,139 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		    List of compiled regex pattern pairs
 
 		"""
-		patterns = [
-			# Frontend component pairs
-			(r".*\.jsx?$", r".*\.css$"),
-			(r".*\.tsx?$", r".*\.css$"),
-			(r".*\.vue$", r".*\.css$"),
-			(r".*\.jsx?$", r".*\.scss$"),
-			(r".*\.tsx?$", r".*\.scss$"),
-			(r".*\.vue$", r".*\.scss$"),
-			(r".*\.jsx?$", r".*\.less$"),
-			(r".*\.tsx?$", r".*\.less$"),
-			# React component pairs
-			(r".*\.jsx$", r".*\.jsx$"),
-			(r".*\.tsx$", r".*\.tsx$"),
-			(r".*Component\.jsx?$", r".*Container\.jsx?$"),
-			(r".*Component\.tsx?$", r".*Container\.tsx?$"),
-			# Implementation and definition pairs
-			(r".*\.h$", r".*\.c$"),
-			(r".*\.hpp$", r".*\.cpp$"),
-			(r".*\.h$", r".*\.m$"),
-			(r".*\.h$", r".*\.mm$"),
-			(r".*\.proto$", r".*\.pb\.(go|py|js|java|rb|cs)$"),
-			(r".*\.idl$", r".*\.(h|cpp|cs|java)$"),
-			# Web development pairs
-			(r".*\.html$", r".*\.js$"),
-			(r".*\.html$", r".*\.css$"),
-			(r".*\.html$", r".*\.scss$"),
-			(r".*\.html$", r".*\.ts$"),
-			# Python related files
-			(r".*\.py$", r".*_test\.py$"),
-			(r".*\.py$", r"test_.*\.py$"),
-			(r".*\.py$", r".*_spec\.py$"),
-			# JavaScript/TypeScript related files
-			(r".*\.js$", r".*\.test\.js$"),
-			(r".*\.js$", r".*\.spec\.js$"),
-			(r".*\.ts$", r".*\.test\.ts$"),
-			(r".*\.ts$", r".*\.spec\.ts$"),
-			# Ruby related files
-			(r".*\.rb$", r".*_spec\.rb$"),
-			(r".*\.rb$", r".*_test\.rb$"),
-			# Java related files
-			(r".*\.java$", r".*Test\.java$"),
-			# Go related files
-			(r".*\.go$", r".*_test\.go$"),
-			# Configuration files
-			(r"package\.json$", r"package-lock\.json$"),
-			(r"package\.json$", r"yarn\.lock$"),
-			(r"package\.json$", r"tsconfig\.json$"),
-			(r"package\.json$", r"\.eslintrc(\.js|\.json|\.yml)?$"),
-			(r"package\.json$", r"\.prettierrc(\.js|\.json|\.yml)?$"),
-			(r"requirements\.txt$", r"setup\.py$"),
-			(r"pyproject\.toml$", r"setup\.py$"),
-			(r"pyproject\.toml$", r"setup\.cfg$"),
-			(r"Gemfile$", r"Gemfile\.lock$"),
-			(r"Cargo\.toml$", r"Cargo\.lock$"),
-			# Documentation
-			(r".*\.md$", r".*\.(js|ts|py|rb|java|go|c|cpp|h|hpp)$"),
-			(r"README\.md$", r".*$"),
+		# Pre-compile regex for efficiency and validation
+		related_file_patterns = []
+		# Define patterns using standard strings with escaped backreferences
+		default_patterns: list[tuple[str, str]] = [
+			# --- General Code + Test Files ---
+			# Python
+			("^(.*)\\.py$", "\\\\1_test\\.py$"),
+			("^(.*)\\.py$", "test_\\\\1\\.py$"),
+			("^(.*)\\.(py)$", "\\\\1_test\\.\\\\2$"),  # For file.py and file_test.py pattern
+			("^(.*)\\.(py)$", "\\\\1Test\\.\\\\2$"),  # For file.py and fileTest.py pattern
+			("^(.*)\\.py$", "\\\\1_spec\\.py$"),
+			("^(.*)\\.py$", "spec_\\\\1\\.py$"),
+			# JavaScript / TypeScript (including JSX/TSX)
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.(test|spec)\\.(js|jsx|ts|tsx)$"),
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.stories\\.(js|jsx|ts|tsx)$"),  # Storybook
+			("^(.*)\\.(js|ts)$", "\\\\1\\.d\\.ts$"),  # JS/TS + Declaration files
+			# Ruby
+			("^(.*)\\.rb$", "\\\\1_spec\\.rb$"),
+			("^(.*)\\.rb$", "\\\\1_test\\.rb$"),
+			("^(.*)\\.rb$", "spec/.*_spec\\.rb$"),  # Common RSpec structure
+			# Java
+			("^(.*)\\.java$", "\\\\1Test\\.java$"),
+			("src/main/java/(.*)\\.java$", "src/test/java/\\\\1Test\\.java$"),  # Maven/Gradle structure
+			# Go
+			("^(.*)\\.go$", "\\\\1_test\\.go$"),
+			# C#
+			("^(.*)\\.cs$", "\\\\1Tests?\\.cs$"),
+			# PHP
+			("^(.*)\\.php$", "\\\\1Test\\.php$"),
+			("^(.*)\\.php$", "\\\\1Spec\\.php$"),
+			("src/(.*)\\.php$", "tests/\\\\1Test\\.php$"),  # Common structure
+			# Rust
+			("src/(lib|main)\\.rs$", "tests/.*\\.rs$"),  # Main/Lib and integration tests
+			("src/(.*)\\.rs$", "src/\\\\1_test\\.rs$"),  # Inline tests (less common for grouping)
+			# Swift
+			("^(.*)\\.swift$", "\\\\1Tests?\\.swift$"),
+			# Kotlin
+			("^(.*)\\.kt$", "\\\\1Test\\.kt$"),
+			("src/main/kotlin/(.*)\\.kt$", "src/test/kotlin/\\\\1Test\\.kt$"),  # Common structure
+			# --- Frontend Component Bundles ---
+			# JS/TS Components + Styles (CSS, SCSS, LESS, CSS Modules)
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.(css|scss|less)$"),
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.module\\.(css|scss|less)$"),
+			("^(.*)\\.(js|jsx|ts|tsx)$", "\\\\1\\.styles?\\.(js|ts)$"),  # Styled Components / Emotion convention
+			# Vue Components + Styles
+			("^(.*)\\.vue$", "\\\\1\\.(css|scss|less)$"),
+			("^(.*)\\.vue$", "\\\\1\\.module\\.(css|scss|less)$"),
+			# Svelte Components + Styles/Scripts
+			("^(.*)\\.svelte$", "\\\\1\\.(css|scss|less)$"),
+			("^(.*)\\.svelte$", "\\\\1\\.(js|ts)$"),
+			# Angular Components (more specific structure)
+			("^(.*)\\.component\\.ts$", "\\\\1\\.component\\.html$"),
+			("^(.*)\\.component\\.ts$", "\\\\1\\.component\\.(css|scss|less)$"),
+			("^(.*)\\.component\\.ts$", "\\\\1\\.component\\.spec\\.ts$"),  # Component + its test
+			("^(.*)\\.service\\.ts$", "\\\\1\\.service\\.spec\\.ts$"),  # Service + its test
+			("^(.*)\\.module\\.ts$", "\\\\1\\.routing\\.module\\.ts$"),  # Module + routing
+			# --- Implementation / Definition / Generation ---
+			# C / C++ / Objective-C
+			("^(.*)\\.h$", "\\\\1\\.c$"),
+			("^(.*)\\.h$", "\\\\1\\.m$"),
+			("^(.*)\\.hpp$", "\\\\1\\.cpp$"),
+			("^(.*)\\.h$", "\\\\1\\.cpp$"),  # Allow .h with .cpp
+			("^(.*)\\.h$", "\\\\1\\.mm$"),
+			# Protocol Buffers / gRPC
+			("^(.*)\\.proto$", "\\\\1\\.pb\\.(go|py|js|java|rb|cs|ts)$"),
+			("^(.*)\\.proto$", "\\\\1_pb2?\\.py$"),  # Python specific proto generation
+			("^(.*)\\.proto$", "\\\\1_grpc\\.pb\\.(go|js|ts)$"),  # gRPC specific
+			# Interface Definition Languages (IDL)
+			("^(.*)\\.idl$", "\\\\1\\.(h|cpp|cs|java)$"),
+			# API Specifications (OpenAPI/Swagger)
+			("(openapi|swagger)\\.(yaml|yml|json)$", ".*\\.(go|py|js|java|rb|cs|ts)$"),  # Spec + generated code
+			("^(.*)\\.(yaml|yml|json)$", "\\\\1\\.generated\\.(go|py|js|java|rb|cs|ts)$"),  # Another convention
+			# --- Web Development (HTML Centric) ---
+			("^(.*)\\.html$", "\\\\1\\.(js|ts)$"),
+			("^(.*)\\.html$", "\\\\1\\.(css|scss|less)$"),
+			# --- Mobile Development ---
+			# iOS (Swift)
+			("^(.*)\\.swift$", "\\\\1\\.storyboard$"),
+			("^(.*)\\.swift$", "\\\\1\\.xib$"),
+			# Android (Kotlin/Java)
+			("^(.*)\\.(kt|java)$", "res/layout/.*\\.(xml)$"),  # Code + Layout XML (Path sensitive)
+			("AndroidManifest\\.xml$", ".*\\.(kt|java)$"),  # Manifest + Code
+			("build\\.gradle(\\.kts)?$", ".*\\.(kt|java)$"),  # Gradle build + Code
+			# --- Configuration Files ---
+			# Package Managers
+			("package\\.json$", "(package-lock\\.json|yarn\\.lock|pnpm-lock\\.yaml)$"),
+			("requirements\\.txt$", "(setup\\.py|setup\\.cfg|pyproject\\.toml)$"),
+			("pyproject\\.toml$", "(setup\\.py|setup\\.cfg|poetry\\.lock|uv\\.lock)$"),
+			("Gemfile$", "Gemfile\\.lock$"),
+			("Cargo\\.toml$", "Cargo\\.lock$"),
+			("composer\\.json$", "composer\\.lock$"),  # PHP Composer
+			("go\\.mod$", "go\\.sum$"),  # Go Modules
+			("pom\\.xml$", ".*\\.java$"),  # Maven + Java
+			("build\\.gradle(\\.kts)?$", ".*\\.(java|kt)$"),  # Gradle + Java/Kotlin
+			# Linters / Formatters / Compilers / Type Checkers
+			(
+				"package\\.json$",
+				"(tsconfig\\.json|\\.eslintrc(\\..*)?|\\.prettierrc(\\..*)?|\\.babelrc(\\..*)?|webpack\\.config\\.js|vite\\.config\\.(js|ts))$",
+			),
+			("pyproject\\.toml$", "(\\.flake8|\\.pylintrc|\\.isort\\.cfg|mypy\\.ini)$"),
+			# Docker
+			("Dockerfile$", "(\\.dockerignore|docker-compose\\.yml)$"),
+			("docker-compose\\.yml$", "\\.env$"),
+			# CI/CD
+			("\\.github/workflows/.*\\.yml$", ".*\\.(sh|py|js|ts|go)$"),  # Workflow + scripts
+			("\\.gitlab-ci\\.yml$", ".*\\.(sh|py|js|ts|go)$"),
+			("Jenkinsfile$", ".*\\.(groovy|sh|py)$"),
+			# IaC (Terraform)
+			("^(.*)\\.tf$", "\\\\1\\.tfvars$"),
+			("^(.*)\\.tf$", "\\\\1\\.tf$"),  # Group TF files together
+			# --- Documentation ---
+			("README\\.md$", ".*$"),  # README often updated with any change
+			("^(.*)\\.md$", "\\\\1\\.(py|js|ts|go|java|rb|rs|php|swift|kt)$"),  # Markdown doc + related code
+			("docs/.*\\.md$", "src/.*$"),  # Documentation in docs/ related to src/
+			# --- Data Science / ML ---
+			("^(.*)\\.ipynb$", "\\\\1\\.py$"),  # Notebook + Python script
+			("^(.*)\\.py$", "data/.*\\.(csv|json|parquet)$"),  # Script + Data file (path sensitive)
+			# --- General Fallbacks (Use with caution) ---
+			# Files with same base name but different extensions (already covered by some specifics)
+			# ("^(.*)\\..*$", "\\1\\..*$"), # Potentially too broad, rely on specifics above
 		]
 
-		# Compile all patterns for better performance
-		return [(re.compile(p1), re.compile(p2)) for p1, p2 in patterns]
+		for pattern1_str, pattern2_str in default_patterns:
+			try:
+				# Compile with IGNORECASE for broader matching
+				pattern1 = re.compile(pattern1_str, re.IGNORECASE)
+				pattern2 = re.compile(pattern2_str, re.IGNORECASE)
+				related_file_patterns.append((pattern1, pattern2))
+			except re.error as e:
+				# Log only if pattern compilation fails
+				logger.warning(f"Failed to compile regex pair: ({pattern1_str!r}, {pattern2_str!r}). Error: {e}")
+
+		return related_file_patterns
 
 	def _get_code_embedding(self, content: str) -> list[float] | None:
 		"""
@@ -397,12 +524,20 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			logger.warning("Embedding model is None, cannot generate embedding")
 			return None
 
-		# Generate embedding
+		# Generate embedding with error handling
 		try:
 			embeddings = self._embedding_model.encode([content], show_progress_bar=False)
-			return embeddings[0].tolist()
-		except (ValueError, TypeError, RuntimeError, IndexError):
-			logger.exception("Failed to generate embedding")
+			# Check if the result is valid and has the expected structure
+			if embeddings is not None and len(embeddings) > 0 and isinstance(embeddings[0], np.ndarray):
+				return embeddings[0].tolist()
+			logger.warning("Embedding model returned unexpected result type: %s", type(embeddings))
+			return None
+		except (ValueError, TypeError, RuntimeError, IndexError, AttributeError) as e:
+			# Catch a broader range of potential exceptions during encode/toList
+			logger.warning("Failed to generate embedding for content snippet: %s", e)
+			return None
+		except Exception:  # Catch any other unexpected errors
+			logger.exception("Unexpected error during embedding generation")
 			return None
 
 	def _calculate_semantic_similarity(self, content1: str, content2: str) -> float:
@@ -427,228 +562,189 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		# Calculate cosine similarity using utility function
 		return calculate_semantic_similarity(emb1, emb2)
 
-	def _semantic_hunk_splitting(self, file_path: str, diff_content: str) -> list[str]:
-		"""
-		Split a diff hunk by semantic boundaries in the code.
+	# --- New Helper Methods for Refactoring _enhance_semantic_split ---
 
-		Args:
-		    file_path: Path to the file
-		    diff_content: Git diff content
+	def _parse_file_diff(self, diff_content: str, file_path: str) -> PatchedFile | None:
+		"""Parse diff content to find the PatchedFile for a specific file path."""
+		if not diff_content:
+			logger.warning("Cannot parse empty diff content for %s", file_path)
+			return None
+		try:
+			# Use StringIO as PatchSet expects a file-like object or iterable
+			patch_set = PatchSet(StringIO(diff_content))
+			matched_file: PatchedFile | None = None
+			for patched_file in patch_set:
+				# unidiff paths usually start with a/ or b/
+				if patched_file.target_file == f"b/{file_path}" or patched_file.path == file_path:
+					matched_file = patched_file
+					break
+			if not matched_file:
+				logger.warning("Could not find matching PatchedFile for: %s in unidiff output", file_path)
+				return None
+			return matched_file
+		except Exception:
+			logger.exception("Failed to parse diff content using unidiff for %s", file_path)
+			return None
 
-		Returns:
-		    List of semantically separated diff chunks
+	def _reconstruct_file_diff(self, patched_file: PatchedFile) -> tuple[str, str]:
+		"""Reconstruct the diff header and full diff content for a PatchedFile."""
+		file_diff_hunks_content = "\n".join(str(hunk) for hunk in patched_file)
+		file_header_obj = getattr(patched_file, "patch_info", None)
+		file_header = str(file_header_obj) if file_header_obj else ""
 
-		"""
-		# Extract file extension
-		extension = Path(file_path).suffix.lstrip(".")
+		if not file_header.startswith("diff --git") and patched_file.source_file and patched_file.target_file:
+			logger.debug("Reconstructing missing diff header for %s", patched_file.path)
+			file_header = f"diff --git {patched_file.source_file} {patched_file.target_file}\n"
+			if hasattr(patched_file, "index") and patched_file.index:
+				file_header += f"index {patched_file.index}\n"
+			# Use timestamps if available for more accurate header reconstruction
+			source_ts = f"\t{patched_file.source_timestamp}" if patched_file.source_timestamp else ""
+			target_ts = f"\t{patched_file.target_timestamp}" if patched_file.target_timestamp else ""
+			file_header += f"--- {patched_file.source_file}{source_ts}\n"
+			file_header += f"+++ {patched_file.target_file}{target_ts}\n"
 
-		# Get language-specific patterns
-		patterns = get_language_specific_patterns(extension)
+		full_file_diff_content = file_header + file_diff_hunks_content
+		return file_header, full_file_diff_content
 
-		if not patterns:
-			# If no language patterns available, return the whole diff as one chunk
-			return [diff_content]
+	def _split_large_file_diff(self, patched_file: PatchedFile, file_header: str) -> list[DiffChunk]:
+		"""Split a large file's diff by grouping hunks under the size limit."""
+		file_path = patched_file.path
+		max_chunk_size = self.max_file_size_for_llm  # Use instance config
+		logger.info(
+			"Splitting large file diff for %s by hunks (limit: %d bytes)",
+			file_path,
+			max_chunk_size,
+		)
+		large_file_chunks = []
+		current_hunk_group: list[Hunk] = []
+		current_group_size = len(file_header)  # Start with header size
 
-		# Extract new code from diff
-		extraction_result = extract_code_from_diff(diff_content)
-		if not extraction_result or len(extraction_result) != EXPECTED_TUPLE_SIZE:
-			return [diff_content]
+		for hunk in patched_file:
+			hunk_content_str = str(hunk)
+			hunk_size = len(hunk_content_str) + 1  # +1 for newline separator
 
-		_, new_code = extraction_result
+			# If adding this hunk exceeds the limit (and group isn't empty), finalize the current chunk
+			if current_hunk_group and current_group_size + hunk_size > max_chunk_size:
+				group_content = file_header + "\n".join(str(h) for h in current_hunk_group)
+				description = f"Chunk {len(large_file_chunks) + 1} of large file {file_path}"
+				large_file_chunks.append(DiffChunk(files=[file_path], content=group_content, description=description))
+				# Start a new chunk with the current hunk
+				current_hunk_group = [hunk]
+				current_group_size = len(file_header) + hunk_size
+			# Edge case: If a single hunk itself is too large, create a chunk just for it
+			elif not current_hunk_group and len(file_header) + hunk_size > max_chunk_size:
+				logger.warning(
+					"Single hunk in %s exceeds size limit (%d bytes). Creating oversized chunk.",
+					file_path,
+					len(file_header) + hunk_size,
+				)
+				group_content = file_header + hunk_content_str
+				description = f"Chunk {len(large_file_chunks) + 1} (oversized hunk) of large file {file_path}"
+				large_file_chunks.append(DiffChunk(files=[file_path], content=group_content, description=description))
+				# Reset for next potential chunk (don't carry this huge hunk forward)
+				current_hunk_group = []
+				current_group_size = len(file_header)
+			else:
+				# Add hunk to the current group
+				current_hunk_group.append(hunk)
+				current_group_size += hunk_size
 
-		if not new_code:
-			return [diff_content]
+		# Add the last remaining chunk group if any
+		if current_hunk_group:
+			group_content = file_header + "\n".join(str(h) for h in current_hunk_group)
+			description = f"Chunk {len(large_file_chunks) + 1} of large file {file_path}"
+			large_file_chunks.append(DiffChunk(files=[file_path], content=group_content, description=description))
 
-		# Find all pattern matches
-		boundaries = []
-		for pattern in patterns:
-			matches = list(re.finditer(pattern, new_code, re.MULTILINE))
-			boundaries.extend(match.start() for match in matches)
+		return large_file_chunks
 
-		if not boundaries:
-			return [diff_content]
-
-		# Sort and deduplicate boundaries
-		boundaries = sorted(set(boundaries))
-
-		# Split the diff using line tracking
-		return self._split_diff_at_boundaries(diff_content, boundaries)
-
-	def _split_diff_at_boundaries(self, diff_content: str, boundaries: list[int]) -> list[str]:
-		"""Split diff content at the given semantic boundaries."""
-		lines = diff_content.splitlines()
-		chunks = []
-		current_chunk = []
-		current_line_idx = 0
-		line_positions = {}  # Maps line indices to positions in the unified code
-
-		# First pass: build the line position mapping
-		pos = 0
-		temp_line_idx = 0
-		for line in diff_content.splitlines(keepends=True):  # Keep line endings
-			if line.startswith("@@"):
-				hunk_match = re.search(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
-				if hunk_match:
-					temp_line_idx = int(hunk_match.group(1)) - 1
-			elif not line.startswith("-"):  # Additions or context lines
-				line_positions[temp_line_idx] = pos
-				temp_line_idx += 1
-			pos += len(line)
-
-		# Second pass: split at boundaries
-		current_line_idx = 0
-		for line in lines:
-			current_chunk.append(line)
-
-			# Reset line counter at hunk headers
-			if line.startswith("@@"):
-				hunk_match = re.search(r"@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@", line)
-				if hunk_match:
-					current_line_idx = int(hunk_match.group(1)) - 1
-				continue
-
-			# Track line number for content lines (skip removals)
-			if not line.startswith("-"):
-				if current_line_idx in line_positions and line_positions[current_line_idx] in boundaries:
-					# Finish current chunk
-					chunks.append("\n".join(current_chunk))
-					current_chunk = []
-
-				current_line_idx += 1
-
-		# Add the final chunk if there's anything left
-		if current_chunk:
-			chunks.append("\n".join(current_chunk))
-
-		return chunks if chunks else [diff_content]
+	# --- Refactored Orchestrator Method ---
 
 	def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
-		Enhance semantic analysis with language-specific patterns.
+		Orchestrates the parsing and splitting for a single file's diff view.
+
+		Handles parsing, reconstruction, large file splitting, semantic pattern
+		splitting, and fallback hunk splitting.
 
 		Args:
-		    diff: GitDiff object to analyze
+		    diff: GitDiff object (expected to contain one file path and full diff content)
 
 		Returns:
-		    List of semantically grouped chunks
+		    List of DiffChunk objects for the file
 
 		"""
-		if not diff.content or not diff.files:
+		if not diff.files or len(diff.files) != 1:
+			logger.error("_enhance_semantic_split called with invalid diff object (files=%s)", diff.files)
 			return []
 
 		file_path = diff.files[0]
-		file_suffix = Path(file_path).suffix
+		extension = Path(file_path).suffix[1:].lower()
 
-		# Check for large diff content and handle appropriately
-		if len(diff.content) > MAX_FILE_SIZE_FOR_LLM:
-			logger.warning(
-				(
-					"Diff content for %s is too large (%d bytes) for detailed "
-					"semantic analysis. Creating a simplified chunk."
-				),
-				file_path,
-				len(diff.content),
+		if not diff.content:
+			logger.warning("No diff content provided for %s, creating basic chunk.", file_path)
+			return [DiffChunk(files=[file_path], content="", description=f"New file: {file_path}")]
+
+		# 1. Parse the diff to get the PatchedFile object
+		matched_file = self._parse_file_diff(diff.content, file_path)
+		if not matched_file:
+			# If parsing failed, return a basic chunk with raw content attempt
+			file_diff_content_raw = re.search(
+				rf"diff --git a/.*? b/{re.escape(file_path)}\n(.*?)(?=diff --git a/|\Z)",
+				diff.content,
+				re.DOTALL | re.MULTILINE,
 			)
-			commit_type = determine_commit_type([file_path])
-			# Create a simplified chunk instead of detailed semantic analysis
+			content_for_chunk = file_diff_content_raw.group(0) if file_diff_content_raw else ""
 			return [
 				DiffChunk(
 					files=[file_path],
-					content="// Large file content - truncated for API limits",
-					description=create_chunk_description(commit_type, [file_path]),
+					content=content_for_chunk,
+					description=f"Changes in {file_path} (parsing failed)",
 				)
 			]
 
-		# If no file extension, create a single chunk
-		if not file_suffix:
-			return [
+		# 2. Reconstruct the full diff content for this file
+		file_header, full_file_diff_content = self._reconstruct_file_diff(matched_file)
+
+		# 3. Check if the reconstructed diff is too large
+		if len(full_file_diff_content) > self.max_file_size_for_llm:
+			return self._split_large_file_diff(matched_file, file_header)
+
+		# 4. Try splitting by semantic patterns (if applicable)
+		patterns = get_language_specific_patterns(extension)
+		if patterns:
+			logger.debug("Attempting semantic pattern splitting for %s", file_path)
+			pattern_chunks = self._split_by_semantic_patterns(matched_file, patterns)
+			if pattern_chunks:
+				return pattern_chunks
+			logger.debug("Pattern splitting yielded no chunks for %s, falling back.", file_path)
+
+		# 5. Fallback: Split by individual hunks
+		logger.debug("Falling back to hunk splitting for %s", file_path)
+		hunk_chunks = []
+		for hunk in matched_file:
+			hunk_content = str(hunk)
+			hunk_chunks.append(
 				DiffChunk(
 					files=[file_path],
-					content=diff.content,
-					description=f"Changes in {file_path}",
+					content=file_header + hunk_content,  # Combine header + hunk
+					description=f"Hunk in {file_path} starting near line {hunk.target_start}",
 				)
-			]
-
-		# Try to apply language-specific patterns
-		patterns = get_language_specific_patterns(file_suffix.lstrip("."))
-
-		if not patterns:
-			# Create a single chunk for unsupported file types
-			return [
-				DiffChunk(
-					files=[file_path],
-					content=diff.content,
-					description=f"Changes in {file_path}",
-				)
-			]
-
-		# Try semantic splitting
-		chunks = self._split_by_semantic_patterns(diff, file_path, patterns)
-
-		return chunks or [
-			DiffChunk(
-				files=[file_path],
-				content=diff.content,
-				description=f"Changes in {file_path}",
 			)
-		]
 
-	def _split_by_semantic_patterns(self, diff: GitDiff, file_path: str, patterns: list[str]) -> list[DiffChunk]:
-		"""Split a diff by semantic patterns in the code."""
-		# Extract code from diff
-		extraction_result = extract_code_from_diff(diff.content)
-		if not extraction_result or len(extraction_result) != EXPECTED_TUPLE_SIZE:
-			return []
-
-		_, new_code = extraction_result
-
-		if not new_code:
-			return []
-
-		# Find semantic boundaries
-		boundaries = []
-		for pattern in patterns:
-			pattern_boundaries = [m.start() for m in re.finditer(pattern, new_code, re.MULTILINE)]
-			boundaries.extend(pattern_boundaries)
-
-		if not boundaries:
-			return []
-
-		# Sort boundaries for splitting
-		boundaries.sort()
-
-		# Create chunks based on boundaries
-		chunks = []
-		prev_boundary = 0
-
-		for i, boundary in enumerate(boundaries):
-			if boundary <= prev_boundary:
-				continue
-
-			chunk_content = new_code[prev_boundary:boundary]
-			if chunk_content.strip():
-				chunks.append(
-					DiffChunk(
-						files=[file_path],
-						content=chunk_content,
-						description=f"Semantic section {i + 1} in {file_path}",
-					)
+		# If no hunks were found at all, return the single reconstructed chunk
+		if not hunk_chunks:
+			logger.warning("No hunks detected for %s after parsing, returning full diff.", file_path)
+			return [
+				DiffChunk(
+					files=[file_path],
+					content=full_file_diff_content,
+					description=f"Changes in {file_path} (no hunks detected)",
 				)
-			prev_boundary = boundary
+			]
 
-		# Add the last chunk
-		if prev_boundary < len(new_code):
-			final_content = new_code[prev_boundary:]
-			if final_content.strip():
-				chunks.append(
-					DiffChunk(
-						files=[file_path],
-						content=final_content,
-						description=f"Semantic section {len(boundaries) + 1} in {file_path}",
-					)
-				)
+		return hunk_chunks
 
-		return chunks
+	# --- Existing Helper Methods (Potentially need review/updates) ---
 
 	def _group_by_content_similarity(
 		self,
@@ -699,7 +795,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			return
 
 		processed_indices = set()
-		threshold = similarity_threshold if similarity_threshold is not None else DEFAULT_SIMILARITY_THRESHOLD
+		threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
 
 		# For each chunk, find similar chunks and group them
 		for i, chunk in enumerate(chunks):
@@ -804,53 +900,145 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			)
 		)
 
-	def _consolidate_small_chunks(self, chunks: list[DiffChunk]) -> list[DiffChunk]:
+	def _should_merge_chunks(self, chunk1: DiffChunk, chunk2: DiffChunk) -> bool:
+		"""Determine if two chunks should be merged."""
+		# Condition 1: Same single file
+		same_file = len(chunk1.files) == 1 and chunk1.files == chunk2.files
+
+		# Condition 2: Related single files
+		related_files = (
+			len(chunk1.files) == 1
+			and len(chunk2.files) == 1
+			and are_files_related(chunk1.files[0], chunk2.files[0], self.related_file_patterns)
+		)
+
+		# Return True if either condition is met
+		return same_file or related_files
+
+	def _consolidate_small_chunks(self, initial_chunks: list[DiffChunk]) -> list[DiffChunk]:
 		"""
-		Consolidate small chunks into larger, more meaningful groups.
+		Merge small or related chunks together.
 
 		First, consolidates chunks originating from the same file.
 		Then, consolidates remaining single-file chunks by directory.
 
 		Args:
-		    chunks: List of diff chunks to consolidate
+		    initial_chunks: List of diff chunks to consolidate
 
 		Returns:
 		    Consolidated list of chunks
 
 		"""
-		# If we have fewer than MIN_CHUNKS_FOR_CONSOLIDATION chunks, no need to consolidate
-		if len(chunks) < MIN_CHUNKS_FOR_CONSOLIDATION:
-			return chunks
+		# Use instance variable for threshold
+		if len(initial_chunks) < self.min_chunks_for_consolidation:
+			return initial_chunks
 
-		# --- Step 1: Consolidate chunks from the same file ----
-		file_groups: dict[str, list[DiffChunk]] = {}
-		other_chunks: list[DiffChunk] = []  # Chunks with multiple files or no files
+		# Consolidate small chunks for the same file or related files
+		consolidated_chunks = []
+		processed_indices = set()
 
-		for chunk in chunks:
-			if len(chunk.files) == 1:
-				file_path = chunk.files[0]
-				if file_path not in file_groups:
-					file_groups[file_path] = []
-				file_groups[file_path].append(chunk)
+		for i, chunk1 in enumerate(initial_chunks):
+			if i in processed_indices:
+				continue
+
+			merged_chunk = chunk1
+			processed_indices.add(i)
+
+			# Check subsequent chunks for merging
+			for j in range(i + 1, len(initial_chunks)):
+				if j in processed_indices:
+					continue
+
+				chunk2 = initial_chunks[j]
+
+				# Check if chunks should be merged (same file or related)
+				if self._should_merge_chunks(merged_chunk, chunk2):
+					# Combine files if merging related chunks, not just same file chunks
+					new_files = merged_chunk.files
+					if (
+						len(merged_chunk.files) == 1
+						and len(chunk2.files) == 1
+						and merged_chunk.files[0] != chunk2.files[0]
+					):
+						new_files = sorted(set(merged_chunk.files + chunk2.files))
+
+					# Merge content and potentially other attributes
+					# Ensure a newline between merged content if needed
+					separator = "\n" if merged_chunk.content and chunk2.content else ""
+					merged_chunk = dataclasses.replace(
+						merged_chunk,
+						files=new_files,
+						content=merged_chunk.content + separator + chunk2.content,
+						description=merged_chunk.description,  # Keep first description
+					)
+					processed_indices.add(j)
+
+			consolidated_chunks.append(merged_chunk)
+
+		return consolidated_chunks
+
+	def _split_by_semantic_patterns(self, patched_file: PatchedFile, patterns: list[str]) -> list[DiffChunk]:
+		"""
+		Split a PatchedFile's content by grouping hunks based on semantic patterns.
+
+		This method groups consecutive hunks together until a hunk is encountered
+		that contains an added line matching one of the semantic boundary patterns.
+		It does *not* split within a single hunk, only between hunks where a boundary
+		is detected in the *first* line of the subsequent hunk group.
+
+		Args:
+		    patched_file: The PatchedFile object from unidiff.
+		    patterns: List of regex pattern strings to match as boundaries.
+
+		Returns:
+		    List of DiffChunk objects, potentially splitting the file into multiple chunks.
+
+		"""
+		compiled_patterns = [re.compile(p) for p in patterns]
+		file_path = patched_file.path  # Or target_file? Need consistency
+
+		final_chunks_data: list[list[Hunk]] = []
+		current_semantic_chunk_hunks: list[Hunk] = []
+
+		# Get header info once using the reconstruction helper
+		file_header, _ = self._reconstruct_file_diff(patched_file)
+
+		for hunk in patched_file:
+			hunk_has_boundary = False
+			for line in hunk:
+				if line.is_added and any(pattern.match(line.value) for pattern in compiled_patterns):
+					hunk_has_boundary = True
+					break  # Found a boundary in this hunk
+
+			# Start a new semantic chunk if the current hunk has a boundary
+			# and we already have hunks accumulated.
+			if hunk_has_boundary and current_semantic_chunk_hunks:
+				final_chunks_data.append(current_semantic_chunk_hunks)
+				current_semantic_chunk_hunks = [hunk]  # Start new chunk with this hunk
 			else:
-				other_chunks.append(chunk)  # Keep multi-file chunks separate for now
+				# Append the current hunk to the ongoing semantic chunk
+				current_semantic_chunk_hunks.append(hunk)
 
-		consolidated_same_file_chunks: list[DiffChunk] = []
-		for file_path, file_chunk_list in file_groups.items():
-			if len(file_chunk_list) > 1:
-				# Merge chunks for this file
-				combined_content = "\n".join([c.content for c in file_chunk_list])
-				# Use the description from the first chunk or generate a default one
-				description = file_chunk_list[0].description or f"Changes in {file_path}"
-				consolidated_same_file_chunks.append(
-					DiffChunk(files=[file_path], content=combined_content, description=description)
+		# Add the last accumulated semantic chunk
+		if current_semantic_chunk_hunks:
+			final_chunks_data.append(current_semantic_chunk_hunks)
+
+		# Convert grouped hunks into DiffChunk objects
+		result_chunks: list[DiffChunk] = []
+		for i, hunk_group in enumerate(final_chunks_data):
+			if not hunk_group:
+				continue
+			# Combine content of all hunks in the group
+			group_content = "\n".join(str(h) for h in hunk_group)
+			# Generate description (could be more sophisticated)
+			description = f"Semantic section {i + 1} in {file_path}"
+			result_chunks.append(
+				DiffChunk(
+					files=[file_path],
+					content=file_header + group_content,  # Combine header + hunks
+					description=description,
 				)
-			else:
-				# Keep single chunks as they are
-				consolidated_same_file_chunks.extend(file_chunk_list)
+			)
 
-		# Combine same-file consolidated chunks and the multi-file chunks
-		final_chunks = consolidated_same_file_chunks + other_chunks
-
-		logger.debug("Consolidated (file-level only) from %d to %d chunks", len(chunks), len(final_chunks))
-		return final_chunks
+		logger.debug("Split %s into %d chunks based on semantic patterns", file_path, len(result_chunks))
+		return result_chunks

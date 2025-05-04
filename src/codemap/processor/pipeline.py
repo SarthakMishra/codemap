@@ -1,372 +1,576 @@
 """
-Pipeline orchestration for code processing.
+Unified pipeline for CodeMap data processing, synchronization, and retrieval.
 
-This module defines the main processing pipeline that orchestrates:
-1. Generating code metadata with tree-sitter at different LOD levels
-2. Providing results to client modules
+This module defines the `ProcessingPipeline`, which acts as the central orchestrator
+for managing and interacting with the HNSW vector database. It handles initialization,
+synchronization with the Git repository, and provides semantic search capabilities.
 
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from concurrent.futures import Future, ThreadPoolExecutor
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Self
 
-from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
+from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
+from rich.progress import Progress, TaskID
+
+from codemap.db.client import DatabaseClient
+from codemap.processor.tree_sitter import TreeSitterAnalyzer
+
+# Use async embedding utils
+from codemap.processor.utils.embedding_utils import (
+	generate_embedding,
+)
+
+# Import Qdrant specific classes
+from codemap.processor.vector.chunking import TreeSitterChunker
+from codemap.processor.vector.qdrant_manager import QdrantManager
+from codemap.processor.vector.synchronizer import VectorSynchronizer
+from codemap.utils.config_loader import ConfigError, ConfigLoader
+from codemap.utils.docker_utils import ensure_qdrant_running
+from codemap.utils.path_utils import find_project_root
+from codemap.watcher.file_watcher import Watcher
+
+if TYPE_CHECKING:
+	from pathlib import Path
+	from types import TracebackType
+
+	from rich.progress import Progress, TaskID
 
 logger = logging.getLogger(__name__)
 
 
-# Utility functions for file type checking
-def is_binary_file(file_path: Path) -> bool:
-	"""
-	Check if a file is binary.
-
-	Args:
-	        file_path: Path to the file
-
-	Returns:
-	        True if the file is binary, False otherwise
-
-	"""
-	# Skip files larger than 10 MB
-	try:
-		if file_path.stat().st_size > 10 * 1024 * 1024:
-			return True
-
-		# Try to read as text
-		with file_path.open(encoding="utf-8") as f:
-			chunk = f.read(1024)
-			return "\0" in chunk
-	except UnicodeDecodeError:
-		return True
-	except (OSError, PermissionError):
-		return True
-
-
-def is_text_file(file_path: Path) -> bool:
-	"""
-	Check if a file is a text file.
-
-	Args:
-	        file_path: Path to the file
-
-	Returns:
-	        True if the file is a text file, False otherwise
-
-	"""
-	return not is_binary_file(file_path)
-
-
 class ProcessingPipeline:
 	"""
-	Main pipeline for code processing and analysis.
+	Orchestrates data processing, synchronization, and retrieval for CodeMap using Qdrant.
 
-	This class orchestrates the generation of LOD data for code files and
-	directories using tree-sitter, with parallel processing capabilities.
+	Manages connections and interactions with the Qdrant vector database,
+	ensuring it is synchronized with the Git repository state. Provides
+	methods for semantic search. Uses asyncio for database and embedding
+	operations.
 
 	"""
 
+	# Note: __init__ cannot be async directly. Initialization happens in an async method.
 	def __init__(
 		self,
-		repo_path: Path,
-		ignored_patterns: set[str] | None = None,
-		max_workers: int = 4,
-		default_lod_level: LODLevel = LODLevel.SIGNATURES,
+		repo_path: Path | None = None,
+		config_loader: ConfigLoader | None = None,
 	) -> None:
 		"""
-		Initialize the processing pipeline.
+		Initialize the processing pipeline synchronously.
+
+		Core async initialization is done via `async_init`.
 
 		Args:
-		        repo_path: Path to the repository root
-		        ignored_patterns: Set of glob patterns to ignore when processing
-		        max_workers: Maximum number of worker threads for processing
-		        default_lod_level: Default Level of Detail to use for processing
+		    repo_path: Path to the repository root. If None, it will be determined.
+		    config_loader: Application configuration loader. If None, a default one is created.
+		    _progress: Progress bar instance for initialization tracking.
+		    _task_id: Task ID for the progress bar.
 
 		"""
-		self.repo_path = repo_path
-		self.ignored_patterns = ignored_patterns or {
-			"**/.git/**",
-			"**/__pycache__/**",
-			"**/.venv/**",
-			"**/node_modules/**",
-			"**/.DS_Store",
-			"**/*.pyc",
-			"**/*.pyo",
-			"**/*.pyd",
-			"**/~*",
+		self.repo_path = repo_path or find_project_root()
+		if not self.repo_path:
+			msg = "Repository path could not be determined."
+			raise ValueError(msg)
+
+		self.config_loader = config_loader or ConfigLoader()
+		self.config = self.config_loader.load_config()
+
+		if not isinstance(self.config, dict):
+			logger.error(f"Config loading failed or returned unexpected type: {type(self.config)}")
+			msg = "Failed to load a valid Config object."
+			raise ConfigError(msg)
+
+		# --- Initialize Shared Components (Synchronous) --- #
+		self.analyzer = TreeSitterAnalyzer()
+		self.chunker = TreeSitterChunker(config_loader=self.config_loader)
+		self.db_client = DatabaseClient()
+
+		# --- Load Configuration --- #
+		# Get embedding configuration
+		embedding_config = self.config_loader.get("embedding", {})
+		embedding_model = embedding_config.get("model_name")
+		qdrant_dimension = embedding_config.get("dimension")
+		distance_metric = embedding_config.get("dimension_metric", "cosine")
+
+		# Make sure embedding_model_name is always a string
+		self.embedding_model_name: str = "voyage-code-3"  # Default
+		if embedding_model and isinstance(embedding_model, str):
+			self.embedding_model_name = embedding_model
+
+		if not qdrant_dimension:
+			logger.warning("Missing qdrant dimension in configuration, using default 1024")
+			qdrant_dimension = 1024
+
+		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {qdrant_dimension}")
+
+		# Get Qdrant configuration
+		vector_config = self.config_loader.get("embedding", {})
+		qdrant_location = vector_config.get("qdrant_location")
+		qdrant_collection = vector_config.get("qdrant_collection_name", "codemap_vectors")
+		qdrant_url = vector_config.get("url")
+		qdrant_api_key = vector_config.get("api_key")
+
+		# Convert distance metric string to enum
+		distance_enum = qdrant_models.Distance.COSINE
+		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT"]:
+			distance_enum = getattr(qdrant_models.Distance, distance_metric.upper())
+
+		# Use URL if provided, otherwise use location (defaults to :memory: in QdrantManager)
+		qdrant_init_args = {
+			"config_loader": self.config_loader,  # Pass ConfigLoader to QdrantManager
+			"collection_name": qdrant_collection,
+			"dim": qdrant_dimension,
+			"distance": distance_enum,
 		}
 
-		# Setup processing components
-		self.lod_generator = LODGenerator()
-		self.default_lod_level = default_lod_level
+		if qdrant_url:
+			qdrant_init_args["url"] = qdrant_url
+			if qdrant_api_key:
+				qdrant_init_args["api_key"] = qdrant_api_key
+			logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
+		elif qdrant_location:
+			qdrant_init_args["location"] = qdrant_location
+			logger.info(f"Configuring Qdrant client for local path/memory: {qdrant_location}")
+		else:
+			# Let QdrantManager use its default (:memory:)
+			logger.info("Configuring Qdrant client for default location (:memory:)")
 
-		# Threading setup
-		self.max_workers = max_workers
-		self.executor = ThreadPoolExecutor(max_workers=max_workers)
-		self._futures: list[Future] = []
+		# --- Initialize Managers (Synchronous) --- #
+		self.qdrant_manager = QdrantManager(**qdrant_init_args)
 
-		# In-memory cache for processed files
-		self.processed_files: dict[Path, LODEntity] = {}
+		# Initialize VectorSynchronizer with the embedding model name and config_loader
+		self.vector_synchronizer = VectorSynchronizer(
+			self.repo_path,
+			self.qdrant_manager,
+			self.chunker,
+			self.embedding_model_name,
+			self.analyzer,
+			config_loader=self.config_loader,  # Pass ConfigLoader to VectorSynchronizer
+		)
 
-	def stop(self) -> None:
-		"""Stop the processing pipeline and clean up resources."""
-		logger.info("Stopping processing pipeline")
+		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
+		self.is_async_initialized = False
+		self.watcher: Watcher | None = None
+		self._watcher_task: asyncio.Task | None = None
+		self._sync_lock = asyncio.Lock()
 
-		# Shutdown thread pool
-		self.executor.shutdown(wait=True)
-		self._futures.clear()
-
-		logger.info("Processing pipeline stopped")
-
-	def process_file(self, file_path: str | Path, level: LODLevel | None = None) -> None:
+	async def async_init(
+		self, sync_on_init: bool = True, progress: Progress | None = None, task_id: TaskID | None = None
+	) -> None:
 		"""
-		Process a single file asynchronously.
+		Perform asynchronous initialization steps, including Qdrant connection and initial sync.
 
 		Args:
-		        file_path: Path to the file to process
-		        level: Level of Detail to use, defaults to pipeline's default level
+		    sync_on_init: If True, run database synchronization during initialization.
+		    progress: Optional rich Progress instance for unified status display.
+		    task_id: Optional rich TaskID for the main initialization/sync task.
 
 		"""
-		path_obj = Path(file_path)
-
-		# Skip binary files
-		if is_binary_file(path_obj):
-			logger.debug("Skipping binary file: %s", path_obj)
+		if self.is_async_initialized:
+			logger.info("Pipeline already async initialized.")
 			return
 
-		# Submit to thread pool
-		future = self.executor.submit(self._process_file_worker, path_obj, level or self.default_lod_level)
-		self._futures.append(future)
+		init_description = "Initializing pipeline components..."
+		if progress and task_id:
+			progress.update(task_id, description=init_description, completed=0, total=100)
 
-	def process_file_sync(self, file_path: str | Path, level: LODLevel | None = None) -> LODEntity | None:
-		"""
-		Process a single file synchronously and return the result.
-
-		Args:
-		        file_path: Path to the file to process
-		        level: Level of Detail to use, defaults to pipeline's default level
-
-		Returns:
-		        LOD entity or None if processing failed or file is binary
-
-		"""
-		path_obj = Path(file_path)
-
-		# Skip binary files
-		if is_binary_file(path_obj):
-			logger.debug("Skipping binary file: %s", path_obj)
-			return None
-
-		# Process directly
-		return self._process_file_worker(path_obj, level or self.default_lod_level)
-
-	def _process_file_worker(self, file_path: Path, level: LODLevel) -> LODEntity | None:
-		"""
-		Worker function to process a file.
-
-		Args:
-		        file_path: Path to the file to process
-		        level: Level of Detail to use
-
-		Returns:
-		        LOD entity or None if processing failed
-
-		"""
 		try:
-			logger.debug("Processing file: %s at LOD level %s", file_path, level.name)
+			# Get embedding configuration for Qdrant URL
+			embedding_config = self.config_loader.get("embedding", {})
+			qdrant_url = embedding_config.get("url")
 
-			# Generate LOD entity
-			lod_entity = self.lod_generator.generate_lod(file_path, level)
+			# Check for Docker containers
+			if qdrant_url:
+				if progress and task_id:
+					progress.update(task_id, description="Checking Docker containers...", completed=5)
 
-			# Store in cache
-			if lod_entity:
-				self.processed_files[file_path] = lod_entity
-				logger.debug("Successfully generated LOD entity for %s", file_path)
+				# Only check Docker if we're using a URL that looks like localhost/127.0.0.1
+				if "localhost" in qdrant_url or "127.0.0.1" in qdrant_url:
+					logger.info("Ensuring Qdrant container is running")
+					success, message = await ensure_qdrant_running(wait_for_health=True, qdrant_url=qdrant_url)
+
+					if not success:
+						logger.warning(f"Docker check failed: {message}")
+						if progress and task_id:
+							progress.update(
+								task_id,
+								description=f"[yellow]Warning:[/yellow] {message}. Continuing anyway...",
+								completed=8,
+							)
+					else:
+						logger.info(f"Docker container check: {message}")
+						if progress and task_id:
+							progress.update(task_id, description="Docker containers ready.", completed=10)
+
+			# Initialize the database client asynchronously
+			if progress and task_id:
+				progress.update(task_id, description="Initializing database client...", completed=15)
+
+			try:
+				await self.db_client.initialize()
+				logger.info("Database client initialized successfully.")
+				if progress and task_id:
+					progress.update(task_id, description="Database initialized.", completed=18)
+			except RuntimeError as e:
+				logger.warning(
+					f"Database initialization failed (RuntimeError): {e}. Some features may not work properly."
+				)
+				if progress and task_id:
+					progress.update(
+						task_id,
+						description="[yellow]Warning:[/yellow] Database initialization failed. Continuing anyway...",
+						completed=18,
+					)
+			except (ConnectionError, OSError) as e:
+				logger.warning(f"Database connection failed: {e}. Some features may not work properly.")
+				if progress and task_id:
+					progress.update(
+						task_id,
+						description="[yellow]Warning:[/yellow] Database connection failed. Continuing anyway...",
+						completed=18,
+					)
+
+			# Initialize Qdrant client (connects, creates collection if needed)
+			if self.qdrant_manager:
+				await self.qdrant_manager.initialize()
+				logger.info("Qdrant manager initialized asynchronously.")
+				if progress and task_id:
+					progress.update(task_id, description="Qdrant connected.", completed=20)
 			else:
-				logger.warning("LODGenerator returned None for %s (file might be unsupported or empty)", file_path)
+				# This case should theoretically not happen if __init__ succeeded
+				msg = "QdrantManager was not initialized in __init__."
+				logger.error(msg)
+				raise RuntimeError(msg)
 
-			return lod_entity
+			needs_sync = False
+			if sync_on_init:
+				needs_sync = True
+				logger.info("`sync_on_init` is True. Performing index synchronization...")
+			else:
+				# Optional: Could add a check here if Qdrant collection is empty
+				# requires another call to qdrant_manager, e.g., get_count()
+				logger.info("Skipping sync on init as requested.")
+				needs_sync = False
+
+			# Set initialized flag *before* potentially long sync operation
+			self.is_async_initialized = True
+			logger.info("ProcessingPipeline async core components initialized.")
+
+			if needs_sync:
+				await self.sync_databases(progress=progress, task_id=task_id)
+				# sync_databases handles final progress update on success/failure
+			elif progress and task_id:
+				# Update progress if sync was skipped
+				progress.update(
+					task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).", completed=100
+				)
 
 		except Exception:
-			logger.exception("Error processing file %s", file_path)
-			return None
-		finally:
-			# Log final status (redundant with above but good for overview)
-			status = (
-				"succeeded (added to cache)"
-				if file_path in self.processed_files
-				else "failed or skipped (not in cache)"
-			)
-			logger.debug("Final processing status for %s: %s", file_path, status)
+			logger.exception("Failed during async initialization")
+			if progress and task_id:
+				progress.update(task_id, description="[red]Error:[/red] Init failed", completed=100)
+			# Optionally re-raise or handle specific exceptions
+			raise
 
-	def batch_process(self, paths: list[str | Path], level: LODLevel | None = None) -> None:
+	async def stop(self) -> None:
+		"""Stops the pipeline and releases resources, including closing Qdrant connection."""
+		logger.info("Stopping ProcessingPipeline asynchronously...")
+		if self.qdrant_manager:
+			await self.qdrant_manager.close()
+			self.qdrant_manager = None  # type: ignore[assignment]
+		else:
+			logger.warning("Qdrant Manager already None during stop.")
+
+		# Stop the watcher if it's running
+		if self._watcher_task and not self._watcher_task.done():
+			logger.info("Stopping file watcher...")
+			self._watcher_task.cancel()
+			try:
+				await self._watcher_task  # Allow cancellation to propagate
+			except asyncio.CancelledError:
+				logger.info("File watcher task cancelled.")
+			if self.watcher:
+				self.watcher.stop()
+				logger.info("File watcher stopped.")
+			self.watcher = None
+			self._watcher_task = None
+
+		# Cleanup database client
+		if hasattr(self, "db_client") and self.db_client:
+			try:
+				await self.db_client.cleanup()
+				logger.info("Database client cleaned up.")
+			except RuntimeError:
+				logger.exception("Error during database client cleanup")
+			except (ConnectionError, OSError):
+				logger.exception("Connection error during database client cleanup")
+
+		# Other cleanup if needed
+		self.is_async_initialized = False
+		logger.info("ProcessingPipeline stopped.")
+
+	# --- Synchronization --- #
+
+	async def _sync_callback_wrapper(self) -> None:
+		"""Async wrapper for the sync callback to handle locking."""
+		if self._sync_lock.locked():
+			logger.info("Sync already in progress, skipping watcher-triggered sync.")
+			return
+
+		async with self._sync_lock:
+			logger.info("Watcher triggered sync starting...")
+			# Run sync without progress bars from watcher
+			await self.sync_databases(progress=None, task_id=None)
+			logger.info("Watcher triggered sync finished.")
+
+	async def sync_databases(self, progress: Progress | None = None, task_id: TaskID | None = None) -> None:
 		"""
-		Process multiple files in batch asynchronously.
+		Asynchronously synchronize the Qdrant index with the Git repository state.
 
 		Args:
-		        paths: List of file paths to process
-		        level: Level of Detail to use, defaults to pipeline's default level
+		    progress: Optional rich Progress instance for status updates.
+		    task_id: Optional rich TaskID for the main sync task.
 
 		"""
-		for path in paths:
-			self.process_file(path, level)
+		if not self.is_async_initialized:
+			logger.error("Cannot sync databases, async initialization not complete.")
+			if progress and task_id:
+				progress.update(task_id, description="[red]Error:[/red] Not initialized", completed=100)
+			return
 
-	def wait_for_completion(self, timeout: float | None = None) -> bool:
+		# Acquire lock only if not already held (for watcher calls)
+		if not self._sync_lock.locked():
+			async with self._sync_lock:
+				logger.info("Starting vector index synchronization using VectorSynchronizer...")
+				# VectorSynchronizer handles its own progress updates internally now
+				await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+				# Final status message/logging is handled by sync_index
+		else:
+			# If lock is already held (likely by watcher call), just run it
+			logger.info("Starting vector index synchronization (lock already held)...")
+			await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+
+	# --- Watcher Methods --- #
+
+	def initialize_watcher(self, debounce_delay: float = 2.0) -> None:
 		"""
-		Wait for all pending file processing tasks to complete.
+		Initialize the file watcher.
 
 		Args:
-		        timeout: Maximum time to wait in seconds, or None to wait indefinitely
-
-		Returns:
-		        True if all tasks completed, False if timeout occurred
+		    debounce_delay: Delay in seconds before triggering sync after a file change.
 
 		"""
-		from concurrent.futures import ALL_COMPLETED, wait
+		if not self.repo_path:
+			logger.error("Cannot initialize watcher without a repository path.")
+			return
 
-		if not self._futures:
-			return True
+		if self.watcher:
+			logger.warning("Watcher already initialized.")
+			return
 
-		_, not_done = wait(self._futures, timeout=timeout, return_when=ALL_COMPLETED)
-
-		# Clean up completed futures
-		self._futures = list(not_done)
-
-		return len(not_done) == 0
-
-	def get_lod_entity(
-		self, file_path: Path, level: LODLevel | None = None, force_refresh: bool = False
-	) -> LODEntity | None:
-		"""
-		Get the LOD entity for a file.
-
-		If the file has already been processed at the requested level or higher,
-		returns the cached entity. Otherwise, processes the file at the requested level.
-
-		Args:
-		        file_path: Path to the file
-		        level: Level of Detail requested, defaults to pipeline's default level
-		        force_refresh: Whether to force reprocessing even if cached
-
-		Returns:
-		        LOD entity for the file, or None if processing failed
-
-		"""
-		requested_level = level or self.default_lod_level
-
-		# Check if we have a cached entity at the same or higher level
-		if not force_refresh and file_path in self.processed_files:
-			existing_entity = self.processed_files[file_path]
-
-			# If we have content in the entity and level is FULL, we know it was processed at FULL level
-			if requested_level == LODLevel.FULL and existing_entity.content:
-				return existing_entity
-
-			# If we have signature and level is SIGNATURES, we know it was processed at SIGNATURES level
-			if requested_level == LODLevel.SIGNATURES and existing_entity.signature:
-				return existing_entity
-
-			# If we have docstring and level is DOCS, we know it was processed at DOCS level
-			if requested_level == LODLevel.DOCS and existing_entity.docstring:
-				return existing_entity
-
-		# Process synchronously in this case
-		return self.process_file_sync(file_path, requested_level)
-
-	def process_repository(self, repo_path: Path | None = None) -> int:
-		"""
-		Process an entire repository asynchronously.
-
-		Args:
-		        repo_path: Repository path, uses the pipeline's repo path if None
-
-		Returns:
-		        Number of files submitted for processing
-
-		"""
-		target_repo = repo_path or self.repo_path
-
-		# Get all files in the repository
-		all_files = []
-		for path_obj in target_repo.rglob("*"):
-			if path_obj.is_file() and is_text_file(path_obj):
-				# Check against ignored patterns
-				should_ignore = False
-				for pattern in self.ignored_patterns:
-					if path_obj.match(pattern):
-						should_ignore = True
-						break
-
-				if not should_ignore:
-					all_files.append(path_obj)
-
-		# Process all files
-		self.batch_process(all_files)
-
-		return len(all_files)
-
-	def get_repository_structure(
-		self, root_path: Path | None = None, level: LODLevel = LODLevel.STRUCTURE
-	) -> dict[str, Any]:
-		"""
-		Get a structured representation of the repository.
-
-		Args:
-		        root_path: Root path to start from, uses pipeline's repo path if None
-		        level: Level of Detail to use for files
-
-		Returns:
-		        Hierarchical structure of the repository with LOD entities
-
-		"""
-		target_path = root_path or self.repo_path
-
-		# Start with the basic directory structure
-		result = {"type": "directory", "name": target_path.name, "path": str(target_path), "children": []}
-
-		# List all items in the directory
+		logger.info(f"Initializing file watcher for path: {self.repo_path}")
 		try:
-			items = list(target_path.iterdir())
+			self.watcher = Watcher(
+				path_to_watch=self.repo_path,
+				on_change_callback=self._sync_callback_wrapper,  # Use the lock wrapper
+				debounce_delay=debounce_delay,
+			)
+			logger.info("File watcher initialized.")
+		except ValueError:
+			logger.exception("Failed to initialize watcher")
+			self.watcher = None
+		except Exception:
+			logger.exception("Unexpected error initializing watcher.")
+			self.watcher = None
 
-			# Process directories first
-			for item in sorted([i for i in items if i.is_dir()], key=lambda x: x.name):
-				# Skip ignored directories
-				should_ignore = False
-				for pattern in self.ignored_patterns:
-					if item.match(pattern):
-						should_ignore = True
-						break
+	async def start_watcher(self) -> None:
+		"""
+		Start the file watcher in the background.
 
-				if should_ignore:
-					continue
+		`initialize_watcher` must be called first.
 
-				# Recursively process this directory
-				child_structure = self.get_repository_structure(item, level)
-				result["children"].append(child_structure)
+		"""
+		if not self.watcher:
+			logger.error("Watcher not initialized. Call initialize_watcher() first.")
+			return
 
-			# Then process files
-			for item in sorted([i for i in items if i.is_file()], key=lambda x: x.name):
-				# Skip ignored files
-				should_ignore = False
-				for pattern in self.ignored_patterns:
-					if item.match(pattern):
-						should_ignore = True
-						break
+		if self._watcher_task and not self._watcher_task.done():
+			logger.warning("Watcher task is already running.")
+			return
 
-				if should_ignore:
-					continue
+		logger.info("Starting file watcher task in the background...")
+		# Create a task to run the watcher's start method asynchronously
+		self._watcher_task = asyncio.create_task(self.watcher.start())
+		# We don't await the task here; it runs independently.
+		# Error handling within the watcher's start method logs issues.
 
-				# Get LOD entity for this file
-				file_entity = self.get_lod_entity(item, level)
+	# --- Retrieval Methods --- #
 
-				file_result = {"type": "file", "name": item.name, "path": str(item), "entity": file_entity}
+	async def semantic_search(
+		self,
+		query: str,
+		k: int = 5,
+		filter_params: dict[str, Any] | None = None,
+	) -> list[dict[str, Any]] | None:
+		"""
+		Perform semantic search for code chunks similar to the query using Qdrant.
 
-				result["children"].append(file_result)
+		Args:
+		    query: The search query string.
+		    k: The number of top similar results to retrieve.
+		    filter_params: Optional dictionary for filtering results. Supports:
+		        - exact match: {"field": "value"} or {"match": {"field": "value"}}
+		        - multiple values: {"match_any": {"field": ["value1", "value2"]}}
+		        - range: {"range": {"field": {"gt": value, "lt": value}}}
+		        - complex: {"must": [...], "should": [...], "must_not": [...]}
 
-		except (PermissionError, FileNotFoundError) as e:
-			logger.warning(f"Error processing directory {target_path}: {e}")
+		Returns:
+		    A list of search result dictionaries (Qdrant ScoredPoint converted to dict),
+		    or None if an error occurs.
 
-		return result
+		"""
+		if not self.is_async_initialized or not self.qdrant_manager:
+			logger.error("QdrantManager not available for semantic search.")
+			return None
+
+		logger.debug("Performing semantic search for query: '%s', k=%d", query, k)
+
+		try:
+			# 1. Generate query embedding (must be async)
+			query_embedding = await generate_embedding(
+				query,
+				model=self.embedding_model_name,
+				config_loader=self.config_loader,  # Pass ConfigLoader to generate_embedding
+			)
+			if query_embedding is None:
+				logger.error("Failed to generate embedding for query.")
+				return None
+
+			# Convert to numpy array if needed by Qdrant client, though list is often fine
+			# query_vector = np.array(query_embedding, dtype=np.float32)
+			query_vector = query_embedding  # Qdrant client typically accepts list[float]
+
+			# 2. Process filter parameters to Qdrant filter format
+			query_filter = None
+			if filter_params:
+				query_filter = self._build_qdrant_filter(filter_params)
+				logger.debug("Using filter for search: %s", query_filter)
+
+			# 3. Query Qdrant index (must be async)
+			search_results: list[qdrant_models.ScoredPoint] = await self.qdrant_manager.search(
+				query_vector, k, query_filter=query_filter
+			)
+
+			if not search_results:
+				logger.debug("Qdrant search returned no results.")
+				return []
+
+			# 4. Format results (convert ScoredPoint to dictionary)
+			formatted_results = []
+			for scored_point in search_results:
+				# Convert Qdrant model to dict for consistent output
+				# Include score (similarity) and payload
+				result_dict = {
+					"id": str(scored_point.id),  # Ensure ID is string
+					"score": scored_point.score,
+					"payload": scored_point.payload,
+					# Optionally include version if needed
+					# "version": scored_point.version,
+				}
+				formatted_results.append(result_dict)
+
+			logger.debug("Semantic search found %d results.", len(formatted_results))
+			return formatted_results
+
+		except Exception:
+			logger.exception("Error during semantic search.")
+			return None
+
+	def _build_qdrant_filter(self, filter_params: dict[str, Any]) -> qdrant_models.Filter:
+		"""
+		Convert filter parameters to Qdrant filter format.
+
+		Args:
+		    filter_params: Dictionary of filter parameters
+
+		Returns:
+		    Qdrant filter object
+
+		"""
+		# If already a proper Qdrant filter, return as is
+		if isinstance(filter_params, qdrant_models.Filter):
+			return filter_params
+
+		# Check for clause-based filter (must, should, must_not)
+		if any(key in filter_params for key in ["must", "should", "must_not"]):
+			filter_obj = {}
+
+			# Process must conditions (AND)
+			if "must" in filter_params:
+				filter_obj["must"] = [self._build_qdrant_filter(cond) for cond in filter_params["must"]]
+
+			# Process should conditions (OR)
+			if "should" in filter_params:
+				filter_obj["should"] = [self._build_qdrant_filter(cond) for cond in filter_params["should"]]
+
+			# Process must_not conditions (NOT)
+			if "must_not" in filter_params:
+				filter_obj["must_not"] = [self._build_qdrant_filter(cond) for cond in filter_params["must_not"]]
+
+			return qdrant_models.Filter(**filter_obj)
+
+		# Check for condition-based filter (match, range, etc.)
+		if "match" in filter_params:
+			field, value = next(iter(filter_params["match"].items()))
+			return qdrant_models.Filter(
+				must=[qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))]
+			)
+
+		if "match_any" in filter_params:
+			field, values = next(iter(filter_params["match_any"].items()))
+			# For string values
+			if (values and isinstance(values[0], str)) or (values and isinstance(values[0], (int, float))):
+				return qdrant_models.Filter(
+					should=[
+						qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))
+						for value in values
+					]
+				)
+			# Default case
+			return qdrant_models.Filter(
+				should=[
+					qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))
+					for value in values
+				]
+			)
+
+		if "range" in filter_params:
+			field, range_values = next(iter(filter_params["range"].items()))
+			return qdrant_models.Filter(
+				must=[qdrant_models.FieldCondition(key=field, range=qdrant_models.Range(**range_values))]
+			)
+
+		# Default: treat as simple field-value pairs (exact match)
+		must_conditions = []
+		for field, value in filter_params.items():
+			must_conditions.append(qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value)))
+
+		return qdrant_models.Filter(must=must_conditions)
+
+	# Context manager support for async operations
+	async def __aenter__(self) -> Self:
+		"""Return self for use as async context manager."""
+		# Basic initialization is sync, async init must be called separately
+		# Consider if automatic async_init here is desired, or keep it explicit
+		# await self.async_init() # Example if auto-init is desired
+		return self
+
+	async def __aexit__(
+		self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+	) -> None:
+		"""Clean up resources when exiting the async context manager."""
+		await self.stop()

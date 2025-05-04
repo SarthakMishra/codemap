@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from typing import TypedDict, cast
-
-from codemap.git.diff_splitter import DiffChunk
+from typing import TypedDict
 
 
-class DiffChunkData(TypedDict, total=False):
-	"""TypedDict representing the structure of a DiffChunk."""
+class CommitMessageSchema(TypedDict):
+	"""TypedDict representing the structured commit message output."""
 
-	files: list[str]
-	content: str
+	type: str
+	scope: str | None
 	description: str
+	body: str | None
+	breaking: bool
+	footers: list[dict[str, str]]
 
 
 # Define a schema for structured commit message output
@@ -48,34 +49,3 @@ COMMIT_MESSAGE_SCHEMA = {
 	},
 	"required": ["type", "description"],
 }
-
-
-class CommitMessageSchema(TypedDict):
-	"""TypedDict representing the structured commit message output."""
-
-	type: str
-	scope: str | None
-	description: str
-	body: str | None
-	breaking: bool
-	footers: list[dict[str, str]]
-
-
-def adapt_chunk_access(chunk: DiffChunk | DiffChunkData) -> DiffChunkData:
-	"""
-	Adapt chunk access to work with both DiffChunk objects and dictionaries.
-
-	Args:
-	    chunk: Chunk to adapt
-
-	Returns:
-	    Dictionary with chunk data
-
-	"""
-	if isinstance(chunk, DiffChunk):
-		return DiffChunkData(
-			files=chunk.files,
-			content=chunk.content,
-			description=chunk.description if chunk.description else "",
-		)
-	return cast("DiffChunkData", chunk)

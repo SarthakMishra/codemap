@@ -6,6 +6,9 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from codemap.config import DEFAULT_CONFIG
+from codemap.utils.config_loader import ConfigLoader
+
 if TYPE_CHECKING:
 	from collections.abc import Sequence
 
@@ -94,23 +97,91 @@ def get_relative_path(path: Path, base_path: Path) -> Path:
 		return path.absolute()
 
 
-def get_git_root(start_path: Path) -> Path | None:
+def find_project_root(start_path: Path | None = None) -> Path:
 	"""
-	Find the root directory of a git repository.
+	Determine the project root directory (typically the Git repository root).
+
+	Searches upwards from the starting path (or current working directory if
+	start_path is None) for the '.git' directory.
 
 	Args:
-	    start_path: Path to start searching from
+	    start_path (Path | None, optional): The path to start searching from.
+	                                        Defaults to the current working directory.
 
 	Returns:
-	    Path to the git root directory, or None if not found
+	    Path: The absolute path to the project root (containing .git).
+
+	Raises:
+	    FileNotFoundError: If the project root cannot be determined based on
+	                       the presence of the '.git' directory.
 
 	"""
-	current = start_path.absolute()
+	if start_path is None:
+		current_dir = Path.cwd()
+		search_origin_display = "current working directory"
+	else:
+		# Ensure start_path is absolute for consistent parent traversal
+		current_dir = start_path.resolve()
+		search_origin_display = f"'{start_path}'"
 
-	while current != current.parent:
-		git_dir = current / ".git"
-		if git_dir.exists() and git_dir.is_dir():
-			return current
-		current = current.parent
+	# Check the starting directory itself and its parents
+	for parent in [current_dir, *current_dir.parents]:
+		# Check for .git directory
+		is_git_root = (parent / ".git").is_dir()
 
-	return None
+		if is_git_root:
+			logger.debug(f"Project root (Git repository root) found at: {parent}")
+			return parent
+
+	# If loop completes without finding a root
+	msg = f"Could not determine project root searching upwards from {search_origin_display}. No '.git' directory found."
+	raise FileNotFoundError(msg)
+
+
+def get_cache_path(component_name: str | None = None, workspace_root: Path | None = None) -> Path:
+	"""
+	Get the cache path for a specific component or the root cache directory.
+
+	Args:
+	    component_name (str | None, optional): The name of the component requiring a
+	                                           cache directory (e.g., 'graph', 'vector').
+	                                           If None, the root cache directory path
+	                                           is returned. Defaults to None.
+	    workspace_root (Path | None, optional): The workspace root path.
+	                                            If None, it will be determined automatically
+	                                            using `find_project_root()`. Defaults to None.
+
+	Returns:
+	    Path: The absolute path to the component's cache directory if `component_name`
+	          is provided, otherwise the absolute path to the root cache directory.
+
+	Raises:
+	    FileNotFoundError: If `workspace_root` is None and `find_project_root()` fails.
+	    # Config related errors might also be raised by ConfigLoader
+
+	"""
+	if workspace_root is None:
+		workspace_root = find_project_root()
+
+	# Get ConfigLoader instance, potentially passing the repo_root
+	# Ensure ConfigLoader handles initialization correctly if called multiple times
+	config_loader = ConfigLoader.get_instance(repo_root=workspace_root)
+
+	# Get cache directory name from config, falling back to default
+	# Ensure DEFAULT_CONFIG is accessible here
+	cache_dir_name = config_loader.get("cache_dir", DEFAULT_CONFIG.get("cache_dir", ".codemap_cache"))
+
+	cache_root = workspace_root / cache_dir_name
+
+	if component_name is None:
+		# Ensure the root cache directory exists
+		cache_root.mkdir(parents=True, exist_ok=True)
+		logger.debug(f"Root cache path: {cache_root}")
+		return cache_root
+
+	# Calculate the specific component's cache path
+	component_cache_path = cache_root / component_name
+	# Ensure the component cache directory exists
+	component_cache_path.mkdir(parents=True, exist_ok=True)
+	logger.debug(f"Cache path for component '{component_name}': {component_cache_path}")
+	return component_cache_path

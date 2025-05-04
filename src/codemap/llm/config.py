@@ -134,8 +134,11 @@ def get_llm_config(
 
 	"""
 	# Create a config loader if none provided
-	if not config_loader:
+	if config_loader is None:
 		config_loader = ConfigLoader()
+		logger.debug("Created new ConfigLoader instance")
+	else:
+		logger.debug("Using provided ConfigLoader instance")
 
 	# Get LLM config from loader
 	llm_config_dict = config_loader.get_llm_config()

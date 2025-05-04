@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -320,7 +321,7 @@ def stage_files(files: list[str]) -> None:
 			error_msg = "; ".join(errors)
 			msg = f"Errors while staging files: {error_msg}"
 			logger.error(msg)
-			raise GitError(msg)  # noqa: TRY301
+			raise GitError(msg)
 
 	except GitError:
 		# Pass through GitError exceptions
@@ -568,3 +569,56 @@ def unstage_files(files: list[str]) -> None:
 	except GitError as e:
 		msg = f"Failed to unstage files: {', '.join(files)}"
 		raise GitError(msg) from e
+
+
+def switch_branch(branch_name: str) -> None:
+	"""
+	Switch the current Git branch.
+
+	Args:
+	    branch_name: The name of the branch to switch to.
+
+	Raises:
+	    GitError: If the git checkout command fails.
+
+	"""
+	try:
+		command = ["git", "checkout", branch_name]
+		logger.debug("Running command: %s", shlex.join(command))
+		result = subprocess.run(command, capture_output=True, text=True, check=True, cwd=get_repo_root())  # noqa: S603
+		logger.debug("Switch branch stdout: %s", result.stdout)
+		logger.debug("Switch branch stderr: %s", result.stderr)
+	except subprocess.CalledProcessError as e:
+		error_message = f"Failed to switch to branch '{branch_name}': {e.stderr}"
+		logger.exception(error_message)
+		raise GitError(error_message) from e
+	except FileNotFoundError as e:
+		error_message = "Git command not found. Ensure Git is installed and in PATH."
+		logger.exception(error_message)
+		raise GitError(error_message) from e
+
+
+def get_current_branch() -> str:
+	"""
+	Get the name of the current branch.
+
+	Returns:
+	    Name of the current branch
+
+	Raises:
+	    GitError: If git command fails
+
+	"""
+	try:
+		return run_git_command(["git", "branch", "--show-current"]).strip()
+	except GitError as e:
+		msg = "Failed to get current branch"
+		raise GitError(msg) from e
+
+
+def is_git_ignored(file_path: str) -> bool:
+	"""Check if a file is ignored by Git."""
+	try:
+		return run_git_command(["git", "check-ignore", file_path]).strip() == ""
+	except GitError:
+		return False

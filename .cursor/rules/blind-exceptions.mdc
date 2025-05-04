@@ -1,0 +1,8 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+- Always use `logger.exception` and not `logger.error`
+- Do not add the error object inside an f-string during `logger.exception`
+- Do not catch blind exceptions like `Exception as e` use typed Errors

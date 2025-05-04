@@ -20,8 +20,8 @@ ASCII_MAX_VALUE = 127  # Maximum ASCII character value
 # Groups: 1:type, 2:scope, 3:breaking(!), 4:description, 5:body_and_footers
 COMMIT_REGEX = re.compile(
 	r"^(?P<type>[a-zA-Z]+)"  # 1: Type (case-insensitive letters)
-	# 2: Scope (optional, case-insensitive letters, numbers, hyphen, slash)
-	r"(?:\((?P<scope>[a-zA-Z0-9\-]*(?:/[a-zA-Z0-9\-]*)*)\))?"
+	# 2: Scope (optional, case-insensitive letters, numbers, hyphen, underscore, slash)
+	r"(?:\((?P<scope>[a-zA-Z0-9\-_]*(?:/[a-zA-Z0-9\-_]*)?)\))?"
 	r"(?P<breaking>!)?"  # 3: Breaking indicator (optional)
 	r": (?P<description>.+?)"  # 4: Description (must exist, non-greedy)
 	# 5: Everything after header (separated by one blank line)
@@ -56,7 +56,7 @@ VALID_FOOTER_TOKEN_REGEX = re.compile(r"^(?:[A-Z][A-Z0-9\-]+|BREAKING[ -]CHANGE)
 
 # Regex to validate type and scope (ASCII only, no special characters)
 VALID_TYPE_REGEX = re.compile(r"^[a-zA-Z]+$")
-VALID_SCOPE_REGEX = re.compile(r"^[a-zA-Z0-9\-]*(?:/[a-zA-Z0-9\-]*)*$")
+VALID_SCOPE_REGEX = re.compile(r"^[a-zA-Z0-9\-_]*(?:/[a-zA-Z0-9\-_]*)*$")
 
 # Regex to detect breaking change token in any case (for validation purposes)
 BREAKING_CHANGE_REGEX = re.compile(r"^breaking[ -]change$", re.IGNORECASE)

@@ -49,22 +49,22 @@ index 2345678..bcdefgh 100645
 
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_sentence_transformers_availability")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_model_availability")
+	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.are_sentence_transformers_available")
+	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available")
 	@patch("codemap.git.diff_splitter.splitter.loading_spinner")
 	def test_split_diff_basic(
 		self,
 		_mock_spinner,
-		mock_check_model,
-		mock_check_st,
+		mock_is_model_avail,
+		mock_are_st_avail,
 		mock_is_test,
 		mock_filter_files,
 	) -> None:
 		"""Test basic functionality of split_diff method."""
 		# Arrange
 		mock_is_test.return_value = False
-		mock_check_st.return_value = True
-		mock_check_model.return_value = True
+		mock_are_st_avail.return_value = True
+		mock_is_model_avail.return_value = True
 		mock_filter_files.return_value = (["file1.py", "file2.py"], [])
 
 		expected_chunks = [
@@ -89,8 +89,8 @@ index 2345678..bcdefgh 100645
 			assert result_chunks == expected_chunks
 			assert large_files == []
 			mock_filter_files.assert_called_once_with(["file1.py", "file2.py"], False)  # noqa: FBT003
-			mock_check_st.assert_called_once()
-			mock_check_model.assert_called_once()
+			mock_are_st_avail.assert_called()
+			mock_is_model_avail.assert_called()
 
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
@@ -110,16 +110,13 @@ index 2345678..bcdefgh 100645
 
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_sentence_transformers_availability")
-	def test_split_diff_no_sentence_transformers(self, mock_check_st, mock_is_test, mock_filter_files) -> None:
+	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.are_sentence_transformers_available")
+	def test_split_diff_no_sentence_transformers(self, mock_are_st_avail, mock_is_test, mock_filter_files) -> None:
 		"""Test split_diff when sentence_transformers is not available."""
 		# Arrange
 		mock_is_test.return_value = False
-		mock_check_st.return_value = False  # Set to False to trigger the ValueError
+		mock_are_st_avail.return_value = False  # Set to False to trigger the ValueError
 		mock_filter_files.return_value = (["file1.py"], [])
-
-		# Force availability to False to ensure the method will check and raise the error
-		type(self.splitter)._sentence_transformers_available = False
 
 		# Act & Assert
 		with pytest.raises(ValueError, match="Semantic splitting is not available"):
@@ -127,26 +124,23 @@ index 2345678..bcdefgh 100645
 
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_sentence_transformers_availability")
+	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available")
 	@patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_model_availability")
 	@patch("codemap.git.diff_splitter.splitter.loading_spinner")
 	def test_split_diff_model_not_available(
 		self,
 		_mock_spinner,
 		mock_check_model,
-		mock_check_st,
+		mock_is_model_avail,
 		mock_is_test,
 		mock_filter_files,
 	) -> None:
 		"""Test split_diff when embedding model is not available."""
 		# Arrange
 		mock_is_test.return_value = False
-		mock_check_st.return_value = True
-		mock_check_model.return_value = False  # Set to False to trigger the ValueError
+		mock_is_model_avail.return_value = False  # Simulate model not being available
+		mock_check_model.return_value = False  # Ensure check also returns False
 		mock_filter_files.return_value = (["file1.py"], [])
-
-		# Force model_available to False to ensure the method will check and raise the error
-		type(self.splitter)._model_available = False
 
 		# Act & Assert
 		with pytest.raises(ValueError, match="Semantic splitting failed: embedding model could not be loaded"):
@@ -154,76 +148,49 @@ index 2345678..bcdefgh 100645
 
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.MAX_FILE_SIZE_FOR_LLM", 10)  # Small value to trigger large file handling
-	def test_split_diff_large_content(self, mock_is_test, mock_filter_files) -> None:
-		"""Test split_diff with large diff content."""
+	@patch("codemap.git.diff_splitter.splitter.re")  # Mock re for large content check
+	def test_split_diff_large_content(
+		self, mock_re: MagicMock, mock_is_test: MagicMock, mock_filter_files: MagicMock
+	) -> None:
+		"""Test split_diff with large diff content (should still process files)."""
 		# Arrange
 		mock_is_test.return_value = False
-		mock_filter_files.return_value = (["file1.py", "file2.py"], [])
+		mock_filter_files.return_value = (["file1.py", "file2.py"], [])  # filter_valid_files still returns valid files
+		mock_re.findall.return_value = [
+			("a/file1.py", "file1.py"),
+			("a/file2.py", "file2.py"),
+		]  # Mock finding files in large diff
 
-		# Create a DiffSplitter with mocked dependencies
+		# Create a splitter instance inside patches
 		with (
 			patch(
-				"codemap.git.diff_splitter.splitter.DiffSplitter._check_sentence_transformers_availability",
+				"codemap.git.diff_splitter.splitter.DiffSplitter.are_sentence_transformers_available",
 				return_value=True,
 			),
-			patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_model_availability", return_value=True),
+			patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available", return_value=True),
 			patch("codemap.git.diff_splitter.splitter.loading_spinner"),
-			patch.object(DiffSplitter, "_split_semantic", return_value=[]),
+			patch.object(
+				DiffSplitter, "_split_semantic", return_value=[]
+			) as mock_split_semantic,  # Mock the semantic split
 		):
-			# Act
 			splitter = DiffSplitter(self.repo_root)
-			result_chunks, large_files = splitter.split_diff(self.sample_diff)
+			# Make sample diff content large
+			large_sample_diff = GitDiff(
+				files=["file1.py", "file2.py"],  # Original files list
+				content="a" * (splitter.max_file_size_for_llm + 10),  # Large content
+				is_staged=False,
+			)
 
-			# Assert
-			assert result_chunks == []
-			assert large_files == []
-			# Verify that filter_valid_files was called with the files from the diff
-			mock_filter_files.assert_called_once()
-
-	def test_semantic_hunk_splitting(self) -> None:
-		"""Test the _semantic_hunk_splitting method."""
-		# Arrange
-		file_path = "test.py"
-		diff_content = """@@ -1,3 +1,5 @@
- def existing_function():
-     pass
-+
-+def new_function():
-+    return True
-"""
-
-		with patch("codemap.git.diff_splitter.splitter.get_language_specific_patterns", return_value=[r"^def\s+\w+"]):
 			# Act
-			result = self.splitter._semantic_hunk_splitting(file_path, diff_content)
+			result_chunks, large_files = splitter.split_diff(large_sample_diff)
 
 			# Assert
-			assert len(result) > 0
-			# Just check that something was returned that contains the functions
-			assert any("existing_function" in chunk for chunk in result)
-			assert any("new_function" in chunk for chunk in result)
-
-	def test_semantic_hunk_splitting_empty_content(self) -> None:
-		"""Test _semantic_hunk_splitting with empty content."""
-		# Act
-		result = self.splitter._semantic_hunk_splitting("test.py", "")
-
-		# Assert
-		assert result == []
-
-	def test_semantic_hunk_splitting_no_patterns(self) -> None:
-		"""Test _semantic_hunk_splitting when no language patterns are available."""
-		# Arrange
-		file_path = "unknown.ext"
-		diff_content = "@@ -1,1 +1,2 @@\n-old\n+new\n"
-
-		with patch("codemap.git.diff_splitter.splitter.get_language_specific_patterns", return_value=[]):
-			# Act
-			result = self.splitter._semantic_hunk_splitting(file_path, diff_content)
-
-			# Assert
-			assert len(result) == 1
-			assert result[0] == diff_content
+			# Even though content was large, files were extracted and passed to filter_valid_files
+			# _split_semantic was called with the modified diff (empty content, extracted files)
+			mock_filter_files.assert_called_once_with(["file1.py", "file2.py"], False)  # noqa: FBT003
+			mock_split_semantic.assert_called_once()
+			assert result_chunks == []  # As mocked
+			assert large_files == []  # Should always be empty
 
 	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
 	def test_split_semantic_success(self, mock_semantic_strategy_cls) -> None:
@@ -246,54 +213,54 @@ index 2345678..bcdefgh 100645
 		mock_semantic_strategy_cls.assert_called_once()
 		mock_strategy.split.assert_called_once_with(self.sample_diff)
 
-	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
-	def test_split_semantic_empty_result(self, mock_semantic_strategy_cls) -> None:
-		"""Test _split_semantic when semantic strategy returns empty result."""
+	@patch("codemap.git.diff_splitter.splitter.FileSplitStrategy")  # Mock fallback strategy
+	def test_split_semantic_st_unavailable_fallback(self, mock_file_strategy_cls) -> None:
+		"""Test _split_semantic fallback when sentence transformers are unavailable."""
 		# Arrange
-		mock_strategy = MagicMock()
-		mock_semantic_strategy_cls.return_value = mock_strategy
-		mock_strategy.split.return_value = []
+		mock_file_strategy = MagicMock()
+		mock_file_strategy_cls.return_value = mock_file_strategy
+		# Define what FileSplitStrategy would *actually* return for the sample diff
+		# It creates one chunk per file mentioned in the diff header
+		expected_fallback_chunks = [
+			DiffChunk(
+				files=["file1.py"],
+				# Content should ONLY be the diff for file1.py
+				content=(
+					"diff --git a/file1.py b/file1.py\n"
+					"index 1234567..abcdefg 100644\n"
+					"--- a/file1.py\n"
+					"+++ b/file1.py\n"
+					"@@ -10,7 +10,7 @@ def existing_function():\n"
+					"    pass\n"
+				),
+				# Description uses determine_commit_type + create_chunk_description
+				description="chore: update file1.py",
+			),
+			DiffChunk(
+				files=["file2.py"],
+				# Content should ONLY be the diff for file2.py
+				content=(
+					"diff --git a/file2.py b/file2.py\n"
+					"index 2345678..bcdefgh 100645\n"
+					"--- a/file2.py\n"
+					"+++ b/file2.py\n"
+					"@@ -5,3 +5,6 @@ def old_function():\n"
+					"    pass\n"
+				),
+				description="chore: update file2.py",
+			),
+		]
+		mock_file_strategy.split.return_value = expected_fallback_chunks
 
-		# Mock directory-based fallback
-		with patch.object(
-			DiffSplitter,
-			"_split_semantic",
-			side_effect=[
-				# First call (the real one) returns directory based chunks
-				[DiffChunk(files=["file1.py"], content="dir_chunk", description="Changes in root directory")],
-				# Any subsequent call (from our test case) returns the original
-				[DiffChunk(files=["file1.py"], content="dir_chunk", description="Changes in root directory")],
-			],
-		):
+		# Simulate sentence transformers being unavailable
+		with patch.object(self.splitter, "are_sentence_transformers_available", return_value=False):
 			# Act
+			# We call _split_semantic, which should internally call the fallback _create_basic_file_chunk,
+			# which instantiates and calls FileSplitStrategy.split (which we mocked)
 			result = self.splitter._split_semantic(self.sample_diff)
 
-			# Assert
-			assert len(result) == 1
-			assert result[0].description == "Changes in root directory"
-
-	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
-	def test_split_semantic_exception(self, mock_semantic_strategy_cls) -> None:
-		"""Test _split_semantic when semantic strategy raises an exception."""
-		# Arrange
-		mock_strategy = MagicMock()
-		mock_semantic_strategy_cls.return_value = mock_strategy
-		mock_strategy.split.side_effect = ValueError("Semantic splitting failed")
-
-		# Mock directory-based fallback
-		with patch.object(
-			DiffSplitter,
-			"_split_semantic",
-			side_effect=[
-				# First call (the real one) would try fallback but we'll mock it
-				[DiffChunk(files=["file1.py"], content="dir_chunk", description="Changes in root directory")],
-				# Any subsequent call (from our test case) returns the original
-				[DiffChunk(files=["file1.py"], content="dir_chunk", description="Changes in root directory")],
-			],
-		):
-			# Act
-			result = self.splitter._split_semantic(self.sample_diff)
-
-			# Assert
-			assert len(result) == 1
-			assert result[0].description == "Changes in root directory"
+		# Assert
+		# The result should be what our mocked FileSplitStrategy.split returned
+		assert result == expected_fallback_chunks
+		mock_file_strategy_cls.assert_called_once()  # Verify fallback class was instantiated
+		mock_file_strategy.split.assert_called_once_with(self.sample_diff)

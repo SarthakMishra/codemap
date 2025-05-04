@@ -3,10 +3,62 @@
 from textwrap import dedent
 
 DEFAULT_CONFIG = {
+	"cache_dir": ".codemap_cache",
 	# LLM configuration
 	"llm": {
 		"model": "openai/gpt-4o-mini",
 		"api_base": None,
+	},
+	# Embedding configuration
+	"embedding": {
+		"model_name": "voyage-code-3",  # Only voyage models are supported
+		"dimension": 1024,
+		"dimension_metric": "cosine",
+		"max_retries": 3,
+		"retry_delay": 5,
+		"max_content_length": 5000,
+		"qdrant_location": ":memory:",  # Local storage location, ignored when url is set
+		"qdrant_collection_name": "codemap_vectors",
+		"batch_size": 32,  # Batch size for embedding generation
+		"qdrant_batch_size": 100,  # Batch size for Qdrant operations
+		"url": "http://localhost:6333",  # URL for Docker Compose Qdrant service
+		"api_key": None,  # Not needed for local Docker Compose setup
+		"timeout": 30,  # Connection timeout in seconds
+		"prefer_grpc": True,  # Whether to prefer gRPC over REST for Qdrant
+		"chunking": {
+			"max_hierarchy_depth": 2,  # Maximum depth for hierarchy extraction in chunks
+			"max_file_lines": 1000,  # Maximum lines for whole-file chunks
+		},
+	},
+	# RAG (Retrieval-Augmented Generation) configuration
+	"rag": {
+		"max_context_length": 8000,  # Maximum context length for LLM prompt
+		"max_context_results": 10,  # Maximum number of search results to include in context
+		"similarity_threshold": 0.75,  # Minimum similarity score for relevant results
+		"system_prompt": None,  # Custom system prompt override (defaults to built-in prompt)
+		"include_file_content": True,  # Whether to include full file content in context
+		"include_metadata": True,  # Whether to include metadata in context
+	},
+	# Sync configuration
+	"sync": {
+		# Patterns to exclude from syncing (in addition to .gitignore)
+		"exclude_patterns": [
+			r"^node_modules/",
+			r"^\.venv/",
+			r"^venv/",
+			r"^env/",
+			r"^__pycache__/",
+			r"^\.mypy_cache/",
+			r"^\.pytest_cache/",
+			r"^\.ruff_cache/",
+			r"^dist/",
+			r"^build/",
+			r"^\.git/",
+			r"\.pyc$",
+			r"\.pyo$",
+			r"\.so$",
+			r"\.dll$",
+		],
 	},
 	# Gen command configuration
 	"gen": {
@@ -55,6 +107,40 @@ DEFAULT_CONFIG = {
 		"strategy": "file",
 		# Whether to bypass git hooks with --no-verify when committing
 		"bypass_hooks": False,
+		# Diff Splitter configuration
+		"diff_splitter": {
+			"similarity_threshold": 0.4,
+			"directory_similarity_threshold": 0.3,
+			"min_chunks_for_consolidation": 2,
+			"max_chunks_before_consolidation": 20,
+			"max_file_size_for_llm": 50000,  # 50KB
+			"max_log_diff_size": 1000,
+			"model_name": "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
+			"default_code_extensions": [
+				"js",
+				"jsx",
+				"ts",
+				"tsx",
+				"py",
+				"java",
+				"c",
+				"cpp",
+				"h",
+				"hpp",
+				"cc",
+				"cs",
+				"go",
+				"rb",
+				"php",
+				"rs",
+				"swift",
+				"scala",
+				"kt",
+				"sh",
+				"pl",
+				"pm",
+			],
+		},
 		# Commit convention settings
 		"convention": {
 			"types": [
@@ -215,5 +301,9 @@ DEFAULT_CONFIG = {
 			# Whether to use PR templates from workflow strategies
 			"use_workflow_templates": True,
 		},
+	},
+	# Ask command configuration
+	"ask": {
+		"interactive_chat": False,  # Default to non-interactive mode
 	},
 }
