@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 import pytest
 from sqlmodel import select
 
+from codemap.db.engine import get_engine, get_session
 from codemap.db.models import ChatHistory
 
 
@@ -37,36 +38,52 @@ def test_chat_history_timestamp_default():
 
 
 @pytest.mark.asyncio
-async def test_chat_history_db_interaction(test_session, sample_chat_history):
+async def test_chat_history_db_interaction():
 	"""Test ChatHistory database interactions."""
-	# Add to session
-	test_session.add(sample_chat_history)
-	test_session.commit()
+	# Create a fresh sample chat history
+	sample_chat = ChatHistory(
+		session_id="test-db-session",
+		user_query="What is the meaning of life?",
+		ai_response="42",
+		context='{"file": "universe.py"}',
+		tool_calls='[{"name": "lookup", "args": {"topic": "meaning of life"}}]',
+	)
 
-	# ID should be set after commit
-	assert sample_chat_history.id is not None
+	# Get a fresh engine
+	engine = await get_engine()
 
-	# Query back
-	result = test_session.exec(select(ChatHistory).where(ChatHistory.session_id == "test-session-123")).first()
+	# Use the engine directly
+	with get_session(engine) as session:
+		# Add to session
+		session.add(sample_chat)
+		session.commit()
 
-	assert result is not None
-	assert result.user_query == "What is the meaning of life?"
-	assert result.ai_response == "42"
+		# ID should be set after commit
+		assert sample_chat.id is not None
 
-	# Test update
-	result.ai_response = "The answer is 42"
-	test_session.commit()
+		# Query back
+		result = session.exec(select(ChatHistory).where(ChatHistory.session_id == "test-db-session")).first()
 
-	# Query again
-	updated = test_session.exec(select(ChatHistory).where(ChatHistory.id == result.id)).first()
+		assert result is not None
+		assert result.user_query == "What is the meaning of life?"
+		assert result.ai_response == "42"
 
-	assert updated.ai_response == "The answer is 42"
+		# Test update
+		result.ai_response = "The answer is 42"
+		session.commit()
 
-	# Test delete
-	test_session.delete(result)
-	test_session.commit()
+		# Query again
+		updated = session.exec(select(ChatHistory).where(ChatHistory.id == result.id)).first()
 
-	# Query again - should be gone
-	deleted = test_session.exec(select(ChatHistory).where(ChatHistory.id == result.id)).first()
+		# Make sure updated is not None before checking its attributes
+		assert updated is not None
+		assert updated.ai_response == "The answer is 42"
 
-	assert deleted is None
+		# Test delete
+		session.delete(result)
+		session.commit()
+
+		# Query again - should be gone
+		deleted = session.exec(select(ChatHistory).where(ChatHistory.id == result.id)).first()
+
+		assert deleted is None

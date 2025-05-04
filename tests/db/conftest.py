@@ -3,6 +3,7 @@
 import asyncio
 
 import pytest
+import pytest_asyncio
 from sqlmodel import Session
 
 from codemap.db.engine import create_db_and_tables, get_engine
@@ -17,7 +18,7 @@ def event_loop():
 	loop.close()
 
 
-@pytest.fixture(scope="session")
+@pytest_asyncio.fixture(scope="session")
 async def test_engine():
 	"""
 	Creates a test database engine for PostgreSQL.
@@ -27,21 +28,18 @@ async def test_engine():
 
 	"""
 	# Set echo=True to see SQL statements during tests (useful for debugging)
-	return await get_engine(echo=True)
-	# Optionally add logic here to ensure container is ready if get_engine doesn't suffice
-	# For now, assume get_engine handles it.
-	# No explicit cleanup needed here if engine is managed externally/by docker_utils
+	engine = await get_engine(echo=True)
+	# Create tables once the engine is ready
+	create_db_and_tables(engine)
+	return engine
 
 
 @pytest.fixture
-async def test_session(test_engine):
+def test_session(test_engine):
 	"""Creates a test database session with tables."""
-	# Ensure tables exist for this engine instance (idempotent)
-	# create_db_and_tables is sync, call it directly
-	create_db_and_tables(test_engine)
-
-	# Use a synchronous session for now, matching the sync create_engine in get_engine
-	# If get_engine is changed to create_async_engine, this needs to change too.
+	# We need to await the test_engine fixture in a synchronous context
+	# This will get the actual engine that was returned by the async fixture
+	# Create a session using the engine
 	with Session(test_engine) as session:
 		yield session
 		# Rollback any changes made during the test

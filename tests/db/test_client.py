@@ -3,9 +3,10 @@
 import json
 
 import pytest
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from codemap.db.client import DatabaseClient
+from codemap.db.engine import get_engine
 from codemap.db.models import ChatHistory
 
 # Removed mock_config_loader fixture as initialization no longer relies on cache_dir config
@@ -19,13 +20,16 @@ from codemap.db.models import ChatHistory
 
 # Mark test as async because DatabaseClient init is now async
 @pytest.mark.asyncio
-async def test_client_add_chat_message(test_session):  # Use test_session fixture
+async def test_client_add_chat_message():
 	"""Test adding a chat message using the client."""
 	# Create client instance - this will trigger async initialization
 	# which uses the real engine via get_engine
 	client = DatabaseClient()
 
-	# Ensure the client's engine was initialized (it uses the test_engine fixture implicitly via get_engine)
+	# Explicitly initialize the client
+	await client.initialize()
+
+	# Ensure the client's engine was initialized
 	assert client.engine is not None
 
 	# Add a message
@@ -46,31 +50,41 @@ async def test_client_add_chat_message(test_session):  # Use test_session fixtur
 	assert result.context == json.dumps({"test": "context"})
 	assert result.tool_calls == json.dumps([{"name": "test_tool"}])
 
-	# Verify it's in the database using the test_session fixture
-	db_result = test_session.exec(select(ChatHistory).where(ChatHistory.id == result.id)).first()
-
-	assert db_result is not None
-	assert db_result.user_query == "Test query from client"
+	# Verify it's in the database using the engine directly
+	engine = await get_engine()
+	with Session(engine) as session:
+		db_result = session.exec(select(ChatHistory).where(ChatHistory.id == result.id)).first()
+		assert db_result is not None
+		assert db_result.user_query == "Test query from client"
 
 
 # Mark test as async because DatabaseClient init is now async
 @pytest.mark.asyncio
-async def test_client_get_chat_history(test_session):  # Use test_session fixture
+async def test_client_get_chat_history():
 	"""Test retrieving chat history using the client."""
-	client = DatabaseClient()  # Triggers async init
+	client = DatabaseClient()
+
+	# Explicitly initialize the client
+	await client.initialize()
+
 	assert client.engine is not None
 
+	# Clean up any existing data with the same session ID to avoid test interference
+	session_id = "test-history-session-unique"
+	engine = await get_engine()
+	with Session(engine) as session:
+		existing = session.exec(select(ChatHistory).where(ChatHistory.session_id == session_id)).all()
+		for item in existing:
+			session.delete(item)
+		session.commit()
+
 	# Add a few messages
-	session_id = "test-history-session"
 	client.add_chat_message(session_id=session_id, user_query="Query 1")
-	# Simulate some time passing for ordering if needed, though default timestamp should work
-	# await asyncio.sleep(0.01)
 	client.add_chat_message(session_id=session_id, user_query="Query 2")
-	# await asyncio.sleep(0.01)
 	client.add_chat_message(session_id=session_id, user_query="Query 3")
 
 	# Different session
-	client.add_chat_message(session_id="other-session", user_query="Other query")
+	client.add_chat_message(session_id="other-session-unique", user_query="Other query")
 
 	# Get history for our session
 	history = client.get_chat_history(session_id)
@@ -92,13 +106,17 @@ async def test_client_get_chat_history(test_session):  # Use test_session fixtur
 
 # Mark test as async because DatabaseClient init is now async
 @pytest.mark.asyncio
-async def test_client_update_chat_response(test_session):  # Use test_session fixture
+async def test_client_update_chat_response():
 	"""Test updating the AI response for a chat message."""
 	client = DatabaseClient()
+
+	# Explicitly initialize the client
+	await client.initialize()
+
 	assert client.engine is not None
 
 	# Add a message
-	session_id = "test-update-session"
+	session_id = "test-update-session-unique"
 	initial_message = client.add_chat_message(
 		session_id=session_id, user_query="Initial query", ai_response="Initial response"
 	)
@@ -111,9 +129,11 @@ async def test_client_update_chat_response(test_session):  # Use test_session fi
 	assert success is True
 
 	# Verify the update in the database
-	updated_entry = test_session.get(ChatHistory, message_id)
-	assert updated_entry is not None
-	assert updated_entry.ai_response == new_response
+	engine = await get_engine()
+	with Session(engine) as session:
+		updated_entry = session.get(ChatHistory, message_id)
+		assert updated_entry is not None
+		assert updated_entry.ai_response == new_response
 
 	# Test updating non-existent ID
 	non_existent_id = 99999
