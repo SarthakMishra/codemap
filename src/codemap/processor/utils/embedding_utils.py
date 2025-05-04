@@ -1,101 +1,166 @@
 """Utilities for generating text embeddings."""
 
 import logging
-from typing import TYPE_CHECKING
+import os
+from typing import cast
 
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from tenacity import retry, stop_after_attempt, wait_fixed
+import voyageai
 
-from codemap.config import DEFAULT_CONFIG
-
-if TYPE_CHECKING:
-	import numpy as np
+from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
-# Configuration from DEFAULT_CONFIG
-MODEL_NAME = DEFAULT_CONFIG["embedding"]["model_name"]
-EMBEDDING_DIMENSION = DEFAULT_CONFIG["embedding"]["dimension"]
-MAX_EMBEDDING_ATTEMPTS = 3
-RETRY_WAIT_SECONDS = 2
-
-# Global variable to hold the loaded model (lazy loading)
-_embedding_model: SentenceTransformer | None = None
+# Define retryable exceptions for voyageai (based on potential errors)
+# Note: voyageai.Client handles retries internally based on max_retries parameter
+# We will rely on the client's retry mechanism.
 
 
-def _get_embedding_model() -> SentenceTransformer:
-	"""Loads and returns the SentenceTransformer model (singleton)."""
-	global _embedding_model  # noqa: PLW0603
-	if _embedding_model is None:
-		logger.info("Loading sentence transformer model: %s...", MODEL_NAME)
-		try:
-			_embedding_model = SentenceTransformer(MODEL_NAME)
-			# Break the long line into multiple lines
-			model_dimension = _embedding_model.get_sentence_embedding_dimension()
-			logger.info("Sentence transformer model loaded successfully with dimension %d", model_dimension)
-		except Exception:
-			logger.exception("Failed to load sentence transformer model: %s", MODEL_NAME)
-			# Re-raise to prevent returning None, as the model is essential
-			raise
-	return _embedding_model
+def get_retry_settings(config_loader: ConfigLoader) -> tuple[int, int]:
+	"""Get retry settings from config."""
+	embedding_config = config_loader.get("embedding", {})
+	# Use max_retries directly for voyageai.Client
+	max_retries = embedding_config.get("max_retries", 3)
+	# retry_delay is handled internally by voyageai client's exponential backoff
+	# We can still keep the config value if needed elsewhere, but timeout is more relevant here.
+	# Increased default timeout
+	timeout = embedding_config.get("timeout", 180)  # Default timeout for requests (increased from 60)
+	return max_retries, timeout
 
 
-@retry(stop=stop_after_attempt(MAX_EMBEDDING_ATTEMPTS), wait=wait_fixed(RETRY_WAIT_SECONDS))
-def generate_embedding(text: str) -> list[float] | None:
+async def generate_embeddings_batch(
+	texts: list[str], model: str | None = None, config_loader: ConfigLoader | None = None
+) -> list[list[float]] | None:
 	"""
-	Generates an embedding for the given text using the configured model.
+	Generates embeddings for a batch of texts using the Voyage AI async client.
 
 	Args:
-	    text (str): The text to embed.
+	    texts (List[str]): A list of text strings to embed.
+	    model (str): The embedding model to use (defaults to config value).
+	    config_loader: Configuration loader instance.
 
 	Returns:
-	    Optional[List[float]]: The embedding vector as a list of floats,
-	                           or None if embedding fails after retries.
+	    Optional[List[List[float]]]: A list of embedding vectors,
+	                                 or None if embedding fails after retries.
 
 	"""
-	if not text or not text.strip():
-		logger.warning("Attempted to generate embedding for empty or whitespace-only text.")
+	if not texts:
+		logger.warning("generate_embeddings_batch called with empty list.")
+		return []
+
+	# Create ConfigLoader if not provided
+	if config_loader is None:
+		config_loader = ConfigLoader()
+
+	embedding_config = config_loader.get("embedding", {})
+
+	# Use model from parameter or fallback to config
+	embedding_model = model or embedding_config.get("model_name", "voyage-code-3")
+
+	# Get retry and timeout settings from config
+	max_retries, timeout = get_retry_settings(config_loader)
+
+	# Ensure VOYAGE_API_KEY is available (voyageai client checks this, but explicit check is good)
+	if "voyage" in embedding_model and "VOYAGE_API_KEY" not in os.environ:
+		logger.error("VOYAGE_API_KEY environment variable not set, but required for model '%s'", embedding_model)
 		return None
 
 	try:
-		model = _get_embedding_model()
-		logger.debug(f"Generating embedding for text (length: {len(text)}, preview: '{text[:100]}...')")
-		# Encode returns a numpy array
-		embedding_tensor = model.encode(text, convert_to_tensor=True)
-		embedding_array: np.ndarray = embedding_tensor.cpu().numpy()
+		logger.info(f"Generating embeddings for {len(texts)} texts using model: {embedding_model} via voyageai client")
 
-		# Check dimension
-		embedding_dimension = embedding_array.shape[0]
-		# Declare global before using it
-		global EMBEDDING_DIMENSION  # noqa: PLW0603
-		if embedding_dimension != EMBEDDING_DIMENSION:
-			logger.warning(
-				f"Embedding dimension mismatch. Expected {EMBEDDING_DIMENSION}, got {embedding_dimension}. "
-				f"Updating EMBEDDING_DIMENSION to match the model."
+		# Instantiate the async client with retry and timeout settings
+		# API key is automatically picked up from VOYAGE_API_KEY env var by default
+		# Explicitly reference voyageai.AsyncClient
+		# type: ignore because linter incorrectly flags AsyncClient as not exported
+		vo = voyageai.AsyncClient(max_retries=max_retries, timeout=timeout)  # type: ignore[arg-type]
+
+		# Call the voyageai embed method
+		# Use keyword argument 'texts=' for clarity and future compatibility
+		result = await vo.embed(texts=texts, model=embedding_model)
+
+		# Check response structure (based on typical patterns, might need adjustment)
+		# Assuming result has an 'embeddings' attribute which is a list of lists of floats
+		if result and hasattr(result, "embeddings") and isinstance(result.embeddings, list):
+			embeddings = result.embeddings
+			if len(embeddings) == len(texts):
+				# Check if embeddings are valid lists of floats
+				if all(isinstance(emb, list) and all(isinstance(x, float) for x in emb) for emb in embeddings):
+					logger.debug(f"Successfully generated {len(embeddings)} embeddings.")
+					# Use cast to assure the type checker
+					return cast("list[list[float]]", embeddings)
+				logger.error("Generated embeddings list contains non-float or non-list items.")
+				return None
+			logger.error(
+				"Mismatch between input texts (%d) and generated embeddings (%d).", len(texts), len(embeddings)
 			)
-			EMBEDDING_DIMENSION = embedding_dimension
+			return None  # Indicate partial failure
+		logger.error("Unexpected response structure from voyageai.embed: %s", result)
+		return None  # Indicate unexpected response
 
-		# Convert numpy array to list of floats
-		embedding_list = embedding_array.tolist()
-		logger.debug(f"Successfully generated embedding with dimension {len(embedding_list)}")
-		return embedding_list
-
-	except Exception:  # No need to capture the exception as 'e' if not used
-		# Logger exception handles the traceback
-		logger.exception("Failed to generate embedding for text")
-		# Return None here; the @retry decorator will handle retries
+	except Exception:
+		# Catch specific Voyage AI errors (includes API errors, rate limits, etc.)
+		# Catch any unexpected errors during the API call
+		# Use logger.exception without redundant variable (per TRY401)
+		logger.exception("Error during voyageai embedding generation")
 		return None
 
 
-# Example Usage (can be removed later)
-if __name__ == "__main__":
-	logging.basicConfig(level=logging.INFO)
-	test_text = "def example_function(param1: int) -> str:"
-	embedding = generate_embedding(test_text)
-	if embedding:
-		pass
-	else:
-		pass
+async def generate_embedding(
+	text: str, model: str | None = None, config_loader: ConfigLoader | None = None
+) -> list[float] | None:
+	"""
+	Generates an embedding for a single text using the Voyage AI client.
 
-	empty_embedding = generate_embedding("")
+	Args:
+	    text (str): The text to embed.
+	    model (str): The embedding model to use.
+	    config_loader: Configuration loader instance.
+
+	Returns:
+	    Optional[List[float]]: The embedding vector, or None if embedding fails.
+
+	"""
+	if not text:
+		logger.warning("generate_embedding called with empty string.")
+		return None
+
+	# Await the async batch function (now using voyageai client)
+	embeddings_batch = await generate_embeddings_batch(texts=[text], model=model, config_loader=config_loader)
+
+	if embeddings_batch and len(embeddings_batch) == 1:
+		return embeddings_batch[0]
+
+	# Error logging is now handled within generate_embeddings_batch
+	logger.error("Failed to generate embedding for single text using voyageai client.")
+	return None
+
+
+# Example Usage (remains the same, but now uses voyageai backend)
+# import asyncio
+#
+# async def main():
+#     # Ensure VOYAGE_API_KEY is set in your environment for this example
+#     texts_to_embed = [
+#         "This is the first document.",
+#         "This document is the second document.",
+#         "And this is the third one.",
+#         "Is this the first document?",
+#     ]
+#     embeddings = await generate_embeddings_batch(texts_to_embed)
+#
+#     if embeddings:
+#         print(f"Generated {len(embeddings)} embeddings.")
+#         for i, emb in enumerate(embeddings):
+#             print(f"Embedding {i+1} (first 5 dims): {emb[:5]}...")
+#             print(f"Embedding dimension: {len(emb)}")
+#     else:
+#         print("Failed to generate embeddings.")
+#
+#     single_embedding = await generate_embedding("A single piece of text.")
+#     if single_embedding:
+#         print(f"Single embedding (first 5 dims): {single_embedding[:5]}...")
+#         print(f"Single embedding dimension: {len(single_embedding)}")
+#     else:
+#         print("Failed to generate single embedding.")
+#
+# if __name__ == "__main__":
+#    asyncio.run(main())
