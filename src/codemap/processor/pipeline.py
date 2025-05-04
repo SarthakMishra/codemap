@@ -206,6 +206,34 @@ class ProcessingPipeline:
 						if progress and task_id:
 							progress.update(task_id, description="Docker containers ready.", completed=10)
 
+			# Initialize the database client asynchronously
+			if progress and task_id:
+				progress.update(task_id, description="Initializing database client...", completed=15)
+
+			try:
+				await self.db_client.initialize()
+				logger.info("Database client initialized successfully.")
+				if progress and task_id:
+					progress.update(task_id, description="Database initialized.", completed=18)
+			except RuntimeError as e:
+				logger.warning(
+					f"Database initialization failed (RuntimeError): {e}. Some features may not work properly."
+				)
+				if progress and task_id:
+					progress.update(
+						task_id,
+						description="[yellow]Warning:[/yellow] Database initialization failed. Continuing anyway...",
+						completed=18,
+					)
+			except (ConnectionError, OSError) as e:
+				logger.warning(f"Database connection failed: {e}. Some features may not work properly.")
+				if progress and task_id:
+					progress.update(
+						task_id,
+						description="[yellow]Warning:[/yellow] Database connection failed. Continuing anyway...",
+						completed=18,
+					)
+
 			# Initialize Qdrant client (connects, creates collection if needed)
 			if self.qdrant_manager:
 				await self.qdrant_manager.initialize()
@@ -241,10 +269,10 @@ class ProcessingPipeline:
 					task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).", completed=100
 				)
 
-		except Exception as e:
+		except Exception:
 			logger.exception("Failed during async initialization")
 			if progress and task_id:
-				progress.update(task_id, description=f"[red]Error:[/red] Init failed: {e}", completed=100)
+				progress.update(task_id, description="[red]Error:[/red] Init failed", completed=100)
 			# Optionally re-raise or handle specific exceptions
 			raise
 
@@ -270,6 +298,16 @@ class ProcessingPipeline:
 				logger.info("File watcher stopped.")
 			self.watcher = None
 			self._watcher_task = None
+
+		# Cleanup database client
+		if hasattr(self, "db_client") and self.db_client:
+			try:
+				await self.db_client.cleanup()
+				logger.info("Database client cleaned up.")
+			except RuntimeError:
+				logger.exception("Error during database client cleanup")
+			except (ConnectionError, OSError):
+				logger.exception("Connection error during database client cleanup")
 
 		# Other cleanup if needed
 		self.is_async_initialized = False

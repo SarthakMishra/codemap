@@ -1,6 +1,5 @@
 """Client interface for interacting with the database in CodeMap."""
 
-import asyncio
 import logging
 
 from sqlalchemy import asc
@@ -20,14 +19,22 @@ class DatabaseClient:
 		"""
 		Initializes the database client.
 
-		It ensures the database engine is initialized asynchronously and
-		tables are created. The engine connects to the PostgreSQL database
-		managed by docker_utils.
-
+		It sets up the client in an uninitialized state. The actual initialization
+		needs to be performed by calling the async initialize() method.
 		"""
 		self.engine = None  # Initialize engine as None
-		# Initialize asynchronously
-		asyncio.run(self._initialize_engine())
+		self.initialized = False  # Flag to track initialization status
+		# Remove asyncio.run call
+
+	async def initialize(self) -> None:
+		"""
+		Asynchronously initialize the database client.
+
+		This should be called after creating the client and before using it.
+		"""
+		await self._initialize_engine()
+		self.initialized = True
+		logger.info("Database client successfully initialized")
 
 	async def _initialize_engine(self) -> None:
 		"""Asynchronously gets the engine and creates tables."""
@@ -46,24 +53,26 @@ class DatabaseClient:
 				logger.exception("An unexpected error occurred during database initialization")
 				raise
 
+	async def cleanup(self) -> None:
+		"""
+		Asynchronously cleanup the database client resources.
+
+		This should be called before discarding the client.
+		"""
+		if self.engine:
+			# No need to close Engine in SQLAlchemy 2.0, but dispose will close connections
+			if hasattr(self.engine, "dispose"):
+				self.engine.dispose()
+			self.engine = None
+		self.initialized = False
+		logger.info("Database client cleaned up")
+
 	# Ensure engine is initialized before DB operations
 	def _ensure_engine_initialized(self) -> None:
-		if self.engine is None:
-			# This case should ideally be prevented by __init__ or handled differently.
-			# Running async code synchronously here can be problematic.
-			# Option 1: Make all methods async (better design)
-			# Option 2: Block here (simpler for now, but not ideal)
-			logger.warning("Engine was not initialized. Attempting synchronous initialization.")
-			try:
-				asyncio.run(self._initialize_engine())
-			except Exception as e:  # Catch specific exception for chaining
-				logger.exception("Failed synchronous initialization attempt")
-				msg = "Database engine could not be initialized"
-				raise RuntimeError(msg) from e  # Chain the original exception
-			if self.engine is None:
-				# Still None after attempt
-				msg = "Database engine failed to initialize."
-				raise RuntimeError(msg)
+		if not self.initialized or self.engine is None:
+			msg = "Database client is not initialized. Call initialize() method first."
+			logger.error(msg)
+			raise RuntimeError(msg)
 
 	def add_chat_message(
 		self,

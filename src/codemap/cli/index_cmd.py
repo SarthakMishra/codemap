@@ -68,6 +68,15 @@ VerboseFlag = Annotated[
 	),
 ]
 
+ConfigOpt = Annotated[
+	Path | None,
+	typer.Option(
+		"--config",
+		"-c",
+		help="Path to config file",
+	),
+]
+
 
 # --- Helper async function for the main logic ---
 async def _index_repo_async(
@@ -143,12 +152,12 @@ async def _index_repo_async(
 
 
 def index_command(
-	ctx: typer.Context,
 	path: PathArg = Path(),
 	sync: SyncOpt = True,
 	watch: WatchOpt = False,
 	log_level: LogLevelOpt = "INFO",
 	is_verbose: VerboseFlag = False,
+	config: ConfigOpt = None,
 ) -> None:
 	"""
 	Index the repository: Process files, generate embeddings, and store in the vector database.
@@ -164,16 +173,14 @@ def index_command(
 		logging.getLogger().setLevel(log_level.upper())
 		logger.info(f"Log level set to {log_level.upper()}")
 
-	# Get config loader from context
-	config_loader = ctx.meta.get("config_loader")
-	if not config_loader or not isinstance(config_loader, ConfigLoader):
-		exit_with_error("ConfigLoader not found in context. Make sure the application is configured correctly.")
-
-	# Cast to ConfigLoader to satisfy type checker
-	config_loader_instance = cast("ConfigLoader", config_loader)
-
 	try:
-		asyncio.run(_index_repo_async(path, sync, watch, config_loader_instance))
+		target_path = path.resolve()
+
+		# Load config directly instead of getting from context
+		config_loader = ConfigLoader(str(config) if config else None)
+
+		# Run the indexing operation
+		asyncio.run(_index_repo_async(target_path, sync, watch, config_loader))
 	except KeyboardInterrupt:
 		console.print("\n[yellow]Operation cancelled by user.[/yellow]")
 		sys.exit(1)

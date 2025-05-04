@@ -2,13 +2,14 @@
 
 import asyncio  # Added for running async ensure_postgres_running
 import logging
+import os
 from collections.abc import Generator
 from contextlib import contextmanager
 
 from sqlalchemy.engine import Engine
+from sqlalchemy.pool import StaticPool  # Re-add for SQLite fallback
 from sqlmodel import Session, SQLModel, create_engine
 
-# Removed StaticPool import as it's SQLite specific
 # Import necessary docker utilities and constants
 from codemap.utils.docker_utils import (
 	POSTGRES_ENV,
@@ -27,8 +28,9 @@ _engine_lock = asyncio.Lock()  # Lock for async engine creation/check
 # Updated function signature: removed db_path, no longer needed for Postgres
 async def get_engine(echo: bool = False) -> Engine:
 	"""
-	Gets or creates the SQLAlchemy engine for the PostgreSQL database.
+	Gets or creates the SQLAlchemy engine for the database.
 
+	Tries to use PostgreSQL first, falling back to SQLite in-memory if PostgreSQL is not available.
 	Ensures the PostgreSQL Docker container is running before creating the engine.
 
 	Args:
@@ -38,11 +40,25 @@ async def get_engine(echo: bool = False) -> Engine:
 	        Engine: The SQLAlchemy Engine instance.
 
 	Raises:
-	        RuntimeError: If the PostgreSQL container cannot be started or connection fails.
-
+	        RuntimeError: If neither PostgreSQL nor SQLite can be initialized.
 	"""
+	# Check if we should skip Docker and use SQLite (for testing or non-Docker environments)
+	use_sqlite = os.environ.get("CODEMAP_USE_SQLITE", "").lower() in ("true", "1", "yes")
+
+	if use_sqlite:
+		return _create_sqlite_engine(echo)
+
+	# Try PostgreSQL first
+	try:
+		return await _create_postgres_engine(echo)
+	except (RuntimeError, ConnectionError, TimeoutError, OSError) as e:
+		logger.warning(f"PostgreSQL connection failed: {e}. Falling back to SQLite in-memory database.")
+		return _create_sqlite_engine(echo)
+
+
+async def _create_postgres_engine(echo: bool = False) -> Engine:
+	"""Creates and returns a PostgreSQL engine."""
 	# Construct the PostgreSQL connection URL
-	# Uses values imported from docker_utils
 	db_user = POSTGRES_ENV.get("POSTGRES_USER", "postgres")
 	db_password = POSTGRES_ENV.get("POSTGRES_PASSWORD", "postgres")
 	db_name = POSTGRES_ENV.get("POSTGRES_DB", "codemap")
@@ -60,16 +76,14 @@ async def get_engine(echo: bool = False) -> Engine:
 		success, message = await ensure_postgres_running()
 		if not success:
 			logger.error(f"Failed to ensure PostgreSQL is running: {message}")
-			# Consider a more specific exception type
 			msg = f"PostgreSQL service setup failed: {message}"
 			raise RuntimeError(msg)
 		logger.info("PostgreSQL container check successful.")
 
-		# Create the engine (using synchronous create_engine for now)
-		# Removed connect_args and poolclass specific to SQLite
+		# Create the engine
 		try:
 			engine = create_engine(database_url, echo=echo)
-			# Test connection - optional but good practice
+			# Test connection
 			with engine.connect():
 				logger.info("Successfully connected to PostgreSQL.")
 
@@ -78,7 +92,27 @@ async def get_engine(echo: bool = False) -> Engine:
 			return engine
 		except Exception:
 			logger.exception(f"Failed to create PostgreSQL engine or connect to {database_url}")
-			raise  # Re-raise the original exception
+			raise
+
+
+def _create_sqlite_engine(echo: bool = False) -> Engine:
+	"""Creates and returns an SQLite in-memory engine."""
+	database_url = "sqlite:///:memory:"
+
+	if database_url in _engine_cache:
+		return _engine_cache[database_url]
+
+	logger.info("Creating SQLite in-memory database as fallback")
+	engine = create_engine(
+		database_url,
+		echo=echo,
+		connect_args={"check_same_thread": False},
+		poolclass=StaticPool,
+	)
+
+	_engine_cache[database_url] = engine
+	logger.info("SQLModel engine created with SQLite in-memory database")
+	return engine
 
 
 def create_db_and_tables(engine_instance: Engine) -> None:
