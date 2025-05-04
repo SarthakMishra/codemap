@@ -53,6 +53,7 @@ dependencies = [
     "httpx>=0.28.1",
     "docker>=7.1.0",
     "asyncer>=0.0.8",
+    "psycopg2-binary>=2.9.10",
 ]
 
 [project.urls]
