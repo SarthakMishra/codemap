@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from codemap.utils.config_loader import ConfigLoader
+
 from .config import DEFAULT_LLM_REQUEST_PARAMS
 from .errors import LLMError
 
@@ -20,6 +22,7 @@ def call_llm_api(
 	api_key: str,
 	api_base: str | None = None,
 	json_schema: dict | None = None,
+	config_loader: ConfigLoader | None = None,
 	**kwargs: dict[str, str | int | float | bool | None],
 ) -> str:
 	"""
@@ -31,6 +34,7 @@ def call_llm_api(
 	    api_key: The API key to use
 	    api_base: Optional custom API base URL
 	    json_schema: Optional JSON schema for response validation
+	    config_loader: Optional ConfigLoader instance for additional configuration
 	    **kwargs: Additional parameters to pass to the LLM API
 
 	Returns:
@@ -47,14 +51,28 @@ def call_llm_api(
 		logger.exception(msg)
 		raise LLMError(msg) from None
 
-	# Set up request parameters
-	request_params = {
-		"model": model,
-		"messages": [{"role": "user", "content": prompt}],
-		"api_key": api_key,
-		**DEFAULT_LLM_REQUEST_PARAMS,
-		**kwargs,
-	}
+	# Get request parameters from config if available
+	request_params = DEFAULT_LLM_REQUEST_PARAMS.copy()
+
+	if config_loader is not None:
+		llm_config = config_loader.get_llm_config()
+		# Update request params with values from config
+		if "temperature" in llm_config:
+			request_params["temperature"] = llm_config.get("temperature")
+		if "max_tokens" in llm_config:
+			request_params["max_tokens"] = llm_config.get("max_tokens")
+
+	# Override with any passed parameters
+	request_params.update(kwargs)
+
+	# Set up final request parameters
+	request_params.update(
+		{
+			"model": model,
+			"messages": [{"role": "user", "content": prompt}],
+			"api_key": api_key,
+		}
+	)
 
 	# Add API base if provided
 	if api_base:
