@@ -11,8 +11,33 @@ DEFAULT_CONFIG = {
 	},
 	# Embedding configuration
 	"embedding": {
-		"model_name": "sentence-transformers/all-MiniLM-L6-v2",
-		"dimension": 384,
+		"model_name": "voyage-code-3",  # Only voyage models are supported
+		"dimension": 1024,
+		"dimension_metric": "cosine",
+		"max_retries": 3,
+		"retry_delay": 5,
+		"max_content_length": 5000,
+		"qdrant_location": ":memory:",  # Local storage location, ignored when url is set
+		"qdrant_collection_name": "codemap_vectors",
+		"batch_size": 32,  # Batch size for embedding generation
+		"qdrant_batch_size": 100,  # Batch size for Qdrant operations
+		"url": "http://localhost:6333",  # URL for Docker Compose Qdrant service
+		"api_key": None,  # Not needed for local Docker Compose setup
+		"timeout": 30,  # Connection timeout in seconds
+		"prefer_grpc": True,  # Whether to prefer gRPC over REST for Qdrant
+		"chunking": {
+			"max_hierarchy_depth": 2,  # Maximum depth for hierarchy extraction in chunks
+			"max_file_lines": 1000,  # Maximum lines for whole-file chunks
+		},
+	},
+	# RAG (Retrieval-Augmented Generation) configuration
+	"rag": {
+		"max_context_length": 8000,  # Maximum context length for LLM prompt
+		"max_context_results": 10,  # Maximum number of search results to include in context
+		"similarity_threshold": 0.75,  # Minimum similarity score for relevant results
+		"system_prompt": None,  # Custom system prompt override (defaults to built-in prompt)
+		"include_file_content": True,  # Whether to include full file content in context
+		"include_metadata": True,  # Whether to include metadata in context
 	},
 	# Sync configuration
 	"sync": {
@@ -75,11 +100,6 @@ DEFAULT_CONFIG = {
 		],
 		# Default LOD level for processing
 		"default_lod_level": "signatures",
-		# Vector database configuration
-		"vector": {
-			"summarize_bodies": False,  # Whether to summarize function/method bodies
-			"min_body_length_for_summary": 1000,  # Minimum characters to trigger summarization
-		},
 	},
 	# Commit feature configuration
 	"commit": {
