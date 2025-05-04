@@ -12,6 +12,7 @@ from codemap import __version__
 from codemap.cli.ask_cmd import ask_command
 from codemap.cli.commit_cmd import commit_command
 from codemap.cli.gen_cmd import gen_command
+from codemap.cli.index_cmd import index_command
 from codemap.cli.pr_cmd import pr_command
 
 logger = logging.getLogger(__name__)
@@ -64,6 +65,7 @@ app.command(name="gen")(gen_command)
 app.command(name="commit")(commit_command)
 app.command(name="pr")(pr_command)
 app.command(name="ask")(ask_command)
+app.command(name="index")(index_command)
 
 
 def main() -> int:

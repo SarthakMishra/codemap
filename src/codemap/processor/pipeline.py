@@ -9,6 +9,7 @@ synchronization with the Git repository, and provides semantic search capabiliti
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import TYPE_CHECKING, Any, Self
 
@@ -30,6 +31,7 @@ from codemap.processor.vector.synchronizer import VectorSynchronizer
 from codemap.utils.config_loader import ConfigError, ConfigLoader
 from codemap.utils.docker_utils import ensure_qdrant_running
 from codemap.utils.path_utils import find_project_root
+from codemap.watcher.file_watcher import Watcher
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -152,6 +154,9 @@ class ProcessingPipeline:
 
 		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
 		self.is_async_initialized = False
+		self.watcher: Watcher | None = None
+		self._watcher_task: asyncio.Task | None = None
+		self._sync_lock = asyncio.Lock()
 
 	async def async_init(
 		self, sync_on_init: bool = True, progress: Progress | None = None, task_id: TaskID | None = None
@@ -252,11 +257,37 @@ class ProcessingPipeline:
 		else:
 			logger.warning("Qdrant Manager already None during stop.")
 
+		# Stop the watcher if it's running
+		if self._watcher_task and not self._watcher_task.done():
+			logger.info("Stopping file watcher...")
+			self._watcher_task.cancel()
+			try:
+				await self._watcher_task  # Allow cancellation to propagate
+			except asyncio.CancelledError:
+				logger.info("File watcher task cancelled.")
+			if self.watcher:
+				self.watcher.stop()
+				logger.info("File watcher stopped.")
+			self.watcher = None
+			self._watcher_task = None
+
 		# Other cleanup if needed
 		self.is_async_initialized = False
 		logger.info("ProcessingPipeline stopped.")
 
 	# --- Synchronization --- #
+
+	async def _sync_callback_wrapper(self) -> None:
+		"""Async wrapper for the sync callback to handle locking."""
+		if self._sync_lock.locked():
+			logger.info("Sync already in progress, skipping watcher-triggered sync.")
+			return
+
+		async with self._sync_lock:
+			logger.info("Watcher triggered sync starting...")
+			# Run sync without progress bars from watcher
+			await self.sync_databases(progress=None, task_id=None)
+			logger.info("Watcher triggered sync finished.")
 
 	async def sync_databases(self, progress: Progress | None = None, task_id: TaskID | None = None) -> None:
 		"""
@@ -273,10 +304,68 @@ class ProcessingPipeline:
 				progress.update(task_id, description="[red]Error:[/red] Not initialized", completed=100)
 			return
 
-		logger.info("Starting vector index synchronization using VectorSynchronizer...")
-		# VectorSynchronizer handles its own progress updates internally now
-		await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
-		# Final status message/logging is handled by sync_index
+		# Acquire lock only if not already held (for watcher calls)
+		if not self._sync_lock.locked():
+			async with self._sync_lock:
+				logger.info("Starting vector index synchronization using VectorSynchronizer...")
+				# VectorSynchronizer handles its own progress updates internally now
+				await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+				# Final status message/logging is handled by sync_index
+		else:
+			# If lock is already held (likely by watcher call), just run it
+			logger.info("Starting vector index synchronization (lock already held)...")
+			await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+
+	# --- Watcher Methods --- #
+
+	def initialize_watcher(self, debounce_delay: float = 2.0) -> None:
+		"""
+		Initialize the file watcher.
+
+		Args:
+		    debounce_delay: Delay in seconds before triggering sync after a file change.
+		"""
+		if not self.repo_path:
+			logger.error("Cannot initialize watcher without a repository path.")
+			return
+
+		if self.watcher:
+			logger.warning("Watcher already initialized.")
+			return
+
+		logger.info(f"Initializing file watcher for path: {self.repo_path}")
+		try:
+			self.watcher = Watcher(
+				path_to_watch=self.repo_path,
+				on_change_callback=self._sync_callback_wrapper,  # Use the lock wrapper
+				debounce_delay=debounce_delay,
+			)
+			logger.info("File watcher initialized.")
+		except ValueError:
+			logger.exception("Failed to initialize watcher")
+			self.watcher = None
+		except Exception:
+			logger.exception("Unexpected error initializing watcher.")
+			self.watcher = None
+
+	async def start_watcher(self) -> None:
+		"""Start the file watcher in the background.
+
+		`initialize_watcher` must be called first.
+		"""
+		if not self.watcher:
+			logger.error("Watcher not initialized. Call initialize_watcher() first.")
+			return
+
+		if self._watcher_task and not self._watcher_task.done():
+			logger.warning("Watcher task is already running.")
+			return
+
+		logger.info("Starting file watcher task in the background...")
+		# Create a task to run the watcher's start method asynchronously
+		self._watcher_task = asyncio.create_task(self.watcher.start())
+		# We don't await the task here; it runs independently.
+		# Error handling within the watcher's start method logs issues.
 
 	# --- Retrieval Methods --- #
 
