@@ -1,0 +1,108 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# ConfigLoader and Dependency Injection Guide
+
+## Overview
+The codebase follows a dependency injection pattern for configuration management. This prevents multiple initializations of `ConfigLoader` and ensures consistent configuration throughout the application.
+
+## Core Principles
+
+1. **Never initialize ConfigLoader directly in component classes**
+2. **Pass ConfigLoader from higher-level components downward**
+3. **Always provide sensible fallback values for configuration**
+4. **Define configuration constants in `config.py`**
+
+## How to Use ConfigLoader
+
+### Passing ConfigLoader Down
+
+Always accept ConfigLoader as a parameter in your class constructors:
+
+```python
+def __init__(
+    self,
+    # Other parameters...
+    config_loader: ConfigLoader | None = None,
+) -> None:
+    # Allow None with fallback
+    self.config_loader = config_loader or ConfigLoader()
+    
+    # Get your configuration values
+    my_config = self.config_loader.get("section_name", {})
+    # Use with defaults
+    self.my_setting = my_config.get("setting_name", "default_value")
+```
+
+### Chain of Responsibility
+
+Components should follow a chain:
+1. `ProcessingPipeline` is the top-level owner of ConfigLoader
+2. Pipeline passes ConfigLoader to major components
+3. Components pass it to their sub-components
+
+Example from `ProcessingPipeline`:
+
+```python
+# Initialize QdrantManager with config_loader
+self.qdrant_manager = QdrantManager(
+    config_loader=self.config_loader,
+    # Other parameters...
+)
+
+# Pass to VectorSynchronizer
+self.vector_synchronizer = VectorSynchronizer(
+    # Other parameters...
+    config_loader=self.config_loader,
+)
+```
+
+### Using ConfigLoader in Functions
+
+For functions like embedding utilities, provide ConfigLoader as an optional parameter:
+
+```python
+async def generate_embedding(
+    text: str, 
+    model: str | None = None, 
+    config_loader: ConfigLoader | None = None
+) -> list[float] | None:
+    # Create if not provided
+    if config_loader is None:
+        config_loader = ConfigLoader()
+    
+    embedding_config = config_loader.get("embedding", {})
+    # Use config or fallback
+    embedding_model = model or embedding_config.get("model_name", "default_model")
+```
+
+## Default Configuration
+
+Always define default values in `DEFAULT_CONFIG` in [config.py](mdc:src/codemap/config.py):
+
+```python
+# In config.py
+DEFAULT_CONFIG = {
+    "section": {
+        "setting": "default_value",
+        "other_setting": 42,
+    }
+}
+```
+
+Then access it with fall-through defaults in your code:
+
+```python
+# Get from config or use default
+setting = config.get("section", {}).get("setting", "fallback")
+```
+
+## Configuration Sections
+
+- `embedding`: Embedding and vector search settings
+- `processor`: Processing pipeline configuration
+- `sync`: Git synchronization settings
+
+Refer to [config.py](mdc:src/codemap/config.py) for all available sections and their default values.
