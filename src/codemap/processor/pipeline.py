@@ -10,61 +10,63 @@ synchronization with the Git repository, and provides semantic search capabiliti
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
-import numpy as np
+from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
 from rich.progress import Progress, TaskID
 
-from codemap.config import DEFAULT_CONFIG
 from codemap.db.client import DatabaseClient
 from codemap.processor.tree_sitter import TreeSitterAnalyzer
-from codemap.processor.utils.embedding_utils import generate_embedding
 
-# Added Vector specific imports
+# Use async embedding utils
+from codemap.processor.utils.embedding_utils import (
+	generate_embedding,
+)
+
+# Import Qdrant specific classes
 from codemap.processor.vector.chunking import TreeSitterChunker
-from codemap.processor.vector.hnsw_manager import HNSWManager
+from codemap.processor.vector.qdrant_manager import QdrantManager
 from codemap.processor.vector.synchronizer import VectorSynchronizer
 from codemap.utils.config_loader import ConfigError, ConfigLoader
-
-# from codemap.processor.utils.sync_utils import compare_states # Moved to VectorSynchronizer
-from codemap.utils.path_utils import find_project_root, get_cache_path
+from codemap.utils.docker_utils import ensure_qdrant_running
+from codemap.utils.path_utils import find_project_root
 
 if TYPE_CHECKING:
+	from pathlib import Path
+	from types import TracebackType
+
 	from rich.progress import Progress, TaskID
 
 logger = logging.getLogger(__name__)
 
-EXPECTED_METADATA_COLUMNS = 9  # Placeholder, not used in HNSW search
-
 
 class ProcessingPipeline:
 	"""
-	Orchestrates data processing, synchronization, and retrieval for CodeMap using HNSW.
+	Orchestrates data processing, synchronization, and retrieval for CodeMap using Qdrant.
 
-	Manages connections and interactions with HNSW vector database,
+	Manages connections and interactions with the Qdrant vector database,
 	ensuring it is synchronized with the Git repository state. Provides
-	methods for semantic search.
+	methods for semantic search. Uses asyncio for database and embedding
+	operations.
 
 	"""
 
+	# Note: __init__ cannot be async directly. Initialization happens in an async method.
 	def __init__(
 		self,
 		repo_path: Path | None = None,
 		config_loader: ConfigLoader | None = None,
-		sync_on_init: bool = True,  # Add sync_on_init parameter
-		progress: Progress | None = None,
-		task_id: TaskID | None = None,
 	) -> None:
 		"""
-		Initialize the unified processing pipeline.
+		Initialize the processing pipeline synchronously.
+
+		Core async initialization is done via `async_init`.
 
 		Args:
 		    repo_path: Path to the repository root. If None, it will be determined.
 		    config_loader: Application configuration loader. If None, a default one is created.
-		    sync_on_init: If True, run database synchronization during initialization.
-		    progress: Optional rich Progress instance for unified status display.
-		    task_id: Optional rich TaskID for the main initialization/sync task.
+		    _progress: Progress bar instance for initialization tracking.
+		    _task_id: Task ID for the progress bar.
 
 		"""
 		self.repo_path = repo_path or find_project_root()
@@ -76,188 +78,280 @@ class ProcessingPipeline:
 		self.config = self.config_loader.load_config()
 
 		if not isinstance(self.config, dict):
-			# This case should ideally not happen if load_config works correctly
 			logger.error(f"Config loading failed or returned unexpected type: {type(self.config)}")
 			msg = "Failed to load a valid Config object."
 			raise ConfigError(msg)
 
+		# --- Initialize Shared Components (Synchronous) --- #
+		self.analyzer = TreeSitterAnalyzer()
+		self.chunker = TreeSitterChunker(config_loader=self.config_loader)  # Pass ConfigLoader to chunker
 		self.db_client = DatabaseClient(db_path=self.config.get("database_path"))
 
-		logger.info("Initializing Processing Pipeline for repository: %s", self.repo_path)
+		# --- Load Configuration --- #
+		# Get embedding configuration
+		embedding_config = self.config_loader.get("embedding", {})
+		embedding_model = embedding_config.get("model_name")
+		qdrant_dimension = embedding_config.get("dimension")
+		distance_metric = embedding_config.get("dimension_metric", "cosine")
 
-		# --- Initialize Shared Components --- #
-		self.analyzer = TreeSitterAnalyzer()
+		# Make sure embedding_model_name is always a string
+		self.embedding_model_name: str = "voyage-code-3"  # Default
+		if embedding_model and isinstance(embedding_model, str):
+			self.embedding_model_name = embedding_model
 
-		# Get embedding config from loaded config with fallback to DEFAULT_CONFIG
-		embedding_config = self.config.get("embedding", {})
-		self.embedding_model_name = embedding_config.get("model_name", DEFAULT_CONFIG["embedding"]["model_name"])
-		embedding_dimension = embedding_config.get("dimension", DEFAULT_CONFIG["embedding"]["dimension"])
-		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {embedding_dimension}")
+		if not qdrant_dimension:
+			logger.warning("Missing qdrant dimension in configuration, using default 1024")
+			qdrant_dimension = 1024
 
-		# --- Initialize Vector Components --- #
-		vector_config = self.config.get("vector", {})
-		# Default index path within cache
-		default_index_dir = get_cache_path() / "vector_index"
-		index_dir_path = Path(vector_config.get("index_path", default_index_dir))
+		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {qdrant_dimension}")
 
-		# Use higher default values to address the "ef too small" errors
-		self.hnsw_manager = HNSWManager(
-			index_dir_path=index_dir_path,
-			space="cosine",
-			dim=embedding_dimension,
-			max_elements=vector_config.get("max_elements", 100000),  # Increased to 100K
-			m=vector_config.get("m", 128),  # Increased to 128 for high-dim vectors
-			ef_construction=vector_config.get("ef_construction", 2000),  # Increased to 2000
-			ef_query=vector_config.get("ef_query", 4000),  # Increased to 4000
-			allow_replace_deleted=vector_config.get("allow_replace_deleted", False),
-		)
-		# Initialize chunker with its default LODGenerator
-		self.chunker = TreeSitterChunker()
-		self.vector_synchronizer = VectorSynchronizer(
-			self.repo_path, self.hnsw_manager, self.chunker, self.embedding_model_name
-		)
-		logger.info("Vector components initialized.")
-		self.has_vector_db = True  # Vector capability exists
+		# Get Qdrant configuration
+		vector_config = self.config_loader.get("embedding", {})
+		qdrant_location = vector_config.get("qdrant_location")
+		qdrant_collection = vector_config.get("qdrant_collection_name", "codemap_vectors")
+		qdrant_url = vector_config.get("url")
+		qdrant_api_key = vector_config.get("api_key")
 
-		# --- Check if initial sync is needed --- #
-		needs_sync = False
-		if sync_on_init:
-			needs_sync = True
-			logger.info("`sync_on_init` is True. Performing index synchronization...")
+		# Convert distance metric string to enum
+		distance_enum = qdrant_models.Distance.COSINE
+		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT"]:
+			distance_enum = getattr(qdrant_models.Distance, distance_metric.upper())
+
+		# Use URL if provided, otherwise use location (defaults to :memory: in QdrantManager)
+		qdrant_init_args = {
+			"config_loader": self.config_loader,  # Pass ConfigLoader to QdrantManager
+			"collection_name": qdrant_collection,
+			"dim": qdrant_dimension,
+			"distance": distance_enum,
+		}
+
+		if qdrant_url:
+			qdrant_init_args["url"] = qdrant_url
+			if qdrant_api_key:
+				qdrant_init_args["api_key"] = qdrant_api_key
+			logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
+		elif qdrant_location:
+			qdrant_init_args["location"] = qdrant_location
+			logger.info(f"Configuring Qdrant client for local path/memory: {qdrant_location}")
 		else:
-			try:
-				# Check if index has any items
-				if self.hnsw_manager.get_current_count() == 0:
-					logger.info("No existing data in HNSW index. Initial sync is needed.")
-					needs_sync = True
-				else:
-					logger.info(
-						f"Found {self.hnsw_manager.get_current_count()} items in HNSW index. "
-						"Skipping initial sync triggered by emptiness check."
-					)
-					needs_sync = False
-			except Exception:
-				logger.exception("Error checking HNSW state for initial sync. Assuming sync is needed.")
+			# Let QdrantManager use its default (:memory:)
+			logger.info("Configuring Qdrant client for default location (:memory:)")
+
+		# --- Initialize Managers (Synchronous) --- #
+		self.qdrant_manager = QdrantManager(**qdrant_init_args)
+
+		# Initialize VectorSynchronizer with the embedding model name and config_loader
+		self.vector_synchronizer = VectorSynchronizer(
+			self.repo_path,
+			self.qdrant_manager,
+			self.chunker,
+			self.embedding_model_name,
+			self.analyzer,
+			config_loader=self.config_loader,  # Pass ConfigLoader to VectorSynchronizer
+		)
+
+		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
+		self.is_async_initialized = False
+
+	async def async_init(
+		self, sync_on_init: bool = True, progress: Progress | None = None, task_id: TaskID | None = None
+	) -> None:
+		"""
+		Perform asynchronous initialization steps, including Qdrant connection and initial sync.
+
+		Args:
+		    sync_on_init: If True, run database synchronization during initialization.
+		    progress: Optional rich Progress instance for unified status display.
+		    task_id: Optional rich TaskID for the main initialization/sync task.
+
+		"""
+		if self.is_async_initialized:
+			logger.info("Pipeline already async initialized.")
+			return
+
+		init_description = "Initializing pipeline components..."
+		if progress and task_id:
+			progress.update(task_id, description=init_description, completed=0, total=100)
+
+		try:
+			# Get embedding configuration for Qdrant URL
+			embedding_config = self.config_loader.get("embedding", {})
+			qdrant_url = embedding_config.get("url")
+
+			# Check for Docker containers
+			if qdrant_url:
+				if progress and task_id:
+					progress.update(task_id, description="Checking Docker containers...", completed=5)
+
+				# Only check Docker if we're using a URL that looks like localhost/127.0.0.1
+				if "localhost" in qdrant_url or "127.0.0.1" in qdrant_url:
+					logger.info("Ensuring Qdrant container is running")
+					success, message = await ensure_qdrant_running(wait_for_health=True, qdrant_url=qdrant_url)
+
+					if not success:
+						logger.warning(f"Docker check failed: {message}")
+						if progress and task_id:
+							progress.update(
+								task_id,
+								description=f"[yellow]Warning:[/yellow] {message}. Continuing anyway...",
+								completed=8,
+							)
+					else:
+						logger.info(f"Docker container check: {message}")
+						if progress and task_id:
+							progress.update(task_id, description="Docker containers ready.", completed=10)
+
+			# Initialize Qdrant client (connects, creates collection if needed)
+			if self.qdrant_manager:
+				await self.qdrant_manager.initialize()
+				logger.info("Qdrant manager initialized asynchronously.")
+				if progress and task_id:
+					progress.update(task_id, description="Qdrant connected.", completed=20)
+			else:
+				# This case should theoretically not happen if __init__ succeeded
+				msg = "QdrantManager was not initialized in __init__."
+				logger.error(msg)
+				raise RuntimeError(msg)
+
+			needs_sync = False
+			if sync_on_init:
 				needs_sync = True
+				logger.info("`sync_on_init` is True. Performing index synchronization...")
+			else:
+				# Optional: Could add a check here if Qdrant collection is empty
+				# requires another call to qdrant_manager, e.g., get_count()
+				logger.info("Skipping sync on init as requested.")
+				needs_sync = False
 
-		if needs_sync:
-			self.sync_databases(progress=progress, task_id=task_id)
-			if progress and task_id and not needs_sync:
+			# Set initialized flag *before* potentially long sync operation
+			self.is_async_initialized = True
+			logger.info("ProcessingPipeline async core components initialized.")
+
+			if needs_sync:
+				await self.sync_databases(progress=progress, task_id=task_id)
+				# sync_databases handles final progress update on success/failure
+			elif progress and task_id:
+				# Update progress if sync was skipped
 				progress.update(
 					task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).", completed=100
 				)
-		elif progress and task_id:
-			# Ensure progress completes even if sync fails or isn't needed but was checked
-			if not needs_sync:
-				progress.update(
-					task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).", completed=100
-				)
-			# If sync was needed but failed, sync_databases handles final progress state
 
-		logger.info(f"ProcessingPipeline initialized for repo: {self.repo_path}")
+		except Exception as e:
+			logger.exception("Failed during async initialization")
+			if progress and task_id:
+				progress.update(task_id, description=f"[red]Error:[/red] Init failed: {e}", completed=100)
+			# Optionally re-raise or handle specific exceptions
+			raise
 
-	def stop(self) -> None:
-		"""Stops the pipeline and releases resources."""
-		logger.info("Stopping ProcessingPipeline...")
-		# HNSWManager doesn't require explicit closing, but we save on stop
-		if self.hnsw_manager:
-			try:
-				self.hnsw_manager.save()
-				logger.info("HNSW index and metadata saved.")
-			except Exception:
-				logger.exception("Error saving HNSW index/metadata during stop.")
-			self.hnsw_manager = None
+	async def stop(self) -> None:
+		"""Stops the pipeline and releases resources, including closing Qdrant connection."""
+		logger.info("Stopping ProcessingPipeline asynchronously...")
+		if self.qdrant_manager:
+			await self.qdrant_manager.close()
+			self.qdrant_manager = None  # type: ignore[assignment]
+		else:
+			logger.warning("Qdrant Manager already None during stop.")
 
+		# Other cleanup if needed
+		self.is_async_initialized = False
 		logger.info("ProcessingPipeline stopped.")
 
 	# --- Synchronization --- #
 
-	def sync_databases(self, progress: Progress | None = None, task_id: TaskID | None = None) -> None:
+	async def sync_databases(self, progress: Progress | None = None, task_id: TaskID | None = None) -> None:
 		"""
-		Synchronize the HNSW index with the Git repository state.
+		Asynchronously synchronize the Qdrant index with the Git repository state.
 
 		Args:
 		    progress: Optional rich Progress instance for status updates.
 		    task_id: Optional rich TaskID for the main sync task.
 
 		"""
-		logger.info("Starting vector index synchronization...")
-		if progress and task_id is not None:
-			# Reset task for sync operation
-			progress.update(task_id, description="Starting index synchronization...", completed=0, total=100)
-
-		try:
-			# Pass progress context down to the vector synchronizer
-			sync_success = self.vector_synchronizer.sync_index(
-				progress=progress,
-				task_id=task_id,
-			)
-
-			if sync_success:
-				logger.info("Vector index synchronization completed successfully.")
-				# Final update is handled by vector_synchronizer
-			else:
-				logger.error("Vector index synchronization failed or had issues.")
-				# Final update is handled by vector_synchronizer
-		except Exception:
-			logger.exception("Error during vector index synchronization.")
+		if not self.is_async_initialized:
+			logger.error("Cannot sync databases, async initialization not complete.")
 			if progress and task_id:
-				progress.update(task_id, description="[red]Error:[/red] Index sync failed.", completed=100)
+				progress.update(task_id, description="[red]Error:[/red] Not initialized", completed=100)
+			return
 
-	# Removed sync_databases_simple as it was graph-focused
+		logger.info("Starting vector index synchronization using VectorSynchronizer...")
+		# VectorSynchronizer handles its own progress updates internally now
+		await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+		# Final status message/logging is handled by sync_index
 
 	# --- Retrieval Methods --- #
 
-	def semantic_search(self, query: str, k: int = 5) -> list[dict[str, Any]] | None:
+	async def semantic_search(
+		self,
+		query: str,
+		k: int = 5,
+		filter_params: dict[str, Any] | None = None,
+	) -> list[dict[str, Any]] | None:
 		"""
-		Perform semantic search for code chunks similar to the query using HNSW index.
+		Perform semantic search for code chunks similar to the query using Qdrant.
 
 		Args:
 		    query: The search query string.
 		    k: The number of top similar results to retrieve.
+		    filter_params: Optional dictionary for filtering results. Supports:
+		        - exact match: {"field": "value"} or {"match": {"field": "value"}}
+		        - multiple values: {"match_any": {"field": ["value1", "value2"]}}
+		        - range: {"range": {"field": {"gt": value, "lt": value}}}
+		        - complex: {"must": [...], "should": [...], "must_not": [...]}
 
 		Returns:
-		    A list of search result dictionaries (including metadata and distance),
+		    A list of search result dictionaries (Qdrant ScoredPoint converted to dict),
 		    or None if an error occurs.
 
 		"""
-		if not self.hnsw_manager:
-			logger.error("HNSWManager not available for semantic search.")
+		if not self.is_async_initialized or not self.qdrant_manager:
+			logger.error("QdrantManager not available for semantic search.")
 			return None
 
 		logger.debug("Performing semantic search for query: '%s', k=%d", query, k)
 
 		try:
-			# 1. Generate query embedding
-			query_embedding = generate_embedding(query)
+			# 1. Generate query embedding (must be async)
+			query_embedding = await generate_embedding(
+				query,
+				model=self.embedding_model_name,
+				config_loader=self.config_loader,  # Pass ConfigLoader to generate_embedding
+			)
 			if query_embedding is None:
 				logger.error("Failed to generate embedding for query.")
 				return None
 
-			# Convert to numpy array for HNSW query
-			query_vector = np.array(query_embedding, dtype=np.float32)
+			# Convert to numpy array if needed by Qdrant client, though list is often fine
+			# query_vector = np.array(query_embedding, dtype=np.float32)
+			query_vector = query_embedding  # Qdrant client typically accepts list[float]
 
-			# 2. Query HNSW index
-			chunk_ids, distances = self.hnsw_manager.knn_query(query_vector, k)
+			# 2. Process filter parameters to Qdrant filter format
+			query_filter = None
+			if filter_params:
+				query_filter = self._build_qdrant_filter(filter_params)
+				logger.debug("Using filter for search: %s", query_filter)
 
-			if not chunk_ids:
-				logger.debug("HNSW index query returned no results.")
+			# 3. Query Qdrant index (must be async)
+			search_results: list[qdrant_models.ScoredPoint] = await self.qdrant_manager.search(
+				query_vector, k, query_filter=query_filter
+			)
+
+			if not search_results:
+				logger.debug("Qdrant search returned no results.")
 				return []
 
-			# 3. Fetch metadata for each result ID
+			# 4. Format results (convert ScoredPoint to dictionary)
 			formatted_results = []
-			for chunk_id, distance in zip(chunk_ids, distances, strict=False):
-				metadata = self.hnsw_manager.get_metadata(chunk_id)
-				if metadata:
-					formatted_results.append(
-						{
-							"id": chunk_id,
-							"distance": distance,
-							"metadata": metadata,
-						}
-					)
-				else:
-					logger.warning(f"Metadata not found for vector hit with chunk_id: {chunk_id}")
+			for scored_point in search_results:
+				# Convert Qdrant model to dict for consistent output
+				# Include score (similarity) and payload
+				result_dict = {
+					"id": str(scored_point.id),  # Ensure ID is string
+					"score": scored_point.score,
+					"payload": scored_point.payload,
+					# Optionally include version if needed
+					# "version": scored_point.version,
+				}
+				formatted_results.append(result_dict)
 
 			logger.debug("Semantic search found %d results.", len(formatted_results))
 			return formatted_results
@@ -266,6 +360,87 @@ class ProcessingPipeline:
 			logger.exception("Error during semantic search.")
 			return None
 
-	# Removed graph_query
-	# Removed graph_enhanced_search
-	# Removed get_repository_structure
+	def _build_qdrant_filter(self, filter_params: dict[str, Any]) -> qdrant_models.Filter:
+		"""
+		Convert filter parameters to Qdrant filter format.
+
+		Args:
+		    filter_params: Dictionary of filter parameters
+
+		Returns:
+		    Qdrant filter object
+
+		"""
+		# If already a proper Qdrant filter, return as is
+		if isinstance(filter_params, qdrant_models.Filter):
+			return filter_params
+
+		# Check for clause-based filter (must, should, must_not)
+		if any(key in filter_params for key in ["must", "should", "must_not"]):
+			filter_obj = {}
+
+			# Process must conditions (AND)
+			if "must" in filter_params:
+				filter_obj["must"] = [self._build_qdrant_filter(cond) for cond in filter_params["must"]]
+
+			# Process should conditions (OR)
+			if "should" in filter_params:
+				filter_obj["should"] = [self._build_qdrant_filter(cond) for cond in filter_params["should"]]
+
+			# Process must_not conditions (NOT)
+			if "must_not" in filter_params:
+				filter_obj["must_not"] = [self._build_qdrant_filter(cond) for cond in filter_params["must_not"]]
+
+			return qdrant_models.Filter(**filter_obj)
+
+		# Check for condition-based filter (match, range, etc.)
+		if "match" in filter_params:
+			field, value = next(iter(filter_params["match"].items()))
+			return qdrant_models.Filter(
+				must=[qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))]
+			)
+
+		if "match_any" in filter_params:
+			field, values = next(iter(filter_params["match_any"].items()))
+			# For string values
+			if (values and isinstance(values[0], str)) or (values and isinstance(values[0], (int, float))):
+				return qdrant_models.Filter(
+					should=[
+						qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))
+						for value in values
+					]
+				)
+			# Default case
+			return qdrant_models.Filter(
+				should=[
+					qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))
+					for value in values
+				]
+			)
+
+		if "range" in filter_params:
+			field, range_values = next(iter(filter_params["range"].items()))
+			return qdrant_models.Filter(
+				must=[qdrant_models.FieldCondition(key=field, range=qdrant_models.Range(**range_values))]
+			)
+
+		# Default: treat as simple field-value pairs (exact match)
+		must_conditions = []
+		for field, value in filter_params.items():
+			must_conditions.append(qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value)))
+
+		return qdrant_models.Filter(must=must_conditions)
+
+	# Context manager support for async operations
+	async def __aenter__(self) -> Self:
+		"""Return self for use as async context manager."""
+		# Basic initialization is sync, async init must be called separately
+		# Consider if automatic async_init here is desired, or keep it explicit
+		# await self.async_init() # Example if auto-init is desired
+		return self
+
+	async def __aexit__(
+		self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: TracebackType | None
+	) -> None:
+		"""Clean up resources when exiting the async context manager."""
+		await self.stop()
