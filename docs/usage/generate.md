@@ -9,9 +9,11 @@ codemap gen [PATH] [OPTIONS]
 ```
 
 **Arguments:**
+
 - `PATH`: Path to the codebase to analyze (defaults to current directory)
 
 **Options:**
+
 - `--output`, `-o`: Output file path for the documentation (overrides config)
 - `--config`, `-c`: Path to custom configuration file
 - `--max-content-length`: Maximum content length for file display (set to 0 for unlimited, overrides config)

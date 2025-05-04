@@ -107,6 +107,7 @@ pr:
 ## Configuration Priority
 
 The configuration is loaded in the following order (later sources override earlier ones):
+
 1. Default configuration from the package
 2. `.codemap.yml` in the project root
 3. Custom config file specified with `--config`
@@ -115,6 +116,7 @@ The configuration is loaded in the following order (later sources override earli
 ## Configuration Tips
 
 Refer to the main README section for detailed tips on configuring:
+
 - Token Limits (Deprecated) & Content Length
 - Git Integration (`use_gitignore`, `convention.scopes`, `bypass_hooks`)
 - LLM Settings (`llm.model`, `llm.api_base`, `--model` flag)

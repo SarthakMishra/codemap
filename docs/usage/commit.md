@@ -30,9 +30,11 @@ codemap commit [PATH] [OPTIONS]
 ```
 
 **Arguments:**
+
 - `PATH`: Path to repository or specific file to commit (defaults to current directory)
 
 **Options:**
+
 - `--message`, `-m`: Specify a commit message directly (skips AI generation)
 - `--all`, `-a`: Commit all changes (stages untracked files)
 - `--model`: LLM model to use for message generation (default: `openai/gpt-4o-mini`). Overrides config (`commit.llm.model`).
@@ -70,10 +72,11 @@ The tool uses semantic analysis to group related changes together based on:
 - Directory structure
 - Common file patterns
 
-> [!Note]
-> The semantic strategy utilizes a custom, distilled version of the `Qodo/Qodo-Embed-1-1.5B` model, named `Qodo-Embed-M-1-1.5B-M2V-Distilled`.
-> This [Model2Vec](https://github.com/MinishLab/model2vec) distilled model is significantly smaller (233MB vs 5.9GB) and faster (~112x) than the original while retaining ~85% of its performance.
-> Find more details [here](https://huggingface.co/sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled).
+/// note
+The semantic strategy utilizes a custom, distilled version of the `Qodo/Qodo-Embed-1-1.5B` model, named `Qodo-Embed-M-1-1.5B-M2V-Distilled`.
+This [Model2Vec](https://github.com/MinishLab/model2vec) distilled model is significantly smaller (233MB vs 5.9GB) and faster (~112x) than the original while retaining ~85% of its performance.
+Find more details [here](https://huggingface.co/sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled).
+///
 
 ## Environment Variables
 
