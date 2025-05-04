@@ -22,10 +22,9 @@ from .prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-# Define a constant for truncation length
-MAX_CONTEXT_LENGTH = 8000
-
-MAX_CONTEXT_RESULTS = 10
+# Default values for configuration
+DEFAULT_MAX_CONTEXT_LENGTH = 8000
+DEFAULT_MAX_CONTEXT_RESULTS = 10
 
 
 class AskResult(TypedDict):
@@ -51,10 +50,38 @@ class AskCommand:
 		model: str | None = None,
 		api_key: str | None = None,
 		api_base: str | None = None,
+		config_loader: ConfigLoader | None = None,
 	) -> None:
-		"""Initializes the AskCommand, setting up clients and pipeline."""
+		"""
+		Initializes the AskCommand, setting up clients and pipeline.
+
+		Args:
+		        repo_path: Path to the repository to analyze
+		        model: LLM model to use for answering questions
+		        api_key: API key for LLM provider
+		        api_base: API base URL for LLM provider
+		        config_loader: ConfigLoader to use for configuration (follows DI pattern)
+
+		"""
 		self.repo_path = repo_path or Path.cwd()
 		self.session_id = str(uuid.uuid4())  # Unique session ID for DB logging
+
+		# Accept ConfigLoader from higher-level components
+		# Always ensure we have a valid ConfigLoader instance
+		if config_loader is None:
+			self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_path)
+			logger.debug("Created fallback ConfigLoader instance")
+		else:
+			self.config_loader = config_loader
+			logger.debug("Using provided ConfigLoader instance")
+
+		# Get RAG configuration
+		rag_config = self.config_loader.get("rag", {})
+		self.max_context_length = rag_config.get("max_context_length", DEFAULT_MAX_CONTEXT_LENGTH)
+		self.max_context_results = rag_config.get("max_context_results", DEFAULT_MAX_CONTEXT_RESULTS)
+		logger.debug(
+			f"Using max_context_length: {self.max_context_length}, max_context_results: {self.max_context_results}"
+		)
 
 		self.db_client = DatabaseClient()  # Uses config path by default
 		self.llm_client = create_client(
@@ -62,51 +89,112 @@ class AskCommand:
 			model=model,  # create_client handles defaults/config
 			api_key=api_key,
 			api_base=api_base,
+			config_loader=self.config_loader,  # Pass the config_loader down
 		)
 		# Initialize ProcessingPipeline correctly
 		try:
 			# Show a spinner while initializing the pipeline
 			with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
-				# Get ConfigLoader instance first, ensuring it knows the repo root
-				self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_path)
+				# Use the provided ConfigLoader instance
 				self.pipeline = ProcessingPipeline(
 					repo_path=self.repo_path,  # Pipeline still needs repo_path directly
 					config_loader=self.config_loader,  # Pass the correctly initialized loader
-					sync_on_init=False,  # Keep sync off during 'ask' init
-					progress=None,  # No progress context with spinner style
-					task_id=None,  # No task_id with spinner style
 				)
+
 			# Progress context manager handles completion message
-			logger.info("ProcessingPipeline initialization attempt complete.")
+			logger.info("ProcessingPipeline initialization complete.")
 		except Exception:
 			logger.exception("Failed to initialize ProcessingPipeline")
 			self.pipeline = None
 
 		logger.info(f"AskCommand initialized for session {self.session_id}")
 
-	def _retrieve_context(self, query: str, limit: int = MAX_CONTEXT_RESULTS) -> list[dict[str, Any]]:
+	async def initialize(self) -> None:
+		"""Perform asynchronous initialization for the command, especially the pipeline."""
+		if self.pipeline and not self.pipeline.is_async_initialized:
+			try:
+				# Show a spinner while initializing the pipeline asynchronously
+				with progress_indicator(
+					message="Initializing async components (pipeline)...", style="spinner", transient=True
+				):
+					await self.pipeline.async_init(sync_on_init=True)
+				logger.info("ProcessingPipeline async initialization complete.")
+			except Exception:
+				logger.exception("Failed during async initialization of ProcessingPipeline")
+				# Optionally set pipeline to None or handle the error appropriately
+				self.pipeline = None
+		elif not self.pipeline:
+			logger.error("Cannot perform async initialization: ProcessingPipeline failed to initialize earlier.")
+		else:
+			logger.info("AskCommand async components already initialized.")
+
+	async def _retrieve_context(self, query: str, limit: int | None = None) -> list[dict[str, Any]]:
 		"""Retrieve relevant code chunks based on the query."""
 		if not self.pipeline:
 			logger.warning("ProcessingPipeline not available, no context will be retrieved.")
 			return []
 
+		# Use configured limit or default
+		actual_limit = limit or self.max_context_results
+
 		try:
-			logger.info(f"Retrieving context for query: '{query}', limit: {limit}")
-			results = self.pipeline.semantic_search(query, k=limit)
+			logger.info(f"Retrieving context for query: '{query}', limit: {actual_limit}")
+			# Use synchronous method to get results (pipeline.semantic_search is async)
+			# Now call await directly as this method is async
+			# import asyncio
+			# results = asyncio.run(self.pipeline.semantic_search(query, k=actual_limit))
+			results = await self.pipeline.semantic_search(query, k=actual_limit)
 
 			# Format results for the LLM
 			formatted_results = []
 			if results:  # Check if results is not None and has items
 				for r in results:
-					# Extract relevant fields safely
-					metadata = r.get("metadata", {})
+					# Extract relevant fields from payload
+					payload = r.get("payload", {})
+
+					# Get file content from repo using file_path, start_line, and end_line
+					file_path = payload.get("file_path", "N/A")
+					start_line = payload.get("start_line", -1)
+					end_line = payload.get("end_line", -1)
+
+					# Get content from repository if needed and build a content representation
+					# For now, we'll use a simple representation that includes metadata
+					entity_type = payload.get("entity_type", "")
+					entity_name = payload.get("entity_name", "")
+					language = payload.get("language", "")
+
+					# Build a content representation from the metadata
+					content_parts = []
+					content_parts.append(f"Type: {entity_type}")
+					if entity_name:
+						content_parts.append(f"Name: {entity_name}")
+
+					# Get the file content from the repo
+					try:
+						if self.repo_path and file_path and start_line > 0 and end_line > 0:
+							repo_file_path = self.repo_path / file_path
+							if repo_file_path.exists():
+								with repo_file_path.open(encoding="utf-8") as f:
+									file_content = f.read()
+								lines = file_content.splitlines()
+								if start_line <= len(lines) and end_line <= len(lines):
+									code_content = "\n".join(lines[start_line - 1 : end_line])
+									if language:
+										content_parts.append(f"```{language}\n{code_content}\n```")
+									else:
+										content_parts.append(f"```\n{code_content}\n```")
+					except Exception:
+						logger.exception(f"Error reading file content for {file_path}")
+
+					content = "\n\n".join(content_parts)
+
 					formatted_results.append(
 						{
-							"file_path": metadata.get("file_path", "N/A"),
-							"start_line": metadata.get("start_line", -1),
-							"end_line": metadata.get("end_line", -1),
-							"content": metadata.get("content", ""),
-							"distance": r.get("distance", -1.0),
+							"file_path": file_path,
+							"start_line": start_line,
+							"end_line": end_line,
+							"content": content,
+							"score": r.get("score", -1.0),
 						}
 					)
 
@@ -148,21 +236,24 @@ class AskCommand:
 			logger.warning(f"Error extracting answer from response: {e}")
 			return None
 
-	def run(self, question: str) -> AskResult:
+	async def run(self, question: str) -> AskResult:
 		"""Executes one turn of the ask command, returning the answer and context."""
 		logger.info(f"Processing question for session {self.session_id}: '{question}'")
+
+		# Ensure async initialization happened (idempotent check inside)
+		await self.initialize()
 
 		if not self.pipeline:
 			return AskResult(answer="Processing pipeline not available.", context=[])
 
 		# Retrieve relevant context first
-		context = self._retrieve_context(question, limit=MAX_CONTEXT_RESULTS)
+		context = await self._retrieve_context(question)
 
 		# Format context for inclusion in prompt
 		context_text = format_content_for_context(context)
-		if len(context_text) > MAX_CONTEXT_LENGTH:
+		if len(context_text) > self.max_context_length:
 			logger.warning(f"Context too long ({len(context_text)} chars), truncating.")
-			context_text = context_text[:MAX_CONTEXT_LENGTH] + "... [truncated]"
+			context_text = context_text[: self.max_context_length] + "... [truncated]"
 
 		# Construct messages with context included
 		messages = [
@@ -188,7 +279,8 @@ class AskCommand:
 		except Exception:
 			logger.exception("Failed to store current query turn in DB")
 
-		# Get LLM config
+		# Get LLM config from the injected ConfigLoader
+		# At this point self.config_loader is guaranteed to be a valid instance
 		llm_config = self.config_loader.get_llm_config()
 		llm_params = {
 			"temperature": llm_config.get("temperature", 0.7),
