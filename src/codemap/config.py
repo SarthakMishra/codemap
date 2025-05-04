@@ -112,10 +112,10 @@ DEFAULT_CONFIG = {
 			"similarity_threshold": 0.4,
 			"directory_similarity_threshold": 0.3,
 			"min_chunks_for_consolidation": 2,
-			"max_chunks_before_consolidation": 20,
-			"max_file_size_for_llm": 100000,  # 100KB
-			"max_log_diff_size": 1000,
-			"model_name": "sentence-transformers/all-MiniLM-L6-v2",
+			"max_chunks_before_consolidation": 10,
+			"max_file_size_for_llm": 50000,  # 50KB
+			"max_log_diff_size": 500,
+			"model_name": "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
 			"default_code_extensions": [
 				"js",
 				"jsx",
