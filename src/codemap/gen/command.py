@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from codemap.processor.lod import LODEntity
 from codemap.utils.cli_utils import console, show_error
+from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
 from .models import GenConfig
@@ -27,6 +28,7 @@ def process_codebase(
 	config: GenConfig,
 	progress: Progress,
 	task_id: TaskID,
+	config_loader: ConfigLoader | None = None,
 ) -> tuple[list[LODEntity], dict]:
 	"""
 	Process a codebase using the LOD pipeline architecture.
@@ -36,6 +38,7 @@ def process_codebase(
 	    config: Generation configuration
 	    progress: Progress indicator
 	    task_id: Task ID for progress reporting
+	    config_loader: Optional ConfigLoader instance to use
 
 	Returns:
 	    Tuple of (list of LOD entities, metadata dict)
@@ -46,6 +49,15 @@ def process_codebase(
 	"""
 	logger.info("Starting codebase processing for: %s", target_path)
 	progress.update(task_id, description="Scanning files...")
+
+	# Get processor configuration from ConfigLoader
+	if config_loader is None:
+		config_loader = ConfigLoader()
+		logger.debug("Created new ConfigLoader instance in process_codebase")
+
+	processor_config = config_loader.get("processor", {})
+	max_workers = processor_config.get("max_workers", 4)
+	logger.debug(f"Using max_workers: {max_workers} from configuration")
 
 	try:
 		# Need project root to correctly locate .gitignore
@@ -60,7 +72,7 @@ def process_codebase(
 		entities = process_files_for_lod(
 			paths=filtered_paths,
 			lod_level=config.lod_level,
-			max_workers=4,  # Or get from config if available
+			max_workers=max_workers,  # Get from configuration
 			progress=progress,
 			task_id=task_id,
 		)
@@ -100,15 +112,18 @@ def process_codebase(
 class GenCommand:
 	"""Main implementation of the gen command."""
 
-	def __init__(self, config: GenConfig) -> None:
+	def __init__(self, config: GenConfig, config_loader: ConfigLoader | None = None) -> None:
 		"""
 		Initialize the gen command.
 
 		Args:
 		    config: Generation configuration
+		    config_loader: Optional ConfigLoader instance to use
 
 		"""
 		self.config = config
+		self.config_loader = config_loader or ConfigLoader()
+		logger.debug("GenCommand initialized with ConfigLoader")
 
 	def execute(self, target_path: Path, output_path: Path) -> bool:
 		"""
@@ -141,7 +156,9 @@ class GenCommand:
 				TimeElapsedColumn(),
 			) as progress:
 				task_id = progress.add_task("Processing codebase...", total=None)
-				entities, metadata = process_codebase(target_path, self.config, progress, task_id)
+				entities, metadata = process_codebase(
+					target_path, self.config, progress, task_id, config_loader=self.config_loader
+				)
 
 			# Generate documentation
 			console.print("[green]Processing complete. Generating documentation...")
