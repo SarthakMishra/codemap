@@ -17,7 +17,7 @@ gen:
   # Whether to include directory tree in output
   include_tree: true
   # Whether to include entity relationship graph in output
-  include_entity_graph: true
+  include_entity_graph: false
   # Enable semantic analysis using LSP
   semantic_analysis: true
   # Output file for generated documentation (Overrides output_dir if present)
