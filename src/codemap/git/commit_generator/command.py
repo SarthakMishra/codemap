@@ -21,14 +21,13 @@ from codemap.git.utils import (
 	commit_only_files,
 	get_current_branch,
 	get_repo_root,
-	get_staged_diff,
-	get_unstaged_diff,
 	get_untracked_files,
-	stage_files,
+	run_git_command,
 	switch_branch,
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import loading_spinner
+from codemap.utils.file_utils import read_file_content
 
 from . import (
 	CommitMessageGenerator,
@@ -42,6 +41,10 @@ logger = logging.getLogger(__name__)
 
 # Constants
 MAX_FILES_BEFORE_BATCHING = 10
+
+# Constants for content truncation
+MAX_FILE_CONTENT_LINES = 300  # Maximum number of lines to include for a single file
+MAX_TOTAL_CONTENT_LINES = 1000  # Maximum total lines across all untracked files
 
 
 class CommitCommand:
@@ -90,35 +93,136 @@ class CommitCommand:
 
 	def _get_changes(self) -> list[GitDiff]:
 		"""
-		Get staged, unstaged, and untracked changes separately.
+		Get staged, unstaged, and untracked changes, generating a GitDiff object per file.
 
 		Returns:
-		    List of GitDiff objects representing changes.
+		    List of GitDiff objects, each representing changes for a single file.
 
 		Raises:
 		    RuntimeError: If Git operations fail.
 
 		"""
-		changes = []
+		changes: list[GitDiff] = []
+		processed_files: set[str] = set()  # Track files already added
+
 		try:
-			# Get staged changes
-			staged = get_staged_diff()
-			if staged and staged.files:
-				changes.append(staged)
-				logger.debug("Found %d staged files.", len(staged.files))
+			# 1. Get Staged Changes (Per File)
+			staged_files = run_git_command(["git", "diff", "--cached", "--name-only"]).splitlines()
+			if staged_files:
+				logger.debug("Found %d staged files. Fetching diffs individually...", len(staged_files))
+				for file_path in staged_files:
+					if file_path in processed_files:
+						continue  # Avoid duplicates if somehow listed again
+					try:
+						file_diff_content = run_git_command(["git", "diff", "--cached", "--", file_path])
+						changes.append(GitDiff(files=[file_path], content=file_diff_content, is_staged=True))
+						processed_files.add(file_path)
+					except GitError as e:
+						logger.warning("Could not get staged diff for %s: %s", file_path, e)
 
-			# Get unstaged changes
-			unstaged = get_unstaged_diff()
-			if unstaged and unstaged.files:
-				changes.append(unstaged)
-				logger.debug("Found %d unstaged files.", len(unstaged.files))
+			# 2. Get Unstaged Changes (Per File for files not already staged)
+			unstaged_files = run_git_command(["git", "diff", "--name-only"]).splitlines()
+			if unstaged_files:
+				logger.debug("Found %d unstaged files. Fetching diffs individually...", len(unstaged_files))
+				for file_path in unstaged_files:
+					# Only process unstaged if not already captured as staged
+					if file_path not in processed_files:
+						try:
+							file_diff_content = run_git_command(["git", "diff", "--", file_path])
+							changes.append(GitDiff(files=[file_path], content=file_diff_content, is_staged=False))
+							processed_files.add(file_path)
+						except GitError as e:
+							logger.warning("Could not get unstaged diff for %s: %s", file_path, e)
 
-			# Get untracked files
-			untracked_files = get_untracked_files()
-			if untracked_files:
-				untracked_diff = GitDiff(files=untracked_files, content="", is_staged=False)
-				changes.append(untracked_diff)
-				logger.debug("Found %d untracked files.", len(untracked_files))
+			# 3. Get Untracked Files (Per File, content formatted as diff)
+			untracked_files_paths = get_untracked_files()
+			if untracked_files_paths:
+				logger.debug("Found %d untracked files. Reading content...", len(untracked_files_paths))
+				total_content_lines = 0
+
+				for file_path in untracked_files_paths:
+					# Only process untracked if not already captured as staged/unstaged (edge case)
+					if file_path not in processed_files:
+						abs_path = self.repo_root / file_path
+						try:
+							content = read_file_content(abs_path)
+							if content is not None:
+								content_lines = content.splitlines()
+								original_line_count = len(content_lines)
+								needs_total_truncation_notice = False
+
+								# File-level truncation
+								if len(content_lines) > MAX_FILE_CONTENT_LINES:
+									logger.info(
+										"Untracked file %s is large (%d lines), truncating to %d lines",
+										file_path,
+										len(content_lines),
+										MAX_FILE_CONTENT_LINES,
+									)
+									truncation_msg = (
+										f"[... {len(content_lines) - MAX_FILE_CONTENT_LINES} more lines truncated ...]"
+									)
+									content_lines = content_lines[:MAX_FILE_CONTENT_LINES]
+									content_lines.append(truncation_msg)
+
+								# Total content truncation check
+								if total_content_lines + len(content_lines) > MAX_TOTAL_CONTENT_LINES:
+									remaining_lines = MAX_TOTAL_CONTENT_LINES - total_content_lines
+									if remaining_lines > 0:
+										logger.info(
+											"Total untracked content size exceeded limit. Truncating %s to %d lines",
+											file_path,
+											remaining_lines,
+										)
+										content_lines = content_lines[:remaining_lines]
+										needs_total_truncation_notice = True
+									else:
+										# No space left at all, skip this file and subsequent ones
+										logger.warning(
+											"Max total untracked lines reached. Skipping remaining untracked files."
+										)
+										break
+
+								# Format content for the diff
+								formatted_content = ["--- /dev/null", f"+++ b/{file_path}"]
+								formatted_content.extend(f"+{line}" for line in content_lines)
+								if needs_total_truncation_notice:
+									formatted_content.append(
+										"+[... Further untracked files truncated due to total size limits ...]"
+									)
+
+								file_content_str = "\n".join(formatted_content)
+								changes.append(
+									GitDiff(
+										files=[file_path], content=file_content_str, is_staged=False, is_untracked=True
+									)
+								)
+								total_content_lines += len(content_lines)
+								processed_files.add(file_path)
+								logger.debug(
+									"Added content for untracked file %s (%d lines / %d original).",
+									file_path,
+									len(content_lines),
+									original_line_count,
+								)
+							else:
+								# File content is None or empty
+								logger.warning(
+									"Untracked file %s could not be read or is empty. Creating entry without content.",
+									file_path,
+								)
+								changes.append(
+									GitDiff(files=[file_path], content="", is_staged=False, is_untracked=True)
+								)
+								processed_files.add(file_path)
+						except (OSError, UnicodeDecodeError) as file_read_error:
+							logger.warning(
+								"Could not read untracked file %s: %s. Creating entry without content.",
+								file_path,
+								file_read_error,
+							)
+							changes.append(GitDiff(files=[file_path], content="", is_staged=False, is_untracked=True))
+							processed_files.add(file_path)
 
 		except GitError as e:
 			msg = f"Failed to get repository changes: {e}"
@@ -126,59 +230,6 @@ class CommitCommand:
 			raise RuntimeError(msg) from e
 
 		return changes
-
-	def _generate_commit_message(self, chunk: DiffChunk) -> None:
-		"""
-		Generate a commit message for the chunk.
-
-		Args:
-		    chunk: DiffChunk to generate message for
-
-		Raises:
-		    RuntimeError: If message generation fails
-
-		"""
-		# Constants to avoid magic numbers
-		max_log_message_length = 40
-
-		logger.debug("Starting commit message generation for %s", chunk.files)
-		try:
-			with loading_spinner("Generating commit message using LLM..."):
-				# Generate the message using the generator
-				message, is_llm = self.message_generator.generate_message(chunk)
-
-				logger.debug(
-					"Got response - is_llm=%s, message=%s",
-					is_llm,
-					message[:max_log_message_length] + "..."
-					if message and len(message) > max_log_message_length
-					else message,
-				)
-				chunk.description = message
-
-				# Store whether this was LLM-generated for UI
-				chunk.is_llm_generated = is_llm
-
-				if is_llm:
-					logger.debug("Generated commit message using LLM: %s", message)
-				else:
-					logger.warning("Using automatically generated fallback message: %s", message)
-
-		except LLMError as e:
-			# If LLM generation fails, try fallback with clear indication
-			logger.exception("LLM message generation failed")
-			logger.warning("LLM error: %s", str(e))
-			with loading_spinner("Falling back to simple message generation..."):
-				# Directly use the chunk object with fallback_generation
-				message = self.message_generator.fallback_generation(chunk)
-				chunk.description = message
-				# Mark as not LLM-generated
-				chunk.is_llm_generated = False
-				logger.warning("Using fallback message: %s", message)
-		except (ValueError, RuntimeError) as e:
-			logger.warning("Other error: %s", str(e))
-			msg = f"Failed to generate commit message: {e}"
-			raise RuntimeError(msg) from e
 
 	def _perform_commit(self, chunk: DiffChunk, message: str) -> bool:
 		"""
@@ -193,11 +244,6 @@ class CommitCommand:
 
 		"""
 		try:
-			# Ensure the specific files for this chunk are staged
-			# This prevents accidentally committing unrelated staged changes
-			with loading_spinner("Staging chunk files..."):
-				stage_files(chunk.files)
-
 			# Commit only the files specified in the chunk
 			commit_only_files(chunk.files, message, ignore_hooks=self.bypass_hooks)
 			self.ui.show_success(f"Committed {len(chunk.files)} files.")
@@ -286,7 +332,9 @@ class CommitCommand:
 				edited_message = self.ui.edit_message(message)  # Pass current message for editing
 				# Clean and re-lint the edited message
 				cleaned_edited_message = clean_message_for_linting(edited_message)
-				edited_is_valid, edited_lint_messages = lint_commit_message(cleaned_edited_message, self.repo_root)
+				edited_is_valid, edited_lint_messages = lint_commit_message(
+					cleaned_edited_message, self.repo_root, config_loader=self.message_generator.get_config_loader()
+				)
 				if edited_is_valid:
 					# Commit with the user-edited, now valid message
 					if self._perform_commit(chunk, cleaned_edited_message):
@@ -390,17 +438,16 @@ class CommitCommand:
 				self.ui.show_message("No changes detected to commit.")
 				return True
 
-			# Combine all diffs for splitting
-			all_files = [f for diff in changes for f in diff.files or []]
-			# Filter unique files while preserving order
-			unique_files = list(dict.fromkeys(all_files))
-			all_content = "\n".join([diff.content for diff in changes if diff.content])
-			combined_diff = GitDiff(files=unique_files, content=all_content, is_staged=False)
+			# Process each diff separately to avoid parsing issues
+			chunks = []
 
-			# Split the combined diff
-			chunks, _ = self.splitter.split_diff(combined_diff)
+			for diff in changes:
+				# Process each diff individually
+				diff_chunks, _ = self.splitter.split_diff(diff)
+				chunks.extend(diff_chunks)
+
 			total_chunks = len(chunks)
-			logger.info("Split %d files into %d chunks.", len(unique_files), total_chunks)
+			logger.info("Split files into %d chunks.", total_chunks)
 
 			if not chunks:
 				self.ui.show_error("Failed to split changes into manageable chunks.")
