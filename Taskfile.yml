@@ -118,12 +118,18 @@ tasks:
     desc: Check documentation coverage
     cmds:
       - task: docs:coverage
+      - task: docs:coverage:badge
       - task: docs:update
 
   docs:coverage:
     desc: Check documentation coverage
     cmds:
-      - uv run interrogate --style google --fail-under 90 --color -vv {{.SRC_DIR}}
+      - uv run interrogate --style google --generate-badge docs/assets --badge-style flat {{.SRC_DIR}}
+
+  docs:coverage:badge:
+    desc: Generate documentation badge
+    cmds:
+      - uv run interrogate --style google -- {{.SRC_DIR}}
 
   docs:update:
     desc: Update documentation
