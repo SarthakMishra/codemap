@@ -56,8 +56,15 @@ def process_codebase(
 		logger.debug("Created new ConfigLoader instance in process_codebase")
 
 	processor_config = config_loader.get("processor", {})
+	gen_config_data = config_loader.get("gen", {})
 	max_workers = processor_config.get("max_workers", 4)
 	logger.debug(f"Using max_workers: {max_workers} from configuration")
+
+	# Debug the command_arg if present
+	if "command_arg" in gen_config_data:
+		logger.debug(f"Found command_arg in gen_config_data: '{gen_config_data['command_arg']}'")
+	else:
+		logger.debug("No command_arg found in gen_config_data")
 
 	try:
 		# Need project root to correctly locate .gitignore
@@ -94,7 +101,8 @@ def process_codebase(
 
 	metadata: dict[str, Any] = {
 		"name": target_path.name,
-		"target_path": str(target_path.resolve()),  # Add absolute target path for creating relative paths
+		"target_path": str(target_path.resolve()),  # Keep absolute target path for file path resolution
+		"original_path": str(target_path),  # Store original path as provided in the command (could be relative)
 		"stats": {
 			"total_files_scanned": total_files_scanned,  # Total files scanned matching criteria
 			"processed_files": processed_files,  # Files successfully processed for LOD
@@ -102,6 +110,11 @@ def process_codebase(
 			"languages": list(languages),
 		},
 	}
+
+	# Add command_arg directly from config if available
+	if "command_arg" in gen_config_data:
+		metadata["command_arg"] = gen_config_data["command_arg"]
+		logger.debug(f"Adding command_arg to metadata: '{gen_config_data['command_arg']}'")
 
 	# Generate directory tree if requested
 	if config.include_tree:
@@ -157,9 +170,16 @@ class GenCommand:
 				TimeElapsedColumn(),
 			) as progress:
 				task_id = progress.add_task("Processing codebase...", total=None)
+
+				# Process the codebase
 				entities, metadata = process_codebase(
 					target_path, self.config, progress, task_id, config_loader=self.config_loader
 				)
+
+				# Extract the command_arg from config_loader and add it to metadata
+				gen_config_data = self.config_loader.get("gen", {})
+				if "command_arg" in gen_config_data:
+					metadata["command_arg"] = gen_config_data["command_arg"]
 
 			# Generate documentation
 			console.print("[green]Processing complete. Generating documentation...")

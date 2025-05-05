@@ -177,6 +177,10 @@ def gen_command(
 	setup_logging(is_verbose=is_verbose)
 
 	try:
+		# Save the original path string before resolving
+		original_path_str = str(path)
+
+		# Now resolve the path for actual processing
 		target_path = path.resolve()
 		project_root = Path.cwd()
 
@@ -186,6 +190,9 @@ def gen_command(
 
 		# Get gen-specific config with defaults
 		gen_config_data = config_data.get("gen", {})
+
+		# Store the original argument in the config data
+		gen_config_data["command_arg"] = original_path_str
 
 		# Command line arguments override config file
 		content_length = (

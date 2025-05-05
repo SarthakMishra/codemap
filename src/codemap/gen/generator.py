@@ -448,8 +448,31 @@ class CodeMapGenerator:
 		content = []
 
 		# Add header with repository information
-		repo_name = metadata.get("name", "Repository")
-		content.append(f"# {repo_name} Documentation")
+		target_path_str = metadata.get("target_path", "")
+		original_path = metadata.get("original_path", "")
+		command_arg = metadata.get("command_arg", "")
+
+		# Debug logging to see what values we're receiving
+		logger.debug(
+			f"Metadata values for heading: "
+			f"command_arg='{command_arg}', "
+			f"original_path='{original_path}', "
+			f"target_path='{target_path_str}'"
+		)
+
+		# Use the exact command argument if available
+		if command_arg:
+			repo_name = command_arg
+		# Fall back to original path if available
+		elif original_path:
+			repo_name = original_path
+		# Further fallback to just the directory name
+		elif target_path_str:
+			repo_name = Path(target_path_str).name
+		else:
+			repo_name = metadata.get("name", "Repository")
+
+		content.append(f"# `{repo_name}` Documentation")
 		content.append(f"\nGenerated on: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}")
 
 		if "description" in metadata:

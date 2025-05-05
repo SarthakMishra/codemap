@@ -170,9 +170,14 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 		except ValueError:
 			continue  # Skip paths not under target_path
 
-	# Recursive function to generate formatted tree lines
-	tree_lines = []
+	# Get just the target directory name to display at the root of the tree
+	# rather than the full absolute path
+	target_dir_name = target_path.name
 
+	# Initialize tree_lines with just the directory name at the root
+	tree_lines = [target_dir_name]
+
+	# Recursive function to generate formatted tree lines
 	def format_level(level: dict, prefix: str = "") -> None:
 		# Sort items: directories first (dictionaries), then files (strings)
 		sorted_items = sorted(level.items(), key=lambda x: (not isinstance(x[1], dict), x[0].lower()))
@@ -195,9 +200,9 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 	# Start formatting from the root
 	format_level(tree)
 
-	# If tree is empty, show a simple root indicator
-	if not tree_lines:
-		return target_path.name + "/"
+	# If tree only contains the target path (no files/directories under it)
+	if len(tree_lines) == 1:
+		return tree_lines[0] + "/"
 
 	return "\n".join(tree_lines)
 
