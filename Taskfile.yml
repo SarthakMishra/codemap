@@ -161,16 +161,15 @@ tasks:
       - task: test:coverage:xml
 
   pre-commit:
-    desc: Run pre-commit hooks on staged files only
+    desc: Run pre-commit checks on staged files only
     cmds:
       - |
         STAGED_FILES=$(git diff --name-only --cached --diff-filter=ACMR | grep -E '\.py$' | tr '\n' ' ')
         if [ -n "$STAGED_FILES" ]; then
           echo "Running checks on staged files: $STAGED_FILES"
-          uv run ruff check --fix --unsafe-fixes $STAGED_FILES
-          uv run ruff format $STAGED_FILES
-          # Stage the files again in case they were modified
-          git add $STAGED_FILES
+          # Only check, don't fix or format here
+          uv run ruff check $STAGED_FILES
+          uv run ruff format $STAGED_FILES --check
         else
           echo "No Python files staged for commit"
         fi
