@@ -49,6 +49,9 @@ MAX_TOTAL_CONTENT_LINES = 1000  # Maximum total lines across all untracked files
 # Git output constants
 MIN_PORCELAIN_LINE_LENGTH = 3  # Minimum length of a valid porcelain status line
 
+class ExitCommandError(Exception):
+	"""Exception to signal an exit command."""
+
 
 class CommitCommand:
 	"""Handles the commit command workflow."""
@@ -734,31 +737,99 @@ class SemanticCommitCommand(CommitCommand):
 			run_git_command(["git", "add", "--", *group_files])
 
 			# Create the commit with the group message
-			commit_cmd = ["git", "commit", "-m", group.message]
+			commit_cmd = ["git", "commit", "-m", group.message or ""]
 
 			# Add --no-verify if bypass_hooks is set
 			if self.bypass_hooks:
 				commit_cmd.append("--no-verify")
 
 			try:
-				# Try to commit
 				run_git_command(commit_cmd)
+
 				# Mark files as committed
 				self.committed_files.update(group_files)
 				return True
 			except GitError as commit_error:
-				# Check if this is a pre-commit hook failure and user wants to bypass
-				if "pre-commit" in str(commit_error) and not self.bypass_hooks and self.ui.confirm_bypass_hooks():
-					# Try again with --no-verify
-					commit_cmd.append("--no-verify")
-					run_git_command(commit_cmd)
-					self.committed_files.update(group_files)
-					return True
-				# If it's not a hook failure or user doesn't want to bypass, re-raise
-				logger.exception("Error during group commit")
+				# Check if this is a pre-commit hook failure
+				if "pre-commit" in str(commit_error) and not self.bypass_hooks:
+					# Show the error message for clarity
+					error_msg = str(commit_error)
+					if "conventional commit" in error_msg.lower() or "lint" in error_msg.lower():
+						# Extract the lint errors if possible
+						lint_errors = [
+							line.strip()
+							for line in error_msg.splitlines()
+							if line.strip() and not line.startswith("Command") and "returned non-zero" not in line
+						]
+
+						# Show the message with lint warnings
+						message = group.message or ""  # Use empty string if None
+						self.ui.display_failed_lint_message(message, lint_errors, is_llm_generated=True)
+
+						# Present options specific to lint failures
+						lint_action = self.ui.get_user_action_on_lint_failure()
+
+						if lint_action == ChunkAction.REGENERATE:
+							self.ui.show_regenerating()
+							try:
+								# Create temporary DiffChunk for regeneration
+								from codemap.git.diff_splitter import DiffChunk
+
+								temp_chunk = DiffChunk(files=group.files, content=group.content)
+
+								# Use the linting-aware prompt this time
+								message, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+								group.message = message
+
+								# Try again with the new message
+								return self._stage_and_commit_group(group)
+							except (LLMError, GitError, RuntimeError) as e:
+								self.ui.show_error(f"Error regenerating message: {e}")
+								return False
+						elif lint_action == ChunkAction.COMMIT:
+							# User chose to bypass the linter
+							self.ui.show_message("Bypassing linter and committing with --no-verify")
+							commit_cmd.append("--no-verify")
+							try:
+								run_git_command(commit_cmd)
+								# Mark files as committed
+								self.committed_files.update(group_files)
+								return True
+							except GitError as e:
+								self.ui.show_error(f"Commit failed even with --no-verify: {e}")
+								return False
+						elif lint_action == ChunkAction.EDIT:
+							edited_message = self.ui.edit_message(group.message or "")  # Empty string as fallback
+							group.message = edited_message
+							return self._stage_and_commit_group(group)
+						elif lint_action == ChunkAction.SKIP:
+							self.ui.show_skipped(group.files)
+							return False
+						elif lint_action == ChunkAction.EXIT:
+							if self.ui.confirm_exit():
+								raise ExitCommandError from None
+							return False
+
+					# Generic pre-commit hook failure (not specifically commit message linting)
+					if self.ui.confirm_bypass_hooks():
+						# Try again with --no-verify
+						commit_cmd.append("--no-verify")
+						run_git_command(commit_cmd)
+
+						# Mark files as committed
+						self.committed_files.update(group_files)
+						return True
+
+				# Either not a pre-commit hook error or user declined to bypass
+				self.ui.show_error(f"Failed to commit: {commit_error}")
 				return False
-		except GitError:
-			logger.exception("Error during staging or reset")
+
+		except GitError as e:
+			self.ui.show_error(f"Git operation failed: {e}")
+			return False
+		except Exception as e:
+			self.ui.show_error(f"Unexpected error during commit: {e}")
+			logger.exception("Unexpected error in _stage_and_commit_group")
 			return False
 
 	def run(self, interactive: bool = True, pathspecs: list[str] | None = None) -> bool:
@@ -773,6 +844,8 @@ class SemanticCommitCommand(CommitCommand):
 		        bool: Whether the process completed successfully
 
 		"""
+		committed_count = 0  # Initialize this at the beginning of the method
+
 		try:
 			# Get target files
 			with loading_spinner("Analyzing repository..."):
@@ -809,6 +882,8 @@ class SemanticCommitCommand(CommitCommand):
 			# Process groups
 			self.ui.show_message(f"Found {len(groups)} semantic groups of changes.")
 
+			success = True
+
 			for i, group in enumerate(groups):
 				if interactive:
 					# Display group info with improved UI
@@ -818,13 +893,25 @@ class SemanticCommitCommand(CommitCommand):
 					action = self.ui.get_group_action()
 
 					if action == ChunkAction.COMMIT:
-						group.approved = True
+						self.ui.show_message(f"\nCommitting: {group.message}")
+						if self._stage_and_commit_group(group):
+							committed_count += 1
+						else:
+							self.ui.show_error(f"Failed to commit group: {group.message}")
+							success = False
 					elif action == ChunkAction.EDIT:
 						# Allow user to edit the message
 						current_message = group.message or ""  # Default to empty string if None
 						edited_message = self.ui.edit_message(current_message)
 						group.message = edited_message
-						group.approved = True
+
+						# Commit immediately after editing
+						self.ui.show_message(f"\nCommitting: {group.message}")
+						if self._stage_and_commit_group(group):
+							committed_count += 1
+						else:
+							self.ui.show_error(f"Failed to commit group: {group.message}")
+							success = False
 					elif action == ChunkAction.REGENERATE:
 						self.ui.show_regenerating()
 						# Re-generate the message
@@ -838,36 +925,33 @@ class SemanticCommitCommand(CommitCommand):
 							# Show the regenerated message
 							self.ui.display_group(group, i, len(groups))
 							if questionary.confirm("Commit with regenerated message?", default=True).ask():
-								group.approved = True
+								self.ui.show_message(f"\nCommitting: {group.message}")
+								if self._stage_and_commit_group(group):
+									committed_count += 1
+								else:
+									self.ui.show_error(f"Failed to commit group: {group.message}")
+									success = False
 							else:
 								self.ui.show_skipped(group.files)
 						except (LLMError, GitError, RuntimeError) as e:
 							self.ui.show_error(f"Error regenerating message: {e}")
 							if questionary.confirm("Skip this group?", default=True).ask():
 								self.ui.show_skipped(group.files)
-						else:
-							return False
+							else:
+								success = False
 					elif action == ChunkAction.SKIP:
 						self.ui.show_skipped(group.files)
 					elif action == ChunkAction.EXIT and self.ui.confirm_exit():
-						return True
-						# If exit is canceled, continue with the next group
+						return committed_count > 0
 				else:
-					# In non-interactive mode, approve all groups
-					group.approved = True
-
-			# Commit approved groups
-			success = True
-			committed_count = 0
-			for group in groups:
-				if group.approved:
+					# In non-interactive mode, commit each group immediately
+					group.message = group.message or f"update: changes to {len(group.files)} files"
 					self.ui.show_message(f"\nCommitting: {group.message}")
 					if self._stage_and_commit_group(group):
 						committed_count += 1
 					else:
-						success = False
 						self.ui.show_error(f"Failed to commit group: {group.message}")
-						# Continue with other groups
+						success = False
 
 			if committed_count > 0:
 				self.ui.show_message(f"Successfully committed {committed_count} semantic groups.")
@@ -876,7 +960,9 @@ class SemanticCommitCommand(CommitCommand):
 				self.ui.show_message("No changes were committed.")
 
 			return success
-
+		except ExitCommandError:
+			# User requested to exit during lint failure handling
+			return committed_count > 0
 		except RuntimeError as e:
 			self.ui.show_error(str(e))
 			return False
