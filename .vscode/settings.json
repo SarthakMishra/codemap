@@ -18,7 +18,4 @@
     ],
     "terminal.integrated.suggest.enabled": true,
     "terminal.integrated.suggest.enableExtensionCompletions": true,
-    "yaml.customTags": [
-        "!!python/name:mermaid2.fence_mermaid_custom",
-    ]
 }
