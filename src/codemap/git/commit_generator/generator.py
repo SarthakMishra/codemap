@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codemap.git.diff_splitter import DiffChunk
+from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
 from codemap.llm import LLMClient, LLMError
 from codemap.utils.config_loader import ConfigLoader
 
@@ -53,6 +54,13 @@ class CommitMessageGenerator:
 
 		# Add commit template to client
 		self.client.set_template("commit", self.prompt_template)
+
+		# Get max token limit from config
+		llm_config = self._config_loader.get("llm", {})
+		self.max_tokens = llm_config.get("max_context_tokens", 4000)
+
+		# Flag to control whether to use the LOD-based context processing
+		self.use_lod_context = llm_config.get("use_lod_context", True)
 
 	def extract_file_info(self, chunk: DiffChunk) -> dict[str, Any]:
 		"""
@@ -110,110 +118,128 @@ class CommitMessageGenerator:
 		file_info = self.extract_file_info(chunk)
 		convention = self.get_commit_convention()
 
-		# Get the diff content directly from the chunk object
+		# Get the diff content
 		diff_content = chunk.content
 
-		# Detect binary files and empty diffs that might be binary files
-		binary_files = []
-		for file_path in chunk.files:
-			if file_path in file_info:
-				extension = file_info[file_path].get("extension", "").lower()
-				# Common binary file extensions
-				binary_extensions = {
-					"png",
-					"jpg",
-					"jpeg",
-					"gif",
-					"bmp",
-					"tiff",
-					"ico",
-					"webp",  # Images
-					"mp3",
-					"wav",
-					"ogg",
-					"flac",
-					"aac",  # Audio
-					"mp4",
-					"avi",
-					"mkv",
-					"mov",
-					"webm",  # Video
-					"pdf",
-					"doc",
-					"docx",
-					"xls",
-					"xlsx",
-					"ppt",
-					"pptx",  # Documents
-					"zip",
-					"tar",
-					"gz",
-					"rar",
-					"7z",  # Archives
-					"exe",
-					"dll",
-					"so",
-					"dylib",  # Binaries
-					"ttf",
-					"otf",
-					"woff",
-					"woff2",  # Fonts
-					"db",
-					"sqlite",
-					"mdb",  # Databases
-				}
-
-				if extension in binary_extensions:
-					binary_files.append(file_path)
-
-			# For absolute paths, try to check if the file is binary
-			abs_path = self.repo_root / file_path
+		# Use the LOD-based context processor if enabled
+		if self.use_lod_context:
+			logger.debug("Using LOD-based context processing")
 			try:
-				if abs_path.exists():
-					from codemap.utils.file_utils import is_binary_file
+				# Process the chunk with LOD to optimize context length
+				enhanced_diff_content = process_chunks_with_lod([chunk], self.max_tokens)
 
-					if is_binary_file(abs_path) and file_path not in binary_files:
+				if enhanced_diff_content:
+					diff_content = enhanced_diff_content
+					logger.debug("LOD context processing successful")
+				else:
+					logger.debug("LOD processing returned empty result, using original content")
+			except Exception:
+				logger.exception("Error during LOD context processing")
+				# Continue with the original content if LOD processing fails
+		else:
+			# Use the original binary file detection logic
+			binary_files = []
+			for file_path in chunk.files:
+				if file_path in file_info:
+					extension = file_info[file_path].get("extension", "").lower()
+					# Common binary file extensions
+					binary_extensions = {
+						"png",
+						"jpg",
+						"jpeg",
+						"gif",
+						"bmp",
+						"tiff",
+						"ico",
+						"webp",  # Images
+						"mp3",
+						"wav",
+						"ogg",
+						"flac",
+						"aac",  # Audio
+						"mp4",
+						"avi",
+						"mkv",
+						"mov",
+						"webm",  # Video
+						"pdf",
+						"doc",
+						"docx",
+						"xls",
+						"xlsx",
+						"ppt",
+						"pptx",  # Documents
+						"zip",
+						"tar",
+						"gz",
+						"rar",
+						"7z",  # Archives
+						"exe",
+						"dll",
+						"so",
+						"dylib",  # Binaries
+						"ttf",
+						"otf",
+						"woff",
+						"woff2",  # Fonts
+						"db",
+						"sqlite",
+						"mdb",  # Databases
+					}
+
+					if extension in binary_extensions:
 						binary_files.append(file_path)
-			except (OSError, PermissionError) as e:
-				# If any error occurs during binary check, log it and continue
-				logger.debug("Error checking if %s is binary: %s", file_path, str(e))
 
-		# If we have binary files or no diff content, enhance the prompt
-		enhanced_diff_content = diff_content
-		if not diff_content or binary_files:
-			# Create a specialized header for binary files
-			binary_files_header = ""
-			if binary_files:
-				binary_files_header = "BINARY FILES DETECTED:\n"
-				for binary_file in binary_files:
-					extension = file_info.get(binary_file, {}).get("extension", "unknown")
-					binary_files_header += f"- {binary_file} (binary {extension} file)\n"
-				binary_files_header += "\n"
+				# For absolute paths, try to check if the file is binary
+				abs_path = self.repo_root / file_path
+				try:
+					if abs_path.exists():
+						from codemap.utils.file_utils import is_binary_file
 
-			# If no diff content, create a more informative message about binary files
-			if not diff_content:
-				file_descriptions = []
-				for file_path in chunk.files:
-					if file_path in binary_files:
-						extension = file_info.get(file_path, {}).get("extension", "unknown")
-						file_descriptions.append(f"{file_path} (binary {extension} file)")
-					else:
-						extension = file_info.get(file_path, {}).get("extension", "")
-						file_descriptions.append(f"{file_path} ({extension} file)")
+						if is_binary_file(abs_path) and file_path not in binary_files:
+							binary_files.append(file_path)
+				except (OSError, PermissionError) as e:
+					# If any error occurs during binary check, log it and continue
+					logger.debug("Error checking if %s is binary: %s", file_path, str(e))
 
-				enhanced_diff_content = (
-					f"{binary_files_header}This chunk contains changes to the following files "
-					f"with no visible diff content (likely binary changes):\n"
-				)
-				for desc in file_descriptions:
-					enhanced_diff_content += f"- {desc}\n"
-			else:
-				# If there is diff content but also binary files, add the binary files header
-				enhanced_diff_content = binary_files_header + diff_content
+			# If we have binary files or no diff content, enhance the prompt
+			enhanced_diff_content = diff_content
+			if not diff_content or binary_files:
+				# Create a specialized header for binary files
+				binary_files_header = ""
+				if binary_files:
+					binary_files_header = "BINARY FILES DETECTED:\n"
+					for binary_file in binary_files:
+						extension = file_info.get(binary_file, {}).get("extension", "unknown")
+						binary_files_header += f"- {binary_file} (binary {extension} file)\n"
+					binary_files_header += "\n"
+
+				# If no diff content, create a more informative message about binary files
+				if not diff_content:
+					file_descriptions = []
+					for file_path in chunk.files:
+						if file_path in binary_files:
+							extension = file_info.get(file_path, {}).get("extension", "unknown")
+							file_descriptions.append(f"{file_path} (binary {extension} file)")
+						else:
+							extension = file_info.get(file_path, {}).get("extension", "")
+							file_descriptions.append(f"{file_path} ({extension} file)")
+
+					enhanced_diff_content = (
+						f"{binary_files_header}This chunk contains changes to the following files "
+						f"with no visible diff content (likely binary changes):\n"
+					)
+					for desc in file_descriptions:
+						enhanced_diff_content += f"- {desc}\n"
+				else:
+					# If there is diff content but also binary files, add the binary files header
+					enhanced_diff_content = binary_files_header + diff_content
+
+			diff_content = enhanced_diff_content
 
 		# Create a context dict with default values for template variables
 		context = {
-			"diff": enhanced_diff_content,
+			"diff": diff_content,
 			"files": file_info,
 			"convention": convention,
 			"schema": COMMIT_MESSAGE_SCHEMA,
@@ -224,7 +250,7 @@ class CommitMessageGenerator:
 		# Prepare and return the prompt
 		return prepare_prompt(
 			template=self.prompt_template,
-			diff_content=enhanced_diff_content,
+			diff_content=diff_content,
 			file_info=file_info,
 			convention=convention,
 			extra_context=context,  # Pass the context with default values
@@ -529,9 +555,10 @@ class CommitMessageGenerator:
 			message = clean_message_for_linting(message)
 
 			# Check if the message passes linting
-			is_valid, initial_lint_messages = lint_commit_message(
-				message, self.repo_root, config_loader=self._config_loader
+			is_valid, error_message = lint_commit_message(
+				message, repo_root=self.repo_root, config_loader=self._config_loader
 			)
+			initial_lint_messages = [error_message] if error_message is not None else []
 			logger.debug("Lint result: valid=%s, messages=%s", is_valid, initial_lint_messages)
 
 			if is_valid or retry_count >= max_retries:
@@ -620,9 +647,10 @@ class CommitMessageGenerator:
 				logger.debug("Cleaned message for linting: %s", cleaned_message)
 
 				# Check if the message passes linting
-				final_is_valid, final_lint_messages = lint_commit_message(
-					cleaned_message, self.repo_root, config_loader=self._config_loader
+				final_is_valid, error_message = lint_commit_message(
+					cleaned_message, repo_root=self.repo_root, config_loader=self._config_loader
 				)
+				final_lint_messages = [error_message] if error_message is not None else []
 				logger.debug("Regenerated lint result: valid=%s, messages=%s", final_is_valid, final_lint_messages)
 
 				# Return final result and messages (empty if valid)

@@ -226,16 +226,49 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		return self._process_group(diff)
 
 	def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
-		"""Process a GitDiff assuming it contains changes for only one file."""
-		if not diff.files or len(diff.files) > 1:
-			logger.error("_process_group called with unexpected number of files: %s", diff.files)
-			# Return a basic chunk or empty list if files list is invalid/unexpected
-			return (
-				[DiffChunk(files=diff.files, content=diff.content, description="Error: Unexpected input format")]
-				if diff.files
-				else []
-			)
+		"""
+		Process a GitDiff with one or more files.
 
+		Originally designed for single files, but now supports multiple files.
+
+		"""
+		if not diff.files:
+			logger.warning("_process_group called with empty files list")
+			return []
+
+		# If multiple files, this used to log an error, but now we'll handle it properly
+		if len(diff.files) > 1:
+			logger.debug("Processing group with multiple files: %s", diff.files)
+
+			# Extract content for each file individually if possible
+			chunks = []
+			for file_path in diff.files:
+				# Try to extract just this file's diff from the full content
+				file_diff_content = self._extract_file_diff(diff.content, file_path)
+
+				if file_diff_content:
+					# Create a new diff for just this file
+					file_diff = GitDiff(files=[file_path], content=file_diff_content, is_staged=diff.is_staged)
+					# Process it and add the resulting chunks
+					enhanced_chunks = self._enhance_semantic_split(file_diff)
+					chunks.extend(enhanced_chunks)
+				else:
+					# If we couldn't extract just this file's diff, create a simple chunk
+					chunks.append(
+						DiffChunk(
+							files=[file_path],
+							content="",  # Empty content as we couldn't extract it
+							description=f"Changes in {file_path}",
+						)
+					)
+
+			# If we couldn't create any valid chunks, fallback to the original behavior
+			if not chunks:
+				return [DiffChunk(files=diff.files, content=diff.content, description="Multiple file changes")]
+
+			return chunks
+
+		# Original behavior for single file
 		file_path = diff.files[0]
 
 		# Enhance this single file diff
@@ -254,6 +287,49 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		# No further consolidation or grouping needed here as we process file-by-file now
 		return enhanced_chunks
+
+	def _extract_file_diff(self, full_diff_content: str, file_path: str) -> str:
+		"""
+		Extract the diff content for a specific file from a multi-file diff.
+
+		Args:
+		        full_diff_content: Complete diff content with multiple files
+		        file_path: Path of the file to extract
+
+		Returns:
+		        The extracted diff for the specific file, or empty string if not found
+
+		"""
+		import re
+
+		# Pattern to match the start of a diff for a file
+		diff_start_pattern = re.compile(r"diff --git a/([^\s]+) b/([^\s]+)")
+
+		# Find all diff start positions
+		diff_positions = []
+		for match in diff_start_pattern.finditer(full_diff_content):
+			_, b_file = match.groups()
+			# For most changes both files are the same; for renames prefer b_file
+			target_file = b_file
+			diff_positions.append((match.start(), target_file))
+
+		# Sort by position
+		diff_positions.sort()
+
+		# Find the diff for our file
+		file_diff = ""
+		for i, (start_pos, diff_file) in enumerate(diff_positions):
+			if diff_file == file_path:
+				# Found our file, now find the end
+				if i < len(diff_positions) - 1:
+					end_pos = diff_positions[i + 1][0]
+					file_diff = full_diff_content[start_pos:end_pos]
+				else:
+					# Last file in the diff
+					file_diff = full_diff_content[start_pos:]
+				break
+
+		return file_diff
 
 	def _validate_embedding_model(self) -> None:
 		"""Validate that the embedding model is available."""
@@ -544,7 +620,23 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			filtered_content = "\n".join(filtered_content_lines)
 
 			# Use StringIO as PatchSet expects a file-like object or iterable
-			patch_set = PatchSet(StringIO(filtered_content))
+			try:
+				patch_set = PatchSet(StringIO(filtered_content))
+			except UnidiffParseError as e:
+				logger.warning("UnidiffParseError for %s: %s", file_path, str(e))
+				# Try to extract just the diff for this specific file to avoid parsing the entire diff
+				file_diff_content_raw = re.search(
+					rf"diff --git a/.*? b/{re.escape(file_path)}\n(.*?)(?=diff --git a/|\Z)",
+					diff_content,
+					re.DOTALL | re.MULTILINE,
+				)
+				content_for_chunk = file_diff_content_raw.group(0) if file_diff_content_raw else ""
+				if content_for_chunk:
+					logger.debug("Extracted raw content for %s after parse error", file_path)
+					# Create a manual PatchedFile since we can't parse it properly
+					return None
+				return None
+
 			matched_file: PatchedFile | None = None
 			for patched_file in patch_set:
 				# unidiff paths usually start with a/ or b/
