@@ -10,6 +10,7 @@ DEFAULT_CONFIG = {
 		"api_base": None,
 		"max_context_tokens": 4000,  # Maximum tokens for context in prompts
 		"use_lod_context": True,  # Whether to use LOD context processing
+		"use_batch_processing": True,  # Whether to use batch processing for multiple LLM calls
 	},
 	# Embedding configuration
 	"embedding": {
