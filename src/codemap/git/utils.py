@@ -18,6 +18,7 @@ class GitDiff:
 	files: list[str]
 	content: str
 	is_staged: bool = False
+	is_untracked: bool = False
 
 
 class GitError(Exception):
