@@ -71,6 +71,7 @@ class CommitCommand:
 			self.repo_root = get_repo_root(path)
 			self.ui: CommitUI = CommitUI()
 			self.splitter = DiffSplitter(self.repo_root)
+			self.target_files = []  # Initialize target_files attribute
 
 			# Store the current branch at initialization to ensure we don't switch branches unexpectedly
 			try:
@@ -456,8 +457,41 @@ class CommitCommand:
 			logger.info("Split files into %d chunks.", total_chunks)
 
 			if not chunks:
-				self.ui.show_error("Failed to split changes into manageable chunks.")
-				return False
+				# Import DiffChunk for clarity
+
+				# If no target files available, try to detect modified files
+				if not self.target_files:
+					try:
+						# Get staged files
+						staged_output = run_git_command(["git", "diff", "--cached", "--name-only"])
+						if staged_output.strip():
+							self.target_files.extend(staged_output.splitlines())
+
+						# Get unstaged but tracked files
+						unstaged_output = run_git_command(["git", "diff", "--name-only"])
+						if unstaged_output.strip():
+							self.target_files.extend(unstaged_output.splitlines())
+
+						# Get untracked files
+						untracked_files = get_untracked_files()
+						if untracked_files:
+							self.target_files.extend(untracked_files)
+
+						# Remove duplicates
+						self.target_files = list(set(self.target_files))
+
+						if self.target_files:
+							logger.info(f"Using detected modified files: {self.target_files}")
+					except GitError as e:
+						logger.warning(f"Error while getting modified files: {e}")
+
+				# Use helper method to create fallback chunks
+				chunks = self._try_create_fallback_chunks(self.target_files)
+
+				# If still no chunks, return error
+				if not chunks:
+					self.ui.show_error("Failed to split changes into manageable chunks.")
+					return False
 
 			# Process chunks, passing the interactive flag
 			success = self.process_all_chunks(chunks, total_chunks, interactive=interactive)
@@ -494,6 +528,80 @@ class CommitCommand:
 						switch_branch(self.original_branch)
 				except (GitError, Exception) as e:
 					logger.warning("Could not restore original branch %s: %s", self.original_branch, e)
+
+	def _try_create_fallback_chunks(self, files: list[str]) -> list[DiffChunk]:
+		"""
+		Try to create fallback chunks for files when regular splitting fails.
+
+		Args:
+			files: List of file paths to process
+
+		Returns:
+			List of created DiffChunk objects
+		"""
+		from codemap.git.diff_splitter import DiffChunk
+
+		chunks = []
+
+		# Get all tracked files from git
+		try:
+			all_tracked_files = run_git_command(["git", "ls-files"]).splitlines()
+
+			# If files has incorrect paths (e.g., "rc/" instead of "src/"), attempt to fix them
+			corrected_files = []
+			for file in files:
+				# Check if file exists as is
+				if file in all_tracked_files:
+					corrected_files.append(file)
+					continue
+
+				# Try to find a similar file in tracked files
+				if file.startswith("rc/") and file.replace("rc/", "src/") in all_tracked_files:
+					corrected_file = file.replace("rc/", "src/")
+					logger.info(f"Corrected file path from {file} to {corrected_file}")
+					corrected_files.append(corrected_file)
+					continue
+
+				# Add other potential corrections here
+				# For example, check for case-insensitive matches
+
+				logger.warning(f"Could not find a matching tracked file for {file}")
+
+			# Update files with corrected paths if needed
+			if corrected_files:
+				files = corrected_files
+				logger.info(f"Using corrected file paths: {files}")
+
+			# Now try to create chunks with the corrected paths
+			for file in files:
+				try:
+					# Try unstaged changes first
+					file_diff = run_git_command(["git", "diff", "HEAD", "--", file])
+					if file_diff.strip():
+						logger.debug(f"Created individual chunk for {file}")
+						chunks.append(DiffChunk(files=[file], content=file_diff))
+						continue  # Skip to next file if we found a diff
+
+					# Then try staged changes
+					file_diff = run_git_command(["git", "diff", "--cached", "--", file])
+					if file_diff.strip():
+						logger.debug(f"Created individual chunk for staged {file}")
+						chunks.append(DiffChunk(files=[file], content=file_diff))
+				except GitError:
+					logger.warning(f"Could not get diff for {file}")
+		except GitError as e:
+			logger.warning(f"Error while trying to fix file paths: {e}")
+
+		# If still no chunks but we have files, create empty chunks as last resort
+		if not chunks and files:
+			logger.warning("No diffs found, creating minimal placeholder chunks")
+			for file in files:
+				# Create a minimal diff just to allow the process to continue
+				placeholder_diff = f"--- a/{file}\n+++ b/{file}\n@@ -1 +1 @@\n No content change detected"
+				chunks.append(DiffChunk(files=[file], content=placeholder_diff))
+				logger.debug(f"Created placeholder chunk for {file}")
+
+		return chunks
 
 
 class SemanticCommitCommand(CommitCommand):
@@ -645,6 +753,21 @@ class SemanticCommitCommand(CommitCommand):
 		        List of SemanticGroup objects
 
 		"""
+		# Shortcut for small changes - bypass embedding process
+		if len(chunks) <= 3:  # Threshold for "small changes" # noqa: PLR2004
+			logger.info("Small number of chunks detected (%d), bypassing embedding process", len(chunks))
+			# Create a single semantic group with all chunks
+			single_group = SemanticGroup(chunks=chunks)
+			# Extract all file names from chunks
+			files_set = set()
+			for chunk in chunks:
+				files_set.update(chunk.files)
+			single_group.files = list(files_set)
+			# Combine all content
+			combined_content = "\n".join(chunk.content for chunk in chunks)
+			single_group.content = combined_content
+			return [single_group]
+
 		# Generate embeddings for chunks
 		chunk_embedding_tuples = self.embedder.embed_chunks(chunks)
 		chunk_embeddings = {ce[0]: ce[1] for ce in chunk_embedding_tuples}
@@ -837,14 +960,48 @@ class SemanticCommitCommand(CommitCommand):
 							return False
 
 					# Generic pre-commit hook failure (not specifically commit message linting)
-					if self.ui.confirm_bypass_hooks():
-						# Try again with --no-verify
-						commit_cmd.append("--no-verify")
-						run_git_command(commit_cmd)
+					hook_action = self.ui.confirm_bypass_hooks()
 
-						# Mark files as committed
-						self.committed_files.update(group_files)
-						return True
+					if hook_action == ChunkAction.COMMIT:
+						# User chose to bypass the hooks
+						self.ui.show_message("Bypassing Git hooks and committing with --no-verify")
+						commit_cmd.append("--no-verify")
+						try:
+							run_git_command(commit_cmd)
+							# Mark files as committed
+							self.committed_files.update(group_files)
+							return True
+						except GitError as e:
+							self.ui.show_error(f"Commit failed even with --no-verify: {e}")
+							return False
+					elif hook_action == ChunkAction.REGENERATE:
+						self.ui.show_regenerating()
+						try:
+							# Create temporary DiffChunk for regeneration
+							from codemap.git.diff_splitter import DiffChunk
+
+							temp_chunk = DiffChunk(files=group.files, content=group.content)
+
+							# Use the linting-aware prompt this time
+							message, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+							group.message = message
+
+							# Try again with the new message
+							return self._stage_and_commit_group(group)
+						except (LLMError, GitError, RuntimeError) as e:
+							self.ui.show_error(f"Error regenerating message: {e}")
+							return False
+					elif hook_action == ChunkAction.EDIT:
+						edited_message = self.ui.edit_message(group.message or "")  # Empty string as fallback
+						group.message = edited_message
+						return self._stage_and_commit_group(group)
+					elif hook_action == ChunkAction.SKIP:
+						self.ui.show_skipped(group.files)
+						return False
+					elif hook_action == ChunkAction.EXIT:
+						if self.ui.confirm_exit():
+							raise ExitCommandError from None
+						return False
 
 				# Either not a pre-commit hook error or user declined to bypass
 				self.ui.show_error(f"Failed to commit: {commit_error}")
@@ -887,16 +1044,50 @@ class SemanticCommitCommand(CommitCommand):
 				# Get combined diff
 				combined_diff = self._get_combined_diff(self.target_files)
 
+				# Log diff details for debugging
+				logger.debug(f"Combined diff size: {len(combined_diff.content)} characters")
+				logger.debug(f"Target files: {len(self.target_files)} files")
+
+				# Import DiffChunk before using it
+				from codemap.git.diff_splitter import DiffChunk
+
 				# Split diff into chunks
 				chunks, _ = self.splitter.split_diff(combined_diff)
+				logger.debug(f"Initial chunks created: {len(chunks)}")
 
+				# If no chunks created but we have combined diff content, create a single chunk
+				if not chunks and combined_diff.content.strip():
+					logger.info("No chunks created from splitter, creating a single chunk")
+					chunks = [DiffChunk(files=self.target_files, content=combined_diff.content)]
+
+				# Last resort: try creating individual chunks for each file
+				if not chunks:
+					logger.info("Attempting to create individual file chunks")
+					chunks = self._try_create_fallback_chunks(self.target_files)
+
+				# If still no chunks, return error
 				if not chunks:
 					self.ui.show_error("Failed to split changes into manageable chunks.")
 					return False
 
+				logger.info(f"Final chunk count: {len(chunks)}")
+
 			# Create semantic groups
 			with loading_spinner("Creating semantic groups..."):
-				groups = self._create_semantic_groups(chunks)
+				# Special case for very few files - create a single group
+				if len(chunks) <= 2:  # noqa: PLR2004
+					logger.info("Small number of chunks detected, creating a single semantic group")
+					# Create a single semantic group with all chunks
+					single_group = SemanticGroup(chunks=chunks)
+					# Extract all file names from chunks
+					files_set = set()
+					for chunk in chunks:
+						files_set.update(chunk.files)
+					single_group.files = list(files_set)
+					groups = [single_group]
+				else:
+					# Normal case - use clustering
+					groups = self._create_semantic_groups(chunks)
 
 				if not groups:
 					self.ui.show_error("Failed to create semantic groups.")
