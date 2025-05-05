@@ -5,6 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from litellm.utils import trim_messages
+
 from codemap.utils.config_loader import ConfigLoader
 
 from .config import DEFAULT_LLM_REQUEST_PARAMS
@@ -65,11 +67,13 @@ def call_llm_api(
 	# Override with any passed parameters
 	request_params.update(kwargs)
 
+	message = [{"role": "user", "content": prompt}]
+
 	# Set up final request parameters
 	request_params.update(
 		{
 			"model": model,
-			"messages": [{"role": "user", "content": prompt}],
+			"messages": trim_messages(message, model),
 			"api_key": api_key,
 		}
 	)
