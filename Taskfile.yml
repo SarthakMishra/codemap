@@ -48,7 +48,6 @@ tasks:
     desc: Run all formatters
     cmds:
       - task: format:isort
-      - task: format:docformatter
       - task: lint:fix-unsafe
       - task: format:ruff
 
@@ -61,12 +60,6 @@ tasks:
     desc: Run isort
     cmds:
       - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
-
-  format:docformatter:
-    desc: Run docformatter
-    cmds:
-      - cmd: uv run docformatter --recursive --in-place {{.SRC_DIR}} {{.TESTS_DIR}}
-        ignore_error: true
 
   radon:
     desc: Run radon
