@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codemap.git.diff_splitter import DiffChunk
-from codemap.llm import LLMClient
+from codemap.llm import LLMClient, LLMError
 from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
@@ -113,9 +113,107 @@ class CommitMessageGenerator:
 		# Get the diff content directly from the chunk object
 		diff_content = chunk.content
 
+		# Detect binary files and empty diffs that might be binary files
+		binary_files = []
+		for file_path in chunk.files:
+			if file_path in file_info:
+				extension = file_info[file_path].get("extension", "").lower()
+				# Common binary file extensions
+				binary_extensions = {
+					"png",
+					"jpg",
+					"jpeg",
+					"gif",
+					"bmp",
+					"tiff",
+					"ico",
+					"webp",  # Images
+					"mp3",
+					"wav",
+					"ogg",
+					"flac",
+					"aac",  # Audio
+					"mp4",
+					"avi",
+					"mkv",
+					"mov",
+					"webm",  # Video
+					"pdf",
+					"doc",
+					"docx",
+					"xls",
+					"xlsx",
+					"ppt",
+					"pptx",  # Documents
+					"zip",
+					"tar",
+					"gz",
+					"rar",
+					"7z",  # Archives
+					"exe",
+					"dll",
+					"so",
+					"dylib",  # Binaries
+					"ttf",
+					"otf",
+					"woff",
+					"woff2",  # Fonts
+					"db",
+					"sqlite",
+					"mdb",  # Databases
+				}
+
+				if extension in binary_extensions:
+					binary_files.append(file_path)
+
+			# For absolute paths, try to check if the file is binary
+			abs_path = self.repo_root / file_path
+			try:
+				if abs_path.exists():
+					from codemap.utils.file_utils import is_binary_file
+
+					if is_binary_file(abs_path) and file_path not in binary_files:
+						binary_files.append(file_path)
+			except (OSError, PermissionError) as e:
+				# If any error occurs during binary check, log it and continue
+				logger.debug("Error checking if %s is binary: %s", file_path, str(e))
+
+		# If we have binary files or no diff content, enhance the prompt
+		enhanced_diff_content = diff_content
+		if not diff_content or binary_files:
+			# Create a specialized header for binary files
+			binary_files_header = ""
+			if binary_files:
+				binary_files_header = "BINARY FILES DETECTED:\n"
+				for binary_file in binary_files:
+					extension = file_info.get(binary_file, {}).get("extension", "unknown")
+					binary_files_header += f"- {binary_file} (binary {extension} file)\n"
+				binary_files_header += "\n"
+
+			# If no diff content, create a more informative message about binary files
+			if not diff_content:
+				file_descriptions = []
+				for file_path in chunk.files:
+					if file_path in binary_files:
+						extension = file_info.get(file_path, {}).get("extension", "unknown")
+						file_descriptions.append(f"{file_path} (binary {extension} file)")
+					else:
+						extension = file_info.get(file_path, {}).get("extension", "")
+						file_descriptions.append(f"{file_path} ({extension} file)")
+
+				enhanced_diff_content = (
+					f"{binary_files_header}This chunk contains changes to the following files "
+					f"with no visible diff content (likely binary changes):\n"
+				)
+				for desc in file_descriptions:
+					enhanced_diff_content += f"- {desc}\n"
+			else:
+				# If there is diff content but also binary files, add the binary files header
+				enhanced_diff_content = binary_files_header + diff_content
+
 		# Create a context dict with default values for template variables
 		context = {
-			"diff": diff_content,
+			"diff": enhanced_diff_content,
 			"files": file_info,
 			"convention": convention,
 			"schema": COMMIT_MESSAGE_SCHEMA,
@@ -126,7 +224,7 @@ class CommitMessageGenerator:
 		# Prepare and return the prompt
 		return prepare_prompt(
 			template=self.prompt_template,
-			diff_content=diff_content,
+			diff_content=enhanced_diff_content,
 			file_info=file_info,
 			convention=convention,
 			extra_context=context,  # Pass the context with default values
@@ -384,7 +482,7 @@ class CommitMessageGenerator:
 
 			# Return generated message with success flag
 			return message, True
-		except Exception:
+		except (ValueError, TypeError, KeyError, LLMError):
 			logger.exception("Error during LLM generation")
 			# Fall back to heuristic generation
 			return self.fallback_generation(chunk), False
@@ -431,7 +529,9 @@ class CommitMessageGenerator:
 			message = clean_message_for_linting(message)
 
 			# Check if the message passes linting
-			is_valid, initial_lint_messages = lint_commit_message(message, self.repo_root)
+			is_valid, initial_lint_messages = lint_commit_message(
+				message, self.repo_root, config_loader=self._config_loader
+			)
 			logger.debug("Lint result: valid=%s, messages=%s", is_valid, initial_lint_messages)
 
 			if is_valid or retry_count >= max_retries:
@@ -441,7 +541,58 @@ class CommitMessageGenerator:
 			# Prepare the diff content
 			diff_content = chunk.content
 			if not diff_content:
-				diff_content = "Empty diff (likely modified binary files)"
+				# Check if we have binary files in the chunk
+				binary_files = []
+				for file_path in chunk.files:
+					# First check file extension
+					extension = ""
+					file_info = self.extract_file_info(chunk)
+					if file_path in file_info:
+						extension = file_info[file_path].get("extension", "").lower()
+						binary_extensions = {
+							"png",
+							"jpg",
+							"jpeg",
+							"gif",
+							"bmp",
+							"ico",
+							"webp",
+							"mp3",
+							"wav",
+							"mp4",
+							"avi",
+							"mov",
+							"pdf",
+							"zip",
+							"tar",
+							"gz",
+							"exe",
+							"dll",
+							"so",
+						}
+						if extension in binary_extensions:
+							binary_files.append(file_path)
+
+					# Also try to detect binary files directly
+					abs_path = self.repo_root / file_path
+					try:
+						if abs_path.exists():
+							from codemap.utils.file_utils import is_binary_file
+
+							if is_binary_file(abs_path) and file_path not in binary_files:
+								binary_files.append(file_path)
+					except (OSError, PermissionError) as e:
+						# If any error occurs during binary check, log it and continue
+						logger.debug("Error checking if %s is binary: %s", file_path, str(e))
+
+				if binary_files:
+					# Create a more descriptive message for binary files
+					diff_content = "Binary files detected in this chunk:\n"
+					for binary_file in binary_files:
+						diff_content += f"- {binary_file}\n"
+				else:
+					# Generic fallback for empty diff with no binary files detected
+					diff_content = "Empty diff (likely modified binary files)"
 
 			logger.info("Regenerating message with linting feedback (attempt %d/%d)", retry_count, max_retries)
 
@@ -450,10 +601,10 @@ class CommitMessageGenerator:
 				lint_template = get_lint_prompt_template()
 				enhanced_prompt = prepare_lint_prompt(
 					template=lint_template,
-					diff_content=diff_content,
 					file_info=self.extract_file_info(chunk),  # Use self
 					convention=self.get_commit_convention(),  # Use self
 					lint_messages=initial_lint_messages,  # Use initial messages for feedback
+					original_message=message,  # Pass the original message that failed linting
 				)
 
 				# Generate message with the enhanced prompt
@@ -469,17 +620,23 @@ class CommitMessageGenerator:
 				logger.debug("Cleaned message for linting: %s", cleaned_message)
 
 				# Check if the message passes linting
-				final_is_valid, final_lint_messages = lint_commit_message(cleaned_message, self.repo_root)
+				final_is_valid, final_lint_messages = lint_commit_message(
+					cleaned_message, self.repo_root, config_loader=self._config_loader
+				)
 				logger.debug("Regenerated lint result: valid=%s, messages=%s", final_is_valid, final_lint_messages)
 
 				# Return final result and messages (empty if valid)
 				return cleaned_message, True, final_is_valid, [] if final_is_valid else final_lint_messages
-			except Exception:
+			except (ValueError, TypeError, KeyError, LLMError, json.JSONDecodeError):
 				# If regeneration fails, log it and return the original message and its lint errors
 				logger.exception("Error during message regeneration")
 				return message, used_llm, False, initial_lint_messages  # Return original message and errors
-		except Exception:
+		except (ValueError, TypeError, KeyError, LLMError, json.JSONDecodeError):
 			# If generation fails completely, use a fallback (fallback doesn't lint, so return True, empty messages)
 			logger.exception("Error during message generation")
 			message = self.fallback_generation(chunk)
 			return message, False, True, []  # Fallback assumes valid, no lint messages
+
+	def get_config_loader(self) -> ConfigLoader:
+		"""Get the config loader instance."""
+		return self._config_loader
