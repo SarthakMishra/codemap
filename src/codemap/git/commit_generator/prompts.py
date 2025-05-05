@@ -65,7 +65,7 @@ You are an AI assistant generating Conventional Commit 1.0.0 messages from Git d
 {schema}
 
 ---
-Analyze the following diff and generate the commit message:
+Please return the commit message in a valid json format. Analyze the following diff and generate the commit message:
 
 {diff}
 """
@@ -114,6 +114,8 @@ IMPORTANT:
 - Respond with a valid JSON object following this schema:
 
 {schema}
+
+Return your answer as json.
 """
 
 
