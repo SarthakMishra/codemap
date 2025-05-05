@@ -157,7 +157,7 @@ def get_cache_path(component_name: str | None = None, workspace_root: Path | Non
 
 	Raises:
 	    FileNotFoundError: If `workspace_root` is None and `find_project_root()` fails.
-	    # Config related errors might also be raised by ConfigLoader
+	    # ConfigError: Config related errors might also be raised by ConfigLoader
 
 	"""
 	if workspace_root is None:
