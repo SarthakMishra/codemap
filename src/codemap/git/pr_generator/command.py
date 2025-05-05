@@ -6,9 +6,21 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from codemap.git.pr_generator.schemas import PullRequest
+from codemap.git.pr_generator.strategies import create_strategy
+from codemap.git.pr_generator.utils import (
+	PRCreationError,
+	generate_pr_description_from_commits,
+	generate_pr_description_with_llm,
+	generate_pr_title_from_commits,
+	generate_pr_title_with_llm,
+	get_commit_messages,
+	get_existing_pr,
+)
 from codemap.git.utils import GitError, get_repo_root, run_git_command
-from codemap.llm import LLMError
+from codemap.llm import LLMClient, LLMError
 from codemap.utils.cli_utils import loading_spinner
+from codemap.utils.config_loader import ConfigLoader
 
 from . import PRGenerator
 from .constants import MIN_COMMIT_PARTS
@@ -193,3 +205,200 @@ class PRCommand:
 		except (RuntimeError, ValueError) as e:
 			self.error_state = "failed"
 			raise RuntimeError(str(e)) from e
+
+
+class PRWorkflowCommand:
+	"""Handles the core PR creation and update workflow logic."""
+
+	def __init__(
+		self,
+		repo_path: Path,
+		config_loader: ConfigLoader,
+		llm_client: LLMClient | None = None,
+		model: str | None = None,
+		api_key: str | None = None,
+		api_base: str | None = None,
+	) -> None:
+		"""
+		Initialize the PR workflow command helper.
+
+		Args:
+		        repo_path: Path to the repository.
+		        config_loader: ConfigLoader instance.
+		        llm_client: Optional pre-configured LLMClient.
+		        model: LLM model name (used if llm_client is None).
+		        api_key: API key (used if llm_client is None).
+		        api_base: API base URL (used if llm_client is None).
+
+		"""
+		self.repo_path = repo_path
+		self.config_loader = config_loader
+		self.pr_config = self.config_loader.config.get("pr", {})
+		self.content_config = self.pr_config.get("content", {})
+		self.workflow_strategy_name = self.config_loader.get_workflow_strategy()
+		self.workflow = create_strategy(self.workflow_strategy_name)
+
+		# Initialize LLM client if needed
+		if llm_client:
+			self.llm_client = llm_client
+		else:
+			from codemap.llm import create_client
+
+			self.llm_client = create_client(
+				repo_path=self.repo_path,
+				model=model,
+				api_key=api_key,
+				api_base=api_base,
+			)
+
+		self.pr_generator = PRGenerator(repo_path=self.repo_path, llm_client=self.llm_client)
+
+	def _generate_release_pr_content(self, base_branch: str, branch_name: str) -> dict[str, str]:
+		"""
+		Generate PR content for a release.
+
+		Args:
+		        base_branch: The branch to merge into (e.g. main)
+		        branch_name: The release branch name (e.g. release/1.0.0)
+
+		Returns:
+		        Dictionary with title and description
+
+		"""
+		# Extract version from branch name
+		version = branch_name.replace("release/", "")
+		title = f"Release {version}"
+		# Include base branch information in the description
+		description = f"# Release {version}\n\nThis pull request merges release {version} into {base_branch}."
+		return {"title": title, "description": description}
+
+	def _generate_title(self, commits: list[str], branch_name: str, branch_type: str) -> str:
+		"""Core logic for generating PR title."""
+		title_strategy = self.content_config.get("title_strategy", "commits")
+
+		if not commits:
+			if branch_type == "release":
+				return f"Release {branch_name.replace('release/', '')}"
+			clean_name = branch_name.replace(f"{branch_type}/", "").replace("-", " ").replace("_", " ")
+			return f"{branch_type.capitalize()}: {clean_name.capitalize()}"
+
+		if title_strategy == "llm":
+			return generate_pr_title_with_llm(commits, llm_client=self.llm_client)
+
+		return generate_pr_title_from_commits(commits)
+
+	def _generate_description(self, commits: list[str], branch_name: str, branch_type: str, base_branch: str) -> str:
+		"""Core logic for generating PR description."""
+		description_strategy = self.content_config.get("description_strategy", "commits")
+
+		if not commits:
+			if branch_type == "release" and self.workflow_strategy_name == "gitflow":
+				# Call the internal helper method
+				content = self._generate_release_pr_content(base_branch, branch_name)
+				return content["description"]
+			return f"Changes in {branch_name}"
+
+		if description_strategy == "llm":
+			return generate_pr_description_with_llm(commits, llm_client=self.llm_client)
+
+		if description_strategy == "template" and not self.content_config.get("use_workflow_templates", True):
+			template = self.content_config.get("description_template", "")
+			if template:
+				commit_description = "\n".join([f"- {commit}" for commit in commits])
+				# Note: Other template variables like testing_instructions might need context
+				return template.format(
+					changes=commit_description,
+					testing_instructions="[Testing instructions]",
+					screenshots="[Screenshots]",
+				)
+
+		return generate_pr_description_from_commits(commits)
+
+	def create_pr_workflow(
+		self, base_branch: str, head_branch: str, title: str | None = None, description: str | None = None
+	) -> PullRequest:
+		"""Orchestrates the PR creation process (non-interactive part)."""
+		try:
+			# Check for existing PR first
+			existing_pr = get_existing_pr(head_branch)
+			if existing_pr:
+				logger.warning(
+					f"PR #{existing_pr.number} already exists for branch '{head_branch}'. Returning existing PR."
+				)
+				return existing_pr
+
+			# Get commits
+			commits = get_commit_messages(base_branch, head_branch)
+
+			# Determine branch type
+			branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
+
+			# Generate title and description if not provided
+			final_title = title or self._generate_title(commits, head_branch, branch_type)
+			final_description = description or self._generate_description(
+				commits, head_branch, branch_type, base_branch
+			)
+
+			# Create PR using PRGenerator
+			pr = self.pr_generator.create_pr(base_branch, head_branch, final_title, final_description)
+			logger.info(f"Successfully created PR #{pr.number}: {pr.url}")
+			return pr
+		except GitError:
+			# Specific handling for unrelated histories might go here or be handled in CLI
+			logger.exception("GitError during PR creation workflow")
+			raise
+		except Exception as e:
+			logger.exception("Unexpected error during PR creation workflow")
+			msg = f"Unexpected error creating PR: {e}"
+			raise PRCreationError(msg) from e
+
+	def update_pr_workflow(
+		self,
+		pr_number: int,
+		title: str | None = None,
+		description: str | None = None,
+		base_branch: str | None = None,
+		head_branch: str | None = None,
+	) -> PullRequest:
+		"""Orchestrates the PR update process (non-interactive part)."""
+		try:
+			# Fetch existing PR info if needed to regenerate title/description
+			# This might require gh cli or GitHub API interaction if pr_generator doesn't fetch
+			# For now, assume base/head are provided if regeneration is needed
+
+			final_title = title
+			final_description = description
+
+			# Regenerate if title/description are None
+			if title is None or description is None:
+				if not base_branch or not head_branch:
+					msg = "Cannot regenerate content for update without base and head branches."
+					raise PRCreationError(msg)
+
+				commits = get_commit_messages(base_branch, head_branch)
+				branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
+
+				if title is None:
+					final_title = self._generate_title(commits, head_branch, branch_type)
+				if description is None:
+					final_description = self._generate_description(commits, head_branch, branch_type, base_branch)
+
+			if final_title is None or final_description is None:
+				msg = "Could not determine final title or description for PR update."
+				raise PRCreationError(msg)
+
+			# Update PR using PRGenerator
+			updated_pr = self.pr_generator.update_pr(pr_number, final_title, final_description)
+			logger.info(f"Successfully updated PR #{updated_pr.number}: {updated_pr.url}")
+			return updated_pr
+		except GitError:
+			logger.exception("GitError during PR update workflow")
+			raise
+		except Exception as e:
+			logger.exception("Unexpected error during PR update workflow")
+			msg = f"Unexpected error updating PR: {e}"
+			raise PRCreationError(msg) from e
+
+			logger.exception("Unexpected error during PR update workflow")
+			msg = f"Unexpected error updating PR: {e}"
+			raise PRCreationError(msg) from e

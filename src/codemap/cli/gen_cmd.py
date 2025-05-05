@@ -1,12 +1,4 @@
-"""
-Implementation of the gen command for code documentation generation.
-
-This module implements the enhanced 'gen' command, which can generate
-human-readable documentation in Markdown format.
-
-"""
-
-from __future__ import annotations
+"""CLI command for generating code documentation."""
 
 import logging
 from pathlib import Path
@@ -14,14 +6,10 @@ from typing import Annotated
 
 import typer
 
-from codemap.gen import GenCommand, GenConfig
-from codemap.processor.lod import LODLevel
-from codemap.utils.cli_utils import exit_with_error, setup_logging
-from codemap.utils.config_loader import ConfigLoader
-
 logger = logging.getLogger(__name__)
 
-# Command line argument annotations
+# --- Command Argument Annotations (Keep these lightweight) ---
+
 PathArg = Annotated[
 	Path,
 	typer.Argument(
@@ -57,10 +45,10 @@ MaxContentLengthOpt = Annotated[
 	),
 ]
 
-TreeFlag = Annotated[
-	bool,
+TreeOpt = Annotated[
+	bool | None,
 	typer.Option(
-		"--tree",
+		"--tree/--no-tree",
 		"-t",
 		help="Include directory tree in output",
 	),
@@ -75,7 +63,7 @@ VerboseFlag = Annotated[
 	),
 ]
 
-EntityGraphFlag = Annotated[
+EntityGraphOpt = Annotated[
 	bool | None,
 	typer.Option(
 		"--entity-graph/--no-entity-graph",
@@ -109,7 +97,7 @@ MermaidRelationshipsOpt = Annotated[
 	),
 ]
 
-MermaidLegendFlag = Annotated[
+MermaidLegendOpt = Annotated[
 	bool | None,
 	typer.Option(
 		"--mermaid-legend/--no-mermaid-legend",
@@ -117,7 +105,7 @@ MermaidLegendFlag = Annotated[
 	),
 ]
 
-MermaidUnconnectedFlag = Annotated[
+MermaidUnconnectedOpt = Annotated[
 	bool | None,
 	typer.Option(
 		"--mermaid-unconnected/--no-mermaid-unconnected",
@@ -125,55 +113,93 @@ MermaidUnconnectedFlag = Annotated[
 	),
 ]
 
+SemanticAnalysisOpt = Annotated[
+	bool,
+	typer.Option(
+		"--semantic/--no-semantic",
+		help="Enable/disable semantic analysis",
+	),
+]
 
-def gen_command(
-	path: PathArg = Path(),
-	output: OutputOpt = None,
-	config: ConfigOpt = None,
-	max_content_length: MaxContentLengthOpt = None,
-	lod_level_str: LODLevelOpt = "docs",
-	semantic_analysis: Annotated[
-		bool,
-		typer.Option(
-			"--semantic/--no-semantic",
-			help="Enable/disable semantic analysis",
-		),
-	] = True,
-	tree: Annotated[
-		bool | None,
-		typer.Option(
-			"--tree/--no-tree",
-			"-t",
-			help="Include directory tree in output",
-		),
-	] = None,
-	is_verbose: Annotated[
-		bool,
-		typer.Option(
-			"--verbose",
-			"-v",
-			help="Enable verbose logging",
-		),
-	] = False,
-	entity_graph: EntityGraphFlag = None,
-	mermaid_entities_str: MermaidEntitiesOpt = None,
-	mermaid_relationships_str: MermaidRelationshipsOpt = None,
-	mermaid_show_legend_flag: MermaidLegendFlag = None,
-	mermaid_remove_unconnected_flag: MermaidUnconnectedFlag = None,
+
+# --- Registration Function ---
+
+
+def register_command(app: typer.Typer) -> None:
+	"""Register the gen command with the CLI app."""
+
+	@app.command(name="gen")
+	def gen_command(
+		path: PathArg = Path(),
+		output: OutputOpt = None,
+		config: ConfigOpt = None,
+		max_content_length: MaxContentLengthOpt = None,
+		lod_level_str: LODLevelOpt = "docs",
+		semantic_analysis: SemanticAnalysisOpt = True,
+		tree: TreeOpt = None,
+		is_verbose: VerboseFlag = False,
+		entity_graph: EntityGraphOpt = None,
+		mermaid_entities_str: MermaidEntitiesOpt = None,
+		mermaid_relationships_str: MermaidRelationshipsOpt = None,
+		mermaid_show_legend_flag: MermaidLegendOpt = None,
+		mermaid_remove_unconnected_flag: MermaidUnconnectedOpt = None,
+	) -> None:
+		"""
+		Generate code documentation.
+
+		This command processes a codebase and generates Markdown documentation
+		with configurable level of detail.
+
+		Examples:
+		        codemap gen                      # Generate docs for current directory
+		        codemap gen --lod full           # Generate full implementation docs
+		        codemap gen --lod signatures     # Generate docs with signatures only
+		        codemap gen --no-semantic        # Generate without semantic analysis
+
+		"""
+		# Defer all heavy imports by calling implementation function
+		_gen_command_impl(
+			path=path,
+			output=output,
+			config=config,
+			max_content_length=max_content_length,
+			lod_level_str=lod_level_str,
+			semantic_analysis=semantic_analysis,
+			tree=tree,
+			is_verbose=is_verbose,
+			entity_graph=entity_graph,
+			mermaid_entities_str=mermaid_entities_str,
+			mermaid_relationships_str=mermaid_relationships_str,
+			mermaid_show_legend_flag=mermaid_show_legend_flag,
+			mermaid_remove_unconnected_flag=mermaid_remove_unconnected_flag,
+		)
+
+
+# --- Implementation Function (Heavy imports deferred here) ---
+
+
+def _gen_command_impl(
+	path: Path = Path(),
+	output: Path | None = None,
+	config: Path | None = None,
+	max_content_length: int | None = None,
+	lod_level_str: str = "docs",
+	semantic_analysis: bool = True,
+	tree: bool | None = None,
+	is_verbose: bool = False,
+	entity_graph: bool | None = None,
+	mermaid_entities_str: str | None = None,
+	mermaid_relationships_str: str | None = None,
+	mermaid_show_legend_flag: bool | None = None,
+	mermaid_remove_unconnected_flag: bool | None = None,
 ) -> None:
-	"""
-	Generate code documentation.
+	"""Implementation of the gen command with heavy imports deferred."""
+	# Import heavy dependencies here instead of at the top
+	from codemap.gen import GenCommand, GenConfig
+	from codemap.processor.lod import LODLevel
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, setup_logging
+	from codemap.utils.config_loader import ConfigLoader
 
-	This command processes a codebase and generates Markdown documentation
-	with configurable level of detail.
-
-	Examples:
-	        codemap gen                      # Generate docs for current directory
-	        codemap gen --lod full           # Generate full implementation docs
-	        codemap gen --lod signatures     # Generate docs with signatures only
-	        codemap gen --no-semantic        # Generate without semantic analysis
-
-	"""
 	setup_logging(is_verbose=is_verbose)
 
 	try:
@@ -289,11 +315,9 @@ def gen_command(
 		if not success:
 			exit_with_error("Generation failed")
 
+	except KeyboardInterrupt:
+		handle_keyboard_interrupt()
 	except (FileNotFoundError, PermissionError, OSError) as e:
 		exit_with_error(f"File system error: {e!s}", exception=e)
 	except ValueError as e:
 		exit_with_error(f"Configuration error: {e!s}", exception=e)
-
-
-# Alias for backward compatibility
-generate_command = gen_command

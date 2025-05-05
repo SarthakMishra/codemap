@@ -1,53 +1,101 @@
 """CLI command for asking questions about the codebase using RAG."""
 
-# Need asyncio for the async command
 import logging
 from pathlib import Path
 from typing import Annotated, Any, cast
 
 import asyncer
 import typer
-from rich.prompt import Prompt
-
-from codemap.llm.rag.command import AskCommand
-from codemap.llm.rag.formatter import print_ask_result
-from codemap.utils.cli_utils import exit_with_error, setup_logging
-from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
+# --- Command Argument Annotations (Keep these lightweight) ---
 
-# Make the command function async
-@asyncer.runnify
-async def ask_command(
-	question: Annotated[
-		str | None, typer.Argument(help="Your question about the codebase (omit for interactive mode).")
-	] = None,
-	path: Annotated[
-		Path | None,
-		typer.Option(
-			"--path",
-			"-p",
-			help="Path to the repository root (defaults to current directory).",
-			exists=True,
-			file_okay=False,
-			dir_okay=True,
-			resolve_path=True,
-		),
-	] = None,
-	model: Annotated[
-		str | None, typer.Option("--model", help="LLM model to use (e.g., 'openai/gpt-4o-mini'). Overrides config.")
-	] = None,
-	api_base: Annotated[str | None, typer.Option("--api-base", help="Override the LLM API base URL.")] = None,
-	api_key: Annotated[
-		str | None, typer.Option("--api-key", help="Override the LLM API key (use environment variables for security).")
-	] = None,
-	interactive: Annotated[
-		bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")
-	] = False,
-	is_verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")] = False,
+QuestionArg = Annotated[
+	str | None, typer.Argument(help="Your question about the codebase (omit for interactive mode).")
+]
+
+PathOpt = Annotated[
+	Path | None,
+	typer.Option(
+		"--path",
+		"-p",
+		help="Path to the repository root (defaults to current directory).",
+		exists=True,
+		file_okay=False,
+		dir_okay=True,
+		resolve_path=True,
+	),
+]
+
+ModelOpt = Annotated[
+	str | None,
+	typer.Option(
+		"--model", "-m", help="LLM model to use (e.g., 'openai/gpt-4o-mini'). Overrides config."
+	),  # Added alias
+]
+
+ApiBaseOpt = Annotated[str | None, typer.Option("--api-base", help="Override the LLM API base URL.")]
+
+ApiKeyOpt = Annotated[
+	str | None, typer.Option("--api-key", help="Override the LLM API key (use environment variables for security).")
+]
+
+InteractiveFlag = Annotated[bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")]
+
+VerboseFlag = Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")]
+
+# --- Registration Function ---
+
+
+def register_command(app: typer.Typer) -> None:
+	"""Register the ask command with the CLI app."""
+
+	@app.command(name="ask")
+	@asyncer.runnify  # Apply runnify directly to the command function
+	async def ask_command(
+		question: QuestionArg = None,
+		path: PathOpt = None,
+		model: ModelOpt = None,
+		api_base: ApiBaseOpt = None,
+		api_key: ApiKeyOpt = None,
+		interactive: InteractiveFlag = False,
+		is_verbose: VerboseFlag = False,
+	) -> None:
+		"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
+		# Defer heavy imports and logic to the implementation function
+		await _ask_command_impl(
+			question=question,
+			path=path,
+			model=model,
+			api_base=api_base,
+			api_key=api_key,
+			interactive=interactive,
+			is_verbose=is_verbose,
+		)
+
+
+# --- Implementation Function (Heavy imports deferred here) ---
+
+
+async def _ask_command_impl(
+	question: str | None = None,
+	path: Path | None = None,
+	model: str | None = None,
+	api_base: str | None = None,
+	api_key: str | None = None,
+	interactive: bool = False,
+	is_verbose: bool = False,
 ) -> None:
-	"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
+	"""Implementation of the ask command with heavy imports deferred."""
+	# Import heavy dependencies here instead of at the top
+	from rich.prompt import Prompt
+
+	from codemap.llm.rag.command import AskCommand
+	from codemap.llm.rag.formatter import print_ask_result
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, setup_logging
+	from codemap.utils.config_loader import ConfigLoader
+
 	setup_logging(is_verbose=is_verbose)
 	repo_path = path or Path.cwd()
 	logger.info(f"Received ask command for path: {repo_path}")
@@ -63,7 +111,6 @@ async def ask_command(
 	try:
 		# Initialize command once for potentially multiple runs (interactive)
 		command = AskCommand(
-			# question=question, # Question is handled by run()
 			repo_path=repo_path,
 			model=model,
 			api_base=api_base,
@@ -95,6 +142,8 @@ async def ask_command(
 			result = await command.run(question=cast("str", question))
 			print_ask_result(cast("dict[str, Any]", result))
 
+	except KeyboardInterrupt:
+		handle_keyboard_interrupt()
 	except Exception as e:
 		logger.exception("An error occurred during the ask command.")
 		exit_with_error(f"Error executing ask command: {e}", exception=e)

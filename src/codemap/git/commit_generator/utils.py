@@ -1,88 +1,134 @@
-"""Linting functionality for commit messages."""
-
-from __future__ import annotations
+"""Utility functions for commit message generation."""
 
 import logging
-from typing import TYPE_CHECKING
+import re
+from pathlib import Path
 
-from codemap.git.commit_linter import create_linter
+from codemap.git.commit_linter.linter import CommitLinter
+from codemap.git.utils import GitError, run_git_command
 from codemap.utils.config_loader import ConfigLoader
-
-if TYPE_CHECKING:
-	from pathlib import Path
-
 
 logger = logging.getLogger(__name__)
 
 
-def lint_commit_message(
-	message: str, repo_root: Path, config_loader: ConfigLoader | None = None
-) -> tuple[bool, list[str]]:
-	"""
-	Lint a commit message using the CommitLinter.
-
-	Args:
-	    message: Commit message to lint
-	    repo_root: Repository root path
-	    config_loader: Optional ConfigLoader instance for dependency injection
-
-	Returns:
-	    Tuple of (is_valid, list_of_messages)
-
-	"""
-	try:
-		# Create a linter using the commit convention config from config_loader
-		# Use dependency injection if a config_loader is provided, otherwise create one based on repo_root
-		linter = create_linter(
-			config_path=str(repo_root / ".codemap.yml"), config_loader=config_loader, repo_root=repo_root
-		)
-		return linter.lint(message)
-	except Exception as e:
-		logger.exception("Error during commit message linting")
-		# Return valid=False with error message to make the failure visible
-		return False, [f"Linter failed to execute: {e!s}"]
-
-
 def clean_message_for_linting(message: str) -> str:
 	"""
-	Clean a message before linting.
+	Clean a commit message for linting.
+
+	Removes extra newlines, trims whitespace, etc.
 
 	Args:
-	    message: Message to clean
+	        message: The commit message to clean
 
 	Returns:
-	    Cleaned message
+	        The cleaned commit message
 
 	"""
-	# Basic cleaning
-	message = message.strip()
+	# Replace multiple consecutive newlines with a single newline
+	cleaned = re.sub(r"\n{3,}", "\n\n", message)
+	# Trim leading and trailing whitespace
+	return cleaned.strip()
 
-	# Remove markdown code blocks and inline code that might come from LLM
-	message = message.replace("```", "").replace("`", "")
 
-	# Remove common prefixes the LLM might add
-	prefixes_to_remove = ["commit message:", "message:", "response:"]
-	for prefix in prefixes_to_remove:
-		if message.lower().startswith(prefix):
-			message = message[len(prefix) :].strip()
+def lint_commit_message(
+	message: str, repo_root: Path | None = None, config_loader: ConfigLoader | None = None
+) -> tuple[bool, str | None]:
+	"""
+	Lint a commit message.
 
-	# Process multi-line content carefully to preserve format
-	lines = message.splitlines()
-	if len(lines) > 0:
-		# Keep the header line as is (first line)
-		header = lines[0]
-		# Join the rest into a body (if any)
-		if len(lines) > 1:
-			# Check if there's already a blank line between header and body
-			body_start = 2 if lines[1].strip() == "" else 1
+	Checks if it adheres to Conventional Commits format using internal CommitLinter.
 
-			if len(lines) > body_start:
-				# Join body lines with proper line breaks
-				body = "\n".join(lines[body_start:])
-				# Return header + blank line + body
-				return f"{header}\n\n{body}"
+	Args:
+	        message: The commit message to lint
+	        repo_root: Repository root path
+	        config_loader: Configuration loader instance
 
-		# Just return the header if no body
-		return header
+	Returns:
+	        Tuple of (is_valid, error_message)
 
-	return message
+	"""
+	# Get config loader if not provided
+	if config_loader is None:
+		config_loader = ConfigLoader(repo_root=repo_root)
+
+	try:
+		# Create a CommitLinter instance with the config_loader
+		linter = CommitLinter(config_loader=config_loader)
+
+		# Lint the commit message
+		is_valid, lint_messages = linter.lint(message)
+
+		# Get error message if not valid
+		error_message = None
+		if not is_valid and lint_messages:
+			error_message = "\n".join(lint_messages)
+
+		return is_valid, error_message
+
+	except Exception as e:
+		# Handle any errors during linting
+		logger.exception("Error linting commit message")
+		return False, f"Linting failed: {e!s}"
+
+
+def save_working_directory_state(files: list[str], output_file: str) -> bool:
+	"""
+	Save the current state of specified files to a patch file.
+
+	Args:
+	        files: List of file paths
+	        output_file: Path to output patch file
+
+	Returns:
+	        bool: Whether the operation was successful
+
+	"""
+	output_path = Path(output_file)
+
+	try:
+		if not files:
+			# Nothing to save
+			with output_path.open("w") as f:
+				f.write("")
+			return True
+
+		# Generate diff for the specified files
+		diff_cmd = ["git", "diff", "--", *files]
+		diff_content = run_git_command(diff_cmd)
+
+		# Write to output file
+		with output_path.open("w") as f:
+			f.write(diff_content)
+
+		return True
+
+	except (OSError, GitError):
+		logger.exception("Error saving working directory state")
+		return False
+
+
+def restore_working_directory_state(patch_file: str) -> bool:
+	"""
+	Restore the working directory state from a patch file.
+
+	Args:
+	        patch_file: Path to patch file
+
+	Returns:
+	        bool: Whether the operation was successful
+
+	"""
+	patch_path = Path(patch_file)
+
+	try:
+		# Check if the patch file exists and is not empty
+		if not patch_path.exists() or patch_path.stat().st_size == 0:
+			return True  # Nothing to restore
+
+		# Apply the patch
+		run_git_command(["git", "apply", patch_file])
+		return True
+
+	except GitError:
+		logger.exception("Error restoring working directory state")
+		return False

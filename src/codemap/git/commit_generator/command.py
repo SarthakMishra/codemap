@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import questionary
 import typer
 
-from codemap.git.commit_generator.utils import (  # Import needed for re-linting edits
+from codemap.git.commit_generator.utils import (
 	clean_message_for_linting,
 	lint_commit_message,
 )
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.interactive import ChunkAction, CommitUI
+from codemap.git.semantic_grouping import SemanticGroup
 from codemap.git.utils import (
 	GitDiff,
 	GitError,
@@ -45,6 +45,9 @@ MAX_FILES_BEFORE_BATCHING = 10
 # Constants for content truncation
 MAX_FILE_CONTENT_LINES = 300  # Maximum number of lines to include for a single file
 MAX_TOTAL_CONTENT_LINES = 1000  # Maximum total lines across all untracked files
+
+# Git output constants
+MIN_PORCELAIN_LINE_LENGTH = 3  # Minimum length of a valid porcelain status line
 
 
 class CommitCommand:
@@ -329,12 +332,12 @@ class CommitCommand:
 				self.error_state = "failed"
 				return False  # Abort on commit failure
 			if action == ChunkAction.EDIT:
-				edited_message = self.ui.edit_message(message)  # Pass current message for editing
-				# Clean and re-lint the edited message
+				# Allow user to edit the message
+				current_message = chunk.description or ""  # Default to empty string if None
+				edited_message = self.ui.edit_message(current_message)
 				cleaned_edited_message = clean_message_for_linting(edited_message)
-				edited_is_valid, edited_lint_messages = lint_commit_message(
-					cleaned_edited_message, self.repo_root, config_loader=self.message_generator.get_config_loader()
-				)
+				edited_is_valid, _ = lint_commit_message(cleaned_edited_message)
+				# Convert error_message to list for compatibility with the rest of the code
 				if edited_is_valid:
 					# Commit with the user-edited, now valid message
 					if self._perform_commit(chunk, cleaned_edited_message):
@@ -344,11 +347,7 @@ class CommitCommand:
 				# If edited message is still invalid, show errors and loop back
 				self.ui.show_warning("Edited message still failed linting.")
 				# Update state for the next loop iteration to show the edited (but invalid) message
-				message = edited_message
-				passed_linting = False
-				lint_messages = edited_lint_messages
-				# No need to update used_llm as it's now user-edited
-				chunk.description = message  # Update chunk description for next display
+				chunk.description = edited_message
 				chunk.is_llm_generated = False  # Mark as not LLM-generated
 				continue  # Go back to the start of the while loop
 			if action == ChunkAction.REGENERATE:
@@ -422,9 +421,12 @@ class CommitCommand:
 
 		return success
 
-	def run(self) -> bool:
+	def run(self, interactive: bool = True) -> bool:
 		"""
 		Run the commit command workflow.
+
+		Args:
+		    interactive: Whether to run in interactive mode. Defaults to True.
 
 		Returns:
 		    True if the process completed (even if aborted), False on unexpected error.
@@ -453,8 +455,8 @@ class CommitCommand:
 				self.ui.show_error("Failed to split changes into manageable chunks.")
 				return False
 
-			# Process chunks
-			success = self.process_all_chunks(chunks, total_chunks)
+			# Process chunks, passing the interactive flag
+			success = self.process_all_chunks(chunks, total_chunks, interactive=interactive)
 
 			if self.error_state == "aborted":
 				self.ui.show_message("Commit process aborted by user.")
@@ -488,3 +490,397 @@ class CommitCommand:
 						switch_branch(self.original_branch)
 				except (GitError, Exception) as e:
 					logger.warning("Could not restore original branch %s: %s", self.original_branch, e)
+
+
+class SemanticCommitCommand(CommitCommand):
+	"""Handles the semantic commit command workflow."""
+
+	def __init__(
+		self,
+		path: Path | None = None,
+		model: str = "gpt-4o-mini",
+		bypass_hooks: bool = False,
+		embedding_model: str = "all-MiniLM-L6-v2",
+		clustering_method: str = "agglomerative",
+		similarity_threshold: float = 0.6,
+	) -> None:
+		"""
+		Initialize the semantic commit command.
+
+		Args:
+		        path: Optional path to start from
+		        model: LLM model to use for commit message generation
+		        bypass_hooks: Whether to bypass git hooks with --no-verify
+		        embedding_model: Model to use for generating embeddings
+		        clustering_method: Method to use for clustering ("agglomerative" or "dbscan")
+		        similarity_threshold: Threshold for group similarity to trigger merging
+
+		"""
+		super().__init__(path, model, bypass_hooks)
+
+		# Import semantic grouping components
+		from codemap.git.semantic_grouping.clusterer import DiffClusterer
+		from codemap.git.semantic_grouping.embedder import DiffEmbedder
+		from codemap.git.semantic_grouping.resolver import FileIntegrityResolver
+
+		# Initialize semantic grouping components
+		self.embedder = DiffEmbedder(model_name=embedding_model)
+		self.clusterer = DiffClusterer(method=clustering_method)
+		self.resolver = FileIntegrityResolver(similarity_threshold=similarity_threshold)
+
+		# Track state for commits
+		self.committed_files: set[str] = set()
+		self.is_pathspec_mode = False
+		self.all_repo_files: set[str] = set()
+		self.target_files: list[str] = []
+
+	def _get_target_files(self, pathspecs: list[str] | None = None) -> list[str]:
+		"""
+		Get the list of target files based on pathspecs.
+
+		Args:
+		        pathspecs: Optional list of path specifications
+
+		Returns:
+		        List of file paths
+
+		"""
+		try:
+			cmd = ["git", "status", "--porcelain=v1", "-uall"]
+			if pathspecs:
+				cmd.extend(["--", *pathspecs])
+				self.is_pathspec_mode = True
+
+			output = run_git_command(cmd)
+
+			# Parse porcelain output to get file paths
+			target_files = []
+			for line in output.splitlines():
+				if not line or len(line) < MIN_PORCELAIN_LINE_LENGTH:
+					continue
+
+				status = line[:2]
+				file_path = line[3:].strip()
+
+				# Handle renamed files
+				if status.startswith("R"):
+					# Extract the new file name after the arrow
+					file_path = file_path.split(" -> ")[1]
+
+				target_files.append(file_path)
+
+			# If in pathspec mode, get all repo files for later use
+			if self.is_pathspec_mode:
+				self.all_repo_files = set(run_git_command(["git", "ls-files"]).splitlines())
+
+			return target_files
+
+		except GitError as e:
+			msg = f"Failed to get target files: {e}"
+			logger.exception(msg)
+			raise RuntimeError(msg) from e
+
+	def _prepare_untracked_files(self, target_files: list[str]) -> list[str]:
+		"""
+		Prepare untracked files for diffing by adding them to the index.
+
+		Args:
+		        target_files: List of target file paths
+
+		Returns:
+		        List of untracked files that were prepared
+
+		"""
+		try:
+			# Get untracked files
+			untracked_files = get_untracked_files()
+
+			# Filter to only those in target_files
+			untracked_targets = [f for f in untracked_files if f in target_files]
+
+			if untracked_targets:
+				# Add untracked files to the index (but not staging area)
+				run_git_command(["git", "add", "-N", "--", *untracked_targets])
+
+			return untracked_targets
+
+		except GitError as e:
+			logger.warning("Error preparing untracked files: %s", e)
+			return []
+
+	def _get_combined_diff(self, target_files: list[str]) -> GitDiff:
+		"""
+		Get the combined diff for all target files.
+
+		Args:
+		        target_files: List of target file paths
+
+		Returns:
+		        GitDiff object with the combined diff
+
+		"""
+		try:
+			# Get diff against HEAD for all target files
+			diff_content = run_git_command(["git", "diff", "HEAD", "--", *target_files])
+
+			return GitDiff(files=target_files, content=diff_content)
+
+		except GitError as e:
+			msg = f"Failed to get combined diff: {e}"
+			logger.exception(msg)
+			raise RuntimeError(msg) from e
+
+	def _create_semantic_groups(self, chunks: list[DiffChunk]) -> list[SemanticGroup]:
+		"""
+		Create semantic groups from diff chunks.
+
+		Args:
+		        chunks: List of DiffChunk objects
+
+		Returns:
+		        List of SemanticGroup objects
+
+		"""
+		# Generate embeddings for chunks
+		chunk_embedding_tuples = self.embedder.embed_chunks(chunks)
+		chunk_embeddings = {ce[0]: ce[1] for ce in chunk_embedding_tuples}
+
+		# Cluster chunks
+		cluster_lists = self.clusterer.cluster(chunk_embedding_tuples)
+
+		# Create initial semantic groups
+		initial_groups = [SemanticGroup(chunks=cluster) for cluster in cluster_lists]
+
+		# Resolve file integrity constraints
+		return self.resolver.resolve_violations(initial_groups, chunk_embeddings)
+
+	def _generate_group_messages(self, groups: list[SemanticGroup]) -> list[SemanticGroup]:
+		"""
+		Generate commit messages for semantic groups.
+
+		Args:
+		        groups: List of SemanticGroup objects
+
+		Returns:
+		        List of SemanticGroup objects with messages
+
+		"""
+		from codemap.git.diff_splitter import DiffChunk
+		from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
+
+		# Get max token limit and settings from message generator's config
+		# since that's where the config_loader is stored
+		llm_config = self.message_generator.get_config_loader().get("llm", {})
+		max_tokens = llm_config.get("max_context_tokens", 4000)
+		use_lod_context = llm_config.get("use_lod_context", True)
+
+		for group in groups:
+			try:
+				# Create temporary DiffChunks from the group's chunks
+				if use_lod_context and len(group.chunks) > 1:
+					logger.debug("Processing semantic group with %d chunks using LOD context", len(group.chunks))
+					try:
+						# Process all chunks in the group with LOD context processor
+						optimized_content = process_chunks_with_lod(group.chunks, max_tokens)
+
+						if optimized_content:
+							# Create a temporary chunk with the optimized content
+							temp_chunk = DiffChunk(files=group.files, content=optimized_content)
+						else:
+							# Fallback: create a temp chunk with original content
+							temp_chunk = DiffChunk(files=group.files, content=group.content)
+					except Exception:
+						logger.exception("Error in LOD context processing")
+						# Fallback to original content
+						temp_chunk = DiffChunk(files=group.files, content=group.content)
+				else:
+					# Use the original group content
+					temp_chunk = DiffChunk(files=group.files, content=group.content)
+
+				# Generate message with linting
+				# We ignore linting status - SemanticCommitCommand is less strict
+				message, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+
+				# Store the message with the group
+				group.message = message
+
+			except Exception:
+				logger.exception("Error generating message for group")
+				# Use a fallback message
+				group.message = f"update: changes to {len(group.files)} files"
+
+		return groups
+
+	def _stage_and_commit_group(self, group: SemanticGroup) -> bool:
+		"""
+		Stage and commit a semantic group.
+
+		Args:
+		        group: SemanticGroup to commit
+
+		Returns:
+		        bool: Whether the commit was successful
+
+		"""
+		# Get files in this group
+		group_files = group.files
+
+		try:
+			# First, unstage any previously staged files
+			# This ensures we only commit the current group
+			run_git_command(["git", "reset"])
+
+			# Add the group files to the index
+			run_git_command(["git", "add", "--", *group_files])
+
+			# Create the commit with the group message
+			commit_cmd = ["git", "commit", "-m", group.message]
+
+			# Add --no-verify if bypass_hooks is set
+			if self.bypass_hooks:
+				commit_cmd.append("--no-verify")
+
+			try:
+				# Try to commit
+				run_git_command(commit_cmd)
+				# Mark files as committed
+				self.committed_files.update(group_files)
+				return True
+			except GitError as commit_error:
+				# Check if this is a pre-commit hook failure and user wants to bypass
+				if "pre-commit" in str(commit_error) and not self.bypass_hooks and self.ui.confirm_bypass_hooks():
+					# Try again with --no-verify
+					commit_cmd.append("--no-verify")
+					run_git_command(commit_cmd)
+					self.committed_files.update(group_files)
+					return True
+				# If it's not a hook failure or user doesn't want to bypass, re-raise
+				logger.exception("Error during group commit")
+				return False
+		except GitError:
+			logger.exception("Error during staging or reset")
+			return False
+
+	def run(self, interactive: bool = True, pathspecs: list[str] | None = None) -> bool:
+		"""
+		Run the semantic commit command workflow.
+
+		Args:
+		        interactive: Whether to run in interactive mode
+		        pathspecs: Optional list of path specifications
+
+		Returns:
+		        bool: Whether the process completed successfully
+
+		"""
+		try:
+			# Get target files
+			with loading_spinner("Analyzing repository..."):
+				self.target_files = self._get_target_files(pathspecs)
+
+				if not self.target_files:
+					self.ui.show_message("No changes detected to commit.")
+					return True
+
+				# Prepare untracked files
+				self._prepare_untracked_files(self.target_files)
+
+				# Get combined diff
+				combined_diff = self._get_combined_diff(self.target_files)
+
+				# Split diff into chunks
+				chunks, _ = self.splitter.split_diff(combined_diff)
+
+				if not chunks:
+					self.ui.show_error("Failed to split changes into manageable chunks.")
+					return False
+
+			# Create semantic groups
+			with loading_spinner("Creating semantic groups..."):
+				groups = self._create_semantic_groups(chunks)
+
+				if not groups:
+					self.ui.show_error("Failed to create semantic groups.")
+					return False
+
+				# Generate messages for groups
+				groups = self._generate_group_messages(groups)
+
+			# Process groups
+			self.ui.show_message(f"Found {len(groups)} semantic groups of changes.")
+
+			for i, group in enumerate(groups):
+				if interactive:
+					# Display group info with improved UI
+					self.ui.display_group(group, i, len(groups))
+
+					# Get user action
+					action = self.ui.get_group_action()
+
+					if action == ChunkAction.COMMIT:
+						group.approved = True
+					elif action == ChunkAction.EDIT:
+						# Allow user to edit the message
+						current_message = group.message or ""  # Default to empty string if None
+						edited_message = self.ui.edit_message(current_message)
+						group.message = edited_message
+						group.approved = True
+					elif action == ChunkAction.REGENERATE:
+						self.ui.show_regenerating()
+						# Re-generate the message
+						try:
+							from codemap.git.diff_splitter import DiffChunk
+
+							temp_chunk = DiffChunk(files=group.files, content=group.content)
+							message, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+							group.message = message
+
+							# Show the regenerated message
+							self.ui.display_group(group, i, len(groups))
+							if questionary.confirm("Commit with regenerated message?", default=True).ask():
+								group.approved = True
+							else:
+								self.ui.show_skipped(group.files)
+						except (LLMError, GitError, RuntimeError) as e:
+							self.ui.show_error(f"Error regenerating message: {e}")
+							if questionary.confirm("Skip this group?", default=True).ask():
+								self.ui.show_skipped(group.files)
+						else:
+							return False
+					elif action == ChunkAction.SKIP:
+						self.ui.show_skipped(group.files)
+					elif action == ChunkAction.EXIT and self.ui.confirm_exit():
+						return True
+						# If exit is canceled, continue with the next group
+				else:
+					# In non-interactive mode, approve all groups
+					group.approved = True
+
+			# Commit approved groups
+			success = True
+			committed_count = 0
+			for group in groups:
+				if group.approved:
+					self.ui.show_message(f"\nCommitting: {group.message}")
+					if self._stage_and_commit_group(group):
+						committed_count += 1
+					else:
+						success = False
+						self.ui.show_error(f"Failed to commit group: {group.message}")
+						# Continue with other groups
+
+			if committed_count > 0:
+				self.ui.show_message(f"Successfully committed {committed_count} semantic groups.")
+				self.ui.show_all_done()
+			else:
+				self.ui.show_message("No changes were committed.")
+
+			return success
+
+		except RuntimeError as e:
+			self.ui.show_error(str(e))
+			return False
+		except Exception as e:
+			self.ui.show_error(f"An unexpected error occurred: {e}")
+			logger.exception("Unexpected error in semantic commit command")
+			return False

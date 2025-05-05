@@ -9,12 +9,15 @@ from pathlib import Path
 import typer
 
 from codemap import __version__
-from codemap.cli.ask_cmd import ask_command
-from codemap.cli.commit_cmd import commit_command
-from codemap.cli.gen_cmd import gen_command
-from codemap.cli.index_cmd import index_command
-from codemap.cli.pr_cmd import pr_command
 
+# Import registration functions first
+from .ask_cmd import register_command as register_ask_command
+from .commit_cmd import register_command as register_commit_command
+from .gen_cmd import register_command as register_gen_command
+from .index_cmd import register_command as register_index_command
+from .pr_cmd import register_command as register_pr_command
+
+# Configure logging early for import error handling
 logger = logging.getLogger(__name__)
 
 # Load environment variables from .env files
@@ -25,19 +28,19 @@ try:
 	env_local = Path(".env.local")
 	if env_local.exists():
 		load_dotenv(dotenv_path=env_local)
-		logging.getLogger(__name__).debug("Loaded environment variables from %s", env_local)
+		logger.debug("Loaded environment variables from %s", env_local)
 	else:
 		env_file = Path(".env")
 		if env_file.exists():
 			load_dotenv(dotenv_path=env_file)
-			logging.getLogger(__name__).debug("Loaded environment variables from %s", env_file)
+			logger.debug("Loaded environment variables from %s", env_file)
 except ImportError as err:
 	# python-dotenv is required for loading environment variables from .env files
 	# Log an error and raise an exception to halt execution if it's missing.
 	error_msg = (
 		"The 'python-dotenv' package is required but not installed.Please install it using: pip install python-dotenv"
 	)
-	# Log the error message along with the original exception information
+	# Use the named logger instead of root logger
 	logger.exception(error_msg)
 	# Raise a new RuntimeError, explicitly chaining the original ImportError
 	raise RuntimeError(error_msg) from err
@@ -60,20 +63,20 @@ app = typer.Typer(
 	no_args_is_help=True,
 )
 
-# Register commands
-app.command(name="gen")(gen_command)
-app.command(name="commit")(commit_command)
-app.command(name="pr")(pr_command)
-app.command(name="ask")(ask_command)
-app.command(name="index")(index_command)
+# --- Register commands using lazy-loading pattern ---
+
+register_gen_command(app)
+register_ask_command(app)
+register_commit_command(app)
+register_index_command(app)
+register_pr_command(app)
 
 
+# --- Main Entry Point ---
 def main() -> int:
 	"""Run the CLI application."""
-	# Typer's app() will handle running sync/async commands appropriately
 	return app()
 
 
 if __name__ == "__main__":
-	# Keep the standard synchronous entry point call
 	sys.exit(main())
