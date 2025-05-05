@@ -130,6 +130,9 @@ def batch_generate_messages(
 							if "commit_message" in json_data:
 								# Extract just the commit message
 								content = json_data["commit_message"]
+							elif "message" in json_data:
+								# Extract message from {"message": "..."} format
+								content = json_data["message"]
 							else:
 								# Use the formatter for conventional format
 								content = format_commit_json(content)
