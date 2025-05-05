@@ -1,7 +1,6 @@
 """Diff splitting implementation for CodeMap."""
 
 import logging
-import re
 from pathlib import Path
 from typing import cast
 
@@ -20,6 +19,12 @@ from .utils import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Constants for truncation and sampling
+MAX_DIFF_CONTENT_LENGTH = 100000  # ~100KB maximum size for diff content
+MAX_DIFF_LINES = 1000  # Maximum number of lines to process
+SMALL_SECTION_SIZE = 50  # Maximum size for a "small" diff section
+COMPLEX_SECTION_SIZE = 100  # Minimum size for a "complex" diff section (with middle sample)
 
 
 class DiffSplitter:
@@ -255,24 +260,28 @@ class DiffSplitter:
 		if not diff.files:
 			return [], []
 
+		# Special handling for untracked files - bypass semantic split since the content isn't a proper diff format
+		if diff.is_untracked:
+			logger.debug("Processing untracked files with special handling: %d files", len(diff.files))
+			# Create a simple chunk per file to avoid errors with unidiff parsing
+			chunks = []
+			for file_path in diff.files:
+				# Create a basic chunk with file info but without trying to parse the content as a diff
+				chunks = [
+					DiffChunk(
+						files=[file_path],
+						content=f"New untracked file: {file_path}",
+						description=f"New file: {file_path}",
+					)
+					for file_path in diff.files
+				]
+			return chunks, []
+
 		# In test environments, log the diff content for debugging
 		if is_test_environment():
 			logger.debug("Processing diff in test environment with %d files", len(diff.files) if diff.files else 0)
 			if diff.content and len(diff.content) < self.max_log_diff_size:  # Use configured max log size
 				logger.debug("Diff content: %s", diff.content)
-
-		# Check for excessively large diff content and handle appropriately
-		if diff.content and len(diff.content) > self.max_file_size_for_llm:
-			logger.warning("Diff content is very large (%d bytes). Processing might be limited.", len(diff.content))
-
-			# Try to extract file names directly from the diff content for large diffs
-			file_list = re.findall(r"diff --git a/(.*?) b/(.*?)$", diff.content, re.MULTILINE)
-			if file_list:
-				logger.info("Extracted %d files from large diff content", len(file_list))
-				files_to_process = [f[1] for f in file_list]  # Use the "b" side of each diff
-
-				# Override diff.files with extracted file list to bypass content processing
-				diff.files = files_to_process
 
 		# Process files in the diff
 		if diff.files:
@@ -304,7 +313,46 @@ class DiffSplitter:
 			raise ValueError(msg)
 
 		try:
-			return self._split_semantic(diff), []
+			chunks = self._split_semantic(diff)
+
+			# If we truncated the content, restore the original content for the actual chunks
+			if diff.content and chunks:
+				# Create a mapping of file paths to chunks for quick lookup
+				chunks_by_file = {}
+				for chunk in chunks:
+					for file_path in chunk.files:
+						if file_path not in chunks_by_file:
+							chunks_by_file[file_path] = []
+						chunks_by_file[file_path].append(chunk)
+
+				# For chunks that represent files we can find in the original content,
+				# update their content to include the full original diff for that file
+				for chunk in chunks:
+					# Use a heuristic to match file sections in the original content
+					for file_path in chunk.files:
+						file_marker = f"diff --git a/{file_path} b/{file_path}"
+						if file_marker in diff.content:
+							# Found a match for this file in the original content
+							# Extract that file's complete diff section
+							start_idx = diff.content.find(file_marker)
+							end_idx = diff.content.find("diff --git", start_idx + len(file_marker))
+							if end_idx == -1:  # Last file in the diff
+								end_idx = len(diff.content)
+
+							file_diff = diff.content[start_idx:end_idx].strip()
+
+							# Now replace just this file's content in the chunk
+							# This is a heuristic that may need adjustment based on your diff format
+							if chunk.content and file_marker in chunk.content:
+								chunk_start = chunk.content.find(file_marker)
+								chunk_end = chunk.content.find("diff --git", chunk_start + len(file_marker))
+								if chunk_end == -1:  # Last file in the chunk
+									chunk_end = len(chunk.content)
+
+								# Replace this file's truncated diff with the full diff
+								chunk.content = chunk.content[:chunk_start] + file_diff + chunk.content[chunk_end:]
+
+			return chunks, []
 		except Exception as e:
 			logger.exception("Semantic splitting failed")
 			console.print(f"[red]Semantic splitting failed: {e}[/red]")
