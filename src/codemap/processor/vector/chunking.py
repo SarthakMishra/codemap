@@ -108,6 +108,15 @@ class TreeSitterChunker:
 		nested_info = []
 
 		def process_nested(nested_entity: LODEntity, depth: int = 1) -> None:
+			"""Process a nested entity and its children recursively to extract information.
+
+			Args:
+				nested_entity: The nested entity to process
+				depth: Current depth in the hierarchy (default: 1)
+
+			Returns:
+				None: Modifies nested_info in place by appending entity information
+			"""
 			# Skip UNKNOWN entities
 			if nested_entity.entity_type == EntityType.UNKNOWN:
 				return

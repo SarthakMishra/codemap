@@ -227,6 +227,14 @@ def progress_indicator(
 
 			# Function to advance and display steps
 			def advance_step(amount: int = 1) -> None:
+				"""Advances the step progress by the specified amount and updates the display.
+
+				Args:
+					amount: The number of steps to advance. Defaults to 1.
+
+				Returns:
+					None
+				"""
 				nonlocal steps_completed
 				steps_completed += amount
 				steps_completed = min(steps_completed, total_steps)

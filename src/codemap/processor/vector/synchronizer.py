@@ -221,7 +221,21 @@ class VectorSynchronizer:
 		return files_to_process, files_to_delete_chunks_for, chunks_to_delete
 
 	async def _process_and_upsert_batch(self, chunk_batch: list[CodeChunk]) -> int:
-		"""Processes a batch of chunks: gets embeddings and upserts to Qdrant."""
+		"""Process a batch of chunks by generating embeddings and upserting to Qdrant.
+
+		Args:
+		    chunk_batch: List of CodeChunk objects to process. Each chunk contains content
+		        and metadata about a code segment.
+
+		Returns:
+		    int: Number of points successfully upserted to Qdrant. Returns 0 if:
+		        - Input batch is empty
+		        - Embedding generation fails
+		        - No points are generated from the batch
+
+		Raises:
+		    RuntimeError: If there's a mismatch between input chunks and generated embeddings.
+		"""
 		if not chunk_batch:
 			return 0
 
@@ -284,6 +298,17 @@ class VectorSynchronizer:
 		processed_chunk_count = 0
 
 		def update_progress(description: str, step_increment: int = 1, processed_chunks: int = 0) -> None:
+			"""Updates the progress bar with current synchronization status.
+
+			Args:
+				description: Main description text to display in progress bar.
+				step_increment: Number of steps to increment progress by. Defaults to 1.
+				processed_chunks: Number of chunks processed in this update. Defaults to 0.
+					If greater than 0, will be appended to description in parentheses.
+
+			Returns:
+				None
+			"""
 			nonlocal current_step, processed_chunk_count
 			current_step += step_increment
 			processed_chunk_count += processed_chunks

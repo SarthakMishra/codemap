@@ -179,6 +179,21 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 
 	# Recursive function to generate formatted tree lines
 	def format_level(level: dict, prefix: str = "") -> None:
+		"""Recursively formats a directory tree level into ASCII tree representation.
+
+		Args:
+		    level: Dictionary representing the current directory level, where keys are names
+		        and values are either subdirectories (dicts) or files (strings).
+		    prefix: String used for indentation and tree connectors in the output. Defaults to "".
+
+		Returns:
+		    None: Modifies the tree_lines list in the closure by appending formatted lines.
+
+		Note:
+		    - Directories are sorted before files
+		    - Items are sorted alphabetically within their type group
+		    - Special markers (like "__file__") are skipped
+		"""
 		# Sort items: directories first (dictionaries), then files (strings)
 		sorted_items = sorted(level.items(), key=lambda x: (not isinstance(x[1], dict), x[0].lower()))
 

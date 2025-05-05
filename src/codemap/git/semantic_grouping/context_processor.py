@@ -118,6 +118,19 @@ def prioritize_chunks(chunks: list[DiffChunk], max_count: int) -> list[DiffChunk
 	# 3. Prefer chunks with more added/changed lines
 
 	def chunk_score(chunk: DiffChunk) -> float:
+		"""Calculates a priority score for a diff chunk based on heuristics.
+
+		The score is calculated using three factors:
+		1. Presence of code files (60% weight)
+		2. Number of files affected (20% weight)
+		3. Size of content changes (20% weight)
+
+		Args:
+			chunk: The diff chunk to score
+
+		Returns:
+			float: A score between 0 and 1 representing the chunk's priority
+		"""
 		# Check if any files are code files
 		code_file_score = 0
 		for file in chunk.files:

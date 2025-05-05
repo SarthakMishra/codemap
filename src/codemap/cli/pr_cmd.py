@@ -212,8 +212,15 @@ def _pr_command_impl(
 	setup_logging(is_verbose=is_verbose)
 	interactive = not non_interactive
 
-	# Helper to exit with typer.Exit
 	def _exit_command(code: int = 1) -> None:
+		"""Helper function to exit the command using typer.Exit.
+
+		Args:
+			code: Exit code to return (default: 1).
+
+		Raises:
+			typer.Exit: Always raises this exception to exit the command.
+		"""
 		raise typer.Exit(code) from None
 
 	# --- Dataclass for Options (similar to pr_cmd_old) ---

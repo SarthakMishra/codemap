@@ -16,8 +16,19 @@ logger = logging.getLogger(__name__)
 
 # --- Mermaid Helper --- #
 def _escape_mermaid_label(label: str) -> str:
-	# Basic escaping for Mermaid node labels
-	# Replace potentially problematic characters
+	"""Escapes special characters in Mermaid node labels.
+
+	Replaces potentially problematic characters with safer alternatives:
+	- Square brackets with parentheses
+	- Curly braces with parentheses
+	- Double quotes with HTML entity
+
+	Args:
+	    label: The original label text to be escaped.
+
+	Returns:
+	    The escaped label text with special characters replaced.
+	"""
 	label = label.replace("[", "(").replace("]", ")")
 	label = label.replace("{", "(").replace("}", ")")
 	return label.replace('"', "#quot;")  # Use HTML entity for quotes
@@ -48,12 +59,33 @@ class CodeMapGenerator:
 
 		# Helper to check if an entity type should be included
 		def should_include_entity(entity_type: EntityType) -> bool:
+			"""Determines if an entity type should be included in the diagram based on allowed entities.
+
+			If no allowed entities are specified in the config, all entities will be included. Otherwise,
+			only entities whose type matches one of the allowed entity types will be included.
+
+			Args:
+				entity_type: The type of entity to check for inclusion.
+
+			Returns:
+				bool: True if the entity should be included, False otherwise.
+			"""
 			if not allowed_entities:
 				return True  # Include all if not specified
 			return entity_type.name.lower() in allowed_entities
 
-		# Helper to check if a relationship type should be included
 		def should_include_relationship(relationship_type: str) -> bool:
+			"""Determines if a relationship type should be included in the diagram based on allowed relationships.
+
+			If no allowed relationships are specified in the config, all relationships will be included. Otherwise,
+			only relationships whose type matches one of the allowed relationship types will be included.
+
+			Args:
+				relationship_type: The type of relationship to check for inclusion.
+
+			Returns:
+				bool: True if the relationship should be included, False otherwise.
+			"""
 			if not allowed_relationships:
 				return True  # Include all if not specified
 			return relationship_type.lower() in allowed_relationships
@@ -81,12 +113,48 @@ class CodeMapGenerator:
 		internal_paths = {str(e.metadata.get("file_path")) for e in entities if e.metadata.get("file_path")}
 
 		def get_node_id(entity: LODEntity) -> str:
+			"""Generates a unique node ID for an entity in Mermaid diagram format.
+
+			The ID is constructed from the entity's file path, start line, and name/type,
+			and is sanitized to be Mermaid-compatible (alphanumeric + underscore only).
+
+			Args:
+				entity: The entity to generate an ID for.
+
+			Returns:
+				str: A Mermaid-compatible node ID string.
+			"""
 			file_path_str = entity.metadata.get("file_path", "unknown_file")
 			base_id = f"{file_path_str}_{entity.start_line}_{entity.name or entity.entity_type.name}"
 			# Ensure Mermaid compatibility (alphanumeric + underscore)
 			return "".join(c if c.isalnum() else "_" for c in base_id)
 
 		def process_entity_recursive(entity: LODEntity, current_subgraph_id: str | None = None) -> None:
+			"""Recursively processes an entity to build Mermaid diagram components.
+
+			This function handles:
+			- Creating subgraphs for modules and classes
+			- Creating nodes for functions, methods, variables and constants
+			- Processing dependencies (imports)
+			- Establishing relationships between entities
+			- Recursively processing child entities
+
+			Args:
+				entity: The entity to process
+				current_subgraph_id: The ID of the current subgraph context (if any)
+
+			Returns:
+				None: Modifies various data structures in the closure:
+					- node_definitions: Dictionary of node definitions
+					- subgraph_definitions: Dictionary of subgraph definitions
+					- subgraph_hierarchy: Dictionary of subgraph parent-child relationships
+					- edges: List of edges between nodes/subgraphs
+					- processed_ids: Set of processed entity IDs
+					- entity_map: Dictionary mapping node IDs to entities
+					- connected_ids: Set of connected node/subgraph IDs
+					- name_to_node_ids: Dictionary mapping names to node IDs
+					- global_nodes: Set of nodes defined outside subgraphs
+			"""
 			nonlocal processed_ids, connected_ids, global_nodes
 
 			entity_node_id = get_node_id(entity)
@@ -269,6 +337,21 @@ class CodeMapGenerator:
 
 		# Function to recursively render subgraphs and their nodes
 		def render_subgraph(subgraph_id: str, indent: str = "") -> None:
+			"""Recursively renders a Mermaid subgraph and its contents.
+
+			Args:
+				subgraph_id: The ID of the subgraph to render
+				indent: String used for indentation in the output (default: "")
+
+			Returns:
+				None: Output is written to output_lines and style_lines lists
+
+			Side Effects:
+				- Adds to rendered_elements set to track rendered items
+				- Appends lines to output_lines for Mermaid graph definition
+				- Appends style commands to style_lines
+				- Updates used_style_keys with any styles actually used
+			"""
 			if subgraph_id in rendered_elements:
 				return
 			rendered_elements.add(subgraph_id)
@@ -562,6 +645,15 @@ class CodeMapGenerator:
 
 		# Helper function to format a single entity recursively
 		def format_entity_recursive(entity: LODEntity, level: int) -> list[str]:
+			"""Recursively formats an entity and its children into markdown documentation.
+
+			Args:
+				entity: The entity to format
+				level: The current indentation level in the hierarchy
+
+			Returns:
+				A list of markdown-formatted strings representing the entity and its children
+			"""
 			entity_content = []
 			indent = "  " * level
 			list_prefix = f"{indent}- "
@@ -592,7 +684,8 @@ class CodeMapGenerator:
 				and entity.docstring
 			):
 				docstring_lines = entity.docstring.strip().split("\n")
-				# Indent docstring relative to the list item
+				# Format docstring lines with proper indentation
+				entity_content.append(f"{indent}  >")
 				entity_content.extend([f"{indent}  > {line}" for line in docstring_lines])
 
 			# Add Content if level is FULL
