@@ -264,3 +264,32 @@ index 2345678..bcdefgh 100645
 		assert result == expected_fallback_chunks
 		mock_file_strategy_cls.assert_called_once()  # Verify fallback class was instantiated
 		mock_file_strategy.split.assert_called_once_with(self.sample_diff)
+
+	def test_split_diff_with_untracked_files(self, tmp_path: Path) -> None:
+		"""Test splitting a diff with untracked files."""
+		splitter = DiffSplitter(tmp_path)
+
+		# Create a diff with untracked files
+		untracked_diff = GitDiff(
+			files=["new_file.py", "another.txt"],
+			content="This is content that's not in valid diff format",
+			is_staged=False,
+			is_untracked=True,
+		)
+
+		# Test the special untracked files handling
+		chunks, filtered_files = splitter.split_diff(untracked_diff)
+
+		# Should create one chunk per file
+		assert len(chunks) == 2
+		assert len(filtered_files) == 0
+
+		# Each chunk should represent one file
+		file_names = [chunk.files[0] for chunk in chunks]
+		assert "new_file.py" in file_names
+		assert "another.txt" in file_names
+
+		# Chunks should be marked as new files
+		for chunk in chunks:
+			assert chunk.description is not None
+			assert chunk.description.startswith("New file:")
