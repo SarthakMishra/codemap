@@ -3,6 +3,7 @@ version: "3"
 vars:
   SRC_DIR: src
   TESTS_DIR: tests
+  SCRIPT_DIR: scripts
   COV_MODULE: src/codemap
 
 tasks:
@@ -21,27 +22,27 @@ tasks:
   lint:ruff:
     desc: Run ruff linter
     cmds:
-      - uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:fix:
     desc: Run ruff linter with auto-fix
     cmds:
-      - uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:fix-unsafe:
     desc: Run ruff linter with unsafe auto-fixes
     cmds:
-      - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:pylint:
     desc: Run pylint
     cmds:
-      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:pyright:
     desc: Run pyright type checker
     cmds:
-      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:
     desc: Run all formatters
@@ -54,12 +55,12 @@ tasks:
   format:ruff:
     desc: Run ruff formatter
     cmds:
-      - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:isort:
     desc: Run isort
     cmds:
-      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:docformatter:
     desc: Run docformatter
@@ -118,7 +119,28 @@ tasks:
   docs:
     desc: Check documentation coverage
     cmds:
+      - task: docs:coverage
+      - task: docs:update
+
+  docs:coverage:
+    desc: Check documentation coverage
+    cmds:
       - uv run interrogate --style google --fail-under 90 --color -vv {{.SRC_DIR}}
+
+  docs:update:
+    desc: Update documentation
+    cmds:
+      - uv run python {{.SCRIPT_DIR}}/update_api_docs.py
+
+  docs:serve:
+    desc: Serve documentation
+    cmds:
+      - uv run mkdocs serve
+
+  docs:push:
+    desc: Push docs to gh pages
+    cmds:
+      - uv run mkdocs gh-deploy --force
 
   ci:
     desc: Run all checks and tests
