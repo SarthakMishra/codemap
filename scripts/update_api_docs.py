@@ -628,7 +628,7 @@ def update_mkdocs_config(versions_nav_structure: dict[str, list[Any]]):
 	nav = config_data.get("nav", [])
 
 	# Create the complete API reference section with all versions
-	api_sections = [
+	api_sections: list[dict[str, Any] | str] = [
 		# Add the Overview as the first item
 		{"Overview": "api/index.md"},
 	]
@@ -642,12 +642,22 @@ def update_mkdocs_config(versions_nav_structure: dict[str, list[Any]]):
 		if isinstance(item, dict) and "Home" in item:
 			home_section = item["Home"]
 
+			# Ensure home_section is a list before proceeding
+			if not isinstance(home_section, list):
+				logger.warning(f"Home section is not a list, creating a new one. Type: {type(home_section)}")
+				home_section = []
+
 			# Look for API Reference within Home section
 			api_ref_index = None
 			for j, subsection in enumerate(home_section):
 				if isinstance(subsection, dict) and "API Reference" in subsection:
 					api_ref_index = j
 					break
+
+			# Debug log the types
+			logger.info(f"home_section type: {type(home_section).__name__}")
+			logger.info(f"home_section value: {home_section}")
+			logger.info(f"api_sections type: {type(api_sections).__name__}")
 
 			if api_ref_index is not None:
 				# Replace the entire API Reference section with our new structure
@@ -658,7 +668,13 @@ def update_mkdocs_config(versions_nav_structure: dict[str, list[Any]]):
 			else:
 				# Add new API Reference section to Home
 				logger.info(f"Adding new API Reference section with overview and {len(api_sections) - 1} versions")
-				home_section.append({"API Reference": api_sections})
+				# For safer append, create a new dictionary entry instead of appending
+				new_item = {"API Reference": api_sections}
+				if isinstance(home_section, list):
+					home_section.append(new_item)
+				else:
+					# If home_section is not a list, create a new list with our item
+					home_section = [new_item]
 
 			# Update the nav with modified Home section
 			nav[i] = {"Home": home_section}
