@@ -716,20 +716,19 @@ def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
 			target_ref = f"origin/{target_branch}"
 
 		# Check if branch is an ancestor of target_branch
-		# Use check=False to prevent raising an exception if the command fails
 		cmd = ["git", "merge-base", "--is-ancestor", branch_ref, target_ref]
 		try:
-			run_git_command(cmd, check=False)
+			run_git_command(cmd)
 			is_ancestor = True
 		except GitError:
-			# This should not happen now with check=False
+			# If command fails, branch is not an ancestor
 			is_ancestor = False
 			logger.debug("Branch %s is not an ancestor of %s", branch_ref, target_ref)
 
 		# Try the reverse check as well to determine relationship
 		try:
 			reverse_cmd = ["git", "merge-base", "--is-ancestor", target_ref, branch_ref]
-			run_git_command(reverse_cmd, check=False)
+			run_git_command(reverse_cmd)
 			# If we get here, target is an ancestor of branch (target is older)
 			if not is_ancestor:
 				logger.debug("Branch %s is newer than %s", branch_ref, target_ref)

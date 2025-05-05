@@ -25,35 +25,26 @@ class GitError(Exception):
 	"""Custom exception for Git-related errors."""
 
 
-def run_git_command(command: list[str], cwd: Path | str | None = None, check: bool = True) -> str:
+def run_git_command(
+	command: list[str],
+	cwd: Path | str | None = None,
+	environment: dict[str, str] | None = None,
+) -> str:
 	"""
 	Run a git command and return its output.
 
 	Args:
-	    command: Git command as a list of strings
-	    cwd: Working directory
-	    check: Whether to check for errors
+	    command: Command to run as a list of string arguments
+	    cwd: Working directory to run the command in
+	    environment: Environment variables to use
 
 	Returns:
-	    Command output as a string
+	    The output from the command
 
 	Raises:
-	    GitError: If the command fails and check is True
+	    GitError: If the git command fails
 
 	"""
-	# Constants to avoid magic numbers
-	min_cmd_len_for_merge_base = 3
-	merge_base_index = 1
-	is_ancestor_index = 2
-
-	# Check if command contains 'merge-base --is-ancestor' which is expected to sometimes fail
-	# without it being a true error condition
-	is_ancestor_check = (
-		len(command) >= min_cmd_len_for_merge_base
-		and command[merge_base_index] == "merge-base"
-		and command[is_ancestor_index] == "--is-ancestor"
-	)
-
 	try:
 		# Using subprocess.run with a list of arguments is safe since we're not using shell=True
 		# and the command is not being built from untrusted input
@@ -62,28 +53,30 @@ def run_git_command(command: list[str], cwd: Path | str | None = None, check: bo
 			cwd=cwd,
 			capture_output=True,
 			text=True,
-			check=check,
+			check=True,
+			env=environment,
 		)
-		return result.stdout
+		return result.stdout.strip()
 	except subprocess.CalledProcessError as e:
-		stderr = e.stderr.strip() if e.stderr else ""
-		stdout = e.stdout.strip() if e.stdout else ""
-
-		# For merge-base --is-ancestor checks, log at debug level as this is expected to fail sometimes
-		if is_ancestor_check:
-			logger.debug("Git command completed with non-zero status (expected for relationship check): %s", command)
-			if check:
-				error_message = f"Git command failed with exit code {e.returncode}: {stderr or stdout}"
-				raise GitError(error_message) from e
-		else:
-			# For other commands, log the exception
+		# Check if this is a pre-commit hook failure for commit - handled specially by the UI
+		if command and len(command) > 1 and command[1] == "commit":
+			if "pre-commit" in (e.stderr or ""):
+				# This is a pre-commit hook failure - which is handled by the UI, so don't log as exception
+				logger.warning("Git hooks failed: %s", e.stderr)
+				msg = f"{e.stderr}"
+				raise GitError(msg) from e
+			# Regular commit error
 			logger.exception("Git command failed: %s", " ".join(command))
-			if check:
-				error_msg = f"Git command failed: {stderr or stdout}"
-				raise GitError(error_msg) from e
 
-		# If we're not checking for errors, return an empty string
-		return ""
+		cmd_str = " ".join(command)
+		error_output = e.stderr or ""
+		error_msg = f"Git command failed: {cmd_str}\n{error_output}"
+		logger.exception(error_msg)
+		raise GitError(error_output or error_msg) from e
+	except Exception as e:
+		error_msg = f"Error running git command: {e}"
+		logger.exception(error_msg)
+		raise GitError(error_msg) from e
 
 
 def get_repo_root(path: Path | None = None) -> Path:
