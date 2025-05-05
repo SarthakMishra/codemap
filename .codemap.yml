@@ -55,7 +55,7 @@ processor:
 # Commit feature configuration
 commit:
   # Strategy for splitting diffs: file, hunk, semantic
-  strategy: file
+  strategy: semantic
   # Whether to bypass git hooks (--no-verify) when committing
   # Set to true only if you want to skip hooks (default: false)
   bypass_hooks: false
