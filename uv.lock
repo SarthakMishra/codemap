@@ -365,7 +365,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "build" },
-    { name = "interrogate" },
+    { name = "interrogate", extra = ["png"] },
     { name = "isort" },
     { name = "packaging" },
     { name = "pre-commit" },
@@ -434,7 +434,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "build", specifier = ">=1.2.2.post1" },
-    { name = "interrogate", specifier = ">=1.7.0" },
+    { name = "interrogate", extras = ["png"], specifier = ">=1.7.0" },
     { name = "isort", specifier = ">=6.0.1" },
     { name = "packaging", specifier = ">=25.0" },
     { name = "pre-commit", specifier = ">=4.2.0" },
@@ -1069,6 +1069,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8b/22/74f7fcc96280eea46cf2bcbfa1354ac31de0e60a4be6f7966f12cef20893/interrogate-1.7.0.tar.gz", hash = "sha256:a320d6ec644dfd887cc58247a345054fc4d9f981100c45184470068f4b3719b0", size = 159636 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/c9/6869a1dcf4aaf309b9543ec070be3ec3adebee7c9bec9af8c230494134b9/interrogate-1.7.0-py3-none-any.whl", hash = "sha256:b13ff4dd8403369670e2efe684066de9fcb868ad9d7f2b4095d8112142dc9d12", size = 46982 },
+]
+
+[package.optional-dependencies]
+png = [
+    { name = "cairosvg" },
 ]
 
 [[package]]
