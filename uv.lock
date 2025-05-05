@@ -365,7 +365,6 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "build" },
-    { name = "docformatter" },
     { name = "interrogate" },
     { name = "isort" },
     { name = "packaging" },
@@ -435,7 +434,6 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "build", specifier = ">=1.2.2.post1" },
-    { name = "docformatter", specifier = ">=1.7.5" },
     { name = "interrogate", specifier = ">=1.7.0" },
     { name = "isort", specifier = ">=6.0.1" },
     { name = "packaging", specifier = ">=25.0" },
@@ -641,19 +639,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277 },
-]
-
-[[package]]
-name = "docformatter"
-version = "1.7.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "charset-normalizer" },
-    { name = "untokenize" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/44/aba2c40cf796121b35835ea8c00bc5d93f2f70730eca53b36b8bbbfaefe1/docformatter-1.7.5.tar.gz", hash = "sha256:ffed3da0daffa2e77f80ccba4f0e50bfa2755e1c10e130102571c890a61b246e", size = 25893 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/95/568a2fca29df365b82012b09b64964a05f4f20ac83c2137b262f3fa3188f/docformatter-1.7.5-py3-none-any.whl", hash = "sha256:a24f5545ed1f30af00d106f5d85dc2fce4959295687c24c8f39f5263afaf9186", size = 32798 },
 ]
 
 [[package]]
@@ -3392,12 +3377,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/a3/48/81be0ac96e423a877
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8a/54/57c411a6e8f7bd7848c8b66e4dcaffa586bf4c02e63f2280db0327a4e6eb/unidiff-0.7.5-py2.py3-none-any.whl", hash = "sha256:c93bf2265cc1ba2a520e415ab05da587370bc2a3ae9e0414329f54f0c2fc09e8", size = 14386 },
 ]
-
-[[package]]
-name = "untokenize"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/46/e7cea8159199096e1df52da20a57a6665da80c37fb8aeb848a3e47442c32/untokenize-0.1.1.tar.gz", hash = "sha256:3865dbbbb8efb4bb5eaa72f1be7f3e0be00ea8b7f125c69cbd1f5fda926f37a2", size = 3099 }
 
 [[package]]
 name = "urllib3"
