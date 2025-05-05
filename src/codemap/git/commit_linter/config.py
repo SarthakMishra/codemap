@@ -1,8 +1,16 @@
-"""Configuration classes for commit linter."""
+"""
+Configuration for commit message linting.
+
+This module defines the configuration structures and rules for linting
+commit messages according to Conventional Commits specifications.
+
+"""
 
 import enum
 from dataclasses import dataclass, field
 from typing import Any, Literal
+
+from codemap.utils.config_loader import ConfigLoader
 
 # Default values are now defined in src/codemap/config.py
 
@@ -376,10 +384,23 @@ class CommitLintConfig:
 	)
 
 	@classmethod
-	def from_dict(cls, config_dict: dict[str, Any]) -> "CommitLintConfig":
-		"""Create a CommitLintConfig from a dictionary."""
+	def from_dict(cls, config_dict: dict[str, Any], config_loader: ConfigLoader | None = None) -> "CommitLintConfig":
+		"""
+		Create a CommitLintConfig from a dictionary.
+
+		Args:
+		    config_dict: Configuration dictionary to parse
+		    config_loader: Optional ConfigLoader instance for retrieving additional configuration
+
+		Returns:
+		    CommitLintConfig: Configured instance
+
+		"""
 		config = cls()
-		commit_config = config_dict.get("commit", {})
+
+		# Use config_loader if provided, otherwise just use the provided config_dict
+		commit_config = config_loader.get("commit", {}) if config_loader else config_dict.get("commit", {})
+
 		lint_config = commit_config.get("lint", {})
 
 		# Merge rules from config dict into config object
