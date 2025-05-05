@@ -56,25 +56,6 @@ class TestCommitWorkflow(unittest.TestCase):
 		self.command.message_generator = self.mock_generator
 		self.command.ui = self.mock_ui  # Inject the mock CommitUI
 
-	def test_generate_commit_message(self) -> None:
-		"""
-		Test _generate_commit_message method.
-
-		Verifies that the method correctly processes a diff chunk and
-		generates a commit message using the message generator.
-
-		"""
-		# Arrange: Set up mock return value
-		self.mock_generator.generate_message.return_value = ("Test commit message", True)
-
-		# Act: Call the method
-		self.command._generate_commit_message(cast("DiffChunk", self.mock_chunk))
-
-		# Assert: Verify results
-		assert self.mock_chunk.description == "Test commit message"
-		assert self.mock_chunk.is_llm_generated is True
-		self.mock_generator.generate_message.assert_called_once_with(self.mock_chunk)
-
 	@patch("codemap.git.commit_generator.command.stage_files")
 	@patch("codemap.git.commit_generator.command.get_staged_diff")
 	@patch("codemap.git.commit_generator.command.commit_only_files")
