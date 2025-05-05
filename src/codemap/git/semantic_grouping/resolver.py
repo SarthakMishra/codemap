@@ -130,35 +130,15 @@ class FileIntegrityResolver:
 		"""
 		Resolve file integrity violations by merging or reassigning chunks.
 
-		              A violation occurs when the same file appears in multiple semantic groups.
-		              This needs to be resolved because a file should be modified in only one commit.
+		A violation occurs when the same file appears in multiple semantic groups.
+		This needs to be resolved because a file should be modified in only one commit.
 
-		              Resolution strategy:
-		              1. Build a mapping of which files are in which groups
-		              2. Identify files that appear in multiple groups (violations)
-		              3. For each violation:
-		   a. Calculate similarity between all groups containing the file
-		   b. If similarity > threshold: Merge the most similar groups
-		   c. If similarity < threshold: Find the primary group (most chunks for this file)
-		      and move all chunks with this file to that group
-		              4. Repeat until no violations remain
-
-		              Args:
+		Args:
 		    groups: List of SemanticGroup objects to resolve
 		    chunk_embeddings: Dict mapping chunks to their embeddings
 
-		              Returns:
+		Returns:
 		    List of SemanticGroup objects with all violations resolved
-
-		              Examples:
-		    >>> embedder = DiffEmbedder()
-		    >>> chunks_with_embeddings = embedder.embed_chunks(chunks)
-		    >>> chunk_embeddings = {ce[0]: ce[1] for ce in chunks_with_embeddings}
-		    >>> clusterer = DiffClusterer()
-		    >>> initial_groups = clusterer.cluster(chunks_with_embeddings)
-		    >>> semantic_groups = [SemanticGroup(chunks=cluster) for cluster in initial_groups]
-		    >>> resolver = FileIntegrityResolver(similarity_threshold=0.6)
-		    >>> resolved_groups = resolver.resolve_violations(semantic_groups, chunk_embeddings)
 
 		"""
 		# Keep iterating until no violations remain
