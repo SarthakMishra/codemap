@@ -349,6 +349,7 @@ dependencies = [
     { name = "requests" },
     { name = "requests-unixsocket" },
     { name = "rich" },
+    { name = "scikit-learn" },
     { name = "sentence-transformers" },
     { name = "sqlmodel" },
     { name = "tenacity" },
@@ -381,6 +382,7 @@ dev = [
     { name = "radon" },
     { name = "ruff" },
     { name = "twine" },
+    { name = "vulture" },
 ]
 docs = [
     { name = "mkdocs-material", extra = ["imaging"] },
@@ -417,6 +419,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "requests-unixsocket", specifier = ">=0.4.1" },
     { name = "rich", specifier = ">=14.0.0" },
+    { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "sentence-transformers", specifier = ">=4.1.0" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "tenacity", specifier = ">=9.1.2" },
@@ -449,6 +452,7 @@ dev = [
     { name = "radon", specifier = ">=6.0.1" },
     { name = "ruff", specifier = ">=0.11.6" },
     { name = "twine", specifier = ">=6.1.0" },
+    { name = "vulture", specifier = ">=2.14" },
 ]
 docs = [
     { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.6.12" },
@@ -3435,6 +3439,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/b7/c9f633149f1bdea95b43d38aa50404df2bdf769f0ccc0b402ca922d454e3/voyageai-0.3.2.tar.gz", hash = "sha256:bd1b52d26179d91853cbd2a0e52dc95cb0d526760c6c830959e01eb5ff9eaa12", size = 18979 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/86/e1/0b2defa3a83aabe67db05d5f494d617dd4764b2a043d83ddc26be5e6e0db/voyageai-0.3.2-py3-none-any.whl", hash = "sha256:1398d6c6bfb1dd3b484f400713e538f00ce8a335250442b0902c21116d9705a8", size = 25518 },
+]
+
+[[package]]
+name = "vulture"
+version = "2.14"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/25/925f35db758a0f9199113aaf61d703de891676b082bd7cf73ea01d6000f7/vulture-2.14.tar.gz", hash = "sha256:cb8277902a1138deeab796ec5bef7076a6e0248ca3607a3f3dee0b6d9e9b8415", size = 58823 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/56/0cc15b8ff2613c1d5c3dc1f3f576ede1c43868c1bc2e5ccaa2d4bcd7974d/vulture-2.14-py2.py3-none-any.whl", hash = "sha256:d9a90dba89607489548a49d557f8bac8112bd25d3cbc8aeef23e860811bd5ed9", size = 28915 },
 ]
 
 [[package]]
