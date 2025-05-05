@@ -458,8 +458,8 @@ class CodeMapGenerator:
 		# Add repository statistics
 		if "stats" in metadata:
 			stats = metadata["stats"]
-			content.append("\n## Repository Statistics")
-			content.append(f"- Total files: {stats.get('total_files', 0)}")
+			content.append("\n## Document Statistics")
+			content.append(f"- Total files scanned: {stats.get('total_files_scanned', 0)}")
 			content.append(f"- Total lines of code: {stats.get('total_lines', 0)}")
 			content.append(f"- Languages: {', '.join(stats.get('languages', []))}")
 
@@ -478,11 +478,16 @@ class CodeMapGenerator:
 			content.append(mermaid_diagram)
 			content.append("```")
 
-		# Add table of contents
-		content.append("\n## Table of Contents")
+		# Add table of contents for the scanned files
+		content.append("\n## Scanned Files")
 
 		# Group entities by file
 		files: dict[Path, list[LODEntity]] = {}
+
+		# Get the target path from metadata
+		target_path_str = metadata.get("target_path", "")
+		target_path = Path(target_path_str) if target_path_str else None
+
 		for entity in entities:
 			file_path = Path(entity.metadata.get("file_path", ""))
 			if not file_path.name:
@@ -492,10 +497,42 @@ class CodeMapGenerator:
 				files[file_path] = []
 			files[file_path].append(entity)
 
-		# Create TOC entries
-		for file_path in sorted(files.keys()):
-			rel_path = file_path.name
-			content.append(f"- [{rel_path}](#{rel_path.replace('.', '-')})")
+		# Create TOC entries with properly formatted relative paths
+		for i, file_path in enumerate(sorted(files.keys()), 1):
+			# Get path relative to the target directory
+			try:
+				if target_path and target_path.exists():
+					# Get the relative path from the target directory
+					rel_path = file_path.relative_to(target_path)
+
+					# Format the path with a leading slash for files directly in the target directory
+					rel_path_str = f"/{rel_path}"
+
+					# Create a clean anchor ID by converting to lowercase and removing all special characters
+					# including underscores, to create standard anchor IDs
+					filename = file_path.name
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in filename)
+
+					# Handle paths with subdirectories
+					if len(rel_path.parts) > 1:
+						# Get directory name and filename
+						directory = rel_path.parts[-2]  # Last directory before the file
+						anchor = f"{directory}{clean_filename}"  # e.g., "raginitpy"
+					else:
+						# Just use the clean filename for files at root
+						anchor = clean_filename
+				else:
+					# Fall back to just the filename if target path is not available
+					rel_path_str = f"/{file_path.name}"
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+					anchor = clean_filename
+
+				content.append(f"{i}. [{rel_path_str}](#{anchor})")
+			except ValueError:
+				# If relative_to fails, just use the filename
+				rel_path_str = f"/{file_path.name}"
+				clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+				content.append(f"{i}. [{rel_path_str}](#{clean_filename})")
 
 		# Add code documentation grouped by file
 		content.append("\n## Code Documentation")
@@ -553,14 +590,47 @@ class CodeMapGenerator:
 			return entity_content
 
 		first_file = True
-		for file_path, file_entities in sorted(files.items()):
+		for i, (file_path, file_entities) in enumerate(sorted(files.items()), 1):
 			# Add a divider before each file section except the first one
 			if not first_file:
 				content.append("\n---")  # Horizontal rule
 			first_file = False
 
-			rel_path = file_path.name
-			content.append(f"\n### {rel_path}")
+			# Get path relative to the target directory
+			try:
+				if target_path and target_path.exists():
+					# Get the relative path from the target directory
+					rel_path = file_path.relative_to(target_path)
+
+					# Format the path with a leading slash for files directly in the target directory
+					rel_path_str = f"/{rel_path}"
+
+					# Create a clean anchor ID by converting to lowercase and removing all special characters
+					# including underscores, to create standard anchor IDs
+					filename = file_path.name
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in filename)
+
+					# Handle paths with subdirectories
+					if len(rel_path.parts) > 1:
+						# Get directory name and filename
+						directory = rel_path.parts[-2]  # Last directory before the file
+						anchor = f"{directory}{clean_filename}"  # e.g., "raginitpy"
+					else:
+						# Just use the clean filename for files at root
+						anchor = clean_filename
+				else:
+					# Fall back to just the filename if target path is not available
+					rel_path_str = f"/{file_path.name}"
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+					anchor = clean_filename
+
+				# Add a custom ID to the heading to match our anchor
+				content.append(f"\n### {i}. {rel_path_str}")
+			except ValueError:
+				# If relative_to fails, just use the filename
+				rel_path_str = f"/{file_path.name}"
+				clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+				content.append(f"\n### {i}. {rel_path_str}")
 
 			# Sort top-level entities by line number
 			sorted_entities = sorted(file_entities, key=lambda e: e.start_line)

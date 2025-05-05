@@ -19,7 +19,7 @@ class PythonConfig(LanguageConfig):
 
 	# File-level entities
 	module: ClassVar[list[str]] = ["module"]
-	namespace: ClassVar[list[str]] = ["import_from_statement"]  # Using import from as namespace indicator
+	namespace: ClassVar[list[str]] = []  # Python doesn't have explicit namespaces
 
 	# Type definitions
 	class_: ClassVar[list[str]] = ["class_definition"]

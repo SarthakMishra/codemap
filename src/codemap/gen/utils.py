@@ -117,44 +117,87 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 	"""
 	# Build a nested dictionary representing the file structure
 	tree = {}
-	for abs_path in filtered_paths:
+
+	# Process directories first to ensure complete structure
+	# Sort paths to process directories first, then files, all in alphabetical order
+	sorted_paths = sorted(filtered_paths, key=lambda p: (p.is_file(), str(p).lower()))
+
+	# Ensure target_path itself is in the structure if it's not already
+	dir_paths = [p for p in sorted_paths if p.is_dir()]
+
+	# Add all directories first to ensure complete structure
+	for abs_path in dir_paths:
 		# Ensure we only process paths within the target_path
 		try:
 			rel_path = abs_path.relative_to(target_path)
-		except ValueError:
-			continue  # Skip paths not under target_path
+			dir_parts = rel_path.parts
 
-		parts = rel_path.parts
-		current_level = tree
-		for i, part in enumerate(parts):
-			if i == len(parts) - 1:  # Last part (file or final directory)
-				current_level[part] = "file" if abs_path.is_file() else "dir"
-			else:
+			current_level = tree
+			for _i, part in enumerate(dir_parts):
 				if part not in current_level:
 					current_level[part] = {}
 				current_level = current_level[part]
-				# Handle case where a file might exist with the same name as a directory part
-				if not isinstance(current_level, dict):
-					break  # Stop processing this path if structure is inconsistent
+		except ValueError:
+			continue  # Skip paths not under target_path
+
+	# Then add files to the structure
+	file_paths = [p for p in sorted_paths if p.is_file()]
+	for abs_path in file_paths:
+		try:
+			rel_path = abs_path.relative_to(target_path)
+			parts = rel_path.parts
+
+			current_level = tree
+			for i, part in enumerate(parts):
+				if i == len(parts) - 1:  # Last part (file)
+					current_level[part] = "file"
+				else:
+					# Create directory levels if they don't exist
+					if part not in current_level:
+						current_level[part] = {}
+
+					# Get reference to the next level
+					next_level = current_level[part]
+
+					# Handle case where a file might exist with the same name as a directory part
+					if not isinstance(next_level, dict):
+						# This shouldn't happen with proper directory structure, but handle just in case
+						logger.warning(f"Name conflict: {part} is both a file and a directory in path {rel_path}")
+						# Convert to dictionary with special file marker
+						current_level[part] = {"__file__": True}
+
+					current_level = current_level[part]
+		except ValueError:
+			continue  # Skip paths not under target_path
 
 	# Recursive function to generate formatted tree lines
 	tree_lines = []
 
 	def format_level(level: dict, prefix: str = "") -> None:
-		items = sorted(level.keys())
-		for i, name in enumerate(items):
-			connector = "└── " if i == len(items) - 1 else "├── "
-			item_type = level[name]
+		# Sort items: directories first (dictionaries), then files (strings)
+		sorted_items = sorted(level.items(), key=lambda x: (not isinstance(x[1], dict), x[0].lower()))
+
+		for i, (name, item_type) in enumerate(sorted_items):
+			is_last_item = i == len(sorted_items) - 1
+			connector = "└── " if is_last_item else "├── "
+
+			if name == "__file__":
+				# Skip special markers
+				continue
 
 			if isinstance(item_type, dict):  # It's a directory
 				tree_lines.append(f"{prefix}{connector}{name}/")
-				new_prefix = prefix + ("    " if i == len(items) - 1 else "│   ")
+				new_prefix = prefix + ("    " if is_last_item else "│   ")
 				format_level(item_type, new_prefix)
 			else:  # It's a file
 				tree_lines.append(f"{prefix}{connector}{name}")
 
 	# Start formatting from the root
 	format_level(tree)
+
+	# If tree is empty, show a simple root indicator
+	if not tree_lines:
+		return target_path.name + "/"
 
 	return "\n".join(tree_lines)
 

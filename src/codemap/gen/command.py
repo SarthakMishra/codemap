@@ -94,6 +94,7 @@ def process_codebase(
 
 	metadata: dict[str, Any] = {
 		"name": target_path.name,
+		"target_path": str(target_path.resolve()),  # Add absolute target path for creating relative paths
 		"stats": {
 			"total_files_scanned": total_files_scanned,  # Total files scanned matching criteria
 			"processed_files": processed_files,  # Files successfully processed for LOD
