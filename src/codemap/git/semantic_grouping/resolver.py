@@ -143,14 +143,14 @@ class FileIntegrityResolver:
 		      and move all chunks with this file to that group
 		              4. Repeat until no violations remain
 
-		Args:
+		              Args:
 		    groups: List of SemanticGroup objects to resolve
 		    chunk_embeddings: Dict mapping chunks to their embeddings
 
-		Returns:
+		              Returns:
 		    List of SemanticGroup objects with all violations resolved
 
-		Examples:
+		              Examples:
 		    >>> embedder = DiffEmbedder()
 		    >>> chunks_with_embeddings = embedder.embed_chunks(chunks)
 		    >>> chunk_embeddings = {ce[0]: ce[1] for ce in chunks_with_embeddings}

@@ -49,6 +49,7 @@ MAX_TOTAL_CONTENT_LINES = 1000  # Maximum total lines across all untracked files
 # Git output constants
 MIN_PORCELAIN_LINE_LENGTH = 3  # Minimum length of a valid porcelain status line
 
+
 class ExitCommandError(Exception):
 	"""Exception to signal an exit command."""
 
@@ -668,12 +669,37 @@ class SemanticCommitCommand(CommitCommand):
 		        List of SemanticGroup objects with messages
 
 		"""
+		from codemap.git.semantic_grouping.batch_processor import batch_generate_messages
+
+		# Get config loader and settings
+		config_loader = self.message_generator.get_config_loader()
+		llm_config = config_loader.get("llm", {})
+		use_batch_processing = llm_config.get("use_batch_processing", True)
+		model = llm_config.get("model", "openai/gpt-4o-mini")
+
+		# Handle batch processing if enabled and we have multiple groups
+		if use_batch_processing and len(groups) > 1:
+			try:
+				logger.info(f"Using batch processing for {len(groups)} semantic groups")
+				# Get the prompt template from the message generator
+				prompt_template = self.message_generator.prompt_template
+
+				# Run the batch processing
+				return batch_generate_messages(
+					groups=groups, prompt_template=prompt_template, config_loader=config_loader, model=model
+				)
+			except Exception:
+				logger.exception("Batch processing failed")
+				# Show warning message in UI when falling back
+				self.ui.show_warning("Batch processing failed. Falling back to individual message generation.")
+				logger.info("Falling back to individual message generation")
+				# Fall back to individual message generation
+
+		# Process groups individually
 		from codemap.git.diff_splitter import DiffChunk
 		from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
 
 		# Get max token limit and settings from message generator's config
-		# since that's where the config_loader is stored
-		llm_config = self.message_generator.get_config_loader().get("llm", {})
 		max_tokens = llm_config.get("max_context_tokens", 4000)
 		use_lod_context = llm_config.get("use_lod_context", True)
 
@@ -942,7 +968,9 @@ class SemanticCommitCommand(CommitCommand):
 					elif action == ChunkAction.SKIP:
 						self.ui.show_skipped(group.files)
 					elif action == ChunkAction.EXIT and self.ui.confirm_exit():
-						return committed_count > 0
+						# This is a user-initiated exit, should not be considered a failure
+						self.ui.show_message("Commit process exited by user.")
+						return True  # Return true to indicate normal exit, not failure
 				else:
 					# In non-interactive mode, commit each group immediately
 					group.message = group.message or f"update: changes to {len(group.files)} files"
