@@ -280,6 +280,7 @@ class CommitUI:
 		"""
 		options: list[tuple[str, ChunkAction]] = [
 			("Regenerate message", ChunkAction.REGENERATE),
+			("Bypass linter and commit with --no-verify", ChunkAction.COMMIT),
 			("Edit message manually", ChunkAction.EDIT),
 			("Skip this chunk", ChunkAction.SKIP),
 			("Exit without committing", ChunkAction.EXIT),
