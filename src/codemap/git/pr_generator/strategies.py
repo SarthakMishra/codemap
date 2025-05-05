@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from abc import ABC, abstractmethod
 from typing import Any
 
 from codemap.git.pr_generator.constants import MIN_SIGNIFICANT_WORD_LENGTH
@@ -15,10 +16,11 @@ from codemap.git.pr_generator.templates import (
 from codemap.git.utils import GitError, run_git_command
 
 
-class WorkflowStrategy:
+class WorkflowStrategy(ABC):
 	"""Base class for git workflow strategies."""
 
-	def get_default_base(self, branch_type: str) -> str:
+	@abstractmethod
+	def get_default_base(self, branch_type: str) -> str | None:
 		"""
 		Get the default base branch for a given branch type.
 
@@ -49,6 +51,7 @@ class WorkflowStrategy:
 		prefix = self.get_branch_prefix(branch_type)
 		return f"{prefix}{clean_description}"
 
+	@abstractmethod
 	def get_branch_prefix(self, branch_type: str) -> str:
 		"""
 		Get the branch name prefix for a given branch type.
@@ -62,6 +65,7 @@ class WorkflowStrategy:
 		"""
 		raise NotImplementedError
 
+	@abstractmethod
 	def get_branch_types(self) -> list[str]:
 		"""
 		Get valid branch types for this workflow.
@@ -72,7 +76,7 @@ class WorkflowStrategy:
 		"""
 		raise NotImplementedError
 
-	def detect_branch_type(self, branch_name: str) -> str | None:
+	def detect_branch_type(self, branch_name: str | None) -> str | None:
 		"""
 		Detect the type of a branch from its name.
 
@@ -85,7 +89,7 @@ class WorkflowStrategy:
 		"""
 		for branch_type in self.get_branch_types():
 			prefix = self.get_branch_prefix(branch_type)
-			if branch_name.startswith(prefix):
+			if branch_name and branch_name.startswith(prefix):
 				return branch_type
 		return None
 
@@ -239,7 +243,7 @@ class WorkflowStrategy:
 class GitHubFlowStrategy(WorkflowStrategy):
 	"""Implementation of GitHub Flow workflow strategy."""
 
-	def get_default_base(self, branch_type: str) -> str:  # noqa: ARG002
+	def get_default_base(self, branch_type: str) -> str | None:  # noqa: ARG002
 		"""
 		Get the default base branch for GitHub Flow.
 
@@ -294,7 +298,7 @@ class GitHubFlowStrategy(WorkflowStrategy):
 class GitFlowStrategy(WorkflowStrategy):
 	"""Implementation of GitFlow workflow strategy."""
 
-	def get_default_base(self, branch_type: str) -> str:
+	def get_default_base(self, branch_type: str) -> str | None:
 		"""
 		Get the default base branch for GitFlow.
 
@@ -383,7 +387,7 @@ class GitFlowStrategy(WorkflowStrategy):
 class TrunkBasedStrategy(WorkflowStrategy):
 	"""Implementation of Trunk-Based Development workflow strategy."""
 
-	def get_default_base(self, branch_type: str) -> str:  # noqa: ARG002
+	def get_default_base(self, branch_type: str) -> str | None:  # noqa: ARG002
 		"""
 		Get the default base branch for Trunk-Based Development.
 

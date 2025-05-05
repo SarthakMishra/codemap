@@ -118,6 +118,10 @@ def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
 	"""
 	try:
 		# Get commit messages between base and head
+		# Add check for None branches
+		if not base_branch or not head_branch:
+			logger.warning("Base or head branch is None, cannot get commit messages.")
+			return []
 		log_output = run_git_command(["git", "log", f"{base_branch}..{head_branch}", "--pretty=format:%s"])
 		return log_output.splitlines() if log_output.strip() else []
 	except GitError as e:
@@ -526,6 +530,10 @@ def get_existing_pr(branch_name: str) -> PullRequest | None:
 
 	"""
 	try:
+		# Add check for None branch_name
+		if not branch_name:
+			logger.debug("Branch name is None, cannot get existing PR.")
+			return None
 		# Check if gh CLI is installed
 		try:
 			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
@@ -788,6 +796,9 @@ def detect_branch_type(branch_name: str, strategy_name: str = "github-flow") -> 
 
 	"""
 	strategy = create_strategy(strategy_name)
+	# Handle None branch_name
+	if not branch_name:
+		return "feature"  # Default if branch name is None
 	branch_type = strategy.detect_branch_type(branch_name)
 
 	return branch_type or "feature"  # Default to feature if not detected
@@ -830,3 +841,24 @@ def list_branches() -> list[str]:
 	except GitError:
 		logger.debug("Error listing branches")
 		return []
+
+
+def validate_branch_name(branch_name: str | None) -> bool:
+	"""
+	Validate a branch name.
+
+	Args:
+	    branch_name: Branch name to validate
+
+	Returns:
+	    True if valid, False otherwise
+
+	"""
+	# Check if branch name is valid
+	if not branch_name or not re.match(r"^[a-zA-Z0-9_.-]+$", branch_name):
+		# Log error instead of showing directly, as this is now a util function
+		logger.error(
+			"Invalid branch name '%s'. Use only letters, numbers, underscores, dots, and hyphens.", branch_name
+		)
+		return False
+	return True
