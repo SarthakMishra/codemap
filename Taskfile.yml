@@ -96,6 +96,11 @@ tasks:
     cmds:
       - uv run radon hal {{.SRC_DIR}} -O .radon/hal.txt
 
+  vulture:
+    desc: Finds unused code
+    cmds:
+      - uv run vulture {{.SRC_DIR}}
+
   test:
     desc: Run all tests
     cmds:
