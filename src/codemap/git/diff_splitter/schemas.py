@@ -19,6 +19,31 @@ class DiffChunk:
 		if self.filtered_files is None:
 			self.filtered_files = []
 
+	def __hash__(self) -> int:
+		"""
+		Make DiffChunk hashable by using the object's id.
+
+		Returns:
+		        Hash value based on the object's id
+
+		"""
+		return hash(id(self))
+
+	def __eq__(self, other: object) -> bool:
+		"""
+		Compare DiffChunk objects for equality.
+
+		Args:
+		        other: Another object to compare with
+
+		Returns:
+		        True if the objects are the same instance, False otherwise
+
+		"""
+		if not isinstance(other, DiffChunk):
+			return False
+		return id(self) == id(other)
+
 
 @dataclass
 class DiffChunkData:
