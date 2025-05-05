@@ -1,118 +1,315 @@
 site_name: Codemap
 site_url: https://codemap.run
 site_author: Sarthak Mishra
-site_description: A CLI tool that generates optimized markdown docs and streamline Git workflows
-
-# Repository
+site_description: A CLI tool that generates optimized markdown docs and streamline
+  Git workflows
 repo_name: SarthakMishra/codemap
 repo_url: https://github.com/SarthakMishra/codemap
-
-# Copyright
 copyright: Copyright &copy; 2025 Sarthak Mishra
-
-# Navigation
-nav:
-  - Home: 
-    - Overview: index.md
-    - Installation: installation.md
-    - Usage:
-      - Overview: usage/index.md
-      - Generate Docs (`gen`): usage/generate.md
-      - Smart Commit (`commit`): usage/commit.md
-      - Pull Requests (`pr`): usage/pr.md
-      - Configuration: usage/configuration.md
-      - LLM Support: usage/llm-support.md
-  - Contributing: 
-    - Overview: contributing/index.md
-    - Contributing Guidelines: contributing/guidelines.md
-    - Code of Conduct: contributing/code-of-conduct.md
-  - Acknowledgements: acknowledgements.md
-
-# Theme
-theme:
-  name: material
-  icon:
-    logo: material/library
-  features:
-    - announce.dismiss
-    - content.action.edit
-    - content.action.view
-    - content.code.annotate
-    - content.code.copy
-    # - content.code.select
-    # - content.footnote.tooltips
-    # - content.tabs.link
-    - content.tooltips
-    # - header.autohide
-    # - navigation.expand
-    - navigation.footer
-    - navigation.indexes
-    # - navigation.instant
-    # - navigation.instant.prefetch
-    # - navigation.instant.progress
-    # - navigation.prune
-    - navigation.sections
-    - navigation.tabs
-    # - navigation.tabs.sticky
-    - navigation.top
-    - navigation.tracking
-    - search.highlight
-    - search.share
-    - search.suggest
-    - toc.follow
-    # - toc.integrate
-  palette:
-    - media: "(prefers-color-scheme)"
-      toggle:
-        icon: material/link
-        name: Switch to light mode
-    - media: "(prefers-color-scheme: light)"
-      scheme: default
-      primary: indigo
-      accent: indigo
-      toggle:
-        icon: material/toggle-switch
-        name: Switch to dark mode
-    - media: "(prefers-color-scheme: dark)"
-      scheme: slate
-      primary: black
-      accent: indigo
-      toggle:
-        icon: material/toggle-switch-off
-        name: Switch to system preference
-  font:
-    text: Geist
-    code: Geist Mono
-
-# Markdown Extensions
-markdown_extensions:
-  - pymdownx.blocks.caption
-  - pymdownx.blocks.admonition
-  - pymdownx.highlight:
-      use_pygments: true
-  - pymdownx.inlinehilite
-  - pymdownx.superfences:
-      # make exceptions to highlighting of code:
-      custom_fences:
-          - name: mermaid
-            class: mermaid
-            format: !!python/name:mermaid2.fence_mermaid_custom
-
-# Additional configuration
 extra:
   status:
     new: Recently added
     deprecated: Deprecated
   social:
-    - icon: fontawesome/brands/github
-      link: https://github.com/SarthakMishra
-    - icon: fontawesome/brands/python
-      link: https://pypi.org/project/codemap/
-    - icon: fontawesome/brands/linkedin
-      link: https://www.linkedin.com/in/itssarthakmishra/
-    - icon: fontawesome/brands/x-twitter
-      link: https://x.com/MishraMishry
-
-plugins: 
-  - search
-  - mermaid2
+  - icon: fontawesome/brands/github
+    link: https://github.com/SarthakMishra
+  - icon: fontawesome/brands/python
+    link: https://pypi.org/project/codemap/
+  - icon: fontawesome/brands/linkedin
+    link: https://www.linkedin.com/in/itssarthakmishra/
+  - icon: fontawesome/brands/x-twitter
+    link: https://x.com/MishraMishry
+nav:
+- Home:
+  - Overview: index.md
+  - Installation: installation.md
+  - Usage:
+    - Overview: usage/index.md
+    - Generate Docs (`gen`): usage/generate.md
+    - Smart Commit (`commit`): usage/commit.md
+    - Pull Requests (`pr`): usage/pr.md
+    - Configuration: usage/configuration.md
+    - LLM Support: usage/llm-support.md
+  - Contributing:
+    - Overview: contributing/index.md
+    - Contributing Guidelines: contributing/guidelines.md
+    - Code of Conduct: contributing/code-of-conduct.md
+  - Acknowledgements: acknowledgements.md
+  - API Reference:
+    - Overview: api/index.md
+    - Stable:
+      - Overview: api/stable/index.md
+      - Cli:
+        - Cli Overview: api/stable/cli/index.md
+        - Ask Cmd: api/stable/cli/ask_cmd.md
+        - Commit Cmd: api/stable/cli/commit_cmd.md
+        - Gen Cmd: api/stable/cli/gen_cmd.md
+        - Index Cmd: api/stable/cli/index_cmd.md
+        - Pr Cmd: api/stable/cli/pr_cmd.md
+      - Config: api/stable/config.md
+      - Db:
+        - Db Overview: api/stable/db/index.md
+        - Client: api/stable/db/client.md
+        - Engine: api/stable/db/engine.md
+        - Models: api/stable/db/models.md
+      - Gen:
+        - Gen Overview: api/stable/gen/index.md
+        - Command: api/stable/gen/command.md
+        - Generator: api/stable/gen/generator.md
+        - Models: api/stable/gen/models.md
+        - Utils: api/stable/gen/utils.md
+      - Git:
+        - Git Overview: api/stable/git/index.md
+        - Commit Generator:
+          - Commit Generator Overview: api/stable/git/commit_generator/index.md
+          - Command: api/stable/git/commit_generator/command.md
+          - Generator: api/stable/git/commit_generator/generator.md
+          - Prompts: api/stable/git/commit_generator/prompts.md
+          - Schemas: api/stable/git/commit_generator/schemas.md
+          - Utils: api/stable/git/commit_generator/utils.md
+        - Commit Linter:
+          - Commit Linter Overview: api/stable/git/commit_linter/index.md
+          - Config: api/stable/git/commit_linter/config.md
+          - Constants: api/stable/git/commit_linter/constants.md
+          - Linter: api/stable/git/commit_linter/linter.md
+          - Parser: api/stable/git/commit_linter/parser.md
+          - Validators: api/stable/git/commit_linter/validators.md
+        - Diff Splitter:
+          - Diff Splitter Overview: api/stable/git/diff_splitter/index.md
+          - Constants: api/stable/git/diff_splitter/constants.md
+          - Schemas: api/stable/git/diff_splitter/schemas.md
+          - Splitter: api/stable/git/diff_splitter/splitter.md
+          - Strategies: api/stable/git/diff_splitter/strategies.md
+          - Utils: api/stable/git/diff_splitter/utils.md
+        - Interactive: api/stable/git/interactive.md
+        - Pr Generator:
+          - Pr Generator Overview: api/stable/git/pr_generator/index.md
+          - Command: api/stable/git/pr_generator/command.md
+          - Constants: api/stable/git/pr_generator/constants.md
+          - Decorators: api/stable/git/pr_generator/decorators.md
+          - Generator: api/stable/git/pr_generator/generator.md
+          - Prompts: api/stable/git/pr_generator/prompts.md
+          - Schemas: api/stable/git/pr_generator/schemas.md
+          - Strategies: api/stable/git/pr_generator/strategies.md
+          - Templates: api/stable/git/pr_generator/templates.md
+          - Utils: api/stable/git/pr_generator/utils.md
+        - Utils: api/stable/git/utils.md
+      - Llm:
+        - Llm Overview: api/stable/llm/index.md
+        - Api: api/stable/llm/api.md
+        - Client: api/stable/llm/client.md
+        - Config: api/stable/llm/config.md
+        - Errors: api/stable/llm/errors.md
+        - Rag:
+          - Rag Overview: api/stable/llm/rag/index.md
+          - Command: api/stable/llm/rag/command.md
+          - Formatter: api/stable/llm/rag/formatter.md
+          - Prompts: api/stable/llm/rag/prompts.md
+        - Utils: api/stable/llm/utils.md
+      - Processor:
+        - Processor Overview: api/stable/processor/index.md
+        - Lod: api/stable/processor/lod.md
+        - Pipeline: api/stable/processor/pipeline.md
+        - Tree Sitter:
+          - Tree Sitter Overview: api/stable/processor/tree_sitter/index.md
+          - Analyzer: api/stable/processor/tree_sitter/analyzer.md
+          - Base: api/stable/processor/tree_sitter/base.md
+          - Languages:
+            - Languages Overview: api/stable/processor/tree_sitter/languages/index.md
+            - Base: api/stable/processor/tree_sitter/languages/base.md
+            - Javascript: api/stable/processor/tree_sitter/languages/javascript.md
+            - Python: api/stable/processor/tree_sitter/languages/python.md
+            - Typescript: api/stable/processor/tree_sitter/languages/typescript.md
+        - Utils:
+          - Utils Overview: api/stable/processor/utils/index.md
+          - Embedding Utils: api/stable/processor/utils/embedding_utils.md
+          - Git Utils: api/stable/processor/utils/git_utils.md
+          - Sync Utils: api/stable/processor/utils/sync_utils.md
+        - Vector:
+          - Vector Overview: api/stable/processor/vector/index.md
+          - Chunking: api/stable/processor/vector/chunking.md
+          - Qdrant Manager: api/stable/processor/vector/qdrant_manager.md
+          - Synchronizer: api/stable/processor/vector/synchronizer.md
+      - Utils:
+        - Utils Overview: api/stable/utils/index.md
+        - Cli Utils: api/stable/utils/cli_utils.md
+        - Config Loader: api/stable/utils/config_loader.md
+        - Docker Utils: api/stable/utils/docker_utils.md
+        - File Utils: api/stable/utils/file_utils.md
+        - Log Setup: api/stable/utils/log_setup.md
+        - Path Utils: api/stable/utils/path_utils.md
+      - Watcher:
+        - Watcher Overview: api/stable/watcher/index.md
+        - File Watcher: api/stable/watcher/file_watcher.md
+    - Pre-release:
+      - Overview: api/pre-release/index.md
+      - Cli:
+        - Cli Overview: api/pre-release/cli/index.md
+        - Ask Cmd: api/pre-release/cli/ask_cmd.md
+        - Commit Cmd: api/pre-release/cli/commit_cmd.md
+        - Gen Cmd: api/pre-release/cli/gen_cmd.md
+        - Index Cmd: api/pre-release/cli/index_cmd.md
+        - Pr Cmd: api/pre-release/cli/pr_cmd.md
+      - Config: api/pre-release/config.md
+      - Db:
+        - Db Overview: api/pre-release/db/index.md
+        - Client: api/pre-release/db/client.md
+        - Engine: api/pre-release/db/engine.md
+        - Models: api/pre-release/db/models.md
+      - Gen:
+        - Gen Overview: api/pre-release/gen/index.md
+        - Command: api/pre-release/gen/command.md
+        - Generator: api/pre-release/gen/generator.md
+        - Models: api/pre-release/gen/models.md
+        - Utils: api/pre-release/gen/utils.md
+      - Git:
+        - Git Overview: api/pre-release/git/index.md
+        - Commit Generator:
+          - Commit Generator Overview: api/pre-release/git/commit_generator/index.md
+          - Command: api/pre-release/git/commit_generator/command.md
+          - Generator: api/pre-release/git/commit_generator/generator.md
+          - Prompts: api/pre-release/git/commit_generator/prompts.md
+          - Schemas: api/pre-release/git/commit_generator/schemas.md
+          - Utils: api/pre-release/git/commit_generator/utils.md
+        - Commit Linter:
+          - Commit Linter Overview: api/pre-release/git/commit_linter/index.md
+          - Config: api/pre-release/git/commit_linter/config.md
+          - Constants: api/pre-release/git/commit_linter/constants.md
+          - Linter: api/pre-release/git/commit_linter/linter.md
+          - Parser: api/pre-release/git/commit_linter/parser.md
+          - Validators: api/pre-release/git/commit_linter/validators.md
+        - Diff Splitter:
+          - Diff Splitter Overview: api/pre-release/git/diff_splitter/index.md
+          - Constants: api/pre-release/git/diff_splitter/constants.md
+          - Schemas: api/pre-release/git/diff_splitter/schemas.md
+          - Splitter: api/pre-release/git/diff_splitter/splitter.md
+          - Strategies: api/pre-release/git/diff_splitter/strategies.md
+          - Utils: api/pre-release/git/diff_splitter/utils.md
+        - Interactive: api/pre-release/git/interactive.md
+        - Pr Generator:
+          - Pr Generator Overview: api/pre-release/git/pr_generator/index.md
+          - Command: api/pre-release/git/pr_generator/command.md
+          - Constants: api/pre-release/git/pr_generator/constants.md
+          - Decorators: api/pre-release/git/pr_generator/decorators.md
+          - Generator: api/pre-release/git/pr_generator/generator.md
+          - Prompts: api/pre-release/git/pr_generator/prompts.md
+          - Schemas: api/pre-release/git/pr_generator/schemas.md
+          - Strategies: api/pre-release/git/pr_generator/strategies.md
+          - Templates: api/pre-release/git/pr_generator/templates.md
+          - Utils: api/pre-release/git/pr_generator/utils.md
+        - Utils: api/pre-release/git/utils.md
+      - Llm:
+        - Llm Overview: api/pre-release/llm/index.md
+        - Api: api/pre-release/llm/api.md
+        - Client: api/pre-release/llm/client.md
+        - Config: api/pre-release/llm/config.md
+        - Errors: api/pre-release/llm/errors.md
+        - Rag:
+          - Rag Overview: api/pre-release/llm/rag/index.md
+          - Command: api/pre-release/llm/rag/command.md
+          - Formatter: api/pre-release/llm/rag/formatter.md
+          - Prompts: api/pre-release/llm/rag/prompts.md
+        - Utils: api/pre-release/llm/utils.md
+      - Processor:
+        - Processor Overview: api/pre-release/processor/index.md
+        - Lod: api/pre-release/processor/lod.md
+        - Pipeline: api/pre-release/processor/pipeline.md
+        - Tree Sitter:
+          - Tree Sitter Overview: api/pre-release/processor/tree_sitter/index.md
+          - Analyzer: api/pre-release/processor/tree_sitter/analyzer.md
+          - Base: api/pre-release/processor/tree_sitter/base.md
+          - Languages:
+            - Languages Overview: api/pre-release/processor/tree_sitter/languages/index.md
+            - Base: api/pre-release/processor/tree_sitter/languages/base.md
+            - Javascript: api/pre-release/processor/tree_sitter/languages/javascript.md
+            - Python: api/pre-release/processor/tree_sitter/languages/python.md
+            - Typescript: api/pre-release/processor/tree_sitter/languages/typescript.md
+        - Utils:
+          - Utils Overview: api/pre-release/processor/utils/index.md
+          - Embedding Utils: api/pre-release/processor/utils/embedding_utils.md
+          - Git Utils: api/pre-release/processor/utils/git_utils.md
+          - Sync Utils: api/pre-release/processor/utils/sync_utils.md
+        - Vector:
+          - Vector Overview: api/pre-release/processor/vector/index.md
+          - Chunking: api/pre-release/processor/vector/chunking.md
+          - Qdrant Manager: api/pre-release/processor/vector/qdrant_manager.md
+          - Synchronizer: api/pre-release/processor/vector/synchronizer.md
+      - Utils:
+        - Utils Overview: api/pre-release/utils/index.md
+        - Cli Utils: api/pre-release/utils/cli_utils.md
+        - Config Loader: api/pre-release/utils/config_loader.md
+        - Docker Utils: api/pre-release/utils/docker_utils.md
+        - File Utils: api/pre-release/utils/file_utils.md
+        - Log Setup: api/pre-release/utils/log_setup.md
+        - Path Utils: api/pre-release/utils/path_utils.md
+      - Watcher:
+        - Watcher Overview: api/pre-release/watcher/index.md
+        - File Watcher: api/pre-release/watcher/file_watcher.md
+theme:
+  name: material
+  icon:
+    logo: material/library
+  features:
+  - content.action.view
+  - content.code.annotate
+  - content.code.copy
+  - content.tooltips
+  - content.tabs.link
+  - navigation.footer
+  - navigation.indexes
+  - navigation.sections
+  - navigation.tracking
+  - search.highlight
+  - search.share
+  - search.suggest
+  - toc.follow
+  palette:
+  - media: (prefers-color-scheme)
+    toggle:
+      icon: material/link
+      name: Switch to light mode
+  - media: '(prefers-color-scheme: light)'
+    scheme: default
+    primary: indigo
+    accent: indigo
+    toggle:
+      icon: material/toggle-switch
+      name: Switch to dark mode
+  - media: '(prefers-color-scheme: dark)'
+    scheme: slate
+    primary: black
+    accent: indigo
+    toggle:
+      icon: material/toggle-switch-off
+      name: Switch to system preference
+  font:
+    text: Geist
+    code: Geist Mono
+markdown_extensions:
+- pymdownx.blocks.caption
+- pymdownx.blocks.admonition
+- pymdownx.highlight:
+    use_pygments: true
+- pymdownx.inlinehilite
+- pymdownx.superfences:
+    custom_fences:
+    - name: mermaid
+      class: mermaid
+      format: !!python/name:mermaid2.fence_mermaid_custom
+plugins:
+- search
+- mermaid2
+- mkdocstrings:
+    handlers:
+      python:
+        paths:
+        - src/codemap
+        options:
+          relative_crossrefs: true
+          members_order: source
+          separate_signature: true
+          show_signature_annotations: true
+          signature_crossrefs: true
+          group_by_category: false
+          heading_level: 3
+          docstring_style: google
