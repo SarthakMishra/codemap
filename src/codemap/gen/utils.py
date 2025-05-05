@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
-from codemap.utils.file_utils import is_text_file
+from codemap.utils.file_utils import is_binary_file
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
@@ -31,7 +31,7 @@ def _process_single_file_lod(file_path: Path, lod_level: LODLevel, lod_generator
 	        LODEntity if successful, None otherwise.
 
 	"""
-	if not is_text_file(file_path):
+	if is_binary_file(file_path):
 		logger.debug("Skipping non-text file for LOD generation: %s", file_path)
 		return None
 	try:
