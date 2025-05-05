@@ -93,6 +93,14 @@ nav:
           - Strategies: api/stable/git/pr_generator/strategies.md
           - Templates: api/stable/git/pr_generator/templates.md
           - Utils: api/stable/git/pr_generator/utils.md
+        - Semantic Grouping:
+          - Semantic Grouping Overview: api/stable/git/semantic_grouping/index.md
+          - Batch Processor: api/stable/git/semantic_grouping/batch_processor.md
+          - Clusterer: api/stable/git/semantic_grouping/clusterer.md
+          - Context Processor: api/stable/git/semantic_grouping/context_processor.md
+          - Embedder: api/stable/git/semantic_grouping/embedder.md
+          - Group: api/stable/git/semantic_grouping/group.md
+          - Resolver: api/stable/git/semantic_grouping/resolver.md
         - Utils: api/stable/git/utils.md
       - Llm:
         - Llm Overview: api/stable/llm/index.md
@@ -197,6 +205,14 @@ nav:
           - Strategies: api/pre-release/git/pr_generator/strategies.md
           - Templates: api/pre-release/git/pr_generator/templates.md
           - Utils: api/pre-release/git/pr_generator/utils.md
+        - Semantic Grouping:
+          - Semantic Grouping Overview: api/pre-release/git/semantic_grouping/index.md
+          - Batch Processor: api/pre-release/git/semantic_grouping/batch_processor.md
+          - Clusterer: api/pre-release/git/semantic_grouping/clusterer.md
+          - Context Processor: api/pre-release/git/semantic_grouping/context_processor.md
+          - Embedder: api/pre-release/git/semantic_grouping/embedder.md
+          - Group: api/pre-release/git/semantic_grouping/group.md
+          - Resolver: api/pre-release/git/semantic_grouping/resolver.md
         - Utils: api/pre-release/git/utils.md
       - Llm:
         - Llm Overview: api/pre-release/llm/index.md
