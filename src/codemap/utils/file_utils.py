@@ -109,17 +109,3 @@ def is_binary_file(file_path: Path) -> bool:
 		return True
 	except (OSError, PermissionError):
 		return True
-
-
-def is_text_file(file_path: Path) -> bool:
-	"""
-	Check if a file is a text file.
-
-	Args:
-	        file_path: Path to the file
-
-	Returns:
-	        True if the file is a text file, False otherwise
-
-	"""
-	return not is_binary_file(file_path)
