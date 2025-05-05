@@ -6,9 +6,11 @@ multiple semantic groups in batch using LiteLLM's batch_completion.
 
 """
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
+from codemap.git.commit_generator.utils import format_commit_json, prepare_prompt
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.interactive import CommitUI
 from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
@@ -78,17 +80,16 @@ def batch_generate_messages(
 			# Store the temp chunk for reference
 			temp_chunks.append(temp_chunk)
 
+			# Create a simple dictionary with file paths as keys
+			file_info = {file: {"path": file} for file in group.files}
+
 			# Prepare the prompt for this group
-			# We need to import and use methods from CommitMessageGenerator
-			from codemap.git.commit_generator.generator import MinimalMessageGenerator
-
-			# Creating a minimal generator just to use its _prepare_prompt method
-			temp_generator = MinimalMessageGenerator(
-				prompt_template=prompt_template,
-				config_loader=config_loader,
+			prompt = prepare_prompt(
+				template=prompt_template,
+				diff_content=temp_chunk.content,
+				file_info=file_info,
+				convention=config_loader.get_commit_convention(),
 			)
-
-			prompt = temp_generator.prepare_prompt(temp_chunk)
 
 			# Format as messages for batch_completion
 			messages = [{"role": "user", "content": prompt}]
@@ -123,14 +124,17 @@ def batch_generate_messages(
 
 					# If it's JSON, extract the message
 					if content.startswith("{") and content.endswith("}"):
-						import json
-
 						try:
-							parsed = json.loads(content)
-							if "message" in parsed:
-								content = parsed["message"]
-						except json.JSONDecodeError:
-							pass  # Keep original content if JSON parsing fails
+							# Check if it's in the {"commit_message": "..."} format
+							json_data = json.loads(content)
+							if "commit_message" in json_data:
+								# Extract just the commit message
+								content = json_data["commit_message"]
+							else:
+								# Use the formatter for conventional format
+								content = format_commit_json(content)
+						except Exception:
+							logger.exception("Error formatting JSON to commit message")
 
 					# Set the message on the group
 					group.message = content
