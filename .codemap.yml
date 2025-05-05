@@ -23,7 +23,7 @@ gen:
   # Output file for generated documentation (Overrides output_dir if present)
   # output_file: code_documentation.md # Remove this to use output_dir
   # Level of Detail for code analysis (signatures, structure, docs, full)
-  lod_level: docs
+  lod_level: full
   # Mermaid entities to include (lowercase EntityType names, e.g., module, class, function)
   mermaid_entities: ["module", "class", "method", "function"]
   # Mermaid relationships to include (declares, imports, calls)
