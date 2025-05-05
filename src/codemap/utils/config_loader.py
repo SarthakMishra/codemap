@@ -344,3 +344,45 @@ class ConfigLoader:
 				logger.debug("Extracted provider '%s' from model '%s'", provider, model)
 
 		return llm_config
+
+	def get_api_key_for_model(self, model_name: str) -> str:
+		"""
+		Get the API key for a specific model.
+
+		Args:
+		    model_name: The model name, which may include the provider prefix (e.g., 'openai/gpt-4')
+
+		Returns:
+		    str: The API key for the specified model
+
+		Raises:
+		    ConfigError: If API key cannot be determined
+
+		"""
+		if not model_name:
+			msg = "Model name is required to determine API key"
+			raise ConfigError(msg)
+
+		# Get the LLM config
+		llm_config = self.get_llm_config()
+
+		# Extract provider from model string if present
+		provider = model_name.split("/")[0].lower() if "/" in model_name else "openai"
+
+		# Check if we have an environment variable specified for this provider
+		api_key_env_var = llm_config.get(f"{provider}_api_key_env")
+		if api_key_env_var:
+			import os
+
+			api_key = os.environ.get(api_key_env_var)
+			if api_key:
+				return api_key
+
+		# Check if we have a direct API key in the config
+		api_key = llm_config.get(f"{provider}_api_key") or llm_config.get("api_key")
+		if api_key:
+			return api_key
+
+		# If still no API key, raise an error
+		msg = f"Could not determine API key for model {model_name} (provider: {provider})"
+		raise ConfigError(msg)
