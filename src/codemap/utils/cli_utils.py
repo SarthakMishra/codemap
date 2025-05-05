@@ -282,6 +282,11 @@ def exit_with_error(message: str, exit_code: int = 1, exception: Exception | Non
 
 	"""
 	show_error(message, exception)
-	if exception is None:
-		raise typer.Exit(exit_code)
+	# No need to check for exception is None, typer.Exit handles it
 	raise typer.Exit(exit_code) from exception
+
+
+def handle_keyboard_interrupt() -> None:
+	"""Handles KeyboardInterrupt by printing a message and exiting cleanly."""
+	console.print("\n[yellow]Operation cancelled by user.[/yellow]")
+	raise typer.Exit(130)  # Standard exit code for SIGINT
