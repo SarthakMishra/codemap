@@ -120,15 +120,15 @@ class DiffClusterer:
 		              5. Organizes chunks into clusters based on labels
 		              6. Handles special cases like noise points in DBSCAN
 
-		Args:
+		              Args:
 		    chunk_embeddings: List of (chunk, embedding) tuples where each embedding
 		        is a numpy array representing the semantic vector of a code chunk
 
-		Returns:
+		              Returns:
 		    List of lists, where each inner list contains chunks in the same cluster.
 		    With DBSCAN, noise points (label -1) are returned as individual single-item clusters.
 
-		Examples:
+		              Examples:
 		    >>> embedder = DiffEmbedder()
 		    >>> chunk_embeddings = embedder.embed_chunks(diff_chunks)
 		    >>> clusterer = DiffClusterer(method="agglomerative", distance_threshold=0.5)
