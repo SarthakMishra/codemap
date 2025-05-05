@@ -72,19 +72,21 @@ class TestFileSplitStrategy:
 	def test_split_untracked_files(self, strategy: FileSplitStrategy) -> None:
 		"""Test splitting untracked files (empty content, files listed)."""
 		# Should only happen for non-staged diffs
-		git_diff = GitDiff(files=["new_file.py", "another.txt"], content="", is_staged=False)
+		git_diff = GitDiff(files=["new_file.py", "another.txt"], content="", is_staged=False, is_untracked=True)
 
 		chunks = strategy.split(git_diff)
 
 		assert len(chunks) == 2
 		assert chunks[0].files == ["new_file.py"]
 		assert chunks[0].content == ""
+		assert chunks[0].description == "New file: new_file.py"
 		assert chunks[1].files == ["another.txt"]
 		assert chunks[1].content == ""
+		assert chunks[1].description == "New file: another.txt"
 
 	def test_split_untracked_files_staged(self, strategy: FileSplitStrategy) -> None:
 		"""Test splitting staged diff with empty content (should yield no chunks)."""
-		git_diff = GitDiff(files=["new_file.py"], content="", is_staged=True)
+		git_diff = GitDiff(files=["new_file.py"], content="", is_staged=True, is_untracked=False)
 		chunks = strategy.split(git_diff)
 		assert chunks == []
 
