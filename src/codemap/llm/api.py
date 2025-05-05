@@ -5,8 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from litellm.utils import trim_messages
-
 from codemap.utils.config_loader import ConfigLoader
 
 from .config import DEFAULT_LLM_REQUEST_PARAMS
@@ -73,7 +71,7 @@ def call_llm_api(
 	request_params.update(
 		{
 			"model": model,
-			"messages": trim_messages(message, model),
+			"messages": message,
 			"api_key": api_key,
 		}
 	)
