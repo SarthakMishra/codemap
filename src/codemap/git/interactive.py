@@ -364,20 +364,39 @@ class CommitUI:
 
 		return False
 
-	def confirm_bypass_hooks(self) -> bool:
+	def confirm_bypass_hooks(self) -> ChunkAction:
 		"""
-		Ask the user to confirm bypassing git hooks.
+		Ask the user what to do when git hooks fail.
 
 		Returns:
-		    True if the user confirms, False otherwise
+		    ChunkAction indicating what to do next
 
 		"""
 		self.console.print("\n[bold yellow]Git hooks failed.[/]")
 		self.console.print("[yellow]This may be due to linting or other pre-commit checks.[/]")
-		return Confirm.ask(
-			"\n[bold yellow]Do you want to bypass git hooks and commit anyway?[/]",
-			default=False,
-		)
+
+		options: list[tuple[str, ChunkAction]] = [
+			("Force commit and bypass hooks", ChunkAction.COMMIT),
+			("Regenerate message and try again", ChunkAction.REGENERATE),
+			("Edit message manually", ChunkAction.EDIT),
+			("Skip this group", ChunkAction.SKIP),
+			("Exit without committing", ChunkAction.EXIT),
+		]
+
+		result = questionary.select(
+			"What would you like to do?",
+			choices=[option[0] for option in options],
+			qmark="»",
+			use_indicator=True,
+			use_arrow_keys=True,
+		).ask()
+
+		for option, action in options:
+			if option == result:
+				return action
+
+		# Fallback (should never happen)
+		return ChunkAction.EXIT
 
 	def show_success(self, message: str) -> None:
 		"""
