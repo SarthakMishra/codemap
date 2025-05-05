@@ -24,6 +24,7 @@ class CommitLinter:
 		allowed_types: list[str] | None = None,
 		config: CommitLintConfig | None = None,
 		config_path: str | None = None,
+		config_loader: ConfigLoader | None = None,
 	) -> None:
 		"""
 		Initialize the linter.
@@ -32,10 +33,18 @@ class CommitLinter:
 		    allowed_types (List[str], optional): Override list of allowed commit types.
 		    config (CommitLintConfig, optional): Configuration object for the linter.
 		    config_path (str, optional): Path to a configuration file (.codemap.yml).
+		    config_loader (ConfigLoader, optional): Config loader instance to use (dependency injection).
 
 		"""
-		# Get default types from central config
-		default_types = DEFAULT_CONFIG["commit"]["convention"]["types"]
+		# Get configuration loader following the Chain of Responsibility pattern
+		repo_root = Path(config_path).parent if config_path else None
+		self.config_loader = config_loader or ConfigLoader(config_file=config_path, repo_root=repo_root)
+
+		# Get default types from central config via config_loader
+		commit_config = self.config_loader.get("commit", {})
+		convention_config = commit_config.get("convention", {})
+		default_types = convention_config.get("types", DEFAULT_CONFIG["commit"]["convention"]["types"])
+
 		self.allowed_types = {t.lower() for t in (allowed_types or default_types)}
 		self.parser = CommitParser()
 
@@ -43,16 +52,12 @@ class CommitLinter:
 		if config:
 			self.config = config
 		else:
-			# Use the ConfigLoader to get configuration
-			repo_root = Path(config_path).parent if config_path else None
-			config_loader = ConfigLoader(config_file=config_path, repo_root=repo_root)
-
-			# Convert the config to CommitLintConfig
-			config_data = config_loader.config
-			self.config = CommitLintConfig.from_dict(config_data)
+			# Convert the config to CommitLintConfig, using config_loader's config
+			config_data = self.config_loader.config
+			self.config = CommitLintConfig.from_dict(config_data, config_loader=self.config_loader)
 
 			# Get commit convention from config loader
-			commit_convention = config_loader.get_commit_convention()
+			commit_convention = self.config_loader.get_commit_convention()
 			if commit_convention.get("types"):
 				self.config.type_enum.value = commit_convention["types"]
 			if commit_convention.get("scopes"):
