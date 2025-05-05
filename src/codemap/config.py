@@ -8,6 +8,8 @@ DEFAULT_CONFIG = {
 	"llm": {
 		"model": "openai/gpt-4o-mini",
 		"api_base": None,
+		"max_context_tokens": 4000,  # Maximum tokens for context in prompts
+		"use_lod_context": True,  # Whether to use LOD context processing
 	},
 	# Embedding configuration
 	"embedding": {
