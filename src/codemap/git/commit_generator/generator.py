@@ -666,5 +666,11 @@ class CommitMessageGenerator:
 			return message, False, True, []  # Fallback assumes valid, no lint messages
 
 	def get_config_loader(self) -> ConfigLoader:
-		"""Get the config loader instance."""
+		"""
+		Get the ConfigLoader instance used by this generator.
+
+		Returns:
+		    ConfigLoader instance
+
+		"""
 		return self._config_loader
