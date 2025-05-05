@@ -10,7 +10,7 @@ from re import Pattern
 from typing import Any, Protocol
 
 import numpy as np
-from unidiff import Hunk, PatchedFile, PatchSet
+from unidiff import Hunk, PatchedFile, PatchSet, UnidiffParseError
 
 from codemap.config import DEFAULT_CONFIG
 from codemap.git.utils import GitDiff
@@ -110,10 +110,10 @@ class FileSplitStrategy(BaseSplitStrategy):
 
 	def _handle_empty_diff_content(self, diff: GitDiff) -> list[DiffChunk]:
 		"""Handle untracked files in empty diff content."""
-		if not diff.is_staged and diff.files:
+		if (not diff.is_staged or diff.is_untracked) and diff.files:
 			# Filter out invalid file names
 			valid_files = [file for file in diff.files if self._is_valid_filename(file)]
-			return [DiffChunk(files=[f], content="") for f in valid_files]
+			return [DiffChunk(files=[f], content="", description=f"New file: {f}") for f in valid_files]
 		return []
 
 	@staticmethod
@@ -226,69 +226,34 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		return self._process_group(diff)
 
 	def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
-		"""Process a manageable group of files."""
-		if not diff.files:
-			return []
-
-		# 1. Generate initial chunks for each file
-		initial_file_chunks: list[DiffChunk] = []
-		for file_path in diff.files:
-			single_file_diff_view = GitDiff(
-				files=[file_path],
-				content=diff.content,  # Full content for parsing
-				is_staged=diff.is_staged,
+		"""Process a GitDiff assuming it contains changes for only one file."""
+		if not diff.files or len(diff.files) > 1:
+			logger.error("_process_group called with unexpected number of files: %s", diff.files)
+			# Return a basic chunk or empty list if files list is invalid/unexpected
+			return (
+				[DiffChunk(files=diff.files, content=diff.content, description="Error: Unexpected input format")]
+				if diff.files
+				else []
 			)
-			enhanced_chunks = self._enhance_semantic_split(single_file_diff_view)
-			if enhanced_chunks:
-				initial_file_chunks.extend(enhanced_chunks)
-			else:
-				logger.warning("No chunk generated for file: %s", file_path)
 
-		if not initial_file_chunks:
-			return []
+		file_path = diff.files[0]
 
-		# 2. Consolidate chunks from the same file first
-		consolidated_chunks = self._consolidate_small_chunks(initial_file_chunks)
+		# Enhance this single file diff
+		enhanced_chunks = self._enhance_semantic_split(diff)  # Pass the original diff directly
 
-		# 3. Group remaining chunks
-		processed_indices: set[int] = set()
-		final_chunks: list[DiffChunk] = []
+		if not enhanced_chunks:
+			logger.warning("No chunk generated for file: %s after enhancement.", file_path)
+			# Fallback if enhancement yields nothing
+			enhanced_chunks = [
+				DiffChunk(
+					files=[file_path],
+					content=diff.content,
+					description=f"Changes in {file_path} (enhancement failed)",
+				)
+			]
 
-		# First pass: Group by related file patterns
-		for i, chunk1 in enumerate(consolidated_chunks):
-			if i in processed_indices:
-				continue
-			if not chunk1.files:  # Skip chunks without files
-				processed_indices.add(i)
-				final_chunks.append(chunk1)
-				continue
-
-			related_group = [chunk1]
-			processed_indices.add(i)
-
-			for j in range(i + 1, len(consolidated_chunks)):
-				if j in processed_indices:
-					continue
-				chunk2 = consolidated_chunks[j]
-				if not chunk2.files:  # Skip chunks without files
-					continue
-
-				# Check relation between first files of each chunk
-				if are_files_related(chunk1.files[0], chunk2.files[0], self.related_file_patterns):
-					related_group.append(chunk2)
-					processed_indices.add(j)
-
-			self._create_semantic_chunk(related_group, final_chunks)
-
-		# Second pass: Group remaining by similarity
-		remaining_chunks = [
-			consolidated_chunks[i] for i in range(len(consolidated_chunks)) if i not in processed_indices
-		]
-		if remaining_chunks:
-			self._group_by_content_similarity(remaining_chunks, final_chunks)
-
-		# 4. Final consolidation check
-		return self._consolidate_if_needed(final_chunks)
+		# No further consolidation or grouping needed here as we process file-by-file now
+		return enhanced_chunks
 
 	def _validate_embedding_model(self) -> None:
 		"""Validate that the embedding model is available."""
@@ -569,9 +534,17 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not diff_content:
 			logger.warning("Cannot parse empty diff content for %s", file_path)
 			return None
+
+		filtered_content = ""  # Initialize to handle unbound case
 		try:
+			# Filter out the truncation marker lines before parsing
+			filtered_content_lines = [
+				line for line in diff_content.splitlines() if line.strip() != "... [content truncated] ..."
+			]
+			filtered_content = "\n".join(filtered_content_lines)
+
 			# Use StringIO as PatchSet expects a file-like object or iterable
-			patch_set = PatchSet(StringIO(diff_content))
+			patch_set = PatchSet(StringIO(filtered_content))
 			matched_file: PatchedFile | None = None
 			for patched_file in patch_set:
 				# unidiff paths usually start with a/ or b/
@@ -582,6 +555,15 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				logger.warning("Could not find matching PatchedFile for: %s in unidiff output", file_path)
 				return None
 			return matched_file
+		except UnidiffParseError:
+			# Log the specific parse error and the content that caused it (first few lines)
+			preview_lines = "\n".join(filtered_content.splitlines()[:10])  # Log first 10 lines
+			logger.exception(
+				"UnidiffParseError for %s\nContent Preview:\n%s",  # Corrected format string
+				file_path,
+				preview_lines,
+			)
+			return None  # Return None on parse error
 		except Exception:
 			logger.exception("Failed to parse diff content using unidiff for %s", file_path)
 			return None
@@ -661,18 +643,32 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
-		Orchestrates the parsing and splitting for a single file's diff view.
-
-		Handles parsing, reconstruction, large file splitting, semantic pattern
-		splitting, and fallback hunk splitting.
+		Enhance the semantic split by using NLP and chunk detection.
 
 		Args:
-		    diff: GitDiff object (expected to contain one file path and full diff content)
+		    diff: The GitDiff object to split
 
 		Returns:
-		    List of DiffChunk objects for the file
+		    List of enhanced DiffChunk objects
 
 		"""
+		if not diff.files:
+			return []
+
+		# Special handling for untracked files - avoid unidiff parsing errors
+		if diff.is_untracked:
+			# Create a basic chunk with only file info for untracked files
+			# Use a list comprehension for performance (PERF401)
+			return [
+				DiffChunk(
+					files=[file_path],
+					content=diff.content if len(diff.files) == 1 else f"New untracked file: {file_path}",
+					description=f"New file: {file_path}",
+				)
+				for file_path in diff.files
+				if self._is_valid_filename(file_path)
+			]
+
 		if not diff.files or len(diff.files) != 1:
 			logger.error("_enhance_semantic_split called with invalid diff object (files=%s)", diff.files)
 			return []
@@ -1042,3 +1038,11 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		logger.debug("Split %s into %d chunks based on semantic patterns", file_path, len(result_chunks))
 		return result_chunks
+
+	@staticmethod
+	def _is_valid_filename(filename: str) -> bool:
+		"""Check if the filename is valid (not a pattern or template)."""
+		if not filename:
+			return False
+		invalid_chars = ["*", "+", "{", "}", "\\"]
+		return not (any(char in filename for char in invalid_chars) or filename.startswith('"'))
