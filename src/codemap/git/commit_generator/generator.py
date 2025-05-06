@@ -16,7 +16,7 @@ from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
 from .schemas import COMMIT_MESSAGE_SCHEMA
-from .utils import clean_message_for_linting, lint_commit_message
+from .utils import clean_message_for_linting, format_commit_json, lint_commit_message
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -256,162 +256,6 @@ class CommitMessageGenerator:
 			extra_context=context,  # Pass the context with default values
 		)
 
-	def format_json_to_commit_message(self, content: str) -> str:
-		"""
-		Format a JSON string as a conventional commit message.
-
-		Args:
-		    content: JSON content string from LLM response
-
-		Returns:
-		    Formatted commit message string
-
-		"""
-
-		def _raise_validation_error(message: str) -> None:
-			"""Helper to raise ValueError with consistent message."""
-			logger.warning("LLM response validation failed: %s", message)
-			msg = message
-			raise ValueError(msg)
-
-		try:
-			# Try to parse the content as JSON
-			debug_content = (
-				content[:MAX_DEBUG_CONTENT_LENGTH] + "..." if len(content) > MAX_DEBUG_CONTENT_LENGTH else content
-			)
-			logger.debug("Parsing JSON content: %s", debug_content)
-
-			# Handle both direct JSON objects and strings containing JSON
-			if not content.strip().startswith("{"):
-				# Extract JSON if it's wrapped in other text
-				import re
-
-				json_match = re.search(r"({.*})", content, re.DOTALL)
-				if json_match:
-					content = json_match.group(1)
-
-			message_data = json.loads(content)
-			logger.debug("Parsed JSON: %s", message_data)
-
-			# Check for standardized response format
-			if "commit_message" in message_data and isinstance(message_data["commit_message"], str):
-				return message_data["commit_message"].strip()
-
-			# Basic Schema Validation
-			if not isinstance(message_data, dict):
-				_raise_validation_error("JSON response is not an object")
-
-			if not message_data.get("type") or not message_data.get("description"):
-				_raise_validation_error("Missing required fields in JSON response")
-
-			# Extract components with validation/defaults
-			commit_type = str(message_data["type"]).lower().strip()
-
-			# Check for valid commit type (from the config)
-			valid_types = self._config_loader.get_commit_convention().get("types", [])
-			if valid_types and commit_type not in valid_types:
-				logger.warning("Invalid commit type: %s. Valid types: %s", commit_type, valid_types)
-				# Try to find a valid type as fallback
-				if "feat" in valid_types:
-					commit_type = "feat"
-				elif "fix" in valid_types:
-					commit_type = "fix"
-				elif len(valid_types) > 0:
-					commit_type = valid_types[0]
-				logger.debug("Using fallback commit type: %s", commit_type)
-
-			scope = message_data.get("scope")
-			if scope is not None:
-				scope = str(scope).lower().strip()
-
-			description = str(message_data["description"]).lower().strip()
-
-			# Ensure description doesn't start with another type prefix
-			for valid_type in valid_types:
-				if description.startswith(f"{valid_type}:"):
-					# Remove the duplicate type prefix from description
-					description = description.split(":", 1)[1].strip()
-					logger.debug("Removed duplicate type prefix from description: %s", description)
-					break
-
-			body = message_data.get("body")
-			if body is not None:
-				body = str(body).strip()
-			is_breaking = bool(message_data.get("breaking", False))
-
-			# Format the header
-			header = f"{commit_type}"
-			if scope:
-				header += f"({scope})"
-			if is_breaking:
-				header += "!"
-			header += f": {description}"
-
-			# Ensure compliance with commit format regex
-			# The regex requires a space after the colon, and the format should be <type>(<scope>)!: <description>
-			if ": " not in header:
-				parts = header.split(":")
-				if len(parts) == EXPECTED_PARTS_COUNT:
-					header = f"{parts[0]}: {parts[1].strip()}"
-
-			# Validation check against regex pattern
-			import re
-
-			from codemap.git.commit_linter.constants import COMMIT_REGEX
-
-			# If header doesn't match the expected format, log and try to fix it
-			if not COMMIT_REGEX.match(header):
-				logger.warning("Generated header doesn't match commit format: %s", header)
-				# As a fallback, recreate with a simpler format
-				simple_header = f"{commit_type}"
-				if scope:
-					simple_header += f"({scope})"
-				if is_breaking:
-					simple_header += "!"
-				simple_header += f": {description}"
-				header = simple_header
-				logger.debug("Fixed header to: %s", header)
-
-			# Build the complete message
-			message_parts = [header]
-
-			# Add body if provided
-			if body:
-				message_parts.append("")  # Empty line between header and body
-				message_parts.append(body)
-
-			# Carefully filter only breaking change footers
-			footers = message_data.get("footers", [])
-			breaking_change_footers = []
-
-			if isinstance(footers, list):
-				breaking_change_footers = [
-					footer
-					for footer in footers
-					if isinstance(footer, dict)
-					and footer.get("token", "").upper() in ("BREAKING CHANGE", "BREAKING-CHANGE")
-				]
-
-			if breaking_change_footers:
-				if not body:
-					message_parts.append("")  # Empty line before footers if no body
-				else:
-					message_parts.append("")  # Empty line between body and footers
-
-				for footer in breaking_change_footers:
-					token = footer.get("token", "")
-					value = footer.get("value", "")
-					message_parts.append(f"{token}: {value}")
-
-			message = "\n".join(message_parts)
-			logger.debug("Formatted commit message: %s", message)
-			return message
-
-		except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
-			# If parsing or validation fails, return the content as-is, but cleaned
-			logger.warning("Error formatting JSON to commit message: %s. Using raw content.", str(e))
-			return content.strip()
-
 	def fallback_generation(self, chunk: DiffChunk) -> str:
 		"""
 		Generate a fallback commit message without LLM.
@@ -643,7 +487,7 @@ class CommitMessageGenerator:
 				logger.debug("Regenerated message (RAW LLM output): %s", regenerated_message)
 
 				# Format from JSON to commit message format
-				regenerated_message = self.format_json_to_commit_message(regenerated_message)
+				regenerated_message = format_commit_json(regenerated_message, self._config_loader)
 				logger.debug("Formatted message: %s", regenerated_message)
 
 				# Clean and recheck linting

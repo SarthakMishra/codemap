@@ -18,10 +18,6 @@ PathArg = Annotated[
 	),
 ]
 
-MessageOpt = Annotated[str | None, typer.Option("--message", "-m", help="Commit message")]
-
-AllFilesFlag = Annotated[bool, typer.Option("--all", "-a", help="Commit all changes")]
-
 ModelOpt = Annotated[
 	str,
 	typer.Option(
