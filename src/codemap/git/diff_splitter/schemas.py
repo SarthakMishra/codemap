@@ -56,6 +56,7 @@ class DiffChunkData:
 	description: str | None = None
 	is_llm_generated: bool = False
 	filtered_files: list[str] | None = None
+	is_move: bool = False  # Indicates if this chunk represents a file move operation
 
 	@classmethod
 	def from_chunk(cls, chunk: DiffChunk) -> "DiffChunkData":
@@ -66,6 +67,7 @@ class DiffChunkData:
 			description=chunk.description,
 			is_llm_generated=chunk.is_llm_generated,
 			filtered_files=chunk.filtered_files,
+			is_move=getattr(chunk, "is_move", False),
 		)
 
 	def to_chunk(self) -> DiffChunk:
@@ -76,6 +78,7 @@ class DiffChunkData:
 			description=self.description,
 			is_llm_generated=self.is_llm_generated,
 			filtered_files=self.filtered_files,
+			is_move=self.is_move,
 		)
 
 	def to_dict(self) -> dict[str, Any]:
@@ -86,4 +89,5 @@ class DiffChunkData:
 			"description": self.description,
 			"is_llm_generated": self.is_llm_generated,
 			"filtered_files": self.filtered_files,
+			"is_move": self.is_move,
 		}

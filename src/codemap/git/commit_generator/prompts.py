@@ -70,6 +70,15 @@ Please return the commit message in a valid json format. Analyze the following d
 {diff}
 """
 
+# Context for move operations
+MOVE_CONTEXT = """
+---
+This diff group contains file moves. Here is the list of files that are relocated:
+{files}
+
+These files are moved from {source_dir} to {target_dir}.
+"""
+
 
 def get_lint_prompt_template() -> str:
 	"""
