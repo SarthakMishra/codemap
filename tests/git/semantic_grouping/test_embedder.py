@@ -20,59 +20,58 @@ def mock_sentence_transformer():
 		yield mock_st
 
 
-def test_preprocess_diff():
+def test_preprocess_diff(mock_sentence_transformer):
 	"""Test diff preprocessing to clean up diff formatting."""
 	# Create a mock SentenceTransformer to avoid actual dependency
-	with patch("sentence_transformers.SentenceTransformer"):
-		embedder = DiffEmbedder()
+	embedder = DiffEmbedder(model=mock_sentence_transformer.return_value)
 
-		diff_text = (
-			"diff --git a/file.py b/file.py\n"
-			"index abc123..def456 100644\n"
-			"--- a/file.py\n"
-			"+++ b/file.py\n"
-			"@@ -10,5 +10,6 @@ class Example:\n"
-			" def existing():\n"
-			"     return True\n"
-			"-def removed():\n"
-			"-    pass\n"
-			"+def added():\n"
-			"+    return False\n"
-			" # A comment\n"
-		)
+	diff_text = (
+		"diff --git a/file.py b/file.py\n"
+		"index abc123..def456 100644\n"
+		"--- a/file.py\n"
+		"+++ b/file.py\n"
+		"@@ -10,5 +10,6 @@ class Example:\n"
+		" def existing():\n"
+		"     return True\n"
+		"-def removed():\n"
+		"-    pass\n"
+		"+def added():\n"
+		"+    return False\n"
+		" # A comment\n"
+	)
 
-		result = embedder.preprocess_diff(diff_text)
+	result = embedder.preprocess_diff(diff_text)
 
-		# Check that diff headers and metadata are removed
-		assert "diff --git" not in result
-		assert "index" not in result
-		assert "--- a/" not in result
-		assert "+++ b/" not in result
-		assert "@@ -10,5 +10,6 @@" not in result
+	# Check that diff headers and metadata are removed
+	assert "diff --git" not in result
+	assert "index" not in result
+	assert "--- a/" not in result
+	assert "+++ b/" not in result
+	assert "@@ -10,5 +10,6 @@" not in result
 
-		# Check that +/- are removed from content lines but content remains
-		assert "def existing():" in result
-		assert "def removed():" in result  # Content without the -
-		assert "def added():" in result  # Content without the +
-		assert "# A comment" in result
+	# Check that +/- are removed from content lines but content remains
+	assert "def existing():" in result
+	assert "def removed():" in result  # Content without the -
+	assert "def added():" in result  # Content without the +
+	assert "# A comment" in result
 
-		# The processed diff should have these lines, with proper indentation
-		# Get actual lines for better diagnosis
-		actual_lines = result.splitlines()
+	# The processed diff should have these lines, with proper indentation
+	# Get actual lines for better diagnosis
+	actual_lines = result.splitlines()
 
-		# Test each line individually, preserving whitespace
-		assert "def existing():" in actual_lines
-		assert "    return True" in actual_lines
-		assert "def removed():" in actual_lines
-		assert "    pass" in actual_lines
-		assert "def added():" in actual_lines
-		assert "    return False" in actual_lines
-		assert "# A comment" in actual_lines
+	# Test each line individually, preserving whitespace
+	assert "def existing():" in actual_lines
+	assert "    return True" in actual_lines
+	assert "def removed():" in actual_lines
+	assert "    pass" in actual_lines
+	assert "def added():" in actual_lines
+	assert "    return False" in actual_lines
+	assert "# A comment" in actual_lines
 
 
 def test_embed_chunk(mock_sentence_transformer):
 	"""Test embedding a diff chunk."""
-	embedder = DiffEmbedder()
+	embedder = DiffEmbedder(model=mock_sentence_transformer.return_value)
 
 	# Create a test chunk
 	chunk = DiffChunk(
@@ -98,7 +97,7 @@ def test_embed_chunk(mock_sentence_transformer):
 
 def test_embed_chunk_empty_content(mock_sentence_transformer):
 	"""Test embedding a chunk with empty content."""
-	embedder = DiffEmbedder()
+	embedder = DiffEmbedder(model=mock_sentence_transformer.return_value)
 
 	# Create a test chunk with empty content
 	chunk = DiffChunk(files=["file1.py", "file2.py"], content="")
@@ -117,7 +116,7 @@ def test_embed_chunk_empty_content(mock_sentence_transformer):
 
 def test_embed_chunks(mock_sentence_transformer):
 	"""Test embedding multiple chunks."""
-	embedder = DiffEmbedder()
+	embedder = DiffEmbedder(model=mock_sentence_transformer.return_value)
 
 	# Create test chunks
 	chunks = [
