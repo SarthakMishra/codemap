@@ -14,7 +14,13 @@ from codemap.git.semantic_grouping.context_processor import process_chunks_with_
 from codemap.llm import LLMClient, LLMError
 from codemap.utils.config_loader import ConfigLoader
 
-from .prompts import MOVE_CONTEXT, get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
+from .prompts import (
+	COMMIT_SYSTEM_PROMPT,
+	MOVE_CONTEXT,
+	get_lint_prompt_template,
+	prepare_lint_prompt,
+	prepare_prompt,
+)
 from .schemas import COMMIT_MESSAGE_SCHEMA
 from .utils import (
 	JSONFormattingError,
@@ -516,7 +522,13 @@ class CommitMessageGenerator:
 
 		"""
 		# Directly use the generate_text method from the LLMClient
-		return self.client.generate_text(prompt=prompt, json_schema=COMMIT_MESSAGE_SCHEMA)
+		return self.client.completion(
+			messages=[
+				{"role": "system", "content": COMMIT_SYSTEM_PROMPT},
+				{"role": "user", "content": prompt},
+			],
+			json_schema=COMMIT_MESSAGE_SCHEMA,
+		)
 
 	def generate_message_with_linting(
 		self, chunk: DiffChunk, retry_count: int = 1, max_retries: int = 3
