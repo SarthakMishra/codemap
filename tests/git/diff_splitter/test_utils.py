@@ -1,6 +1,7 @@
 """Tests for diff splitting utility functions."""
 
 import re
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -349,8 +350,14 @@ class TestFileSystemUtils:
 	@patch("codemap.git.diff_splitter.utils.run_git_command")  # For ls-files
 	@patch("codemap.git.diff_splitter.utils.get_deleted_tracked_files")
 	@patch("codemap.git.diff_splitter.utils.is_test_environment", return_value=False)
+	@patch("codemap.git.diff_splitter.utils.get_absolute_path")  # Mock get_absolute_path
 	def test_filter_valid_files_normal_env(
-		self, _mock_is_test: MagicMock, mock_get_deleted: MagicMock, mock_run_git: MagicMock, mock_exists: MagicMock
+		self,
+		mock_get_absolute_path: MagicMock,
+		_mock_is_test: MagicMock,
+		mock_get_deleted: MagicMock,
+		mock_run_git: MagicMock,
+		mock_exists: MagicMock,
 	) -> None:
 		"""Test filtering files in a normal (non-test) environment."""
 		files_to_check = [
@@ -365,9 +372,15 @@ class TestFileSystemUtils:
 		deleted_unstaged = {"deleted_unstaged.info"}
 		deleted_staged = {"deleted_staged.log"}
 		tracked_files_ls = "existing.py\ndeleted_staged.log\ndeleted_unstaged.info\nalso_exists.js\nother_tracked.md\n"
+		repo_root = Path("/mock/repo")  # Mock repository root path
 
 		mock_get_deleted.return_value = (deleted_unstaged, deleted_staged)
 		mock_run_git.return_value = tracked_files_ls  # Mock for 'git ls-files'
+
+		# Mock get_absolute_path to return the input file path
+		# This simulates the behavior without having to deal with Path resolution
+		mock_get_absolute_path.side_effect = lambda file, _root: file
+
 		# Configure os.path.exists mock - only called if not deleted and not tracked
 		# In this setup, only 'non_existent.txt' and 'untracked.md' would trigger os.path.exists
 		mock_exists.side_effect = lambda f: f in [
@@ -376,7 +389,7 @@ class TestFileSystemUtils:
 			"untracked.md",
 		]  # Assume untracked exists
 
-		valid_files, invalid_files = utils.filter_valid_files(files_to_check)
+		valid_files, invalid_files = utils.filter_valid_files(files_to_check, repo_root)
 
 		# According to the implementation, untracked files are only valid if they exist
 		# and the implementation includes Path(file).exists() checks for all files
@@ -389,21 +402,18 @@ class TestFileSystemUtils:
 		# invalid_files list is actually for LARGE files, not non-existent ones.
 		assert invalid_files == []
 		mock_get_deleted.assert_called_once()
-		mock_run_git.assert_called_once_with(["git", "ls-files"])  # Check ls-files call
+		mock_run_git.assert_called_once_with(["git", "ls-files"], cwd=repo_root)  # Verify cwd parameter
 
-		# In the implementation, Path(file).exists() is used instead of os.path.exists(),
-		# so our mock doesn't capture the calls
-		# The code is checking for both existence and large file sizes, so the real behavior
-		# is more complex than our test can easily mock
-
-	@patch("codemap.git.diff_splitter.utils.Path.exists")  # Mock Path.exists for large file check
+	@patch("codemap.git.diff_splitter.utils.Path.exists")  # Mock Path.exists for existence check
 	@patch("codemap.git.diff_splitter.utils.is_test_environment", return_value=True)
 	def test_filter_valid_files_test_env(self, _mock_is_test: MagicMock, mock_path_exists: MagicMock) -> None:
 		"""Test filtering files in a test environment (skips git/fs checks, but not pattern/size)."""
-		mock_path_exists.return_value = False  # Assume files don't exist for size check simplicity
+		mock_path_exists.return_value = False  # Assume files don't exist for simplicity
 		files_to_check = ["existing.py", "non_existent.txt", "deleted.log", "invalid*.py"]
+		repo_root = Path("/mock/repo")  # Mock repository root path
+
 		# In test env, git/fs existence checks are skipped, but pattern checks still run.
-		valid_files, large_files = utils.filter_valid_files(files_to_check, is_test_environment=True)
+		valid_files, large_files = utils.filter_valid_files(files_to_check, repo_root, is_test_environment=True)
 
 		assert valid_files == ["existing.py", "non_existent.txt", "deleted.log"]
 		assert large_files == []  # No large files simulated

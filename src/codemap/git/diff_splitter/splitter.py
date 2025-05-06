@@ -286,7 +286,9 @@ class DiffSplitter:
 		# Process files in the diff
 		if diff.files:
 			# Filter for valid files (existence, tracked status), max_size check removed here
-			diff.files, _ = filter_valid_files(diff.files, is_test_environment())
+			logger.debug(f"DiffSplitter.split_diff: Files before filter_valid_files: {diff.files}")
+			diff.files, _ = filter_valid_files(diff.files, self.repo_root, is_test_environment())
+			logger.debug(f"DiffSplitter.split_diff: Files after filter_valid_files: {diff.files}")
 			# filtered_large_files list is no longer populated or used here
 
 		if not diff.files:
