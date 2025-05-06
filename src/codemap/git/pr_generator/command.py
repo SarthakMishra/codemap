@@ -398,7 +398,3 @@ class PRWorkflowCommand:
 			logger.exception("Unexpected error during PR update workflow")
 			msg = f"Unexpected error updating PR: {e}"
 			raise PRCreationError(msg) from e
-
-			logger.exception("Unexpected error during PR update workflow")
-			msg = f"Unexpected error updating PR: {e}"
-			raise PRCreationError(msg) from e
