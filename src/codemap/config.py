@@ -8,9 +8,11 @@ DEFAULT_CONFIG = {
 	"llm": {
 		"model": "openai/gpt-4o-mini",
 		"api_base": None,
-		"max_context_tokens": 4000,  # Maximum tokens for context in prompts
-		"use_lod_context": True,  # Whether to use LOD context processing
-		"use_batch_processing": True,  # Whether to use batch processing for multiple LLM calls
+		"api_key_env": "OPENAI_API_KEY",
+		"temperature": 0.7,
+		"max_tokens": 1024,
+		"max_context_tokens": 4000,  # Max tokens for context window
+		"use_lod_context": True,  # Whether to use Level of Detail context processing
 	},
 	# Embedding configuration
 	"embedding": {
