@@ -11,6 +11,15 @@ from codemap.utils.config_loader import ConfigLoader
 logger = logging.getLogger(__name__)
 
 
+class JSONFormattingError(ValueError):
+	"""Custom exception for errors during JSON commit message formatting."""
+
+	def __init__(self, message: str, original_content: str) -> None:
+		"""Initialize the JSONFormattingError with a message and original content."""
+		super().__init__(message)
+		self.original_content = original_content
+
+
 def clean_message_for_linting(message: str) -> str:
 	"""
 	Clean a commit message for linting.
@@ -82,12 +91,17 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 	Returns:
 	        Formatted commit message string
 
+	Raises:
+	        JSONFormattingError: If JSON parsing or validation fails.
+
 	"""
+	original_content = content  # Store original content for error reporting
 
 	def _raise_validation_error(message: str) -> None:
-		"""Helper to raise ValueError with consistent message."""
+		"""Helper to raise JSONFormattingError with consistent message."""
 		logger.warning("LLM response validation failed: %s", message)
-		raise ValueError(message)
+		# Raise the custom exception with the original content
+		raise JSONFormattingError(message, original_content)
 
 	try:
 		# Handle both direct JSON objects and strings containing JSON
@@ -96,20 +110,34 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 			json_match = re.search(r"({.*})", content, re.DOTALL)
 			if json_match:
 				content = json_match.group(1)
+			else:
+				# If no JSON object found within the string, raise error
+				_raise_validation_error("Could not find JSON object in the response")
 
 		message_data = json.loads(content)
 		logger.debug("Parsed JSON: %s", message_data)
 
-		# Check for simplified {"commit_message": "..."} format
-		if "commit_message" in message_data and isinstance(message_data["commit_message"], str):
-			return message_data["commit_message"].strip()
+		# Check for simplified {"commit_message": "..."} format FIRST
+		if isinstance(message_data, dict) and "commit_message" in message_data:
+			commit_message_value = message_data["commit_message"]
+			# Handle if commit_message itself is the nested structure
+			if isinstance(commit_message_value, dict):
+				logger.debug("Found nested structure within 'commit_message'. Processing nested dict.")
+				message_data = commit_message_value  # Use the nested dict for further processing
+			# Handle if commit_message is a string (original simplified format)
+			elif isinstance(commit_message_value, str):
+				logger.debug("Found simplified string format within 'commit_message'. Returning directly.")
+				return commit_message_value.strip()
+			# Handle if commit_message is neither dict nor string
+			else:
+				_raise_validation_error(f"Unexpected type for 'commit_message': {type(commit_message_value).__name__}")
 
-		# Basic Schema Validation
+		# Basic Schema Validation (now applied to potentially nested structure)
 		if not isinstance(message_data, dict):
 			_raise_validation_error("JSON response is not an object")
 
 		if not message_data.get("type") or not message_data.get("description"):
-			_raise_validation_error("Missing required fields in JSON response")
+			_raise_validation_error("Missing required fields ('type', 'description') in JSON response")
 
 		# Extract components with validation/defaults
 		commit_type = str(message_data["type"]).lower().strip()
@@ -196,7 +224,16 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 		logger.debug("Formatted commit message: %s", message)
 		return message
 
-	except (json.JSONDecodeError, ValueError, TypeError, AttributeError) as e:
-		# If parsing or validation fails, return the content as-is, but cleaned
-		logger.warning("Error formatting JSON to commit message: %s. Using raw content.", str(e))
-		return content.strip()
+	except (json.JSONDecodeError, TypeError, AttributeError) as e:
+		# Catch parsing/attribute errors and raise the custom exception
+		error_msg = f"Error processing commit message JSON: {e}"
+		logger.warning(error_msg)
+		raise JSONFormattingError(error_msg, original_content) from e
+	except JSONFormattingError:
+		# Re-raise the validation errors triggered by _raise_validation_error
+		raise
+	except Exception as e:
+		# Catch any other unexpected errors during formatting
+		error_msg = f"Unexpected error formatting commit message JSON: {e}"
+		logger.exception(error_msg)  # Log unexpected errors with stack trace
+		raise JSONFormattingError(error_msg, original_content) from e

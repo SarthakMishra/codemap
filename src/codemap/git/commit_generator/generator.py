@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 # Import collections.abc for type annotation
-import json
 import logging
 import os
 from pathlib import Path
@@ -16,7 +15,12 @@ from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
 from .schemas import COMMIT_MESSAGE_SCHEMA
-from .utils import clean_message_for_linting, format_commit_json, lint_commit_message
+from .utils import (
+	JSONFormattingError,
+	clean_message_for_linting,
+	format_commit_json,
+	lint_commit_message,
+)
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -380,7 +384,7 @@ class CommitMessageGenerator:
 
 	def generate_message_with_linting(
 		self, chunk: DiffChunk, retry_count: int = 1, max_retries: int = 3
-	) -> tuple[str, bool, bool, list[str]]:
+	) -> tuple[str, bool, bool, bool, list[str]]:
 		"""
 		Generate a commit message with linting verification.
 
@@ -390,111 +394,72 @@ class CommitMessageGenerator:
 		        max_retries: Maximum number of retries for linting (default: 3)
 
 		Returns:
-		        Tuple of (message, used_llm, passed_linting, lint_messages)
+		        Tuple of (message, used_llm, passed_validation, is_json_error, error_messages)
+		        - message: Generated message, or original raw content if JSON validation failed.
+		        - used_llm: Whether LLM was used.
+		        - passed_validation: True if both JSON formatting and linting passed.
+		        - is_json_error: True if JSON formatting failed.
+		        - error_messages: List of lint or JSON error messages.
 
 		"""
 		# First, generate the initial message
 		initial_lint_messages: list[str] = []  # Store initial messages
+		message = ""  # Initialize message
+		used_llm = False  # Initialize used_llm
+
 		try:
-			message, used_llm = self.generate_message(chunk)
-			logger.debug("Generated initial message: %s", message)
+			# --- Initial Generation ---
+			raw_llm_message, used_llm = self.generate_message(chunk)
+			logger.debug("Generated initial raw message: %s", raw_llm_message)
 
-			# Clean the message before linting
+			# --- Format JSON ---
+			# This is where JSONFormattingError can occur
+			message = format_commit_json(raw_llm_message, self._config_loader)
+			logger.debug("Formatted initial message: %s", message)
+
+			# --- Clean and Lint ---
 			message = clean_message_for_linting(message)
+			logger.debug("Cleaned initial message: %s", message)
 
-			# Check if the message passes linting
 			is_valid, error_message = lint_commit_message(
 				message, repo_root=self.repo_root, config_loader=self._config_loader
 			)
 			initial_lint_messages = [error_message] if error_message is not None else []
-			logger.debug("Lint result: valid=%s, messages=%s", is_valid, initial_lint_messages)
+			logger.debug("Initial lint result: valid=%s, messages=%s", is_valid, initial_lint_messages)
 
 			if is_valid or retry_count >= max_retries:
 				# Return empty list if valid, or initial messages if max retries reached
-				return message, used_llm, is_valid, [] if is_valid else initial_lint_messages
+				# passed_validation is True only if is_valid is True
+				# is_json_error is False here
+				return message, used_llm, is_valid, False, [] if is_valid else initial_lint_messages
 
-			# Prepare the diff content
-			diff_content = chunk.content
-			if not diff_content:
-				# Check if we have binary files in the chunk
-				binary_files = []
-				for file_path in chunk.files:
-					# First check file extension
-					extension = ""
-					file_info = self.extract_file_info(chunk)
-					if file_path in file_info:
-						extension = file_info[file_path].get("extension", "").lower()
-						binary_extensions = {
-							"png",
-							"jpg",
-							"jpeg",
-							"gif",
-							"bmp",
-							"ico",
-							"webp",
-							"mp3",
-							"wav",
-							"mp4",
-							"avi",
-							"mov",
-							"pdf",
-							"zip",
-							"tar",
-							"gz",
-							"exe",
-							"dll",
-							"so",
-						}
-						if extension in binary_extensions:
-							binary_files.append(file_path)
-
-					# Also try to detect binary files directly
-					abs_path = self.repo_root / file_path
-					try:
-						if abs_path.exists():
-							from codemap.utils.file_utils import is_binary_file
-
-							if is_binary_file(abs_path) and file_path not in binary_files:
-								binary_files.append(file_path)
-					except (OSError, PermissionError) as e:
-						# If any error occurs during binary check, log it and continue
-						logger.debug("Error checking if %s is binary: %s", file_path, str(e))
-
-				if binary_files:
-					# Create a more descriptive message for binary files
-					diff_content = "Binary files detected in this chunk:\n"
-					for binary_file in binary_files:
-						diff_content += f"- {binary_file}\n"
-				else:
-					# Generic fallback for empty diff with no binary files detected
-					diff_content = "Empty diff (likely modified binary files)"
-
-			logger.info("Regenerating message with linting feedback (attempt %d/%d)", retry_count, max_retries)
+			# --- Regeneration on Lint Failure ---
+			logger.info("Regenerating message due to lint failure (attempt %d/%d)", retry_count, max_retries)
 
 			try:
 				# Prepare the enhanced prompt for regeneration
 				lint_template = get_lint_prompt_template()
 				enhanced_prompt = prepare_lint_prompt(
 					template=lint_template,
-					file_info=self.extract_file_info(chunk),  # Use self
-					convention=self.get_commit_convention(),  # Use self
+					file_info=self.extract_file_info(chunk),
+					convention=self.get_commit_convention(),
 					lint_messages=initial_lint_messages,  # Use initial messages for feedback
-					original_message=message,  # Pass the original message that failed linting
+					original_message=message,  # Pass the original formatted message that failed linting
 				)
 
 				# Generate message with the enhanced prompt
-				regenerated_message = self._call_llm_api(enhanced_prompt)
-				logger.debug("Regenerated message (RAW LLM output): %s", regenerated_message)
+				regenerated_raw_message = self._call_llm_api(enhanced_prompt)
+				logger.debug("Regenerated message (RAW LLM output): %s", regenerated_raw_message)
 
-				# Format from JSON to commit message format
-				regenerated_message = format_commit_json(regenerated_message, self._config_loader)
-				logger.debug("Formatted message: %s", regenerated_message)
+				# --- Format JSON (Regeneration) ---
+				# This can also raise JSONFormattingError
+				regenerated_message = format_commit_json(regenerated_raw_message, self._config_loader)
+				logger.debug("Formatted regenerated message: %s", regenerated_message)
 
-				# Clean and recheck linting
+				# --- Clean and Lint (Regeneration) ---
 				cleaned_message = clean_message_for_linting(regenerated_message)
-				logger.debug("Cleaned message for linting: %s", cleaned_message)
+				logger.debug("Cleaned regenerated message: %s", cleaned_message)
 
-				# Check if the message passes linting
 				final_is_valid, error_message = lint_commit_message(
 					cleaned_message, repo_root=self.repo_root, config_loader=self._config_loader
 				)
@@ -502,16 +467,32 @@ class CommitMessageGenerator:
 				logger.debug("Regenerated lint result: valid=%s, messages=%s", final_is_valid, final_lint_messages)
 
 				# Return final result and messages (empty if valid)
-				return cleaned_message, True, final_is_valid, [] if final_is_valid else final_lint_messages
-			except (ValueError, TypeError, KeyError, LLMError, json.JSONDecodeError):
-				# If regeneration fails, log it and return the original message and its lint errors
-				logger.exception("Error during message regeneration")
-				return message, used_llm, False, initial_lint_messages  # Return original message and errors
-		except (ValueError, TypeError, KeyError, LLMError, json.JSONDecodeError):
-			# If generation fails completely, use a fallback (fallback doesn't lint, so return True, empty messages)
-			logger.exception("Error during message generation")
-			message = self.fallback_generation(chunk)
-			return message, False, True, []  # Fallback assumes valid, no lint messages
+				# passed_validation is True only if final_is_valid is True
+				# is_json_error is False here
+				return cleaned_message, True, final_is_valid, False, [] if final_is_valid else final_lint_messages
+
+			except JSONFormattingError as json_err:
+				# Catch JSON error during REGENERATION
+				logger.warning("JSON formatting failed during regeneration: %s", str(json_err))
+				# Return the RAW content from regeneration attempt, marked as JSON error
+				return json_err.original_content, True, False, True, [str(json_err)]
+			except (ValueError, TypeError, KeyError, LLMError):
+				# If regeneration itself fails (LLM call, prompt prep), log it
+				# Return the ORIGINAL message and its lint errors
+				logger.exception("Error during message regeneration attempt")
+				return message, used_llm, False, False, initial_lint_messages
+
+		except JSONFormattingError as json_err:
+			# Catch JSON error during INITIAL formatting
+			logger.warning("Initial JSON formatting failed: %s", str(json_err))
+			# Return the ORIGINAL RAW LLM content, marked as JSON error
+			return json_err.original_content, used_llm, False, True, [str(json_err)]
+		except (ValueError, TypeError, KeyError, LLMError):
+			# If initial generation or formatting (non-JSON error) fails completely
+			logger.exception("Error during initial message generation/formatting")
+			# Use a fallback (fallback doesn't lint, so passed_validation=True, is_json_error=False, empty messages)
+			fallback_message = self.fallback_generation(chunk)
+			return fallback_message, False, True, False, []
 
 	def get_config_loader(self) -> ConfigLoader:
 		"""
