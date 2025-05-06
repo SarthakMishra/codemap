@@ -126,7 +126,7 @@ def test_generate_text_no_api_key():
 	client = LLMClient(config=config)
 
 	with pytest.raises(LLMError, match="No API key available for openai provider"):
-		client.generate_text("Test prompt")
+		client.completion(messages=[{"role": "user", "content": "Test prompt"}])
 
 
 @pytest.mark.unit
@@ -148,15 +148,6 @@ def test_generate_from_template(llm_client):
 
 		# Verify result
 		assert result == "Generated from template"
-
-
-@pytest.mark.unit
-def test_generate_from_template_missing():
-	"""Test generating text from a non-existent template raises error."""
-	client = LLMClient()
-
-	with pytest.raises(ValueError, match="Template 'missing' not found"):
-		client.generate_from_template("missing", {"some": "vars"})
 
 
 @pytest.mark.unit

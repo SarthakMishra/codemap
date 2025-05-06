@@ -13,7 +13,6 @@ from codemap.llm.errors import LLMError
 from codemap.llm.utils import (
 	create_client,
 	extract_content_from_response,
-	generate_text,
 	get_llm_client,
 	load_prompt_template,
 )
@@ -94,42 +93,6 @@ def test_extract_content_from_response_pass_through():
 
 		# Verify API function was called with response
 		assert result == "Test content"
-
-
-@pytest.mark.unit
-def test_generate_text_success():
-	"""Test successful text generation."""
-	with patch("codemap.llm.utils.create_client") as mock_create_client:
-		mock_client = Mock(spec=LLMClient)
-		mock_client.generate_text.return_value = "Generated text"
-		mock_create_client.return_value = mock_client
-
-		result = generate_text(prompt="Test prompt", model="openai/gpt-4", api_key="test-key", temperature=0.7)
-
-		# Verify client was created with correct parameters
-		mock_create_client.assert_called_once_with(
-			model="openai/gpt-4", api_key="test-key", api_base=None, config_loader=None
-		)
-
-		# Verify generate_text was called with correct parameters
-		mock_client.generate_text.assert_called_once()
-		call_args = mock_client.generate_text.call_args
-		assert call_args[1]["prompt"] == "Test prompt"
-		assert call_args[1]["temperature"] == 0.7
-
-		assert result == "Generated text"
-
-
-@pytest.mark.unit
-def test_generate_text_error():
-	"""Test error handling during text generation."""
-	with patch("codemap.llm.utils.create_client") as mock_create_client:
-		mock_client = Mock(spec=LLMClient)
-		mock_client.generate_text.side_effect = LLMError("Generation error")
-		mock_create_client.return_value = mock_client
-
-		with pytest.raises(RuntimeError, match="Failed to generate text with LLM: Generation error"):
-			generate_text(prompt="Test prompt")
 
 
 @pytest.mark.unit

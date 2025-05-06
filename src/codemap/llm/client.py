@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from codemap.utils.config_loader import ConfigLoader
 
-from .api import call_llm_api
+from .api import MessageDict, call_llm_api
 from .config import LLMConfig
 from .errors import LLMError
 
@@ -86,9 +86,9 @@ class LLMClient:
 			return llm_config.get("model", "openai/gpt-4o-mini")
 		return "openai/gpt-4o-mini"  # Hardcoded fallback
 
-	def generate_text(
+	def completion(
 		self,
-		prompt: str,
+		messages: list[MessageDict],
 		model: str | None = None,
 		json_schema: dict | None = None,
 		**kwargs: dict[str, str | int | float | bool | None],
@@ -97,7 +97,7 @@ class LLMClient:
 		Generate text using the configured LLM.
 
 		Args:
-		    prompt: Prompt to send to the LLM
+		    messages: List of messages to send to the LLM
 		    model: Optional model override
 		    json_schema: Optional JSON schema for response validation
 		    **kwargs: Additional parameters to pass to the LLM API
@@ -119,49 +119,11 @@ class LLMClient:
 
 		# Call the API
 		return call_llm_api(
-			prompt=prompt,
+			messages=messages,
 			model=model_to_use,
 			api_key=api_key,
 			api_base=self.config.api_base,
 			json_schema=json_schema,
 			config_loader=self.config_loader,
-			**kwargs,
-		)
-
-	def generate_from_template(
-		self,
-		template_name: str,
-		template_vars: dict[str, Any],
-		model: str | None = None,
-		json_schema: dict | None = None,
-		**kwargs: dict[str, str | int | float | bool | None],
-	) -> str:
-		"""
-		Generate text using a named template.
-
-		Args:
-		    template_name: Name of the template to use
-		    template_vars: Variables to format the template with
-		    model: Optional model override
-		    json_schema: Optional JSON schema for response validation
-		    **kwargs: Additional parameters to pass to the LLM API
-
-		Returns:
-		    Generated text
-
-		Raises:
-		    LLMError: If the API call fails
-		    ValueError: If the template doesn't exist
-
-		"""
-		# Get and format the template
-		template = self.get_template(template_name)
-		prompt = template.format(**template_vars)
-
-		# Generate text
-		return self.generate_text(
-			prompt=prompt,
-			model=model,
-			json_schema=json_schema,
 			**kwargs,
 		)

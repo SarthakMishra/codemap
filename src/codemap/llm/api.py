@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 from codemap.utils.config_loader import ConfigLoader
 
@@ -16,10 +16,17 @@ logger = logging.getLogger(__name__)
 ResponseType = dict[str, Any] | Any
 
 
+class MessageDict(TypedDict):
+	"""Typed dictionary for LLM message structure."""
+
+	role: Literal["user", "system"]
+	content: str
+
+
 def call_llm_api(
-	prompt: str,
 	model: str,
 	api_key: str,
+	messages: list[MessageDict],
 	api_base: str | None = None,
 	json_schema: dict | None = None,
 	config_loader: ConfigLoader | None = None,
@@ -29,9 +36,9 @@ def call_llm_api(
 	Call an LLM API using litellm.
 
 	Args:
-	    prompt: The prompt to send to the LLM
 	    model: The model identifier (including provider prefix)
 	    api_key: The API key to use
+	    messages: The list of messages to send to the LLM
 	    api_base: Optional custom API base URL
 	    json_schema: Optional JSON schema for response validation
 	    config_loader: Optional ConfigLoader instance for additional configuration
@@ -65,13 +72,28 @@ def call_llm_api(
 	# Override with any passed parameters
 	request_params.update(kwargs)
 
-	message = [{"role": "user", "content": prompt}]
+	# If no system message is provided, add a default one
+	if not any(msg["role"] == "system" for msg in messages):
+		system_message = (
+			"You are an AI programming assistant. Follow the user's requirements carefully and to the letter."
+		)
+
+		if json_schema:
+			system_message += " Your response must be a valid JSON object matching the provided schema."
+
+		messages.insert(
+			0,
+			{
+				"role": "system",
+				"content": system_message,
+			},
+		)
 
 	# Set up final request parameters
 	request_params.update(
 		{
 			"model": model,
-			"messages": message,
+			"messages": messages,
 			"api_key": api_key,
 		}
 	)

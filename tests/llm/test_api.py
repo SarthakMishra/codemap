@@ -28,7 +28,7 @@ def mock_config_loader():
 def test_call_llm_api_litellm_not_installed():
 	"""Test handling of missing litellm dependency."""
 	with patch.dict(sys.modules, {"litellm": None}), pytest.raises(LLMError, match="LiteLLM library not installed"):
-		call_llm_api(prompt="Test prompt", model="openai/gpt-4", api_key="test-key")
+		call_llm_api(messages=[{"role": "user", "content": "Test prompt"}], model="openai/gpt-4", api_key="test-key")
 
 
 @pytest.mark.unit
@@ -39,7 +39,9 @@ def test_call_llm_api_success():
 	with patch("litellm.completion") as mock_completion:
 		mock_completion.return_value = mock_response
 
-		result = call_llm_api(prompt="Test prompt", model="openai/gpt-4", api_key="test-key")
+		result = call_llm_api(
+			messages=[{"role": "user", "content": "Test prompt"}], model="openai/gpt-4", api_key="test-key"
+		)
 
 		# Verify API was called correctly
 		mock_completion.assert_called_once()
@@ -66,7 +68,12 @@ def test_call_llm_api_with_config():
 	with patch("litellm.completion") as mock_completion:
 		mock_completion.return_value = mock_response
 
-		result = call_llm_api(prompt="Test prompt", model="openai/gpt-4", api_key="test-key", config_loader=mock_loader)
+		result = call_llm_api(
+			messages=[{"role": "user", "content": "Test prompt"}],
+			model="openai/gpt-4",
+			api_key="test-key",
+			config_loader=mock_loader,
+		)
 
 		# Verify config was used
 		call_args = mock_completion.call_args[1]
@@ -88,7 +95,10 @@ def test_call_llm_api_with_api_base():
 		mock_completion.return_value = mock_response
 
 		result = call_llm_api(
-			prompt="Test prompt", model="openai/gpt-4", api_key="test-key", api_base="https://custom-api.example.com"
+			messages=[{"role": "user", "content": "Test prompt"}],
+			model="openai/gpt-4",
+			api_key="test-key",
+			api_base="https://custom-api.example.com",
 		)
 
 		# Verify custom API base was used
@@ -114,7 +124,12 @@ def test_call_llm_api_with_json_schema():
 	):
 		mock_completion.return_value = mock_response
 
-		result = call_llm_api(prompt="Test prompt", model="openai/gpt-4", api_key="test-key", json_schema=schema)
+		result = call_llm_api(
+			messages=[{"role": "user", "content": "Test prompt"}],
+			model="openai/gpt-4",
+			api_key="test-key",
+			json_schema=schema,
+		)
 
 		# Verify JSON schema was used
 		call_args = mock_completion.call_args[1]
@@ -132,7 +147,11 @@ def test_call_llm_api_error():
 		patch("litellm.completion", side_effect=Exception("API error")),
 		pytest.raises(LLMError, match="LLM API call failed: API error"),
 	):
-		call_llm_api(prompt="Test prompt", model="openai/gpt-4", api_key="test-key")
+		call_llm_api(
+			messages=[{"role": "user", "content": "Test prompt"}],
+			model="openai/gpt-4",
+			api_key="test-key",
+		)
 
 
 @pytest.mark.unit
@@ -145,7 +164,11 @@ def test_call_llm_api_empty_response():
 		mock_completion.return_value = mock_response
 
 		with pytest.raises(LLMError, match="Failed to extract content from LLM response"):
-			call_llm_api(prompt="Test prompt", model="openai/gpt-4", api_key="test-key")
+			call_llm_api(
+				messages=[{"role": "user", "content": "Test prompt"}],
+				model="openai/gpt-4",
+				api_key="test-key",
+			)
 
 
 @pytest.mark.unit

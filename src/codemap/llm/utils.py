@@ -82,43 +82,6 @@ def extract_content_from_response(response: LLMResponseType) -> str:
 	return _extract_content(response)
 
 
-def generate_text(
-	prompt: str,
-	model: str | None = None,
-	api_key: str | None = None,
-	api_base: str | None = None,
-	config_loader: ConfigLoader | None = None,
-	**kwargs: str | float | bool | None,
-) -> str:
-	"""
-	Generate text using an LLM with minimal configuration.
-
-	Args:
-	    prompt: The prompt to send to the LLM
-	    model: The model to use
-	    api_key: The API key (if None, tries to find in environment)
-	    api_base: Optional API base URL
-	    config_loader: Optional ConfigLoader instance to use
-	    **kwargs: Additional parameters to pass to the LLM API
-
-	Returns:
-	    The generated text
-
-	Raises:
-	    RuntimeError: If the LLM call fails
-
-	"""
-	try:
-		# Create client and generate text directly
-		client = create_client(model=model, api_key=api_key, api_base=api_base, config_loader=config_loader)
-		return client.generate_text(prompt=prompt, **kwargs)  # type: ignore[arg-type]
-
-	except LLMError as e:
-		logger.exception("LLM error")
-		msg = f"Failed to generate text with LLM: {e}"
-		raise RuntimeError(msg) from e
-
-
 def create_client(
 	repo_path: Path | None = None,
 	model: str | None = None,
