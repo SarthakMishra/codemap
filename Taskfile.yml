@@ -5,6 +5,8 @@ vars:
   TESTS_DIR: tests
   SCRIPT_DIR: scripts
   COV_MODULE: src/codemap
+  VERSION:
+    sh: python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('src/codemap/__init__.py').read()).group(1))"
 
 tasks:
   default:
@@ -136,15 +138,33 @@ tasks:
     cmds:
       - uv run python {{.SCRIPT_DIR}}/update_api_docs.py
 
-  docs:serve:
-    desc: Serve documentation
+  docs:mkdocs:
+    desc: Serve documentation from the current version
     cmds:
       - uv run mkdocs serve
 
-  docs:push:
-    desc: Push docs to gh pages
+  docs:mike:
+    desc: Serve documentation from the latest version
     cmds:
-      - uv run mkdocs gh-deploy --force
+      - uv run mike serve
+
+  docs:push:
+    desc: Push docs to latest version
+    cmds:
+      - task: docs:update
+      - uv run mike deploy {{.VERSION}} latest --update-aliases --push
+    preconditions:
+      - sh: '! echo "{{.VERSION}}" | grep -q "rc"'
+        msg: "Cannot publish to latest with a pre-release version (contains 'rc'). Use docs:push:pre instead."
+
+  docs:push:pre:
+    desc: Push docs to pre-release version
+    cmds:
+      - task: docs:update
+      - DOCS_PRERELEASE=true uv run mike deploy {{.VERSION}} pre-release --update-aliases --push
+    preconditions:
+      - sh: 'echo "{{.VERSION}}" | grep -q "rc"'
+        msg: "Cannot publish to pre-release with a stable version (missing 'rc'). Use docs:push instead."
 
   ci:
     desc: Run all checks and tests

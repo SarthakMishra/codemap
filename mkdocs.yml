@@ -19,6 +19,9 @@ extra:
     link: https://www.linkedin.com/in/itssarthakmishra/
   - icon: fontawesome/brands/x-twitter
     link: https://x.com/MishraMishry
+  version:
+    provider: mike
+  pre_release: !ENV [DOCS_PRERELEASE, false]
 nav:
 - Home:
   - Overview: index.md
@@ -35,234 +38,122 @@ nav:
     - Contributing Guidelines: contributing/guidelines.md
     - Code of Conduct: contributing/code-of-conduct.md
   - Acknowledgements: acknowledgements.md
-  - API Reference:
-    - Overview: api/index.md
-    - Stable:
-      - Overview: api/stable/index.md
-      - Cli:
-        - Cli Overview: api/stable/cli/index.md
-        - Ask Cmd: api/stable/cli/ask_cmd.md
-        - Commit Cmd: api/stable/cli/commit_cmd.md
-        - Gen Cmd: api/stable/cli/gen_cmd.md
-        - Index Cmd: api/stable/cli/index_cmd.md
-        - Pr Cmd: api/stable/cli/pr_cmd.md
-      - Config: api/stable/config.md
-      - Db:
-        - Db Overview: api/stable/db/index.md
-        - Client: api/stable/db/client.md
-        - Engine: api/stable/db/engine.md
-        - Models: api/stable/db/models.md
-      - Gen:
-        - Gen Overview: api/stable/gen/index.md
-        - Command: api/stable/gen/command.md
-        - Generator: api/stable/gen/generator.md
-        - Models: api/stable/gen/models.md
-        - Utils: api/stable/gen/utils.md
-      - Git:
-        - Git Overview: api/stable/git/index.md
-        - Commit Generator:
-          - Commit Generator Overview: api/stable/git/commit_generator/index.md
-          - Command: api/stable/git/commit_generator/command.md
-          - Generator: api/stable/git/commit_generator/generator.md
-          - Prompts: api/stable/git/commit_generator/prompts.md
-          - Schemas: api/stable/git/commit_generator/schemas.md
-          - Utils: api/stable/git/commit_generator/utils.md
-        - Commit Linter:
-          - Commit Linter Overview: api/stable/git/commit_linter/index.md
-          - Config: api/stable/git/commit_linter/config.md
-          - Constants: api/stable/git/commit_linter/constants.md
-          - Linter: api/stable/git/commit_linter/linter.md
-          - Parser: api/stable/git/commit_linter/parser.md
-          - Validators: api/stable/git/commit_linter/validators.md
-        - Diff Splitter:
-          - Diff Splitter Overview: api/stable/git/diff_splitter/index.md
-          - Constants: api/stable/git/diff_splitter/constants.md
-          - Schemas: api/stable/git/diff_splitter/schemas.md
-          - Splitter: api/stable/git/diff_splitter/splitter.md
-          - Strategies: api/stable/git/diff_splitter/strategies.md
-          - Utils: api/stable/git/diff_splitter/utils.md
-        - Interactive: api/stable/git/interactive.md
-        - Pr Generator:
-          - Pr Generator Overview: api/stable/git/pr_generator/index.md
-          - Command: api/stable/git/pr_generator/command.md
-          - Constants: api/stable/git/pr_generator/constants.md
-          - Decorators: api/stable/git/pr_generator/decorators.md
-          - Generator: api/stable/git/pr_generator/generator.md
-          - Prompts: api/stable/git/pr_generator/prompts.md
-          - Schemas: api/stable/git/pr_generator/schemas.md
-          - Strategies: api/stable/git/pr_generator/strategies.md
-          - Templates: api/stable/git/pr_generator/templates.md
-          - Utils: api/stable/git/pr_generator/utils.md
-        - Semantic Grouping:
-          - Semantic Grouping Overview: api/stable/git/semantic_grouping/index.md
-          - Batch Processor: api/stable/git/semantic_grouping/batch_processor.md
-          - Clusterer: api/stable/git/semantic_grouping/clusterer.md
-          - Context Processor: api/stable/git/semantic_grouping/context_processor.md
-          - Embedder: api/stable/git/semantic_grouping/embedder.md
-          - Group: api/stable/git/semantic_grouping/group.md
-          - Resolver: api/stable/git/semantic_grouping/resolver.md
-        - Utils: api/stable/git/utils.md
-      - Llm:
-        - Llm Overview: api/stable/llm/index.md
-        - Api: api/stable/llm/api.md
-        - Client: api/stable/llm/client.md
-        - Config: api/stable/llm/config.md
-        - Errors: api/stable/llm/errors.md
-        - Rag:
-          - Rag Overview: api/stable/llm/rag/index.md
-          - Command: api/stable/llm/rag/command.md
-          - Formatter: api/stable/llm/rag/formatter.md
-          - Prompts: api/stable/llm/rag/prompts.md
-        - Utils: api/stable/llm/utils.md
-      - Processor:
-        - Processor Overview: api/stable/processor/index.md
-        - Lod: api/stable/processor/lod.md
-        - Pipeline: api/stable/processor/pipeline.md
-        - Tree Sitter:
-          - Tree Sitter Overview: api/stable/processor/tree_sitter/index.md
-          - Analyzer: api/stable/processor/tree_sitter/analyzer.md
-          - Base: api/stable/processor/tree_sitter/base.md
-          - Languages:
-            - Languages Overview: api/stable/processor/tree_sitter/languages/index.md
-            - Base: api/stable/processor/tree_sitter/languages/base.md
-            - Javascript: api/stable/processor/tree_sitter/languages/javascript.md
-            - Python: api/stable/processor/tree_sitter/languages/python.md
-            - Typescript: api/stable/processor/tree_sitter/languages/typescript.md
-        - Utils:
-          - Utils Overview: api/stable/processor/utils/index.md
-          - Embedding Utils: api/stable/processor/utils/embedding_utils.md
-          - Git Utils: api/stable/processor/utils/git_utils.md
-          - Sync Utils: api/stable/processor/utils/sync_utils.md
-        - Vector:
-          - Vector Overview: api/stable/processor/vector/index.md
-          - Chunking: api/stable/processor/vector/chunking.md
-          - Qdrant Manager: api/stable/processor/vector/qdrant_manager.md
-          - Synchronizer: api/stable/processor/vector/synchronizer.md
-      - Utils:
-        - Utils Overview: api/stable/utils/index.md
-        - Cli Utils: api/stable/utils/cli_utils.md
-        - Config Loader: api/stable/utils/config_loader.md
-        - Docker Utils: api/stable/utils/docker_utils.md
-        - File Utils: api/stable/utils/file_utils.md
-        - Log Setup: api/stable/utils/log_setup.md
-        - Path Utils: api/stable/utils/path_utils.md
-      - Watcher:
-        - Watcher Overview: api/stable/watcher/index.md
-        - File Watcher: api/stable/watcher/file_watcher.md
-    - Pre-release:
-      - Overview: api/pre-release/index.md
-      - Cli:
-        - Cli Overview: api/pre-release/cli/index.md
-        - Ask Cmd: api/pre-release/cli/ask_cmd.md
-        - Commit Cmd: api/pre-release/cli/commit_cmd.md
-        - Gen Cmd: api/pre-release/cli/gen_cmd.md
-        - Index Cmd: api/pre-release/cli/index_cmd.md
-        - Pr Cmd: api/pre-release/cli/pr_cmd.md
-      - Config: api/pre-release/config.md
-      - Db:
-        - Db Overview: api/pre-release/db/index.md
-        - Client: api/pre-release/db/client.md
-        - Engine: api/pre-release/db/engine.md
-        - Models: api/pre-release/db/models.md
-      - Gen:
-        - Gen Overview: api/pre-release/gen/index.md
-        - Command: api/pre-release/gen/command.md
-        - Generator: api/pre-release/gen/generator.md
-        - Models: api/pre-release/gen/models.md
-        - Utils: api/pre-release/gen/utils.md
-      - Git:
-        - Git Overview: api/pre-release/git/index.md
-        - Commit Generator:
-          - Commit Generator Overview: api/pre-release/git/commit_generator/index.md
-          - Command: api/pre-release/git/commit_generator/command.md
-          - Generator: api/pre-release/git/commit_generator/generator.md
-          - Prompts: api/pre-release/git/commit_generator/prompts.md
-          - Schemas: api/pre-release/git/commit_generator/schemas.md
-          - Utils: api/pre-release/git/commit_generator/utils.md
-        - Commit Linter:
-          - Commit Linter Overview: api/pre-release/git/commit_linter/index.md
-          - Config: api/pre-release/git/commit_linter/config.md
-          - Constants: api/pre-release/git/commit_linter/constants.md
-          - Linter: api/pre-release/git/commit_linter/linter.md
-          - Parser: api/pre-release/git/commit_linter/parser.md
-          - Validators: api/pre-release/git/commit_linter/validators.md
-        - Diff Splitter:
-          - Diff Splitter Overview: api/pre-release/git/diff_splitter/index.md
-          - Constants: api/pre-release/git/diff_splitter/constants.md
-          - Schemas: api/pre-release/git/diff_splitter/schemas.md
-          - Splitter: api/pre-release/git/diff_splitter/splitter.md
-          - Strategies: api/pre-release/git/diff_splitter/strategies.md
-          - Utils: api/pre-release/git/diff_splitter/utils.md
-        - Interactive: api/pre-release/git/interactive.md
-        - Pr Generator:
-          - Pr Generator Overview: api/pre-release/git/pr_generator/index.md
-          - Command: api/pre-release/git/pr_generator/command.md
-          - Constants: api/pre-release/git/pr_generator/constants.md
-          - Decorators: api/pre-release/git/pr_generator/decorators.md
-          - Generator: api/pre-release/git/pr_generator/generator.md
-          - Prompts: api/pre-release/git/pr_generator/prompts.md
-          - Schemas: api/pre-release/git/pr_generator/schemas.md
-          - Strategies: api/pre-release/git/pr_generator/strategies.md
-          - Templates: api/pre-release/git/pr_generator/templates.md
-          - Utils: api/pre-release/git/pr_generator/utils.md
-        - Semantic Grouping:
-          - Semantic Grouping Overview: api/pre-release/git/semantic_grouping/index.md
-          - Batch Processor: api/pre-release/git/semantic_grouping/batch_processor.md
-          - Clusterer: api/pre-release/git/semantic_grouping/clusterer.md
-          - Context Processor: api/pre-release/git/semantic_grouping/context_processor.md
-          - Embedder: api/pre-release/git/semantic_grouping/embedder.md
-          - Group: api/pre-release/git/semantic_grouping/group.md
-          - Resolver: api/pre-release/git/semantic_grouping/resolver.md
-        - Utils: api/pre-release/git/utils.md
-      - Llm:
-        - Llm Overview: api/pre-release/llm/index.md
-        - Api: api/pre-release/llm/api.md
-        - Client: api/pre-release/llm/client.md
-        - Config: api/pre-release/llm/config.md
-        - Errors: api/pre-release/llm/errors.md
-        - Rag:
-          - Rag Overview: api/pre-release/llm/rag/index.md
-          - Command: api/pre-release/llm/rag/command.md
-          - Formatter: api/pre-release/llm/rag/formatter.md
-          - Prompts: api/pre-release/llm/rag/prompts.md
-        - Utils: api/pre-release/llm/utils.md
-      - Processor:
-        - Processor Overview: api/pre-release/processor/index.md
-        - Lod: api/pre-release/processor/lod.md
-        - Pipeline: api/pre-release/processor/pipeline.md
-        - Tree Sitter:
-          - Tree Sitter Overview: api/pre-release/processor/tree_sitter/index.md
-          - Analyzer: api/pre-release/processor/tree_sitter/analyzer.md
-          - Base: api/pre-release/processor/tree_sitter/base.md
-          - Languages:
-            - Languages Overview: api/pre-release/processor/tree_sitter/languages/index.md
-            - Base: api/pre-release/processor/tree_sitter/languages/base.md
-            - Javascript: api/pre-release/processor/tree_sitter/languages/javascript.md
-            - Python: api/pre-release/processor/tree_sitter/languages/python.md
-            - Typescript: api/pre-release/processor/tree_sitter/languages/typescript.md
-        - Utils:
-          - Utils Overview: api/pre-release/processor/utils/index.md
-          - Embedding Utils: api/pre-release/processor/utils/embedding_utils.md
-          - Git Utils: api/pre-release/processor/utils/git_utils.md
-          - Sync Utils: api/pre-release/processor/utils/sync_utils.md
-        - Vector:
-          - Vector Overview: api/pre-release/processor/vector/index.md
-          - Chunking: api/pre-release/processor/vector/chunking.md
-          - Qdrant Manager: api/pre-release/processor/vector/qdrant_manager.md
-          - Synchronizer: api/pre-release/processor/vector/synchronizer.md
-      - Utils:
-        - Utils Overview: api/pre-release/utils/index.md
-        - Cli Utils: api/pre-release/utils/cli_utils.md
-        - Config Loader: api/pre-release/utils/config_loader.md
-        - Docker Utils: api/pre-release/utils/docker_utils.md
-        - File Utils: api/pre-release/utils/file_utils.md
-        - Log Setup: api/pre-release/utils/log_setup.md
-        - Path Utils: api/pre-release/utils/path_utils.md
-      - Watcher:
-        - Watcher Overview: api/pre-release/watcher/index.md
-        - File Watcher: api/pre-release/watcher/file_watcher.md
+- API Reference:
+  - Overview: api/index.md
+  - Cli:
+    - Cli Overview: api/cli/index.md
+    - Ask Cmd: api/cli/ask_cmd.md
+    - Commit Cmd: api/cli/commit_cmd.md
+    - Gen Cmd: api/cli/gen_cmd.md
+    - Index Cmd: api/cli/index_cmd.md
+    - Pr Cmd: api/cli/pr_cmd.md
+  - Config: api/config.md
+  - Db:
+    - Db Overview: api/db/index.md
+    - Client: api/db/client.md
+    - Engine: api/db/engine.md
+    - Models: api/db/models.md
+  - Gen:
+    - Gen Overview: api/gen/index.md
+    - Command: api/gen/command.md
+    - Generator: api/gen/generator.md
+    - Models: api/gen/models.md
+    - Utils: api/gen/utils.md
+  - Git:
+    - Git Overview: api/git/index.md
+    - Commit Generator:
+      - Commit Generator Overview: api/git/commit_generator/index.md
+      - Command: api/git/commit_generator/command.md
+      - Generator: api/git/commit_generator/generator.md
+      - Prompts: api/git/commit_generator/prompts.md
+      - Schemas: api/git/commit_generator/schemas.md
+      - Utils: api/git/commit_generator/utils.md
+    - Commit Linter:
+      - Commit Linter Overview: api/git/commit_linter/index.md
+      - Config: api/git/commit_linter/config.md
+      - Constants: api/git/commit_linter/constants.md
+      - Linter: api/git/commit_linter/linter.md
+      - Parser: api/git/commit_linter/parser.md
+      - Validators: api/git/commit_linter/validators.md
+    - Diff Splitter:
+      - Diff Splitter Overview: api/git/diff_splitter/index.md
+      - Constants: api/git/diff_splitter/constants.md
+      - Schemas: api/git/diff_splitter/schemas.md
+      - Splitter: api/git/diff_splitter/splitter.md
+      - Strategies: api/git/diff_splitter/strategies.md
+      - Utils: api/git/diff_splitter/utils.md
+    - Interactive: api/git/interactive.md
+    - Pr Generator:
+      - Pr Generator Overview: api/git/pr_generator/index.md
+      - Command: api/git/pr_generator/command.md
+      - Constants: api/git/pr_generator/constants.md
+      - Decorators: api/git/pr_generator/decorators.md
+      - Generator: api/git/pr_generator/generator.md
+      - Prompts: api/git/pr_generator/prompts.md
+      - Schemas: api/git/pr_generator/schemas.md
+      - Strategies: api/git/pr_generator/strategies.md
+      - Templates: api/git/pr_generator/templates.md
+      - Utils: api/git/pr_generator/utils.md
+    - Semantic Grouping:
+      - Semantic Grouping Overview: api/git/semantic_grouping/index.md
+      - Batch Processor: api/git/semantic_grouping/batch_processor.md
+      - Clusterer: api/git/semantic_grouping/clusterer.md
+      - Context Processor: api/git/semantic_grouping/context_processor.md
+      - Embedder: api/git/semantic_grouping/embedder.md
+      - Group: api/git/semantic_grouping/group.md
+      - Resolver: api/git/semantic_grouping/resolver.md
+    - Utils: api/git/utils.md
+  - Llm:
+    - Llm Overview: api/llm/index.md
+    - Api: api/llm/api.md
+    - Client: api/llm/client.md
+    - Config: api/llm/config.md
+    - Errors: api/llm/errors.md
+    - Rag:
+      - Rag Overview: api/llm/rag/index.md
+      - Command: api/llm/rag/command.md
+      - Formatter: api/llm/rag/formatter.md
+      - Prompts: api/llm/rag/prompts.md
+    - Utils: api/llm/utils.md
+  - Processor:
+    - Processor Overview: api/processor/index.md
+    - Lod: api/processor/lod.md
+    - Pipeline: api/processor/pipeline.md
+    - Tree Sitter:
+      - Tree Sitter Overview: api/processor/tree_sitter/index.md
+      - Analyzer: api/processor/tree_sitter/analyzer.md
+      - Base: api/processor/tree_sitter/base.md
+      - Languages:
+        - Languages Overview: api/processor/tree_sitter/languages/index.md
+        - Base: api/processor/tree_sitter/languages/base.md
+        - Javascript: api/processor/tree_sitter/languages/javascript.md
+        - Python: api/processor/tree_sitter/languages/python.md
+        - Typescript: api/processor/tree_sitter/languages/typescript.md
+    - Utils:
+      - Utils Overview: api/processor/utils/index.md
+      - Embedding Utils: api/processor/utils/embedding_utils.md
+      - Git Utils: api/processor/utils/git_utils.md
+      - Sync Utils: api/processor/utils/sync_utils.md
+    - Vector:
+      - Vector Overview: api/processor/vector/index.md
+      - Chunking: api/processor/vector/chunking.md
+      - Qdrant Manager: api/processor/vector/qdrant_manager.md
+      - Synchronizer: api/processor/vector/synchronizer.md
+  - Utils:
+    - Utils Overview: api/utils/index.md
+    - Cli Utils: api/utils/cli_utils.md
+    - Config Loader: api/utils/config_loader.md
+    - Docker Utils: api/utils/docker_utils.md
+    - File Utils: api/utils/file_utils.md
+    - Log Setup: api/utils/log_setup.md
+    - Path Utils: api/utils/path_utils.md
+  - Watcher:
+    - Watcher Overview: api/watcher/index.md
+    - File Watcher: api/watcher/file_watcher.md
+
 theme:
   name: material
+  custom_dir: overrides
   icon:
     logo: material/library
   features:

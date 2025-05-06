@@ -3,19 +3,14 @@
 import logging
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 import yaml
-from packaging import version
 from rich.logging import RichHandler
 
 # --- Configuration ---
-# Remove basicConfig, we'll configure the handler directly
-# logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
-
 # Define a logger for this script
 logger = logging.getLogger(__name__)
 # Set logger level to DEBUG to see all messages
@@ -33,127 +28,7 @@ DOCS_API_ROOT = Path("docs/api")
 MKDOCS_CONFIG_PATH = Path("mkdocs.yml")
 API_NAV_TITLE = "API Reference"  # The title used in mkdocs.yml nav
 
-# GitHub repository information
-GITHUB_REPO_URL = "https://github.com/SarthakMishra/codemap"
-MAIN_BRANCH = "main"
-DEV_BRANCH = "dev"
-
 # --- Helper Functions ---
-
-
-def get_git_tags() -> tuple[str, str]:
-	"""
-	Get the latest stable and pre-release versions from Git tags.
-
-	Returns:
-		tuple: (stable_version, prerelease_version)
-	"""
-	try:
-		# Get all tags sorted by version
-		result = subprocess.run(["git", "tag"], capture_output=True, text=True, check=True)
-
-		if result.returncode != 0:
-			logger.warning("Failed to get Git tags")
-			return "1.0.0", "0.1.0"
-
-		tags = result.stdout.strip().split("\n")
-
-		# Filter out empty tags
-		tags = [tag.strip() for tag in tags if tag.strip()]
-
-		if not tags:
-			logger.warning("No Git tags found")
-			return "1.0.0", "0.1.0"
-
-		# Parse versions and separate into stable and pre-release
-		stable_versions = []
-		prerelease_versions = []
-
-		for tag in tags:
-			# Remove 'v' prefix if present
-			clean_tag = tag.removeprefix("v")
-
-			try:
-				parsed_version = version.parse(clean_tag)
-
-				if parsed_version.is_prerelease:
-					prerelease_versions.append((parsed_version, tag))
-				else:
-					stable_versions.append((parsed_version, tag))
-			except version.InvalidVersion:
-				logger.warning(f"Invalid version tag: {tag}")
-
-		# Get latest versions
-		latest_stable = "1.0.0"
-		latest_prerelease = "0.1.0"
-
-		if stable_versions:
-			stable_versions.sort(reverse=True)
-			latest_stable = stable_versions[0][1]
-
-		if prerelease_versions:
-			prerelease_versions.sort(reverse=True)
-			latest_prerelease = prerelease_versions[0][1]
-
-		# Ensure version string format is consistent (with v prefix)
-		latest_stable = latest_stable if latest_stable.startswith("v") else f"v{latest_stable}"
-		latest_prerelease = latest_prerelease if latest_prerelease.startswith("v") else f"v{latest_prerelease}"
-
-		logger.info(f"Latest stable version: {latest_stable}")
-		logger.info(f"Latest pre-release version: {latest_prerelease}")
-
-		return latest_stable, latest_prerelease
-
-	except (subprocess.SubprocessError, subprocess.CalledProcessError) as e:
-		logger.warning(f"Error getting Git tags: {e}")
-		return "1.0.0", "0.1.0"
-
-
-def get_version_info() -> tuple[str, bool]:
-	"""
-	Extract version information from __init__.py and determine if we're on dev branch.
-
-	Returns:
-		tuple: (version_string, is_dev_branch)
-	"""
-	init_file = SRC_ROOT / CODE_PACKAGE / "__init__.py"
-	if not init_file.exists():
-		logger.warning(f"Could not find {init_file} for version information")
-		return "unknown", False
-
-	try:
-		# Read the __init__.py file
-		content = init_file.read_text(encoding="utf-8")
-
-		# Extract version
-		version_match = re.search(r'__version__\s*=\s*[\'"]([^\'"]+)[\'"]', content)
-		version = version_match.group(1) if version_match else "unknown"
-
-		# Determine current branch
-		try:
-			result = subprocess.run(
-				["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, check=True
-			)
-			current_branch = result.stdout.strip()
-			is_dev = current_branch == DEV_BRANCH or any(x in version.lower() for x in ["dev", "alpha", "beta", "rc"])
-
-			logger.info(f"Detected version: {version} on branch: {current_branch}")
-			return version, is_dev
-
-		except (subprocess.SubprocessError, subprocess.CalledProcessError) as e:
-			logger.warning(f"Error getting git branch: {e}")
-			# Fall back to checking if version has dev, alpha, beta in it
-			is_dev = any(x in version.lower() for x in ["dev", "alpha", "beta", "rc"])
-			return version, is_dev
-
-	except Exception as e:
-		logger.warning(f"Error extracting version information: {e}")
-		return "unknown", False
-
-
-def get_remote_file_url(path: str, branch: str) -> str:
-	"""Get the URL to the file in the GitHub repository."""
-	return f"{GITHUB_REPO_URL}/blob/{branch}/{path}"
 
 
 def module_path_to_string(path_parts: tuple[str, ...]) -> str:
@@ -186,23 +61,8 @@ def extract_module_description(init_file_path: Path) -> str | None:
 		return None
 
 
-def create_markdown_content(module_id: str, title: str, is_package: bool, branch: str) -> str:
+def create_markdown_content(module_id: str, title: str, is_package: bool) -> str:
 	"""Generates the content for a mkdocstrings markdown file."""
-	# Figure out the path to the source file
-	parts = module_id.split(".")
-	rel_path = "/".join(parts[1:])  # Skip the top-level package name
-
-	if is_package:
-		source_path = (
-			f"{SRC_ROOT}/{parts[0]}/{rel_path}/__init__.py" if rel_path else f"{SRC_ROOT}/{parts[0]}/__init__.py"
-		)
-	else:
-		source_path = f"{SRC_ROOT}/{parts[0]}/{rel_path}.py" if rel_path else f"{SRC_ROOT}/{parts[0]}.py"
-
-	# Generate source link
-	source_url = get_remote_file_url(source_path, branch)
-
-	# Basic options common to all
 	options = [
 		"members_order: source",
 		"show_if_no_docstring: true",
@@ -220,9 +80,53 @@ def create_markdown_content(module_id: str, title: str, is_package: bool, branch
 ::: {module_id}
     options:
 {options_str}
-
-[View Source Code]({source_url})
 """
+
+
+def create_package_index_content(module_id: str, title: str, description: str, children: dict) -> str:
+	"""Generates a more concise index file for packages with links to sub-modules.
+
+	Args:
+		module_id: Full module ID (e.g., 'codemap.watcher')
+		title: Package title (e.g., 'Watcher')
+		description: Package description from docstring
+		children: Dictionary of child modules with their descriptions
+
+	Returns:
+		Markdown content with module summary and links to sub-modules
+	"""
+	# Start with the title and description
+	content = [f"# {title} Overview"]
+
+	if description:
+		content.append(f"\n{description}\n")
+	else:
+		content.append("\n")  # Add empty line if no description
+
+	# Add a section about available modules if we have children
+	if children:
+		# Sort modules alphabetically
+		sorted_modules = sorted(children.keys())
+
+		for module_name in sorted_modules:
+			# Skip internal items
+			if module_name.startswith("_"):
+				continue
+
+			module_info = children.get(module_name, {})
+			module_title = path_to_title(module_name)
+			module_description = module_info.get("_description", "")
+
+			# Create relative link to the module
+			link_path = f"{module_name}/index.md" if module_info.get("_is_package", False) else f"{module_name}.md"
+
+			# Add module entry with description if available
+			if module_description:
+				content.append(f"- [{module_title}]({link_path}) - {module_description}")
+			else:
+				content.append(f"- [{module_title}]({link_path})")
+
+	return "\n".join(content)
 
 
 def build_nested_nav(structure: dict[str, Any], current_rel_path: Path) -> list[Any]:
@@ -396,7 +300,7 @@ def discover_modules(src_package_dir: Path) -> dict[str, Any]:
 	return module_structure.get(CODE_PACKAGE, {})
 
 
-def generate_docs(structure: dict[str, Any], current_module_parts: tuple[str, ...], docs_dir: Path, branch: str):
+def generate_docs(structure: dict[str, Any], current_module_parts: tuple[str, ...], docs_dir: Path):
 	"""Recursively generates markdown files for the discovered structure."""
 	# If this structure has _children, process those directly first
 	if "_children" in structure:
@@ -404,7 +308,7 @@ def generate_docs(structure: dict[str, Any], current_module_parts: tuple[str, ..
 		children = structure.get("_children", {})
 		if children and isinstance(children, dict):
 			logger.debug(f"Processing children at module parts: {current_module_parts}")
-			generate_docs(children, current_module_parts, docs_dir, branch)
+			generate_docs(children, current_module_parts, docs_dir)
 			return
 
 	for key, item in structure.items():
@@ -422,21 +326,30 @@ def generate_docs(structure: dict[str, Any], current_module_parts: tuple[str, ..
 		is_package = item.get("_is_package", False)
 		is_file = item.get("_is_file", False)
 		children_structure = item.get("_children", None)
+		description = item.get("_description", "")
 
 		if is_package:
 			logger.debug(f"  -> Generating package index for: {module_id}")
 			md_file_path = docs_dir / key / "index.md"
 			md_file_path.parent.mkdir(parents=True, exist_ok=True)
-			content = create_markdown_content(module_id, f"{title} Overview", is_package=True, branch=branch)
+
+			# Use the new concise index format for packages
+			if children_structure:
+				content = create_package_index_content(module_id, title, description, children_structure)
+			else:
+				# Fallback to standard content if no children
+				content = create_markdown_content(module_id, f"{title} Overview", is_package=True)
+
 			md_file_path.write_text(content + "\n", encoding="utf-8")
 			logger.info(f"Generated: {md_file_path}")
+
 			if children_structure:
-				generate_docs(children_structure, new_module_parts, docs_dir / key, branch)
+				generate_docs(children_structure, new_module_parts, docs_dir / key)
 		elif is_file:
 			logger.debug(f"  -> Generating module file for: {module_id}")
 			md_file_path = docs_dir / f"{key}.md"
 			md_file_path.parent.mkdir(parents=True, exist_ok=True)
-			content = create_markdown_content(module_id, title, is_package=False, branch=branch)
+			content = create_markdown_content(module_id, title, is_package=False)
 			md_file_path.write_text(content + "\n", encoding="utf-8")
 			logger.info(f"Generated: {md_file_path}")
 		elif children_structure:  # Handle intermediate directories
@@ -445,258 +358,176 @@ def generate_docs(structure: dict[str, Any], current_module_parts: tuple[str, ..
 			child_dir = docs_dir / key
 			child_dir.mkdir(parents=True, exist_ok=True)
 			# Don't generate a file for the directory itself, just recurse
-			generate_docs(children_structure, new_module_parts, docs_dir / key, branch)
+			generate_docs(children_structure, new_module_parts, docs_dir / key)
 
 
-def create_version_docs(stable_version: str, prerelease_version: str, module_structure: dict):
+def create_api_docs(module_structure: dict):
 	"""
-	Creates API documentation for both stable and pre-release versions.
+	Creates API documentation for a single version.
 
 	Args:
-		stable_version: The stable version string
-		prerelease_version: The pre-release version string
 		module_structure: The module structure dictionary
 
 	Returns:
-		Dict with nav structures for both versions
+		Nav structure for the API docs
 	"""
-	versions_nav = {}
+	logger.info("Generating API documentation")
 
-	# Define version-specific directories and info
-	versions_info = [
-		{
-			"title": "Stable",
-			"display_title": f"Stable ({stable_version.lstrip('v')})",
-			"version": stable_version,
-			"branch": MAIN_BRANCH,
-			"dir": DOCS_API_ROOT / "stable",
-			"other_display_title": f"Pre-release ({prerelease_version.lstrip('v')})",
-		},
-		{
-			"title": "Pre-release",
-			"display_title": f"Pre-release ({prerelease_version.lstrip('v')})",
-			"version": prerelease_version,
-			"branch": DEV_BRANCH,
-			"dir": DOCS_API_ROOT / "pre-release",
-			"other_display_title": f"Stable ({stable_version.lstrip('v')})",
-		},
-	]
+	# Create the directory
+	docs_dir = DOCS_API_ROOT
+	docs_dir.mkdir(parents=True, exist_ok=True)
 
-	# Process each version
-	for version_info in versions_info:
-		title = version_info["title"]
-		display_title = version_info["display_title"]
-		version = version_info["version"]
-		branch = version_info["branch"]
-		docs_dir = version_info["dir"]
-		other_display_title = version_info["other_display_title"]
+	# Extract the package description
+	package_description = module_structure.get("_description", "")
 
-		logger.info(f"Generating documentation for {display_title}")
+	# Create a concise index with links to main modules
+	index_content = ["# API Reference"]
 
-		# Create the directory for this version
-		docs_dir.mkdir(parents=True, exist_ok=True)
+	if package_description:
+		index_content.append(f"\n{package_description}\n")
+	else:
+		index_content.append("\n")
 
-		# Create list of main modules with descriptions
-		main_modules_links = []
-		if "_children" in module_structure:
-			children = module_structure.get("_children", {})
-			# Sort the keys to ensure consistent order
-			for key in sorted(children.keys()):
-				# Skip internal keys and __main__
-				if key.startswith("_") or key == "__main__":
-					continue
+	# Create list of main modules with descriptions
+	if "_children" in module_structure:
+		children = module_structure.get("_children", {})
+		# Sort keys for consistent order
+		sorted_keys = sorted(children.keys())
 
-				# Get the module node
-				module_node = children.get(key, {})
+		index_content.append("## Main Modules\n")
 
-				# Create a link for each top-level module with description if available
-				module_title = path_to_title(key)
+		for key in sorted_keys:
+			# Skip internal keys and __main__
+			if key.startswith("_") or key == "__main__":
+				continue
 
-				# Determine the correct link path based on whether it's a package
-				is_package = module_node.get("_is_package", False)
+			# Get the module node
+			module_node = children.get(key, {})
+			module_title = path_to_title(key)
+			is_package = module_node.get("_is_package", False)
+			link_path = f"{key}/index.md" if is_package else f"{key}.md"
+			description = module_node.get("_description", "")
 
-				link_path = f"{key}/index.md" if is_package else f"{key}.md"
-
-				# Check if this module has a description
-				description = module_node.get("_description", "")
-				if description:
-					main_modules_links.append(f"- [{module_title}]({link_path}) - {description}")
-				else:
-					main_modules_links.append(f"- [{module_title}]({link_path})")
-
-		module_links_text = "\n".join(main_modules_links) if main_modules_links else "No modules found."
-
-		index_content = f"""# {display_title}
-
-This section provides the auto-generated API documentation for the `{CODE_PACKAGE}` package.
-
-## Version Information
-- **Version:** {version.lstrip("v")}
-- **Branch:** [{branch}]({get_remote_file_url(f"{SRC_ROOT}/{CODE_PACKAGE}", branch)})
-- **Switch to:** [{other_display_title}](../{"stable" if "Pre-release" in title else "pre-release"}/index.md)
-
-Navigate through the modules using the sidebar to explore the full API documentation.
-
-## Main Modules
-
-{module_links_text}
-"""
-		index_path = docs_dir / "index.md"
-		index_path.write_text(index_content + "\n", encoding="utf-8")
-		logger.info(f"Generated: {index_path}")
-
-		# Generate the markdown files for this version
-		generate_docs(module_structure, (CODE_PACKAGE,), docs_dir, branch)
-
-		# Build the navigation structure for this version
-		# For the path, use a relative path that works with the directory layout
-		# Include 'api/' prefix in the path
-		version_path = Path("api") / Path(docs_dir.name)
-		api_nav = build_nested_nav(module_structure, version_path)
-
-		# Prepare the nav structure including the overview
-		version_nav_content = [
-			{"Overview": (version_path / "index.md").as_posix()},
-			*api_nav,
-		]
-
-		# Add to the versions_nav dictionary using the title (without version info) as key
-		# This ensures we have "Stable" and "Pre-release" as section titles
-		versions_nav[title] = version_nav_content
-
-	return versions_nav
-
-
-def create_api_index(stable_version: str, prerelease_version: str):
-	"""
-	Creates a top-level index.md file for the API Reference section.
-
-	Args:
-		stable_version: The stable version string
-		prerelease_version: The pre-release version string
-	"""
-	logger.info("Generating top-level API index file")
-
-	# Create the content for the index file
-	content = f"""# API Reference
-
-This section contains the auto-generated API documentation for the `{CODE_PACKAGE}` package.
-
-## Available Versions
-
-- [Stable ({stable_version.lstrip("v")})](stable/index.md) - Documentation for the latest stable release
-- [Pre-release ({prerelease_version.lstrip("v")})](pre-release/index.md) - Documentation for the upcoming release
-
-Choose a version from the navigation menu or the links above to explore the API documentation.
-"""
+			# Add the module entry with description if available
+			if description:
+				index_content.append(f"- [{module_title}]({link_path}) - {description}")
+			else:
+				index_content.append(f"- [{module_title}]({link_path})")
+	else:
+		index_content.append("No modules found.")
 
 	# Write the index file
-	index_path = DOCS_API_ROOT / "index.md"
-	index_path.write_text(content + "\n", encoding="utf-8")
-	logger.info(f"Generated top-level index: {index_path}")
+	index_path = docs_dir / "index.md"
+	index_path.write_text("\n".join(index_content) + "\n", encoding="utf-8")
+	logger.info(f"Generated: {index_path}")
 
+	# Generate the markdown files
+	generate_docs(module_structure, (CODE_PACKAGE,), docs_dir)
 
-def update_mkdocs_config(versions_nav_structure: dict[str, list[Any]]):
-	"""Updates the mkdocs.yml nav section, handling the mermaid tag safely."""
-	mermaid_tag = "!!python/name:mermaid2.fence_mermaid_custom"
-	placeholder = "__MERMAID_FORMAT_PLACEHOLDER__"
+	# Build the navigation structure
+	api_nav = build_nested_nav(module_structure, Path("api"))
 
-	raw_yaml_content = ""
-	try:
-		with MKDOCS_CONFIG_PATH.open(encoding="utf-8") as f:
-			raw_yaml_content = f.read()
-	except FileNotFoundError:
-		logger.exception(f"mkdocs.yml not found at {MKDOCS_CONFIG_PATH}")
-		return
-	except OSError:
-		logger.exception("Error reading mkdocs.yml file")
-		return
-
-	# Replace tag with placeholder before parsing (NO quotes)
-	yaml_to_parse = raw_yaml_content.replace(mermaid_tag, placeholder)
-
-	try:
-		config_data = yaml.safe_load(yaml_to_parse)
-	except yaml.YAMLError:
-		logger.exception("Error parsing mkdocs.yml after placeholder replacement")
-		return
-
-	if not isinstance(config_data, dict) or "nav" not in config_data:
-		logger.error("Invalid mkdocs.yml format: Missing 'nav' section.")
-		return
-
-	nav = config_data.get("nav", [])
-
-	# Create the complete API reference section with all versions
-	api_sections: list[dict[str, Any] | str] = [
-		# Add the Overview as the first item
+	return [
 		{"Overview": "api/index.md"},
+		*api_nav,
 	]
 
-	# Add version sections
-	for version_title, version_content in versions_nav_structure.items():
-		api_sections.append({version_title: version_content})
 
-	# Find the 'Home' section first - that's where our API Reference needs to be
-	for i, item in enumerate(nav):
-		if isinstance(item, dict) and "Home" in item:
-			home_section = item["Home"]
-
-			# Ensure home_section is a list before proceeding
-			if not isinstance(home_section, list):
-				logger.warning(f"Home section is not a list, creating a new one. Type: {type(home_section)}")
-				home_section = []
-
-			# Look for API Reference within Home section
-			api_ref_index = None
-			for j, subsection in enumerate(home_section):
-				if isinstance(subsection, dict) and "API Reference" in subsection:
-					api_ref_index = j
-					break
-
-			# Debug log the types
-			logger.info(f"home_section type: {type(home_section).__name__}")
-			logger.info(f"home_section value: {home_section}")
-			logger.info(f"api_sections type: {type(api_sections).__name__}")
-
-			if api_ref_index is not None:
-				# Replace the entire API Reference section with our new structure
-				logger.info(
-					f"Replacing existing API Reference section with overview and {len(api_sections) - 1} versions"
-				)
-				home_section[api_ref_index] = {"API Reference": api_sections}
-			else:
-				# Add new API Reference section to Home
-				logger.info(f"Adding new API Reference section with overview and {len(api_sections) - 1} versions")
-				# For safer append, create a new dictionary entry instead of appending
-				new_item = {"API Reference": api_sections}
-				if isinstance(home_section, list):
-					home_section.append(new_item)
-				else:
-					# If home_section is not a list, create a new list with our item
-					home_section = [new_item]
-
-			# Update the nav with modified Home section
-			nav[i] = {"Home": home_section}
-			logger.info("Updated navigation structure successfully")
-			break
-
-	config_data["nav"] = nav
-
-	# Dump the modified data back to a string
+def update_mkdocs_config(nav_structure: list[Any]):
+	"""Updates the mkdocs.yml nav section by replacing only the API Reference section."""
 	try:
-		dumped_yaml = yaml.dump(config_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
-		# Replace bare placeholder back with the original tag
-		final_yaml_content = dumped_yaml.replace(placeholder, mermaid_tag)
+		# Read the original file content
+		with MKDOCS_CONFIG_PATH.open(encoding="utf-8") as f:
+			content = f.read()
 
-		# Write the final string to the file
+		# Create a backup just in case
+		backup_path = MKDOCS_CONFIG_PATH.with_suffix(".bak")
+		with backup_path.open("w", encoding="utf-8") as f:
+			f.write(content)
+		logger.info(f"Created backup at {backup_path}")
+
+		# Split by lines for processing
+		lines = content.splitlines()
+
+		# Generate API Reference section
+		api_ref_yaml = yaml.dump(nav_structure, default_flow_style=False, sort_keys=False, allow_unicode=True)
+		# Create indented lines for the API Reference section
+		api_ref_lines = ["- API Reference:"]
+		api_ref_lines.extend(f"  {line}" for line in api_ref_yaml.splitlines() if line.strip())
+
+		# Process file into sections
+		new_lines = []
+		in_nav = False
+		in_api_ref = False
+		api_ref_added = False
+		api_ref_indent_level = 0
+		i = 0
+
+		while i < len(lines):
+			line = lines[i]
+			stripped = line.strip()
+
+			# Track when we're in the nav section
+			if stripped == "nav:":
+				in_nav = True
+				new_lines.append(line)
+				i += 1
+				continue
+
+			# Detect start of API Reference section with proper indentation tracking
+			if in_nav and not in_api_ref and stripped == "- API Reference:":
+				in_api_ref = True
+				api_ref_indent_level = len(line) - len(line.lstrip())
+				logger.debug(f"Found API Reference at line {i} with indent level {api_ref_indent_level}")
+				i += 1  # Skip this line
+				continue
+
+			# Skip all lines in the API Reference section until we reach the next top-level nav item
+			if in_api_ref:
+				current_indent = len(line) - len(line.lstrip())
+				# Check if this line is still part of the API Reference section
+				if stripped and current_indent > api_ref_indent_level:
+					# Still in API Reference section, skip this line
+					logger.debug(f"Skipping API Reference content line: {line}")
+					i += 1
+					continue
+				# We've reached the end of the API Reference section
+				# Add our new API Reference section
+				if not api_ref_added:
+					logger.debug("Adding new API Reference section")
+					for ref_line in api_ref_lines:
+						indent_spaces = " " * api_ref_indent_level
+						new_lines.append(f"{indent_spaces}{ref_line}")
+					api_ref_added = True
+
+				in_api_ref = False
+				# Don't increment i, continue naturally to add the next line
+				if stripped:
+					new_lines.append(line)
+					i += 1
+				continue
+
+			# Add the line normally
+			new_lines.append(line)
+			i += 1
+
+		# If we're still in API Reference section at the end, or never found it
+		if in_api_ref or (in_nav and not api_ref_added):
+			# Add the API Reference section at the end of nav
+			logger.debug("Adding API Reference section at end of nav")
+			for ref_line in api_ref_lines:
+				# Use default indentation level if we never found API Reference section
+				indent_level = max(0, api_ref_indent_level)
+				indent_spaces = " " * indent_level
+				new_lines.append(f"{indent_spaces}{ref_line}")
+
+		# Write the updated content back to the file
 		with MKDOCS_CONFIG_PATH.open("w", encoding="utf-8") as f:
-			f.write(final_yaml_content)
-		logger.info("Successfully updated mkdocs.yml")
-	except yaml.YAMLError:
-		logger.exception("Error dumping mkdocs.yml data")
-	except OSError:
-		logger.exception("Error writing mkdocs.yml file")
+			f.write("\n".join(new_lines))
+
+		logger.info("Successfully updated mkdocs.yml API Reference section")
+	except Exception:
+		logger.exception("Error updating mkdocs.yml")
 
 
 if __name__ == "__main__":
@@ -704,9 +535,6 @@ if __name__ == "__main__":
 	if not src_package_dir.is_dir():
 		logger.error(f"Source package directory not found: {src_package_dir}")
 		sys.exit(1)
-
-	# Get Git tags for versioning
-	stable_version, prerelease_version = get_git_tags()
 
 	# Discover all the modules
 	logger.info(f"Discovering modules in: {src_package_dir}")
@@ -722,14 +550,11 @@ if __name__ == "__main__":
 		shutil.rmtree(DOCS_API_ROOT)
 	DOCS_API_ROOT.mkdir(parents=True)
 
-	# Create the top-level index file first
-	create_api_index(stable_version, prerelease_version)
+	# Generate docs for a single version
+	nav_structure = create_api_docs(module_structure)
 
-	# Generate docs for both stable and pre-release versions
-	versions_nav = create_version_docs(stable_version, prerelease_version, module_structure)
-
-	# Update the mkdocs.yml configuration with both versions
-	logger.info("Updating mkdocs.yml with both stable and pre-release versions...")
-	update_mkdocs_config(versions_nav)
+	# Update the mkdocs.yml configuration
+	logger.info("Updating mkdocs.yml with API structure...")
+	update_mkdocs_config(nav_structure)
 
 	logger.info("API documentation update process finished.")

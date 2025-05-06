@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block outdated %}
+  {% if config.extra.pre_release %}
+  You're not viewing the latest version.
+  {% endif %}
+  {% if config.extra.pre_release %}
+    You are currently viewing <strong>pre-release</strong> documentation.
+  {% endif %}
+  <a href="{{ '../' ~ base_url }}"> 
+	<strong>Click here to go to latest.</strong>
+  </a>
+{% endblock %}

@@ -95,6 +95,7 @@ model2vec = [
     "transformers>=4.51.1",
 ]
 docs = [
+    "mike>=2.1.3",
     "mkdocs-material[imaging]>=9.6.12",
     "mkdocs-mermaid2-plugin>=1.2.1",
     "mkdocstrings-python>=1.16.10",

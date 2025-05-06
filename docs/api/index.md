@@ -1,11 +1,15 @@
 # API Reference
 
-This section contains the auto-generated API documentation for the `codemap` package.
+CodeMap - AI-powered developer toolkit.
 
-## Available Versions
+## Main Modules
 
-- [Stable (0.1.0)](stable/index.md) - Documentation for the latest stable release
-- [Pre-release (0.2.0-rc.2)](pre-release/index.md) - Documentation for the upcoming release
-
-Choose a version from the navigation menu or the links above to explore the API documentation.
-
+- [Cli](cli/index.md) - Command-line interface package for CodeMap.
+- [Config](config.md) - Default configuration settings for the codemap tool.
+- [Db](db/index.md) - Database management utilities using SQLModel.
+- [Gen](gen/index.md) - Code documentation generation package for CodeMap.
+- [Git](git/index.md) - Git utilities for CodeMap.
+- [Llm](llm/index.md) - LLM module for CodeMap.
+- [Processor](processor/index.md) - CodeMap processor module.
+- [Utils](utils/index.md) - Utility module for CodeMap package.
+- [Watcher](watcher/index.md) - Watcher module for CodeMap.
