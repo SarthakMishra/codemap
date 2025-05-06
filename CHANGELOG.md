@@ -1,6 +1,49 @@
 # CHANGELOG
 
 
+## v0.3.0-rc.1 (2025-05-06)
+
+### Chores
+
+- Merge mkdocs override from feature branch
+  ([`c1fc403`](https://github.com/SarthakMishra/codemap/commit/c1fc4030fae9d83d467c9b9cc8adaf114a58d1bc))
+
+- Remove mkdocs.bak file and update version to 0.2.0
+  ([`9a7fbd9`](https://github.com/SarthakMishra/codemap/commit/9a7fbd912bd3ec72065a88386d4aa5cc66433ec6))
+
+
+## v0.2.0 (2025-05-06)
+
+### Chores
+
+- Merge mkdocs override from feature branch
+  ([`ad1a108`](https://github.com/SarthakMishra/codemap/commit/ad1a108d55f92708750fdd29d2b4ffca51af6604))
+
+- Remove mkdocs.bak file and update version to 0.2.0
+  ([`7cdfd2a`](https://github.com/SarthakMishra/codemap/commit/7cdfd2a71bd0f8babf759f7c712edcf243d3b343))
+
+- **docs**: Update site url
+  ([`a8d8a7d`](https://github.com/SarthakMishra/codemap/commit/a8d8a7d9c278270009ccbd1bf66a263478344462))
+
+Updated the site URL in mkdocs.yml to point to the new domain
+
+### Documentation
+
+- **readme**: Update readme with improved documentation and installation instructions
+  ([`9c54ef6`](https://github.com/SarthakMishra/codemap/commit/9c54ef6a8c93136996d01b7fdd2476e275d02081))
+
+The README has been updated to reflect the latest changes in CodeMap, including new installation
+  options, improved documentation, and better explanations of the various features and commands.
+
+### Features
+
+- Merge documentation from feature branch
+  ([`b40c5ed`](https://github.com/SarthakMishra/codemap/commit/b40c5ed182426b5df237c30263009664e812b6c6))
+
+- Merge documentation from feature branch
+  ([`be813f7`](https://github.com/SarthakMishra/codemap/commit/be813f7bba120492443419a5f94f29319b5ebbab))
+
+
 ## v0.2.0-rc.2 (2025-05-04)
 
 ### Chores

@@ -32,6 +32,8 @@ CodeMap is an AI-powered developer toolkit designed to enhance your coding workf
 - 🔍 Index and search your repository for semantic understanding
 
 
+
+
 ## Installation
 
 > [!Important]
