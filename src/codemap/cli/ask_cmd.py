@@ -91,8 +91,8 @@ async def _ask_command_impl(
 	# Import heavy dependencies here instead of at the top
 	from rich.prompt import Prompt
 
-	from codemap.llm.rag.command import AskCommand
-	from codemap.llm.rag.formatter import print_ask_result
+	from codemap.llm.rag.ask.command import AskCommand
+	from codemap.llm.rag.ask.formatter import print_ask_result
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, setup_logging
 	from codemap.utils.config_loader import ConfigLoader
 
