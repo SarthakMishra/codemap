@@ -161,39 +161,3 @@ def create_client(
 		logger.exception("Error creating LLM client")
 		msg = f"Failed to create LLM client: {e}"
 		raise RuntimeError(msg) from e
-
-
-def batch_generate_completions(
-	messages_list: list[list[dict]],
-	model: str,
-	config_loader: ConfigLoader,
-	response_format: dict | None = None,
-	**kwargs: str | float | bool | dict | None,
-) -> list:
-	"""Generate batch completions using LiteLLM."""
-	from litellm import batch_completion
-
-	# Get LLM config from config_loader
-	llm_config = config_loader.get_llm_config()
-
-	# Set up common parameters - LiteLLM will automatically use environment variables
-	litellm_params = {
-		"model": model,
-		"temperature": llm_config.get("temperature", 0.7),
-		"max_tokens": llm_config.get("max_tokens", 1024),
-	}
-
-	# Add api_base if specified
-	api_base = llm_config.get("api_base")
-	if api_base:
-		litellm_params["api_base"] = api_base
-
-	# Add response format
-	if response_format:
-		litellm_params["response_format"] = response_format
-
-	# Add additional parameters
-	litellm_params = {**litellm_params, **kwargs}
-
-	# LiteLLM will automatically use the appropriate API key from environment variables
-	return batch_completion(messages=messages_list, **litellm_params)
