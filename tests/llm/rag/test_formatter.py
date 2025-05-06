@@ -9,7 +9,7 @@ import pytest
 from rich.console import Console
 from rich.markdown import Markdown
 
-from codemap.llm.rag.formatter import format_ask_response, format_content_for_context, print_ask_result
+from codemap.llm.rag.ask.formatter import format_ask_response, format_content_for_context, print_ask_result
 
 
 @pytest.fixture
