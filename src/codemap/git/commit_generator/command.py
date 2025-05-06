@@ -746,13 +746,26 @@ class SemanticCommitCommand(CommitCommand):
 					continue
 
 				status = line[:2]
-				file_path = line[3:].strip()
+				# raw_path_part = line[3:] # Old way
+				# file_path = raw_path_part.strip()
+
+				# More robust path extraction
+				if len(line) > 2 and line[2] == " ":  # noqa: PLR2004
+					file_path = line[3:].strip()
+				else:  # Should not happen with standard porcelain v1, but as a fallback
+					file_path = line[2:].strip()
+					logger.warning(f"Porcelain line format anomaly: {line}. Extracted path: {file_path}")
 
 				# Handle renamed files
 				if status.startswith("R"):
-					# Extract the new file name after the arrow
-					file_path = file_path.split(" -> ")[1]
+					# Example: R  old_name -> new_name
+					try:
+						file_path = file_path.split(" -> ")[1]
+					except IndexError:
+						logger.warning(f"Could not parse renamed file line: {line}")
+						continue  # Skip malformed rename line
 
+				logger.debug(f"Processing line: '{line}' -> Status: '{status}', Raw Path Part: '{file_path}'")
 				target_files.append(file_path)
 
 			# If in pathspec mode, get all repo files for later use
@@ -1086,6 +1099,7 @@ class SemanticCommitCommand(CommitCommand):
 			# Get target files
 			with loading_spinner("Analyzing repository..."):
 				self.target_files = self._get_target_files(pathspecs)
+				logger.debug(f"SemanticCommitCommand.run: Target files after _get_target_files: {self.target_files}")
 
 				if not self.target_files:
 					self.ui.show_message("No changes detected to commit.")
