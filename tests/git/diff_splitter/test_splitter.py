@@ -148,18 +148,11 @@ index 2345678..bcdefgh 100645
 
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.re")  # Mock re for large content check
-	def test_split_diff_large_content(
-		self, mock_re: MagicMock, mock_is_test: MagicMock, mock_filter_files: MagicMock
-	) -> None:
+	def test_split_diff_large_content(self, mock_is_test: MagicMock, mock_filter_files: MagicMock) -> None:
 		"""Test split_diff with large diff content (should still process files)."""
 		# Arrange
 		mock_is_test.return_value = False
 		mock_filter_files.return_value = (["file1.py", "file2.py"], [])  # filter_valid_files still returns valid files
-		mock_re.findall.return_value = [
-			("a/file1.py", "file1.py"),
-			("a/file2.py", "file2.py"),
-		]  # Mock finding files in large diff
 
 		# Create a splitter instance inside patches
 		with (
@@ -169,6 +162,7 @@ index 2345678..bcdefgh 100645
 			),
 			patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available", return_value=True),
 			patch("codemap.git.diff_splitter.splitter.loading_spinner"),
+			# Remove patch for nonexistent _extract_file_names_from_diff function
 			patch.object(
 				DiffSplitter, "_split_semantic", return_value=[]
 			) as mock_split_semantic,  # Mock the semantic split
