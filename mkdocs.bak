@@ -1,0 +1,188 @@
+site_name: Codemap
+site_url: https://codemap.run
+site_author: Sarthak Mishra
+site_description: A CLI tool that generates optimized markdown docs and streamline
+  Git workflows
+repo_name: SarthakMishra/codemap
+repo_url: https://github.com/SarthakMishra/codemap
+copyright: Copyright &copy; 2025 Sarthak Mishra
+extra:
+  status:
+    new: Recently added
+    deprecated: Deprecated
+  social:
+  - icon: fontawesome/brands/github
+    link: https://github.com/SarthakMishra
+  - icon: fontawesome/brands/python
+    link: https://pypi.org/project/codemap/
+  - icon: fontawesome/brands/linkedin
+    link: https://www.linkedin.com/in/itssarthakmishra/
+  - icon: fontawesome/brands/x-twitter
+    link: https://x.com/MishraMishry
+  version:
+    provider: mike
+  pre_release: !ENV [DOCS_PRERELEASE, false]
+nav:
+- Home:
+  - Overview: index.md
+  - Installation: installation.md
+  - Usage:
+    - Overview: usage/index.md
+    - Generate Docs (`gen`): usage/generate.md
+    - Smart Commit (`commit`): usage/commit.md
+    - Pull Requests (`pr`): usage/pr.md
+    - Configuration: usage/configuration.md
+    - LLM Support: usage/llm-support.md
+  - Contributing:
+    - Overview: contributing/index.md
+    - Contributing Guidelines: contributing/guidelines.md
+    - Code of Conduct: contributing/code-of-conduct.md
+  - Acknowledgements: acknowledgements.md
+- API Reference:
+  - Overview: api/index.md
+  - Cli:
+    - Cli Overview: api/cli/index.md
+    - Commit Cmd: api/cli/commit_cmd.md
+    - Gen Cmd: api/cli/gen_cmd.md
+    - Pr Cmd: api/cli/pr_cmd.md
+  - Config: api/config.md
+  - Gen:
+    - Gen Overview: api/gen/index.md
+    - Command: api/gen/command.md
+    - Generator: api/gen/generator.md
+    - Models: api/gen/models.md
+    - Utils: api/gen/utils.md
+  - Git:
+    - Git Overview: api/git/index.md
+    - Commit Generator:
+      - Commit Generator Overview: api/git/commit_generator/index.md
+      - Command: api/git/commit_generator/command.md
+      - Generator: api/git/commit_generator/generator.md
+      - Prompts: api/git/commit_generator/prompts.md
+      - Schemas: api/git/commit_generator/schemas.md
+      - Utils: api/git/commit_generator/utils.md
+    - Commit Linter:
+      - Commit Linter Overview: api/git/commit_linter/index.md
+      - Config: api/git/commit_linter/config.md
+      - Constants: api/git/commit_linter/constants.md
+      - Linter: api/git/commit_linter/linter.md
+      - Parser: api/git/commit_linter/parser.md
+      - Validators: api/git/commit_linter/validators.md
+    - Diff Splitter:
+      - Diff Splitter Overview: api/git/diff_splitter/index.md
+      - Constants: api/git/diff_splitter/constants.md
+      - Schemas: api/git/diff_splitter/schemas.md
+      - Splitter: api/git/diff_splitter/splitter.md
+      - Strategies: api/git/diff_splitter/strategies.md
+      - Utils: api/git/diff_splitter/utils.md
+    - Interactive: api/git/interactive.md
+    - Pr Generator:
+      - Pr Generator Overview: api/git/pr_generator/index.md
+      - Command: api/git/pr_generator/command.md
+      - Constants: api/git/pr_generator/constants.md
+      - Decorators: api/git/pr_generator/decorators.md
+      - Generator: api/git/pr_generator/generator.md
+      - Prompts: api/git/pr_generator/prompts.md
+      - Schemas: api/git/pr_generator/schemas.md
+      - Strategies: api/git/pr_generator/strategies.md
+      - Templates: api/git/pr_generator/templates.md
+      - Utils: api/git/pr_generator/utils.md
+    - Utils: api/git/utils.md
+  - Llm:
+    - Llm Overview: api/llm/index.md
+    - Api: api/llm/api.md
+    - Client: api/llm/client.md
+    - Config: api/llm/config.md
+    - Errors: api/llm/errors.md
+    - Utils: api/llm/utils.md
+  - Processor:
+    - Processor Overview: api/processor/index.md
+    - Lod: api/processor/lod.md
+    - Pipeline: api/processor/pipeline.md
+    - Tree Sitter:
+      - Tree Sitter Overview: api/processor/tree_sitter/index.md
+      - Analyzer: api/processor/tree_sitter/analyzer.md
+      - Base: api/processor/tree_sitter/base.md
+      - Languages:
+        - Languages Overview: api/processor/tree_sitter/languages/index.md
+        - Base: api/processor/tree_sitter/languages/base.md
+        - Javascript: api/processor/tree_sitter/languages/javascript.md
+        - Python: api/processor/tree_sitter/languages/python.md
+        - Typescript: api/processor/tree_sitter/languages/typescript.md
+  - Utils:
+    - Utils Overview: api/utils/index.md
+    - Cli Utils: api/utils/cli_utils.md
+    - Config Loader: api/utils/config_loader.md
+    - File Utils: api/utils/file_utils.md
+    - Log Setup: api/utils/log_setup.md
+    - Path Utils: api/utils/path_utils.md
+
+theme:
+  name: material
+  custom_dir: overrides
+  icon:
+    logo: material/library
+  features:
+  - content.action.view
+  - content.code.annotate
+  - content.code.copy
+  - content.tooltips
+  - content.tabs.link
+  - navigation.footer
+  - navigation.indexes
+  - navigation.sections
+  - navigation.tracking
+  - search.highlight
+  - search.share
+  - search.suggest
+  - toc.follow
+  palette:
+  - media: (prefers-color-scheme)
+    toggle:
+      icon: material/link
+      name: Switch to light mode
+  - media: '(prefers-color-scheme: light)'
+    scheme: default
+    primary: indigo
+    accent: indigo
+    toggle:
+      icon: material/toggle-switch
+      name: Switch to dark mode
+  - media: '(prefers-color-scheme: dark)'
+    scheme: slate
+    primary: black
+    accent: indigo
+    toggle:
+      icon: material/toggle-switch-off
+      name: Switch to system preference
+  font:
+    text: Geist
+    code: Geist Mono
+markdown_extensions:
+- pymdownx.blocks.caption
+- pymdownx.blocks.admonition
+- pymdownx.highlight:
+    use_pygments: true
+- pymdownx.inlinehilite
+- pymdownx.superfences:
+    custom_fences:
+    - name: mermaid
+      class: mermaid
+      format: !!python/name:mermaid2.fence_mermaid_custom
+plugins:
+- search
+- mermaid2
+- mkdocstrings:
+    handlers:
+      python:
+        paths:
+        - src/codemap
+        options:
+          relative_crossrefs: true
+          members_order: source
+          separate_signature: true
+          show_signature_annotations: true
+          signature_crossrefs: true
+          group_by_category: false
+          heading_level: 3
+          docstring_style: google
