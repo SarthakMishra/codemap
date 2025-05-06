@@ -1,6 +1,6 @@
 """Schema definitions for diff splitting."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 
@@ -8,9 +8,11 @@ from typing import Any
 class DiffChunk:
 	"""Represents a logical chunk of changes."""
 
-	files: list[str]
-	content: str
+	files: list[str] = field(default_factory=list)
+	content: str = ""
 	description: str | None = None
+	embedding: list[float] | None = None
+	is_move: bool = False  # Indicates if this chunk represents a file move operation
 	is_llm_generated: bool = False
 	filtered_files: list[str] | None = None
 

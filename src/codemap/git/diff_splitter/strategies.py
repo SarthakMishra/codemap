@@ -138,6 +138,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		min_chunks_for_consolidation: int = 2,
 		max_chunks_before_consolidation: int = 20,
 		max_file_size_for_llm: int | None = None,
+		file_move_similarity_threshold: float = 0.85,  # High threshold for file moves
 	) -> None:
 		"""
 		Initialize the SemanticSplitStrategy.
@@ -151,6 +152,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		    min_chunks_for_consolidation: Min chunks to trigger consolidation.
 		    max_chunks_before_consolidation: Max chunks allowed before forced consolidation.
 		    max_file_size_for_llm: Max file size for LLM processing.
+		    file_move_similarity_threshold: Threshold for detecting moved files (should be high).
 
 		"""
 		super().__init__(embedding_model)
@@ -159,6 +161,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		self.directory_similarity_threshold = directory_similarity_threshold
 		self.min_chunks_for_consolidation = min_chunks_for_consolidation
 		self.max_chunks_before_consolidation = max_chunks_before_consolidation
+		self.file_move_similarity_threshold = file_move_similarity_threshold
 		# Use default from config if not provided
 		self.max_file_size_for_llm = (
 			max_file_size_for_llm
@@ -190,6 +193,15 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			logger.debug("No files to process")
 			return []
 
+		# Detect moved files
+		moved_files = self._detect_moved_files(diff)
+		if moved_files:
+			logger.info("Detected %d moved files", len(moved_files))
+			move_chunks = self._create_move_chunks(moved_files, diff)
+			if move_chunks:
+				return move_chunks
+
+		# If no moved files or couldn't create move chunks, continue with normal processing
 		# Validate embedding model is available
 		self._validate_embedding_model()
 
@@ -415,6 +427,9 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		related_file_patterns = []
 		# Define patterns using standard strings with escaped backreferences
 		default_patterns: list[tuple[str, str]] = [
+			# --- File Moves (same name, different directories) ---
+			# This helps identify potential file moves regardless of directory structure
+			("^(.*/)?(.*?)$", "^(.*/)\\\\2$"),  # Same filename in any directory
 			# --- General Code + Test Files ---
 			# Python
 			("^(.*)\\.py$", "\\\\1_test\\.py$"),
@@ -791,11 +806,11 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			]
 
 		# 2. Reconstruct the full diff content for this file
-		file_header, full_file_diff_content = self._reconstruct_file_diff(matched_file)
+		_, full_file_diff_content = self._reconstruct_file_diff(matched_file)
 
 		# 3. Check if the reconstructed diff is too large
 		if len(full_file_diff_content) > self.max_file_size_for_llm:
-			return self._split_large_file_diff(matched_file, file_header)
+			return self._split_large_file_diff(matched_file, "")
 
 		# 4. Try splitting by semantic patterns (if applicable)
 		patterns = get_language_specific_patterns(extension)
@@ -814,7 +829,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			hunk_chunks.append(
 				DiffChunk(
 					files=[file_path],
-					content=file_header + hunk_content,  # Combine header + hunk
+					content=hunk_content,  # Combine header + hunk
 					description=f"Hunk in {file_path} starting near line {hunk.target_start}",
 				)
 			)
@@ -966,16 +981,22 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		all_files = []
 		combined_content = []
+		is_move = any(getattr(chunk, "is_move", False) for chunk in related_chunks)
 
 		for rc in related_chunks:
 			all_files.extend(rc.files)
 			combined_content.append(rc.content)
 
-		# Determine the appropriate commit type based on the files
-		commit_type = determine_commit_type(all_files)
-
-		# Create description based on file count
-		description = create_chunk_description(commit_type, all_files)
+		# Determine if this is a move or a normal change
+		if is_move:
+			commit_type = "chore"  # For moves, we always use chore
+			# Description will be handled separately for moves
+			description = related_chunks[0].description if related_chunks else "Move files"
+		else:
+			# For normal changes, use the regular commit type detection
+			commit_type = determine_commit_type(all_files)
+			# Create description based on file count
+			description = create_chunk_description(commit_type, all_files)
 
 		# Join the content from all related chunks
 		content = "\n\n".join(combined_content)
@@ -985,6 +1006,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				files=all_files,
 				content=content,
 				description=description,
+				is_move=is_move,
 			)
 		)
 
@@ -1089,7 +1111,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		current_semantic_chunk_hunks: list[Hunk] = []
 
 		# Get header info once using the reconstruction helper
-		file_header, _ = self._reconstruct_file_diff(patched_file)
+		_, _ = self._reconstruct_file_diff(patched_file)
 
 		for hunk in patched_file:
 			hunk_has_boundary = False
@@ -1123,7 +1145,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			result_chunks.append(
 				DiffChunk(
 					files=[file_path],
-					content=file_header + group_content,  # Combine header + hunks
+					content=group_content,  # Combine header + hunks
 					description=description,
 				)
 			)
@@ -1138,3 +1160,193 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			return False
 		invalid_chars = ["*", "+", "{", "}", "\\"]
 		return not (any(char in filename for char in invalid_chars) or filename.startswith('"'))
+
+	def _detect_moved_files(self, diff: GitDiff) -> dict[str, str]:
+		"""
+		Detect files that have been moved (deleted and added elsewhere).
+
+		This analyzes the diff to find files that appear to have been deleted from
+		one location and added to another location with similar content.
+
+		Args:
+		    diff: The git diff to analyze
+
+		Returns:
+		    Dictionary mapping from deleted file paths to their new locations
+		"""
+		# Skip if we don't have embedding model for content comparison
+		if self._embedding_model is None:
+			return {}
+
+		# Parse the diff to identify deleted and added files with their content
+		deleted_files: dict[str, str] = {}  # path -> content
+		added_files: dict[str, str] = {}  # path -> content
+
+		try:
+			# Use PatchSet to parse the diff
+			patch_set = PatchSet(StringIO(diff.content))
+
+			# Identify deleted and added files
+			for patched_file in patch_set:
+				if patched_file.is_removed_file:
+					# Extract content from the source (deleted) file
+					file_path = patched_file.source_file.replace("a/", "", 1)
+					file_content = ""
+					for hunk in patched_file:
+						for line in hunk:
+							# Line type ' ' is context, '-' is removed
+							if line.line_type in (" ", "-"):
+								file_content += line.value
+					deleted_files[file_path] = file_content
+				elif patched_file.is_added_file:
+					# Extract content from the target (added) file
+					file_path = patched_file.target_file.replace("b/", "", 1)
+					file_content = ""
+					for hunk in patched_file:
+						for line in hunk:
+							# Line type ' ' is context, '+' is added
+							if line.line_type in (" ", "+"):
+								file_content += line.value
+					added_files[file_path] = file_content
+
+		except (ValueError, UnidiffParseError, Exception) as e:
+			logger.warning(f"Failed to parse diff for move detection: {e}")
+			return {}
+
+		# Match deleted files with added files based on content similarity
+		moved_files = {}
+
+		for deleted_path, deleted_content in deleted_files.items():
+			# Skip empty content
+			if not deleted_content.strip():
+				continue
+
+			deleted_name = Path(deleted_path).name
+			best_match = None
+			best_similarity = 0.0
+
+			for added_path, added_content in added_files.items():
+				# Skip empty content
+				if not added_content.strip():
+					continue
+
+				# Quick check: files should have the same name
+				# (can be relaxed if needed, but helps avoid unnecessary embedding comparisons)
+				added_name = Path(added_path).name
+				if deleted_name != added_name:
+					continue
+
+				# Calculate content similarity
+				try:
+					# Get embeddings
+					deleted_emb = self._get_code_embedding(deleted_content)
+					added_emb = self._get_code_embedding(added_content)
+
+					if deleted_emb and added_emb:
+						similarity = calculate_semantic_similarity(deleted_emb, added_emb)
+
+						# Update best match if this is the best similarity so far
+						if similarity > best_similarity:
+							best_similarity = similarity
+							best_match = added_path
+				except Exception:
+					logger.exception(f"Error calculating similarity for {deleted_path} and potential move target")
+
+			# If we found a good match above the threshold, consider it a move
+			if best_match and best_similarity >= self.file_move_similarity_threshold:
+				moved_files[deleted_path] = best_match
+				logger.debug(f"Detected move: {deleted_path} -> {best_match} (similarity: {best_similarity:.2f})")
+
+		return moved_files
+
+	def _create_move_chunks(self, moved_files: dict[str, str], diff: GitDiff) -> list[DiffChunk]:
+		"""
+		Create diff chunks for moved files.
+
+		Args:
+		    moved_files: Dictionary mapping from source (deleted) paths to target (added) paths
+		    diff: Original diff containing the move changes
+
+		Returns:
+		    List of DiffChunk objects representing file moves
+		"""
+		if not moved_files:
+			return []
+
+		# Group moves by common source/target directories
+		# This helps create logical commit groups for moves within the same directories
+		dir_moves: dict[tuple[str, str], list[tuple[str, str]]] = {}
+
+		for source, target in moved_files.items():
+			source_dir = str(Path(source).parent)
+			target_dir = str(Path(target).parent)
+			dir_key = (source_dir, target_dir)
+
+			if dir_key not in dir_moves:
+				dir_moves[dir_key] = []
+
+			dir_moves[dir_key].append((source, target))
+
+		# Create chunks for each move group
+		move_chunks = []
+
+		for (source_dir, target_dir), moves in dir_moves.items():
+			# Combine source and target files
+			all_files = []
+			for source, target in moves:
+				all_files.extend([source, target])
+
+			# Create descriptive move information
+			if source_dir == target_dir:
+				# Rename within same directory
+				if len(moves) == 1:
+					source, target = moves[0]
+					description = f"chore: rename {Path(source).name} to {Path(target).name}"
+				else:
+					description = f"chore: rename {len(moves)} files in {source_dir}"
+			else:
+				# Move between directories
+				source_dir_desc = "root directory" if source_dir in {".", ""} else source_dir
+
+				target_dir_desc = "root directory" if target_dir in {".", ""} else target_dir
+
+				if len(moves) == 1:
+					description = f"chore: move {Path(moves[0][0]).name} from {source_dir_desc} to {target_dir_desc}"
+				else:
+					description = f"chore: move {len(moves)} files from {source_dir_desc} to {target_dir_desc}"
+
+			# Extract all content related to these moves from the original diff
+			chunk_content = ""
+			try:
+				patch_set = PatchSet(StringIO(diff.content))
+				for patched_file in patch_set:
+					source_file = patched_file.source_file.replace("a/", "", 1)
+					target_file = patched_file.target_file.replace("b/", "", 1)
+
+					# Check if this patched file is part of our move group
+					is_move_source = source_file in [source for source, _ in moves]
+					is_move_target = target_file in [target for _, target in moves]
+
+					if is_move_source or is_move_target:
+						# Reconstruct this file's diff content
+						_, file_content = self._reconstruct_file_diff(patched_file)
+						chunk_content += file_content + "\n"
+
+			except Exception:
+				logger.exception("Error extracting content for move chunk")
+				# Use a placeholder if extraction failed
+				chunk_content = f"# File moves between {source_dir} and {target_dir}:\n"
+				for source, target in moves:
+					chunk_content += f"# - {source} -> {target}\n"
+
+			# Create a single chunk for this move group
+			move_chunks.append(
+				DiffChunk(
+					files=all_files,
+					content=chunk_content,
+					description=description,
+					is_move=True,  # Indicate this is a move operation
+				)
+			)
+
+		return move_chunks
