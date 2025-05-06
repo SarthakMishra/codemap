@@ -5,15 +5,16 @@ from __future__ import annotations
 # Import collections.abc for type annotation
 import logging
 import os
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
 from codemap.llm import LLMClient, LLMError
 from codemap.utils.config_loader import ConfigLoader
 
-from .prompts import get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
+from .prompts import MOVE_CONTEXT, get_lint_prompt_template, prepare_lint_prompt, prepare_prompt
 from .schemas import COMMIT_MESSAGE_SCHEMA
 from .utils import (
 	JSONFormattingError,
@@ -22,13 +23,11 @@ from .utils import (
 	lint_commit_message,
 )
 
-if TYPE_CHECKING:
-	from pathlib import Path
-
 logger = logging.getLogger(__name__)
 
 MAX_DEBUG_CONTENT_LENGTH = 100
 EXPECTED_PARTS_COUNT = 2  # Type+scope and description
+MIN_DIRS_FOR_MOVE = 2  # Minimum number of directories for a move operation
 
 
 class CommitMessageGenerator:
@@ -251,6 +250,50 @@ class CommitMessageGenerator:
 			"lint_errors": "",  # Default value for lint_errors
 		}
 
+		# Add move operation context if this is a file move
+		if getattr(chunk, "is_move", False):
+			# For a move operation, files in chunk.files should include both source and destination paths
+			# We need to identify which files are source (deleted) and which are destination (added)
+
+			# First attempt: Try to parse from the diff content to identify actual moved file pairs
+			moved_file_pairs = self._extract_moved_file_pairs(chunk)
+
+			if moved_file_pairs:
+				# Create context based on actual file pairs extracted from diff
+				move_contexts = self._create_move_contexts_from_pairs(moved_file_pairs)
+				if move_contexts:
+					diff_content += "\n\n" + "\n".join(move_contexts)
+					context["diff"] = diff_content
+			else:
+				# Fallback: Group files by directory and infer move operations
+				# Group files by directory
+				files_by_dir = {}
+				for file_path in chunk.files:
+					dir_path = str(Path(file_path).parent)
+					if dir_path not in files_by_dir:
+						files_by_dir[dir_path] = []
+					files_by_dir[dir_path].append(file_path)
+
+				# Find source and target directories
+				dirs = list(files_by_dir.keys())
+				if len(dirs) >= MIN_DIRS_FOR_MOVE:
+					# Simplest case: first directory is source, second is target
+					source_dir = dirs[0]
+					target_dir = dirs[1]
+
+					# We don't have exact mapping information, so list all files
+					files_list = "\n".join([f"- {file}" for file in chunk.files])
+
+					# Format the move context and add it to the diff content
+					move_context = MOVE_CONTEXT.format(
+						files=files_list,
+						source_dir=source_dir if source_dir not in {".", ""} else "root directory",
+						target_dir=target_dir if target_dir not in {".", ""} else "root directory",
+					)
+
+					diff_content += "\n\n" + move_context
+					context["diff"] = diff_content
+
 		# Prepare and return the prompt
 		return prepare_prompt(
 			template=self.prompt_template,
@@ -259,6 +302,99 @@ class CommitMessageGenerator:
 			convention=convention,
 			extra_context=context,  # Pass the context with default values
 		)
+
+	def _extract_moved_file_pairs(self, chunk: DiffChunk) -> list[tuple[str, str]]:
+		"""
+		Extract moved file pairs from a move operation diff.
+
+		This analyzes diff content to identify pairs of files that were moved
+		from one location to another.
+
+		Args:
+			chunk: DiffChunk representing a file move operation
+
+		Returns:
+			List of (source_path, target_path) tuples
+		"""
+		if not chunk.content:
+			return []
+
+		# Look for patterns in the diff content that indicate moves
+		# Git diff for moves typically shows a deletion and an addition
+		moved_pairs = []
+
+		try:
+			# Parse for deleted/added file patterns
+			deleted_files = []
+			added_files = []
+
+			# Simple regex-based parsing (could be improved with proper diff parsing)
+			deleted_pattern = re.compile(r"diff --git a/(.*?) b/.*?\n.*?deleted file mode")
+			added_pattern = re.compile(r"diff --git a/.*? b/(.*?)\n.*?new file mode")
+
+			# Find all deleted files and added files using list comprehensions
+			deleted_files = [match.group(1) for match in deleted_pattern.finditer(chunk.content)]
+			added_files = [match.group(1) for match in added_pattern.finditer(chunk.content)]
+
+			# Try to match deleted and added files by name
+			for deleted in deleted_files:
+				deleted_name = Path(deleted).name
+				for added in added_files:
+					added_name = Path(added).name
+
+					# If filenames match, assume it's a move
+					if deleted_name == added_name:
+						moved_pairs.append((deleted, added))
+						# Remove these files from consideration for other pairs
+						added_files.remove(added)
+						break
+
+			return moved_pairs
+		except Exception:
+			logger.exception("Error extracting moved file pairs")
+			return []
+
+	def _create_move_contexts_from_pairs(self, moved_file_pairs: list[tuple[str, str]]) -> list[str]:
+		"""
+		Create move context strings for each group of moved files.
+
+		Args:
+			moved_file_pairs: List of (source_path, target_path) tuples
+
+		Returns:
+			List of formatted move context strings
+		"""
+		if not moved_file_pairs:
+			return []
+
+		# Group by source/target directories
+		move_pairs = {}  # (source_dir, target_dir) -> [(source, target), ...]
+
+		for source, target in moved_file_pairs:
+			source_dir = str(Path(source).parent)
+			target_dir = str(Path(target).parent)
+			dir_pair = (source_dir, target_dir)
+
+			if dir_pair not in move_pairs:
+				move_pairs[dir_pair] = []
+			move_pairs[dir_pair].append((source, target))
+
+		# Create context for each distinct move operation
+		move_contexts = []
+		for (src_dir, tgt_dir), file_pairs in move_pairs.items():
+			# Create detailed file list with source → target mapping
+			files_list = "\n".join([f"- {src} → {tgt}" for src, tgt in file_pairs])
+
+			# Format source/target directory names
+			src_dir_display = "root directory" if src_dir in {".", ""} else src_dir
+			tgt_dir_display = "root directory" if tgt_dir in {".", ""} else tgt_dir
+
+			# Create context using the template
+			move_contexts.append(
+				MOVE_CONTEXT.format(files=files_list, source_dir=src_dir_display, target_dir=tgt_dir_display)
+			)
+
+		return move_contexts
 
 	def fallback_generation(self, chunk: DiffChunk) -> str:
 		"""
