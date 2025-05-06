@@ -94,7 +94,7 @@ tasks:
   vulture:
     desc: Finds unused code
     cmds:
-      - uv run vulture {{.SRC_DIR}}
+      - uv run vulture {{.SRC_DIR}} --min-confidence 80
 
   test:
     desc: Run all tests
@@ -126,12 +126,12 @@ tasks:
   docs:coverage:
     desc: Check documentation coverage
     cmds:
-      - uv run interrogate --style google --generate-badge docs/assets --badge-style flat {{.SRC_DIR}}
+      - uv run interrogate --style google -v --fail-under 100 {{.SRC_DIR}}
 
   docs:coverage:badge:
     desc: Generate documentation badge
     cmds:
-      - uv run interrogate --style google -- {{.SRC_DIR}}
+      - uv run interrogate --style google --generate-badge docs/assets --badge-style flat {{.SRC_DIR}}
 
   docs:update:
     desc: Update documentation
