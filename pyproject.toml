@@ -12,9 +12,18 @@ changelog = "CHANGELOG.md"
 authors = [
     { name="Sarthak Mishra", email="hi@sarthakmishra.com" },
 ]
-license = { text = "MIT" }
+license = "MIT"
 keywords = ["cli", "markdown", "git", "documentation", "codebase"]
-requires-python = ">=3.12,<3.13"
+classifiers = [
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Build Tools",
+  
+  "License :: OSI Approved :: MIT License",
+
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+]
+requires-python = ">=3.12"
 dependencies = [
     "litellm>=1.67.0",
     "numpy>=2.2.5",
@@ -27,34 +36,47 @@ dependencies = [
     "typer>=0.15.2",
     "typing-extensions>=4.13.2",
     "sentence-transformers>=4.1.0",
-    "watchdog>=6.0.0",
     "tree-sitter>=0.24.0",
     "tree-sitter-language-pack>=0.7.2",
-    "lancedb>=0.21.2",
     "pandas>=2.2.3",
-    "multilspy>=0.0.15",
     "pytest-mock>=3.14.0",
-    "python-daemon>=3.1.2",
-    "lockfile>=0.12.2",
-    "fastapi>=0.110.0",
-    "uvicorn>=0.29.0",
     "pydantic>=2.7.0",
     "pyxdg>=0.28",
     "packaging>=24.2",
     "requests-unixsocket>=0.4.1",
     "pathspec>=0.12.1",
+    "unidiff>=0.7.5",
+    "sqlmodel>=0.0.24",
+    "tenacity>=9.1.2",
+    "qdrant-client>=1.14.2",
+    "voyageai>=0.3.2",
+    "sentence-transformers>=4.1.0",
+    "httpx>=0.28.1",
+    "docker>=7.1.0",
+    "asyncer>=0.0.8",
+    "psycopg2-binary>=2.9.10",
+    "watchdog>=6.0.0",
+    "scikit-learn>=1.6.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/SarthakMishra/codemap.git"
+Changelog = "https://github.com/SarthakMishra/codemap/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/SarthakMishra/codemap/blob/main/README.md"
+Repository = "https://github.com/SarthakMishra/codemap.git"
+Issues = "https://github.com/SarthakMishra/codemap/issues"
 
 [dependency-groups]
 dev = [
     "build>=1.2.2.post1",
-    "docformatter>=1.7.5",
-    "interrogate>=1.7.0",
+    "interrogate[png]>=1.7.0",
     "isort>=6.0.1",
+    "packaging>=25.0",
     "pre-commit>=4.2.0",
     "pylint>=3.3.6",
     "pyright>=1.1.400",
     "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.1.1",
     "pytest-mock>=3.14.0",
     "pytest-sugar>=1.0.0",
@@ -63,6 +85,7 @@ dev = [
     "radon>=6.0.1",
     "ruff>=0.11.6",
     "twine>=6.1.0",
+    "vulture>=2.14",
 ]
 model2vec = [
     "matplotlib[pyplot]>=3.10.1",
@@ -70,6 +93,12 @@ model2vec = [
     "psutil>=7.0.0",
     "sentence-transformers>=4.1.0",
     "transformers>=4.51.1",
+]
+docs = [
+    "mike>=2.1.3",
+    "mkdocs-material[imaging]>=9.6.12",
+    "mkdocs-mermaid2-plugin>=1.2.1",
+    "mkdocstrings-python>=1.16.10",
 ]
 
 [tool.pyright]
@@ -152,6 +181,8 @@ ignore = [
     "TC001",  # Move application import into a type-checking block
     "ERA001", # Found commented-out code
     "G004", # Logging statement uses f-string
+    "TD003", # Missing link in to-do
+    "TRY301", # Abstract raise to an inner function
     # Disable rules that conflict with tab indentation
     "E101",  # Indentation contains mixed spaces and tabs
     "W191",  # indentation contains tabs
@@ -160,11 +191,48 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"tests/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105", "PT019", "ANN001", "D102"]
-"models/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
-"models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
+"tests/*" = [
+    "S101",  # Use of assert detected (security risk in production)
+    "PLR2004",  # Magic value comparison (should use constant)
+    "ANN002",  # Missing type annotation for argument
+    "ANN003",  # Missing type annotation for return value
+    "SLF001",  # Private member accessed (name starts with underscore)
+    "S108",  # File permissions set too openly (security risk)
+    "S105",  # Hardcoded password/token (security risk)
+    "PT019",  # Fixture without return type annotation
+    "ANN001",  # Missing type annotation for function argument
+    "ANN201",  # Missing return type annotation for public function
+    "ANN202",  # Missing return type annotation for private function
+    "D102",  # Missing docstring in public method
+    "ARG001",  # Unused function argument
+    "E501",  # Line too long (>120 characters)
+    "N806",  # Variable in function should be lowercase
+    "BLE001", # Do not catch blind exceptions
+]
+"ai_models/*" = ["S101", "PLR2004", "ANN002", "ANN003", "SLF001", "S108", "S105"]
+"ai_models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 "src/codemap/utils/pr_strategies.py" = ["ARG002"]  # Allow unused arguments in strategy interface methods
+"scripts/*" = [
+    "S101",  # Use of assert detected (security risk in production)
+    "PLR2004",  # Magic value comparison (should use constant)
+    "ANN002",  # Missing type annotation for argument
+    "ANN003",  # Missing type annotation for return value
+    "SLF001",  # Private member accessed (name starts with underscore)
+    "S108",  # File permissions set too openly (security risk)
+    "S105",  # Hardcoded password/token (security risk)
+    "PT019",  # Fixture without return type annotation
+    "ANN001",  # Missing type annotation for function argument
+    "ANN201",  # Missing return type annotation for public function
+    "ANN202",  # Missing return type annotation for private function
+    "D102",  # Missing docstring in public method
+    "ARG001",  # Unused function argument
+    "E501",  # Line too long (>120 characters)
+    "N806",  # Variable in function should be lowercase
+    "BLE001", # Do not catch blind exceptions
+    "S603", # Use of unsafe subprocess call
+    "S607", # Starting a process with a partial executable path
+]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

@@ -70,3 +70,7 @@ models/qodo_embed_m2v/tokenizer.json
 
 # CodeMap cache
 .codemap_cache
+
+# mkdocs
+.cache
+site
