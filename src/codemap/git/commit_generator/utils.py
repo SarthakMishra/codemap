@@ -170,10 +170,6 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 		if "commit_message" in message_data and isinstance(message_data["commit_message"], str):
 			return message_data["commit_message"].strip()
 
-		# Check for {"message": "..."} format
-		if "message" in message_data and isinstance(message_data["message"], str):
-			return message_data["message"].strip()
-
 		# Basic Schema Validation
 		if not isinstance(message_data, dict):
 			_raise_validation_error("JSON response is not an object")

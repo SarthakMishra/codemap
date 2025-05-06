@@ -20,31 +20,33 @@ class CommitMessageSchema(TypedDict):
 COMMIT_MESSAGE_SCHEMA = {
 	"type": "object",
 	"properties": {
-		"type": {
-			"type": "string",
-			"description": "The type of change (e.g., feat, fix, docs, style, refactor, perf, test, chore)",
-		},
-		"scope": {"type": ["string", "null"], "description": "The scope of the change (e.g., component affected)"},
-		"description": {"type": "string", "description": "A short, imperative-tense description of the change"},
-		"body": {
-			"type": ["string", "null"],
-			"description": "A longer description of the changes, explaining why and how",
-		},
-		"breaking": {"type": "boolean", "description": "Whether this is a breaking change", "default": False},
-		"footers": {
-			"type": "array",
-			"items": {
-				"type": "object",
-				"properties": {
-					"token": {
-						"type": "string",
-						"description": "Footer token (e.g., 'BREAKING CHANGE', 'Fixes', 'Refs')",
-					},
-					"value": {"type": "string", "description": "Footer value"},
-				},
-				"required": ["token", "value"],
+		"commit_message": {
+			"type": {
+				"type": "string",
+				"description": "The type of change (e.g., feat, fix, docs, style, refactor, perf, test, chore)",
 			},
-			"default": [],
+			"scope": {"type": ["string", "null"], "description": "The scope of the change (e.g., component affected)"},
+			"description": {"type": "string", "description": "A short, imperative-tense description of the change"},
+			"body": {
+				"type": ["string", "null"],
+				"description": "A longer description of the changes, explaining why and how",
+			},
+			"breaking": {"type": "boolean", "description": "Whether this is a breaking change", "default": False},
+			"footers": {
+				"type": "array",
+				"items": {
+					"type": "object",
+					"properties": {
+						"token": {
+							"type": "string",
+							"description": "Footer token (e.g., 'BREAKING CHANGE', 'Fixes', 'Refs')",
+						},
+						"value": {"type": "string", "description": "Footer value"},
+					},
+					"required": ["token", "value"],
+				},
+				"default": [],
+			},
 		},
 	},
 	"required": ["type", "description"],
