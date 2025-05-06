@@ -96,7 +96,6 @@ nav:
       - Utils: api/git/pr_generator/utils.md
     - Semantic Grouping:
       - Semantic Grouping Overview: api/git/semantic_grouping/index.md
-      - Batch Processor: api/git/semantic_grouping/batch_processor.md
       - Clusterer: api/git/semantic_grouping/clusterer.md
       - Context Processor: api/git/semantic_grouping/context_processor.md
       - Embedder: api/git/semantic_grouping/embedder.md
