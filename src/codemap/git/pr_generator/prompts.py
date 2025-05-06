@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+PR_SYSTEM_PROMPT = """
+You are an AI assistant knowledgeable in Git best practices.
+You are tasked with generating PR titles and descriptions based on a list of commits.
+Follow the user's requirements carefully and to the letter.
+"""
+
 PR_TITLE_PROMPT = """Based on the following commits, generate a clear, concise PR title that captures the
 essence of the changes.
 Follow these guidelines:

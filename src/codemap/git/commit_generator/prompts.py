@@ -7,10 +7,15 @@ from typing import Any
 
 from .schemas import COMMIT_MESSAGE_SCHEMA
 
+COMMIT_SYSTEM_PROMPT = """
+You are an AI assistant knowledgeable in Git best practices.
+You are tasked with generating Conventional Commit 1.0.0 messages from Git diffs.
+Follow the user's requirements carefully and to the letter.
+Your response must be a valid JSON object matching the provided schema.
+"""
+
 # Default prompt template for commit message generation
 DEFAULT_PROMPT_TEMPLATE = """
-You are an AI assistant generating Conventional Commit 1.0.0 messages from Git diffs.
-
 **Format:**
 ```
 <type>[optional scope]: <description>

@@ -10,7 +10,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from codemap.git.pr_generator.constants import MAX_COMMIT_PREVIEW
-from codemap.git.pr_generator.prompts import PR_DESCRIPTION_PROMPT, PR_TITLE_PROMPT, format_commits_for_prompt
+from codemap.git.pr_generator.prompts import (
+	PR_DESCRIPTION_PROMPT,
+	PR_SYSTEM_PROMPT,
+	PR_TITLE_PROMPT,
+	format_commits_for_prompt,
+)
 from codemap.git.pr_generator.schemas import PRContent, PullRequest
 from codemap.git.pr_generator.strategies import branch_exists, create_strategy, get_default_branch
 from codemap.git.utils import GitError, run_git_command
@@ -201,7 +206,12 @@ def generate_pr_title_with_llm(
 			actual_model = model or "gpt-4o-mini"
 			client = create_client(model=actual_model, api_key=api_key, api_base=api_base)
 
-		title = client.generate_text(prompt=prompt)
+		title = client.completion(
+			messages=[
+				{"role": "system", "content": PR_SYSTEM_PROMPT},
+				{"role": "user", "content": prompt},
+			],
+		)
 
 		# Clean up the title
 		title = title.strip()
@@ -362,7 +372,12 @@ def generate_pr_description_with_llm(
 			actual_model = model or "gpt-4o-mini"
 			client = create_client(model=actual_model, api_key=api_key, api_base=api_base)
 
-		return client.generate_text(prompt=prompt)
+		return client.completion(
+			messages=[
+				{"role": "system", "content": PR_SYSTEM_PROMPT},
+				{"role": "user", "content": prompt},
+			],
+		)
 
 	except (ValueError, RuntimeError, ConnectionError) as e:
 		logger.warning("Failed to generate PR description with LLM: %s", str(e))
