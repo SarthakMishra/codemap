@@ -205,34 +205,6 @@
          <lastmod>2025-05-06</lastmod>
     </url>
     <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/batch_processor/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/clusterer/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/context_processor/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/embedder/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/group/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
-         <loc>https://codemap.run/0.2.0-rc.2/api/git/semantic_grouping/resolver/</loc>
-         <lastmod>2025-05-06</lastmod>
-    </url>
-    <url>
          <loc>https://codemap.run/0.2.0-rc.2/api/llm/</loc>
          <lastmod>2025-05-06</lastmod>
     </url>

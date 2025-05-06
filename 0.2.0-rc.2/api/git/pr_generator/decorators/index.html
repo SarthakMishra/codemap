@@ -1330,8 +1330,6 @@
       
         
       
-        
-      
     
     
     
@@ -2311,219 +2309,6 @@
   
   <span class="md-ellipsis">
     Utils
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    
-    
-      
-        
-          
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-    
-    
-    
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6_7" >
-        
-          
-          <div class="md-nav__link md-nav__container">
-            <a href="../../semantic_grouping/" class="md-nav__link ">
-              
-  
-  
-  <span class="md-ellipsis">
-    Semantic Grouping
-    
-  </span>
-  
-
-            </a>
-            
-              
-              <label class="md-nav__link " for="__nav_2_6_7" id="__nav_2_6_7_label" tabindex="0">
-                <span class="md-nav__icon md-icon"></span>
-              </label>
-            
-          </div>
-        
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_6_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_6_7">
-            <span class="md-nav__icon md-icon"></span>
-            Semantic Grouping
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/batch_processor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Batch Processor
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/clusterer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Clusterer
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/context_processor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Context Processor
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/embedder/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Embedder
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/group/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Group
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/resolver/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Resolver
     
   </span>
   
@@ -4209,26 +3994,7 @@
 <span class="normal">48</span>
 <span class="normal">49</span>
 <span class="normal">50</span>
-<span class="normal">51</span>
-<span class="normal">52</span>
-<span class="normal">53</span>
-<span class="normal">54</span>
-<span class="normal">55</span>
-<span class="normal">56</span>
-<span class="normal">57</span>
-<span class="normal">58</span>
-<span class="normal">59</span>
-<span class="normal">60</span>
-<span class="normal">61</span>
-<span class="normal">62</span>
-<span class="normal">63</span>
-<span class="normal">64</span>
-<span class="normal">65</span>
-<span class="normal">66</span>
-<span class="normal">67</span>
-<span class="normal">68</span>
-<span class="normal">69</span>
-<span class="normal">70</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">git_operation</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">F</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">F</span><span class="p">:</span>
+<span class="normal">51</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">git_operation</span><span class="p">(</span><span class="n">func</span><span class="p">:</span> <span class="n">F</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">F</span><span class="p">:</span>
 <span class="w">	</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">	Decorator for git operations.</span>
 
@@ -4247,25 +4013,6 @@
 
 	<span class="nd">@functools</span><span class="o">.</span><span class="n">wraps</span><span class="p">(</span><span class="n">func</span><span class="p">)</span>
 	<span class="k">def</span><span class="w"> </span><span class="nf">wrapper</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">:</span> <span class="nb">object</span><span class="p">,</span> <span class="o">**</span><span class="n">kwargs</span><span class="p">:</span> <span class="nb">object</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">object</span><span class="p">:</span>
-<span class="w">		</span><span class="sd">&quot;&quot;&quot;Wrapper function for git operations that handles logging and error conversion.</span>
-
-<span class="sd">		Args:</span>
-<span class="sd">		    *args: Positional arguments passed to the decorated function.</span>
-<span class="sd">		    **kwargs: Keyword arguments passed to the decorated function.</span>
-
-<span class="sd">		Returns:</span>
-<span class="sd">		    The result of the decorated function if successful.</span>
-
-<span class="sd">		Raises:</span>
-<span class="sd">		    GitError: If any exception occurs during the git operation. Original GitError</span>
-<span class="sd">		        exceptions are re-raised as-is, while other exceptions are converted to</span>
-<span class="sd">		        GitError with a descriptive message.</span>
-
-<span class="sd">		Note:</span>
-<span class="sd">		    - Logs debug messages for operation start/end</span>
-<span class="sd">		    - Converts non-GitError exceptions to GitError</span>
-<span class="sd">		    - Preserves original GitError exceptions</span>
-<span class="sd">		&quot;&quot;&quot;</span>
 		<span class="n">function_name</span> <span class="o">=</span> <span class="n">func</span><span class="o">.</span><span class="vm">__name__</span>
 		<span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Starting git operation: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">function_name</span><span class="p">)</span>
 

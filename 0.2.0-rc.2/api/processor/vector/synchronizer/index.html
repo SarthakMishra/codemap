@@ -1328,8 +1328,6 @@
       
         
       
-        
-      
     
     
     
@@ -2229,219 +2227,6 @@
   
   <span class="md-ellipsis">
     Utils
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    
-    
-      
-        
-          
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-    
-    
-    
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6_7" >
-        
-          
-          <div class="md-nav__link md-nav__container">
-            <a href="../../../git/semantic_grouping/" class="md-nav__link ">
-              
-  
-  
-  <span class="md-ellipsis">
-    Semantic Grouping
-    
-  </span>
-  
-
-            </a>
-            
-              
-              <label class="md-nav__link " for="__nav_2_6_7" id="__nav_2_6_7_label" tabindex="0">
-                <span class="md-nav__icon md-icon"></span>
-              </label>
-            
-          </div>
-        
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_6_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_6_7">
-            <span class="md-nav__icon md-icon"></span>
-            Semantic Grouping
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../git/semantic_grouping/batch_processor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Batch Processor
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../git/semantic_grouping/clusterer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Clusterer
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../git/semantic_grouping/context_processor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Context Processor
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../git/semantic_grouping/embedder/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Embedder
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../git/semantic_grouping/group/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Group
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../../git/semantic_grouping/resolver/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Resolver
     
   </span>
   
@@ -4792,32 +4577,7 @@
 <span class="normal">443</span>
 <span class="normal">444</span>
 <span class="normal">445</span>
-<span class="normal">446</span>
-<span class="normal">447</span>
-<span class="normal">448</span>
-<span class="normal">449</span>
-<span class="normal">450</span>
-<span class="normal">451</span>
-<span class="normal">452</span>
-<span class="normal">453</span>
-<span class="normal">454</span>
-<span class="normal">455</span>
-<span class="normal">456</span>
-<span class="normal">457</span>
-<span class="normal">458</span>
-<span class="normal">459</span>
-<span class="normal">460</span>
-<span class="normal">461</span>
-<span class="normal">462</span>
-<span class="normal">463</span>
-<span class="normal">464</span>
-<span class="normal">465</span>
-<span class="normal">466</span>
-<span class="normal">467</span>
-<span class="normal">468</span>
-<span class="normal">469</span>
-<span class="normal">470</span>
-<span class="normal">471</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">VectorSynchronizer</span><span class="p">:</span>
+<span class="normal">446</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">VectorSynchronizer</span><span class="p">:</span>
 <span class="w">	</span><span class="sd">&quot;&quot;&quot;Handles asynchronous synchronization between Git repository and Qdrant vector index.&quot;&quot;&quot;</span>
 
 	<span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
@@ -5014,21 +4774,7 @@
 		<span class="k">return</span> <span class="n">files_to_process</span><span class="p">,</span> <span class="n">files_to_delete_chunks_for</span><span class="p">,</span> <span class="n">chunks_to_delete</span>
 
 	<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">_process_and_upsert_batch</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">chunk_batch</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">CodeChunk</span><span class="p">])</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
-<span class="w">		</span><span class="sd">&quot;&quot;&quot;Process a batch of chunks by generating embeddings and upserting to Qdrant.</span>
-
-<span class="sd">		Args:</span>
-<span class="sd">		    chunk_batch: List of CodeChunk objects to process. Each chunk contains content</span>
-<span class="sd">		        and metadata about a code segment.</span>
-
-<span class="sd">		Returns:</span>
-<span class="sd">		    int: Number of points successfully upserted to Qdrant. Returns 0 if:</span>
-<span class="sd">		        - Input batch is empty</span>
-<span class="sd">		        - Embedding generation fails</span>
-<span class="sd">		        - No points are generated from the batch</span>
-
-<span class="sd">		Raises:</span>
-<span class="sd">		    RuntimeError: If there&#39;s a mismatch between input chunks and generated embeddings.</span>
-<span class="sd">		&quot;&quot;&quot;</span>
+<span class="w">		</span><span class="sd">&quot;&quot;&quot;Processes a batch of chunks: gets embeddings and upserts to Qdrant.&quot;&quot;&quot;</span>
 		<span class="k">if</span> <span class="ow">not</span> <span class="n">chunk_batch</span><span class="p">:</span>
 			<span class="k">return</span> <span class="mi">0</span>
 
@@ -5091,17 +4837,6 @@
 		<span class="n">processed_chunk_count</span> <span class="o">=</span> <span class="mi">0</span>
 
 		<span class="k">def</span><span class="w"> </span><span class="nf">update_progress</span><span class="p">(</span><span class="n">description</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">step_increment</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">processed_chunks</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<span class="w">			</span><span class="sd">&quot;&quot;&quot;Updates the progress bar with current synchronization status.</span>
-
-<span class="sd">			Args:</span>
-<span class="sd">				description: Main description text to display in progress bar.</span>
-<span class="sd">				step_increment: Number of steps to increment progress by. Defaults to 1.</span>
-<span class="sd">				processed_chunks: Number of chunks processed in this update. Defaults to 0.</span>
-<span class="sd">					If greater than 0, will be appended to description in parentheses.</span>
-
-<span class="sd">			Returns:</span>
-<span class="sd">				None</span>
-<span class="sd">			&quot;&quot;&quot;</span>
 			<span class="k">nonlocal</span> <span class="n">current_step</span><span class="p">,</span> <span class="n">processed_chunk_count</span>
 			<span class="n">current_step</span> <span class="o">+=</span> <span class="n">step_increment</span>
 			<span class="n">processed_chunk_count</span> <span class="o">+=</span> <span class="n">processed_chunks</span>
@@ -5893,7 +5628,21 @@
 
             <details class="quote">
               <summary>Source code in <code>src/codemap/processor/vector/synchronizer.py</code></summary>
-              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">282</span>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">268</span>
+<span class="normal">269</span>
+<span class="normal">270</span>
+<span class="normal">271</span>
+<span class="normal">272</span>
+<span class="normal">273</span>
+<span class="normal">274</span>
+<span class="normal">275</span>
+<span class="normal">276</span>
+<span class="normal">277</span>
+<span class="normal">278</span>
+<span class="normal">279</span>
+<span class="normal">280</span>
+<span class="normal">281</span>
+<span class="normal">282</span>
 <span class="normal">283</span>
 <span class="normal">284</span>
 <span class="normal">285</span>
@@ -6057,32 +5806,7 @@
 <span class="normal">443</span>
 <span class="normal">444</span>
 <span class="normal">445</span>
-<span class="normal">446</span>
-<span class="normal">447</span>
-<span class="normal">448</span>
-<span class="normal">449</span>
-<span class="normal">450</span>
-<span class="normal">451</span>
-<span class="normal">452</span>
-<span class="normal">453</span>
-<span class="normal">454</span>
-<span class="normal">455</span>
-<span class="normal">456</span>
-<span class="normal">457</span>
-<span class="normal">458</span>
-<span class="normal">459</span>
-<span class="normal">460</span>
-<span class="normal">461</span>
-<span class="normal">462</span>
-<span class="normal">463</span>
-<span class="normal">464</span>
-<span class="normal">465</span>
-<span class="normal">466</span>
-<span class="normal">467</span>
-<span class="normal">468</span>
-<span class="normal">469</span>
-<span class="normal">470</span>
-<span class="normal">471</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sync_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">progress</span><span class="p">:</span> <span class="n">Progress</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">task_id</span><span class="p">:</span> <span class="n">TaskID</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
+<span class="normal">446</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">sync_index</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">progress</span><span class="p">:</span> <span class="n">Progress</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span> <span class="n">task_id</span><span class="p">:</span> <span class="n">TaskID</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
 <span class="w">	</span><span class="sd">&quot;&quot;&quot;</span>
 <span class="sd">	Asynchronously synchronize the Qdrant index with the current repository state.</span>
 
@@ -6101,17 +5825,6 @@
 	<span class="n">processed_chunk_count</span> <span class="o">=</span> <span class="mi">0</span>
 
 	<span class="k">def</span><span class="w"> </span><span class="nf">update_progress</span><span class="p">(</span><span class="n">description</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">step_increment</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">processed_chunks</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">0</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
-<span class="w">		</span><span class="sd">&quot;&quot;&quot;Updates the progress bar with current synchronization status.</span>
-
-<span class="sd">		Args:</span>
-<span class="sd">			description: Main description text to display in progress bar.</span>
-<span class="sd">			step_increment: Number of steps to increment progress by. Defaults to 1.</span>
-<span class="sd">			processed_chunks: Number of chunks processed in this update. Defaults to 0.</span>
-<span class="sd">				If greater than 0, will be appended to description in parentheses.</span>
-
-<span class="sd">		Returns:</span>
-<span class="sd">			None</span>
-<span class="sd">		&quot;&quot;&quot;</span>
 		<span class="k">nonlocal</span> <span class="n">current_step</span><span class="p">,</span> <span class="n">processed_chunk_count</span>
 		<span class="n">current_step</span> <span class="o">+=</span> <span class="n">step_increment</span>
 		<span class="n">processed_chunk_count</span> <span class="o">+=</span> <span class="n">processed_chunks</span>

@@ -1330,8 +1330,6 @@
       
         
       
-        
-      
     
     
     
@@ -2479,219 +2477,6 @@
   
   <span class="md-ellipsis">
     Utils
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-          </ul>
-        </nav>
-      
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    
-    
-      
-        
-          
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
-    
-    
-    
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2_6_7" >
-        
-          
-          <div class="md-nav__link md-nav__container">
-            <a href="../../semantic_grouping/" class="md-nav__link ">
-              
-  
-  
-  <span class="md-ellipsis">
-    Semantic Grouping
-    
-  </span>
-  
-
-            </a>
-            
-              
-              <label class="md-nav__link " for="__nav_2_6_7" id="__nav_2_6_7_label" tabindex="0">
-                <span class="md-nav__icon md-icon"></span>
-              </label>
-            
-          </div>
-        
-        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_2_6_7_label" aria-expanded="false">
-          <label class="md-nav__title" for="__nav_2_6_7">
-            <span class="md-nav__icon md-icon"></span>
-            Semantic Grouping
-          </label>
-          <ul class="md-nav__list" data-md-scrollfix>
-            
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/batch_processor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Batch Processor
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/clusterer/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Clusterer
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/context_processor/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Context Processor
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/embedder/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Embedder
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/group/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Group
-    
-  </span>
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../semantic_grouping/resolver/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    Resolver
     
   </span>
   
@@ -4427,10 +4212,6 @@
 
 
 
-
-
-
-
 <div class="doc doc-object doc-attribute">
 
 
@@ -4963,10 +4744,10 @@
 
 	<span class="k">def</span><span class="w"> </span><span class="nf">_handle_empty_diff_content</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">diff</span><span class="p">:</span> <span class="n">GitDiff</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">DiffChunk</span><span class="p">]:</span>
 <span class="w">		</span><span class="sd">&quot;&quot;&quot;Handle untracked files in empty diff content.&quot;&quot;&quot;</span>
-		<span class="k">if</span> <span class="p">(</span><span class="ow">not</span> <span class="n">diff</span><span class="o">.</span><span class="n">is_staged</span> <span class="ow">or</span> <span class="n">diff</span><span class="o">.</span><span class="n">is_untracked</span><span class="p">)</span> <span class="ow">and</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
+		<span class="k">if</span> <span class="ow">not</span> <span class="n">diff</span><span class="o">.</span><span class="n">is_staged</span> <span class="ow">and</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
 			<span class="c1"># Filter out invalid file names</span>
 			<span class="n">valid_files</span> <span class="o">=</span> <span class="p">[</span><span class="n">file</span> <span class="k">for</span> <span class="n">file</span> <span class="ow">in</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span> <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_valid_filename</span><span class="p">(</span><span class="n">file</span><span class="p">)]</span>
-			<span class="k">return</span> <span class="p">[</span><span class="n">DiffChunk</span><span class="p">(</span><span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">f</span><span class="p">],</span> <span class="n">content</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;New file: </span><span class="si">{</span><span class="n">f</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">valid_files</span><span class="p">]</span>
+			<span class="k">return</span> <span class="p">[</span><span class="n">DiffChunk</span><span class="p">(</span><span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">f</span><span class="p">],</span> <span class="n">content</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">)</span> <span class="k">for</span> <span class="n">f</span> <span class="ow">in</span> <span class="n">valid_files</span><span class="p">]</span>
 		<span class="k">return</span> <span class="p">[]</span>
 
 	<span class="nd">@staticmethod</span>
@@ -6116,103 +5897,7 @@
 <span class="normal">1041</span>
 <span class="normal">1042</span>
 <span class="normal">1043</span>
-<span class="normal">1044</span>
-<span class="normal">1045</span>
-<span class="normal">1046</span>
-<span class="normal">1047</span>
-<span class="normal">1048</span>
-<span class="normal">1049</span>
-<span class="normal">1050</span>
-<span class="normal">1051</span>
-<span class="normal">1052</span>
-<span class="normal">1053</span>
-<span class="normal">1054</span>
-<span class="normal">1055</span>
-<span class="normal">1056</span>
-<span class="normal">1057</span>
-<span class="normal">1058</span>
-<span class="normal">1059</span>
-<span class="normal">1060</span>
-<span class="normal">1061</span>
-<span class="normal">1062</span>
-<span class="normal">1063</span>
-<span class="normal">1064</span>
-<span class="normal">1065</span>
-<span class="normal">1066</span>
-<span class="normal">1067</span>
-<span class="normal">1068</span>
-<span class="normal">1069</span>
-<span class="normal">1070</span>
-<span class="normal">1071</span>
-<span class="normal">1072</span>
-<span class="normal">1073</span>
-<span class="normal">1074</span>
-<span class="normal">1075</span>
-<span class="normal">1076</span>
-<span class="normal">1077</span>
-<span class="normal">1078</span>
-<span class="normal">1079</span>
-<span class="normal">1080</span>
-<span class="normal">1081</span>
-<span class="normal">1082</span>
-<span class="normal">1083</span>
-<span class="normal">1084</span>
-<span class="normal">1085</span>
-<span class="normal">1086</span>
-<span class="normal">1087</span>
-<span class="normal">1088</span>
-<span class="normal">1089</span>
-<span class="normal">1090</span>
-<span class="normal">1091</span>
-<span class="normal">1092</span>
-<span class="normal">1093</span>
-<span class="normal">1094</span>
-<span class="normal">1095</span>
-<span class="normal">1096</span>
-<span class="normal">1097</span>
-<span class="normal">1098</span>
-<span class="normal">1099</span>
-<span class="normal">1100</span>
-<span class="normal">1101</span>
-<span class="normal">1102</span>
-<span class="normal">1103</span>
-<span class="normal">1104</span>
-<span class="normal">1105</span>
-<span class="normal">1106</span>
-<span class="normal">1107</span>
-<span class="normal">1108</span>
-<span class="normal">1109</span>
-<span class="normal">1110</span>
-<span class="normal">1111</span>
-<span class="normal">1112</span>
-<span class="normal">1113</span>
-<span class="normal">1114</span>
-<span class="normal">1115</span>
-<span class="normal">1116</span>
-<span class="normal">1117</span>
-<span class="normal">1118</span>
-<span class="normal">1119</span>
-<span class="normal">1120</span>
-<span class="normal">1121</span>
-<span class="normal">1122</span>
-<span class="normal">1123</span>
-<span class="normal">1124</span>
-<span class="normal">1125</span>
-<span class="normal">1126</span>
-<span class="normal">1127</span>
-<span class="normal">1128</span>
-<span class="normal">1129</span>
-<span class="normal">1130</span>
-<span class="normal">1131</span>
-<span class="normal">1132</span>
-<span class="normal">1133</span>
-<span class="normal">1134</span>
-<span class="normal">1135</span>
-<span class="normal">1136</span>
-<span class="normal">1137</span>
-<span class="normal">1138</span>
-<span class="normal">1139</span>
-<span class="normal">1140</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SemanticSplitStrategy</span><span class="p">(</span><span class="n">BaseSplitStrategy</span><span class="p">):</span>
+<span class="normal">1044</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">class</span><span class="w"> </span><span class="nc">SemanticSplitStrategy</span><span class="p">(</span><span class="n">BaseSplitStrategy</span><span class="p">):</span>
 <span class="w">	</span><span class="sd">&quot;&quot;&quot;Strategy to split diffs semantically.&quot;&quot;&quot;</span>
 
 	<span class="k">def</span><span class="w"> </span><span class="fm">__init__</span><span class="p">(</span>
@@ -6313,110 +5998,69 @@
 		<span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_process_group</span><span class="p">(</span><span class="n">diff</span><span class="p">)</span>
 
 	<span class="k">def</span><span class="w"> </span><span class="nf">_process_group</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">diff</span><span class="p">:</span> <span class="n">GitDiff</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">DiffChunk</span><span class="p">]:</span>
-<span class="w">		</span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">		Process a GitDiff with one or more files.</span>
-
-<span class="sd">		Originally designed for single files, but now supports multiple files.</span>
-
-<span class="sd">		&quot;&quot;&quot;</span>
+<span class="w">		</span><span class="sd">&quot;&quot;&quot;Process a manageable group of files.&quot;&quot;&quot;</span>
 		<span class="k">if</span> <span class="ow">not</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
-			<span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;_process_group called with empty files list&quot;</span><span class="p">)</span>
 			<span class="k">return</span> <span class="p">[]</span>
 
-		<span class="c1"># If multiple files, this used to log an error, but now we&#39;ll handle it properly</span>
-		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">)</span> <span class="o">&gt;</span> <span class="mi">1</span><span class="p">:</span>
-			<span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Processing group with multiple files: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">)</span>
+		<span class="c1"># 1. Generate initial chunks for each file</span>
+		<span class="n">initial_file_chunks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">DiffChunk</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
+		<span class="k">for</span> <span class="n">file_path</span> <span class="ow">in</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
+			<span class="n">single_file_diff_view</span> <span class="o">=</span> <span class="n">GitDiff</span><span class="p">(</span>
+				<span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">file_path</span><span class="p">],</span>
+				<span class="n">content</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">content</span><span class="p">,</span>  <span class="c1"># Full content for parsing</span>
+				<span class="n">is_staged</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">is_staged</span><span class="p">,</span>
+			<span class="p">)</span>
+			<span class="n">enhanced_chunks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enhance_semantic_split</span><span class="p">(</span><span class="n">single_file_diff_view</span><span class="p">)</span>
+			<span class="k">if</span> <span class="n">enhanced_chunks</span><span class="p">:</span>
+				<span class="n">initial_file_chunks</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">enhanced_chunks</span><span class="p">)</span>
+			<span class="k">else</span><span class="p">:</span>
+				<span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;No chunk generated for file: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
 
-			<span class="c1"># Extract content for each file individually if possible</span>
-			<span class="n">chunks</span> <span class="o">=</span> <span class="p">[]</span>
-			<span class="k">for</span> <span class="n">file_path</span> <span class="ow">in</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
-				<span class="c1"># Try to extract just this file&#39;s diff from the full content</span>
-				<span class="n">file_diff_content</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_extract_file_diff</span><span class="p">(</span><span class="n">diff</span><span class="o">.</span><span class="n">content</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
+		<span class="k">if</span> <span class="ow">not</span> <span class="n">initial_file_chunks</span><span class="p">:</span>
+			<span class="k">return</span> <span class="p">[]</span>
 
-				<span class="k">if</span> <span class="n">file_diff_content</span><span class="p">:</span>
-					<span class="c1"># Create a new diff for just this file</span>
-					<span class="n">file_diff</span> <span class="o">=</span> <span class="n">GitDiff</span><span class="p">(</span><span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">file_path</span><span class="p">],</span> <span class="n">content</span><span class="o">=</span><span class="n">file_diff_content</span><span class="p">,</span> <span class="n">is_staged</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">is_staged</span><span class="p">)</span>
-					<span class="c1"># Process it and add the resulting chunks</span>
-					<span class="n">enhanced_chunks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enhance_semantic_split</span><span class="p">(</span><span class="n">file_diff</span><span class="p">)</span>
-					<span class="n">chunks</span><span class="o">.</span><span class="n">extend</span><span class="p">(</span><span class="n">enhanced_chunks</span><span class="p">)</span>
-				<span class="k">else</span><span class="p">:</span>
-					<span class="c1"># If we couldn&#39;t extract just this file&#39;s diff, create a simple chunk</span>
-					<span class="n">chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
-						<span class="n">DiffChunk</span><span class="p">(</span>
-							<span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">file_path</span><span class="p">],</span>
-							<span class="n">content</span><span class="o">=</span><span class="s2">&quot;&quot;</span><span class="p">,</span>  <span class="c1"># Empty content as we couldn&#39;t extract it</span>
-							<span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Changes in </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-						<span class="p">)</span>
-					<span class="p">)</span>
+		<span class="c1"># 2. Consolidate chunks from the same file first</span>
+		<span class="n">consolidated_chunks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consolidate_small_chunks</span><span class="p">(</span><span class="n">initial_file_chunks</span><span class="p">)</span>
 
-			<span class="c1"># If we couldn&#39;t create any valid chunks, fallback to the original behavior</span>
-			<span class="k">if</span> <span class="ow">not</span> <span class="n">chunks</span><span class="p">:</span>
-				<span class="k">return</span> <span class="p">[</span><span class="n">DiffChunk</span><span class="p">(</span><span class="n">files</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">,</span> <span class="n">content</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">content</span><span class="p">,</span> <span class="n">description</span><span class="o">=</span><span class="s2">&quot;Multiple file changes&quot;</span><span class="p">)]</span>
+		<span class="c1"># 3. Group remaining chunks</span>
+		<span class="n">processed_indices</span><span class="p">:</span> <span class="nb">set</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="nb">set</span><span class="p">()</span>
+		<span class="n">final_chunks</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="n">DiffChunk</span><span class="p">]</span> <span class="o">=</span> <span class="p">[]</span>
 
-			<span class="k">return</span> <span class="n">chunks</span>
+		<span class="c1"># First pass: Group by related file patterns</span>
+		<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="n">chunk1</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">consolidated_chunks</span><span class="p">):</span>
+			<span class="k">if</span> <span class="n">i</span> <span class="ow">in</span> <span class="n">processed_indices</span><span class="p">:</span>
+				<span class="k">continue</span>
+			<span class="k">if</span> <span class="ow">not</span> <span class="n">chunk1</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>  <span class="c1"># Skip chunks without files</span>
+				<span class="n">processed_indices</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
+				<span class="n">final_chunks</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chunk1</span><span class="p">)</span>
+				<span class="k">continue</span>
 
-		<span class="c1"># Original behavior for single file</span>
-		<span class="n">file_path</span> <span class="o">=</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+			<span class="n">related_group</span> <span class="o">=</span> <span class="p">[</span><span class="n">chunk1</span><span class="p">]</span>
+			<span class="n">processed_indices</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">i</span><span class="p">)</span>
 
-		<span class="c1"># Enhance this single file diff</span>
-		<span class="n">enhanced_chunks</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_enhance_semantic_split</span><span class="p">(</span><span class="n">diff</span><span class="p">)</span>  <span class="c1"># Pass the original diff directly</span>
+			<span class="k">for</span> <span class="n">j</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">consolidated_chunks</span><span class="p">)):</span>
+				<span class="k">if</span> <span class="n">j</span> <span class="ow">in</span> <span class="n">processed_indices</span><span class="p">:</span>
+					<span class="k">continue</span>
+				<span class="n">chunk2</span> <span class="o">=</span> <span class="n">consolidated_chunks</span><span class="p">[</span><span class="n">j</span><span class="p">]</span>
+				<span class="k">if</span> <span class="ow">not</span> <span class="n">chunk2</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>  <span class="c1"># Skip chunks without files</span>
+					<span class="k">continue</span>
 
-		<span class="k">if</span> <span class="ow">not</span> <span class="n">enhanced_chunks</span><span class="p">:</span>
-			<span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;No chunk generated for file: </span><span class="si">%s</span><span class="s2"> after enhancement.&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
-			<span class="c1"># Fallback if enhancement yields nothing</span>
-			<span class="n">enhanced_chunks</span> <span class="o">=</span> <span class="p">[</span>
-				<span class="n">DiffChunk</span><span class="p">(</span>
-					<span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">file_path</span><span class="p">],</span>
-					<span class="n">content</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">content</span><span class="p">,</span>
-					<span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;Changes in </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2"> (enhancement failed)&quot;</span><span class="p">,</span>
-				<span class="p">)</span>
-			<span class="p">]</span>
+				<span class="c1"># Check relation between first files of each chunk</span>
+				<span class="k">if</span> <span class="n">are_files_related</span><span class="p">(</span><span class="n">chunk1</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">chunk2</span><span class="o">.</span><span class="n">files</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="bp">self</span><span class="o">.</span><span class="n">related_file_patterns</span><span class="p">):</span>
+					<span class="n">related_group</span><span class="o">.</span><span class="n">append</span><span class="p">(</span><span class="n">chunk2</span><span class="p">)</span>
+					<span class="n">processed_indices</span><span class="o">.</span><span class="n">add</span><span class="p">(</span><span class="n">j</span><span class="p">)</span>
 
-		<span class="c1"># No further consolidation or grouping needed here as we process file-by-file now</span>
-		<span class="k">return</span> <span class="n">enhanced_chunks</span>
+			<span class="bp">self</span><span class="o">.</span><span class="n">_create_semantic_chunk</span><span class="p">(</span><span class="n">related_group</span><span class="p">,</span> <span class="n">final_chunks</span><span class="p">)</span>
 
-	<span class="k">def</span><span class="w"> </span><span class="nf">_extract_file_diff</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">full_diff_content</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">file_path</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">str</span><span class="p">:</span>
-<span class="w">		</span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">		Extract the diff content for a specific file from a multi-file diff.</span>
+		<span class="c1"># Second pass: Group remaining by similarity</span>
+		<span class="n">remaining_chunks</span> <span class="o">=</span> <span class="p">[</span>
+			<span class="n">consolidated_chunks</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="n">consolidated_chunks</span><span class="p">))</span> <span class="k">if</span> <span class="n">i</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">processed_indices</span>
+		<span class="p">]</span>
+		<span class="k">if</span> <span class="n">remaining_chunks</span><span class="p">:</span>
+			<span class="bp">self</span><span class="o">.</span><span class="n">_group_by_content_similarity</span><span class="p">(</span><span class="n">remaining_chunks</span><span class="p">,</span> <span class="n">final_chunks</span><span class="p">)</span>
 
-<span class="sd">		Args:</span>
-<span class="sd">		        full_diff_content: Complete diff content with multiple files</span>
-<span class="sd">		        file_path: Path of the file to extract</span>
-
-<span class="sd">		Returns:</span>
-<span class="sd">		        The extracted diff for the specific file, or empty string if not found</span>
-
-<span class="sd">		&quot;&quot;&quot;</span>
-		<span class="kn">import</span><span class="w"> </span><span class="nn">re</span>
-
-		<span class="c1"># Pattern to match the start of a diff for a file</span>
-		<span class="n">diff_start_pattern</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">compile</span><span class="p">(</span><span class="sa">r</span><span class="s2">&quot;diff --git a/([^\s]+) b/([^\s]+)&quot;</span><span class="p">)</span>
-
-		<span class="c1"># Find all diff start positions</span>
-		<span class="n">diff_positions</span> <span class="o">=</span> <span class="p">[]</span>
-		<span class="k">for</span> <span class="n">match</span> <span class="ow">in</span> <span class="n">diff_start_pattern</span><span class="o">.</span><span class="n">finditer</span><span class="p">(</span><span class="n">full_diff_content</span><span class="p">):</span>
-			<span class="n">_</span><span class="p">,</span> <span class="n">b_file</span> <span class="o">=</span> <span class="n">match</span><span class="o">.</span><span class="n">groups</span><span class="p">()</span>
-			<span class="c1"># For most changes both files are the same; for renames prefer b_file</span>
-			<span class="n">target_file</span> <span class="o">=</span> <span class="n">b_file</span>
-			<span class="n">diff_positions</span><span class="o">.</span><span class="n">append</span><span class="p">((</span><span class="n">match</span><span class="o">.</span><span class="n">start</span><span class="p">(),</span> <span class="n">target_file</span><span class="p">))</span>
-
-		<span class="c1"># Sort by position</span>
-		<span class="n">diff_positions</span><span class="o">.</span><span class="n">sort</span><span class="p">()</span>
-
-		<span class="c1"># Find the diff for our file</span>
-		<span class="n">file_diff</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>
-		<span class="k">for</span> <span class="n">i</span><span class="p">,</span> <span class="p">(</span><span class="n">start_pos</span><span class="p">,</span> <span class="n">diff_file</span><span class="p">)</span> <span class="ow">in</span> <span class="nb">enumerate</span><span class="p">(</span><span class="n">diff_positions</span><span class="p">):</span>
-			<span class="k">if</span> <span class="n">diff_file</span> <span class="o">==</span> <span class="n">file_path</span><span class="p">:</span>
-				<span class="c1"># Found our file, now find the end</span>
-				<span class="k">if</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="n">diff_positions</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">:</span>
-					<span class="n">end_pos</span> <span class="o">=</span> <span class="n">diff_positions</span><span class="p">[</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">][</span><span class="mi">0</span><span class="p">]</span>
-					<span class="n">file_diff</span> <span class="o">=</span> <span class="n">full_diff_content</span><span class="p">[</span><span class="n">start_pos</span><span class="p">:</span><span class="n">end_pos</span><span class="p">]</span>
-				<span class="k">else</span><span class="p">:</span>
-					<span class="c1"># Last file in the diff</span>
-					<span class="n">file_diff</span> <span class="o">=</span> <span class="n">full_diff_content</span><span class="p">[</span><span class="n">start_pos</span><span class="p">:]</span>
-				<span class="k">break</span>
-
-		<span class="k">return</span> <span class="n">file_diff</span>
+		<span class="c1"># 4. Final consolidation check</span>
+		<span class="k">return</span> <span class="bp">self</span><span class="o">.</span><span class="n">_consolidate_if_needed</span><span class="p">(</span><span class="n">final_chunks</span><span class="p">)</span>
 
 	<span class="k">def</span><span class="w"> </span><span class="nf">_validate_embedding_model</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="kc">None</span><span class="p">:</span>
 <span class="w">		</span><span class="sd">&quot;&quot;&quot;Validate that the embedding model is available.&quot;&quot;&quot;</span>
@@ -6697,33 +6341,9 @@
 		<span class="k">if</span> <span class="ow">not</span> <span class="n">diff_content</span><span class="p">:</span>
 			<span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Cannot parse empty diff content for </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
 			<span class="k">return</span> <span class="kc">None</span>
-
-		<span class="n">filtered_content</span> <span class="o">=</span> <span class="s2">&quot;&quot;</span>  <span class="c1"># Initialize to handle unbound case</span>
 		<span class="k">try</span><span class="p">:</span>
-			<span class="c1"># Filter out the truncation marker lines before parsing</span>
-			<span class="n">filtered_content_lines</span> <span class="o">=</span> <span class="p">[</span>
-				<span class="n">line</span> <span class="k">for</span> <span class="n">line</span> <span class="ow">in</span> <span class="n">diff_content</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()</span> <span class="k">if</span> <span class="n">line</span><span class="o">.</span><span class="n">strip</span><span class="p">()</span> <span class="o">!=</span> <span class="s2">&quot;... [content truncated] ...&quot;</span>
-			<span class="p">]</span>
-			<span class="n">filtered_content</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">filtered_content_lines</span><span class="p">)</span>
-
 			<span class="c1"># Use StringIO as PatchSet expects a file-like object or iterable</span>
-			<span class="k">try</span><span class="p">:</span>
-				<span class="n">patch_set</span> <span class="o">=</span> <span class="n">PatchSet</span><span class="p">(</span><span class="n">StringIO</span><span class="p">(</span><span class="n">filtered_content</span><span class="p">))</span>
-			<span class="k">except</span> <span class="n">UnidiffParseError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
-				<span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;UnidiffParseError for </span><span class="si">%s</span><span class="s2">: </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="nb">str</span><span class="p">(</span><span class="n">e</span><span class="p">))</span>
-				<span class="c1"># Try to extract just the diff for this specific file to avoid parsing the entire diff</span>
-				<span class="n">file_diff_content_raw</span> <span class="o">=</span> <span class="n">re</span><span class="o">.</span><span class="n">search</span><span class="p">(</span>
-					<span class="sa">rf</span><span class="s2">&quot;diff --git a/.*? b/</span><span class="si">{</span><span class="n">re</span><span class="o">.</span><span class="n">escape</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span><span class="si">}</span><span class="s2">\n(.*?)(?=diff --git a/|\Z)&quot;</span><span class="p">,</span>
-					<span class="n">diff_content</span><span class="p">,</span>
-					<span class="n">re</span><span class="o">.</span><span class="n">DOTALL</span> <span class="o">|</span> <span class="n">re</span><span class="o">.</span><span class="n">MULTILINE</span><span class="p">,</span>
-				<span class="p">)</span>
-				<span class="n">content_for_chunk</span> <span class="o">=</span> <span class="n">file_diff_content_raw</span><span class="o">.</span><span class="n">group</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="k">if</span> <span class="n">file_diff_content_raw</span> <span class="k">else</span> <span class="s2">&quot;&quot;</span>
-				<span class="k">if</span> <span class="n">content_for_chunk</span><span class="p">:</span>
-					<span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Extracted raw content for </span><span class="si">%s</span><span class="s2"> after parse error&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
-					<span class="c1"># Create a manual PatchedFile since we can&#39;t parse it properly</span>
-					<span class="k">return</span> <span class="kc">None</span>
-				<span class="k">return</span> <span class="kc">None</span>
-
+			<span class="n">patch_set</span> <span class="o">=</span> <span class="n">PatchSet</span><span class="p">(</span><span class="n">StringIO</span><span class="p">(</span><span class="n">diff_content</span><span class="p">))</span>
 			<span class="n">matched_file</span><span class="p">:</span> <span class="n">PatchedFile</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
 			<span class="k">for</span> <span class="n">patched_file</span> <span class="ow">in</span> <span class="n">patch_set</span><span class="p">:</span>
 				<span class="c1"># unidiff paths usually start with a/ or b/</span>
@@ -6734,15 +6354,6 @@
 				<span class="n">logger</span><span class="o">.</span><span class="n">warning</span><span class="p">(</span><span class="s2">&quot;Could not find matching PatchedFile for: </span><span class="si">%s</span><span class="s2"> in unidiff output&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
 				<span class="k">return</span> <span class="kc">None</span>
 			<span class="k">return</span> <span class="n">matched_file</span>
-		<span class="k">except</span> <span class="n">UnidiffParseError</span><span class="p">:</span>
-			<span class="c1"># Log the specific parse error and the content that caused it (first few lines)</span>
-			<span class="n">preview_lines</span> <span class="o">=</span> <span class="s2">&quot;</span><span class="se">\n</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">join</span><span class="p">(</span><span class="n">filtered_content</span><span class="o">.</span><span class="n">splitlines</span><span class="p">()[:</span><span class="mi">10</span><span class="p">])</span>  <span class="c1"># Log first 10 lines</span>
-			<span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span>
-				<span class="s2">&quot;UnidiffParseError for </span><span class="si">%s</span><span class="se">\n</span><span class="s2">Content Preview:</span><span class="se">\n</span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span>  <span class="c1"># Corrected format string</span>
-				<span class="n">file_path</span><span class="p">,</span>
-				<span class="n">preview_lines</span><span class="p">,</span>
-			<span class="p">)</span>
-			<span class="k">return</span> <span class="kc">None</span>  <span class="c1"># Return None on parse error</span>
 		<span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
 			<span class="n">logger</span><span class="o">.</span><span class="n">exception</span><span class="p">(</span><span class="s2">&quot;Failed to parse diff content using unidiff for </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">)</span>
 			<span class="k">return</span> <span class="kc">None</span>
@@ -6822,32 +6433,18 @@
 
 	<span class="k">def</span><span class="w"> </span><span class="nf">_enhance_semantic_split</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">diff</span><span class="p">:</span> <span class="n">GitDiff</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">list</span><span class="p">[</span><span class="n">DiffChunk</span><span class="p">]:</span>
 <span class="w">		</span><span class="sd">&quot;&quot;&quot;</span>
-<span class="sd">		Enhance the semantic split by using NLP and chunk detection.</span>
+<span class="sd">		Orchestrates the parsing and splitting for a single file&#39;s diff view.</span>
+
+<span class="sd">		Handles parsing, reconstruction, large file splitting, semantic pattern</span>
+<span class="sd">		splitting, and fallback hunk splitting.</span>
 
 <span class="sd">		Args:</span>
-<span class="sd">		    diff: The GitDiff object to split</span>
+<span class="sd">		    diff: GitDiff object (expected to contain one file path and full diff content)</span>
 
 <span class="sd">		Returns:</span>
-<span class="sd">		    List of enhanced DiffChunk objects</span>
+<span class="sd">		    List of DiffChunk objects for the file</span>
 
 <span class="sd">		&quot;&quot;&quot;</span>
-		<span class="k">if</span> <span class="ow">not</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">:</span>
-			<span class="k">return</span> <span class="p">[]</span>
-
-		<span class="c1"># Special handling for untracked files - avoid unidiff parsing errors</span>
-		<span class="k">if</span> <span class="n">diff</span><span class="o">.</span><span class="n">is_untracked</span><span class="p">:</span>
-			<span class="c1"># Create a basic chunk with only file info for untracked files</span>
-			<span class="c1"># Use a list comprehension for performance (PERF401)</span>
-			<span class="k">return</span> <span class="p">[</span>
-				<span class="n">DiffChunk</span><span class="p">(</span>
-					<span class="n">files</span><span class="o">=</span><span class="p">[</span><span class="n">file_path</span><span class="p">],</span>
-					<span class="n">content</span><span class="o">=</span><span class="n">diff</span><span class="o">.</span><span class="n">content</span> <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="k">else</span> <span class="sa">f</span><span class="s2">&quot;New untracked file: </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-					<span class="n">description</span><span class="o">=</span><span class="sa">f</span><span class="s2">&quot;New file: </span><span class="si">{</span><span class="n">file_path</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span>
-				<span class="p">)</span>
-				<span class="k">for</span> <span class="n">file_path</span> <span class="ow">in</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span>
-				<span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">_is_valid_filename</span><span class="p">(</span><span class="n">file_path</span><span class="p">)</span>
-			<span class="p">]</span>
-
 		<span class="k">if</span> <span class="ow">not</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span> <span class="ow">or</span> <span class="nb">len</span><span class="p">(</span><span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">1</span><span class="p">:</span>
 			<span class="n">logger</span><span class="o">.</span><span class="n">error</span><span class="p">(</span><span class="s2">&quot;_enhance_semantic_split called with invalid diff object (files=</span><span class="si">%s</span><span class="s2">)&quot;</span><span class="p">,</span> <span class="n">diff</span><span class="o">.</span><span class="n">files</span><span class="p">)</span>
 			<span class="k">return</span> <span class="p">[]</span>
@@ -7217,14 +6814,6 @@
 
 		<span class="n">logger</span><span class="o">.</span><span class="n">debug</span><span class="p">(</span><span class="s2">&quot;Split </span><span class="si">%s</span><span class="s2"> into </span><span class="si">%d</span><span class="s2"> chunks based on semantic patterns&quot;</span><span class="p">,</span> <span class="n">file_path</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="n">result_chunks</span><span class="p">))</span>
 		<span class="k">return</span> <span class="n">result_chunks</span>
-
-	<span class="nd">@staticmethod</span>
-	<span class="k">def</span><span class="w"> </span><span class="nf">_is_valid_filename</span><span class="p">(</span><span class="n">filename</span><span class="p">:</span> <span class="nb">str</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">bool</span><span class="p">:</span>
-<span class="w">		</span><span class="sd">&quot;&quot;&quot;Check if the filename is valid (not a pattern or template).&quot;&quot;&quot;</span>
-		<span class="k">if</span> <span class="ow">not</span> <span class="n">filename</span><span class="p">:</span>
-			<span class="k">return</span> <span class="kc">False</span>
-		<span class="n">invalid_chars</span> <span class="o">=</span> <span class="p">[</span><span class="s2">&quot;*&quot;</span><span class="p">,</span> <span class="s2">&quot;+&quot;</span><span class="p">,</span> <span class="s2">&quot;{&quot;</span><span class="p">,</span> <span class="s2">&quot;}&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="se">\\</span><span class="s2">&quot;</span><span class="p">]</span>
-		<span class="k">return</span> <span class="ow">not</span> <span class="p">(</span><span class="nb">any</span><span class="p">(</span><span class="n">char</span> <span class="ow">in</span> <span class="n">filename</span> <span class="k">for</span> <span class="n">char</span> <span class="ow">in</span> <span class="n">invalid_chars</span><span class="p">)</span> <span class="ow">or</span> <span class="n">filename</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="s1">&#39;&quot;&#39;</span><span class="p">))</span>
 </code></pre></div></td></tr></table></div>
               </details>
 
