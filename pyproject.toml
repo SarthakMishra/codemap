@@ -317,7 +317,8 @@ allowed_tags = [
     "perf",
     "refactor",
     "style",
-    "test"
+    "test",
+    "release"
 ]
-minor_tags = ["feat"]
-patch_tags = ["fix", "perf"]
+minor_tags = ["release"]
+patch_tags = ["fix", "feat"]
