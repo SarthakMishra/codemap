@@ -56,6 +56,7 @@ dependencies = [
     "asyncer>=0.0.8",
     "psycopg2-binary>=2.9.10",
     "watchdog>=6.0.0",
+    "scikit-learn>=1.6.1",
 ]
 
 [project.urls]
@@ -68,9 +69,9 @@ Issues = "https://github.com/SarthakMishra/codemap/issues"
 [dependency-groups]
 dev = [
     "build>=1.2.2.post1",
-    "docformatter>=1.7.5",
-    "interrogate>=1.7.0",
+    "interrogate[png]>=1.7.0",
     "isort>=6.0.1",
+    "packaging>=25.0",
     "pre-commit>=4.2.0",
     "pylint>=3.3.6",
     "pyright>=1.1.400",
@@ -84,6 +85,7 @@ dev = [
     "radon>=6.0.1",
     "ruff>=0.11.6",
     "twine>=6.1.0",
+    "vulture>=2.14",
 ]
 model2vec = [
     "matplotlib[pyplot]>=3.10.1",
@@ -93,8 +95,10 @@ model2vec = [
     "transformers>=4.51.1",
 ]
 docs = [
+    "mike>=2.1.3",
     "mkdocs-material[imaging]>=9.6.12",
     "mkdocs-mermaid2-plugin>=1.2.1",
+    "mkdocstrings-python>=1.16.10",
 ]
 
 [tool.pyright]
@@ -209,6 +213,26 @@ ignore = [
 "ai_models/qodo_embed_m2v/*" = ["ANN001", "ANN201", "ANN202", "ANN401", "G003", "BLE001"]
 "src/codemap/cli/main.py" = ["ARG001"]  # Allow unused arguments in CLI functions (for API compatibility)
 "src/codemap/utils/pr_strategies.py" = ["ARG002"]  # Allow unused arguments in strategy interface methods
+"scripts/*" = [
+    "S101",  # Use of assert detected (security risk in production)
+    "PLR2004",  # Magic value comparison (should use constant)
+    "ANN002",  # Missing type annotation for argument
+    "ANN003",  # Missing type annotation for return value
+    "SLF001",  # Private member accessed (name starts with underscore)
+    "S108",  # File permissions set too openly (security risk)
+    "S105",  # Hardcoded password/token (security risk)
+    "PT019",  # Fixture without return type annotation
+    "ANN001",  # Missing type annotation for function argument
+    "ANN201",  # Missing return type annotation for public function
+    "ANN202",  # Missing return type annotation for private function
+    "D102",  # Missing docstring in public method
+    "ARG001",  # Unused function argument
+    "E501",  # Line too long (>120 characters)
+    "N806",  # Variable in function should be lowercase
+    "BLE001", # Do not catch blind exceptions
+    "S603", # Use of unsafe subprocess call
+    "S607", # Starting a process with a partial executable path
+]
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10

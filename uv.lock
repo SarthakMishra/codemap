@@ -326,7 +326,7 @@ wheels = [
 
 [[package]]
 name = "codemap"
-version = "0.2.0rc1"
+version = "0.2.0rc2"
 source = { editable = "." }
 dependencies = [
     { name = "asyncer" },
@@ -349,6 +349,7 @@ dependencies = [
     { name = "requests" },
     { name = "requests-unixsocket" },
     { name = "rich" },
+    { name = "scikit-learn" },
     { name = "sentence-transformers" },
     { name = "sqlmodel" },
     { name = "tenacity" },
@@ -364,9 +365,9 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "build" },
-    { name = "docformatter" },
-    { name = "interrogate" },
+    { name = "interrogate", extra = ["png"] },
     { name = "isort" },
+    { name = "packaging" },
     { name = "pre-commit" },
     { name = "pylint" },
     { name = "pyright" },
@@ -380,10 +381,13 @@ dev = [
     { name = "radon" },
     { name = "ruff" },
     { name = "twine" },
+    { name = "vulture" },
 ]
 docs = [
+    { name = "mike" },
     { name = "mkdocs-material", extra = ["imaging"] },
     { name = "mkdocs-mermaid2-plugin" },
+    { name = "mkdocstrings-python" },
 ]
 model2vec = [
     { name = "matplotlib" },
@@ -415,6 +419,7 @@ requires-dist = [
     { name = "requests", specifier = ">=2.32.3" },
     { name = "requests-unixsocket", specifier = ">=0.4.1" },
     { name = "rich", specifier = ">=14.0.0" },
+    { name = "scikit-learn", specifier = ">=1.6.1" },
     { name = "sentence-transformers", specifier = ">=4.1.0" },
     { name = "sqlmodel", specifier = ">=0.0.24" },
     { name = "tenacity", specifier = ">=9.1.2" },
@@ -430,9 +435,9 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "build", specifier = ">=1.2.2.post1" },
-    { name = "docformatter", specifier = ">=1.7.5" },
-    { name = "interrogate", specifier = ">=1.7.0" },
+    { name = "interrogate", extras = ["png"], specifier = ">=1.7.0" },
     { name = "isort", specifier = ">=6.0.1" },
+    { name = "packaging", specifier = ">=25.0" },
     { name = "pre-commit", specifier = ">=4.2.0" },
     { name = "pylint", specifier = ">=3.3.6" },
     { name = "pyright", specifier = ">=1.1.400" },
@@ -446,10 +451,13 @@ dev = [
     { name = "radon", specifier = ">=6.0.1" },
     { name = "ruff", specifier = ">=0.11.6" },
     { name = "twine", specifier = ">=6.1.0" },
+    { name = "vulture", specifier = ">=2.14" },
 ]
 docs = [
+    { name = "mike", specifier = ">=2.1.3" },
     { name = "mkdocs-material", extras = ["imaging"], specifier = ">=9.6.12" },
     { name = "mkdocs-mermaid2-plugin", specifier = ">=1.2.1" },
+    { name = "mkdocstrings-python", specifier = ">=1.16.10" },
 ]
 model2vec = [
     { name = "matplotlib", extras = ["pyplot"], specifier = ">=3.10.1" },
@@ -633,19 +641,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/fc/f8/98eea607f65de6527f8a2e8885fc8015d3e6f5775df186e443e0964a11c3/distro-1.9.0.tar.gz", hash = "sha256:2fa77c6fd8940f116ee1d6b94a2f90b13b5ea8d019b98bc8bafdcabcdd9bdbed", size = 60722 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/b3/231ffd4ab1fc9d679809f356cebee130ac7daa00d6d6f3206dd4fd137e9e/distro-1.9.0-py3-none-any.whl", hash = "sha256:7bffd925d65168f85027d8da9af6bddab658135b840670a223589bc0c8ef02b2", size = 20277 },
-]
-
-[[package]]
-name = "docformatter"
-version = "1.7.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "charset-normalizer" },
-    { name = "untokenize" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/44/aba2c40cf796121b35835ea8c00bc5d93f2f70730eca53b36b8bbbfaefe1/docformatter-1.7.5.tar.gz", hash = "sha256:ffed3da0daffa2e77f80ccba4f0e50bfa2755e1c10e130102571c890a61b246e", size = 25893 }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8b/95/568a2fca29df365b82012b09b64964a05f4f20ac83c2137b262f3fa3188f/docformatter-1.7.5-py3-none-any.whl", hash = "sha256:a24f5545ed1f30af00d106f5d85dc2fce4959295687c24c8f39f5263afaf9186", size = 32798 },
 ]
 
 [[package]]
@@ -872,6 +867,18 @@ wheels = [
 ]
 
 [[package]]
+name = "griffe"
+version = "1.7.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a9/3e/5aa9a61f7c3c47b0b52a1d930302992229d191bf4bc76447b324b731510a/griffe-1.7.3.tar.gz", hash = "sha256:52ee893c6a3a968b639ace8015bec9d36594961e156e23315c8e8e51401fa50b", size = 395137 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/58/c6/5c20af38c2a57c15d87f7f38bee77d63c1d2a3689f74fefaf35915dd12b2/griffe-1.7.3-py3-none-any.whl", hash = "sha256:c6b3ee30c2f0f17f30bcdef5068d6ab7a2a4f1b8bf1a3e74b56fffd21e1c5f75", size = 129303 },
+]
+
+[[package]]
 name = "grpcio"
 version = "1.71.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1064,6 +1071,11 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/8b/22/74f7fcc96280eea46cf2bcbfa1354ac31de0e60a4be6f7966f12cef20893/interrogate-1.7.0.tar.gz", hash = "sha256:a320d6ec644dfd887cc58247a345054fc4d9f981100c45184470068f4b3719b0", size = 159636 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/12/c9/6869a1dcf4aaf309b9543ec070be3ec3adebee7c9bec9af8c230494134b9/interrogate-1.7.0-py3-none-any.whl", hash = "sha256:b13ff4dd8403369670e2efe684066de9fcb868ad9d7f2b4095d8112142dc9d12", size = 46982 },
+]
+
+[package.optional-dependencies]
+png = [
+    { name = "cairosvg" },
 ]
 
 [[package]]
@@ -1439,6 +1451,25 @@ wheels = [
 ]
 
 [[package]]
+name = "mike"
+version = "2.1.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "importlib-metadata" },
+    { name = "importlib-resources" },
+    { name = "jinja2" },
+    { name = "mkdocs" },
+    { name = "pyparsing" },
+    { name = "pyyaml" },
+    { name = "pyyaml-env-tag" },
+    { name = "verspec" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ab/f7/2933f1a1fb0e0f077d5d6a92c6c7f8a54e6128241f116dff4df8b6050bbf/mike-2.1.3.tar.gz", hash = "sha256:abd79b8ea483fb0275b7972825d3082e5ae67a41820f8d8a0dc7a3f49944e810", size = 38119 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/1a/31b7cd6e4e7a02df4e076162e9783620777592bea9e4bb036389389af99d/mike-2.1.3-py3-none-any.whl", hash = "sha256:d90c64077e84f06272437b464735130d380703a76a5738b152932884c60c062a", size = 33754 },
+]
+
+[[package]]
 name = "mkdocs"
 version = "1.6.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1460,6 +1491,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/bc/c6/bbd4f061bd16b378247f12953ffcb04786a618ce5e904b8c5a01a0309061/mkdocs-1.6.1.tar.gz", hash = "sha256:7b432f01d928c084353ab39c57282f29f92136665bdd6abf7c1ec8d822ef86f2", size = 3889159 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/22/5b/dbc6a8cddc9cfa9c4971d59fb12bb8d42e161b7e7f8cc89e49137c5b279c/mkdocs-1.6.1-py3-none-any.whl", hash = "sha256:db91759624d1647f3f34aa0c3f327dd2601beae39a366d6e064c03468d35c20e", size = 3864451 },
+]
+
+[[package]]
+name = "mkdocs-autorefs"
+version = "1.4.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "markdown" },
+    { name = "markupsafe" },
+    { name = "mkdocs" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c2/44/140469d87379c02f1e1870315f3143718036a983dd0416650827b8883192/mkdocs_autorefs-1.4.1.tar.gz", hash = "sha256:4b5b6235a4becb2b10425c2fa191737e415b37aa3418919db33e5d774c9db079", size = 4131355 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f8/29/1125f7b11db63e8e32bcfa0752a4eea30abff3ebd0796f808e14571ddaa2/mkdocs_autorefs-1.4.1-py3-none-any.whl", hash = "sha256:9793c5ac06a6ebbe52ec0f8439256e66187badf4b5334b5fde0b128ec134df4f", size = 5782047 },
 ]
 
 [[package]]
@@ -1528,6 +1573,37 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/3e/1a/f580733da1924ebc9b4bb04a34ca63ae62a50b0e62eeb016e78d9dee6d69/mkdocs_mermaid2_plugin-1.2.1.tar.gz", hash = "sha256:9c7694c73a65905ac1578f966e5c193325c4d5a5bc1836727e74ac9f99d0e921", size = 16104 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/24/ce/c8a41cb0f3044990c8afbdc20c853845a9e940995d4e0cffecafbb5e927b/mkdocs_mermaid2_plugin-1.2.1-py3-none-any.whl", hash = "sha256:22d2cf2c6867d4959a5e0903da2dde78d74581fc0b107b791bc4c7ceb9ce9741", size = 17260 },
+]
+
+[[package]]
+name = "mkdocstrings"
+version = "0.29.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "jinja2" },
+    { name = "markdown" },
+    { name = "markupsafe" },
+    { name = "mkdocs" },
+    { name = "mkdocs-autorefs" },
+    { name = "pymdown-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/41/e8/d22922664a627a0d3d7ff4a6ca95800f5dde54f411982591b4621a76225d/mkdocstrings-0.29.1.tar.gz", hash = "sha256:8722f8f8c5cd75da56671e0a0c1bbed1df9946c0cef74794d6141b34011abd42", size = 1212686 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/14/22533a578bf8b187e05d67e2c1721ce10e3f526610eebaf7a149d557ea7a/mkdocstrings-0.29.1-py3-none-any.whl", hash = "sha256:37a9736134934eea89cbd055a513d40a020d87dfcae9e3052c2a6b8cd4af09b6", size = 1631075 },
+]
+
+[[package]]
+name = "mkdocstrings-python"
+version = "1.16.10"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "griffe" },
+    { name = "mkdocs-autorefs" },
+    { name = "mkdocstrings" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/44/c8/600c4201b6b9e72bab16802316d0c90ce04089f8e6bb5e064cd2a5abba7e/mkdocstrings_python-1.16.10.tar.gz", hash = "sha256:f9eedfd98effb612ab4d0ed6dd2b73aff6eba5215e0a65cea6d877717f75502e", size = 205771 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/53/37/19549c5e0179785308cc988a68e16aa7550e4e270ec8a9878334e86070c6/mkdocstrings_python-1.16.10-py3-none-any.whl", hash = "sha256:63bb9f01f8848a644bdb6289e86dc38ceddeaa63ecc2e291e3b2ca52702a6643", size = 124112 },
 ]
 
 [[package]]
@@ -3329,18 +3405,21 @@ wheels = [
 ]
 
 [[package]]
-name = "untokenize"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/f7/46/e7cea8159199096e1df52da20a57a6665da80c37fb8aeb848a3e47442c32/untokenize-0.1.1.tar.gz", hash = "sha256:3865dbbbb8efb4bb5eaa72f1be7f3e0be00ea8b7f125c69cbd1f5fda926f37a2", size = 3099 }
-
-[[package]]
 name = "urllib3"
 version = "2.4.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/8a/78/16493d9c386d8e60e442a35feac5e00f0913c0f4b7c217c11e8ec2ff53e0/urllib3-2.4.0.tar.gz", hash = "sha256:414bc6535b787febd7567804cc015fee39daab8ad86268f1310a9250697de466", size = 390672 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6b/11/cc635220681e93a0183390e26485430ca2c7b5f9d33b15c74c2861cb8091/urllib3-2.4.0-py3-none-any.whl", hash = "sha256:4e16665048960a0900c702d4a66415956a584919c03361cac9f1df5c5dd7e813", size = 128680 },
+]
+
+[[package]]
+name = "verspec"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e7/44/8126f9f0c44319b2efc65feaad589cadef4d77ece200ae3c9133d58464d0/verspec-0.1.0.tar.gz", hash = "sha256:c4504ca697b2056cdb4bfa7121461f5a0e81809255b41c03dda4ba823637c01e", size = 27123 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a4/ce/3b6fee91c85626eaf769d617f1be9d2e15c1cca027bbdeb2e0d751469355/verspec-0.1.0-py3-none-any.whl", hash = "sha256:741877d5633cc9464c45a469ae2a31e801e6dbbaa85b9675d481cda100f11c31", size = 19640 },
 ]
 
 [[package]]
@@ -3374,6 +3453,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c7/b7/c9f633149f1bdea95b43d38aa50404df2bdf769f0ccc0b402ca922d454e3/voyageai-0.3.2.tar.gz", hash = "sha256:bd1b52d26179d91853cbd2a0e52dc95cb0d526760c6c830959e01eb5ff9eaa12", size = 18979 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/86/e1/0b2defa3a83aabe67db05d5f494d617dd4764b2a043d83ddc26be5e6e0db/voyageai-0.3.2-py3-none-any.whl", hash = "sha256:1398d6c6bfb1dd3b484f400713e538f00ce8a335250442b0902c21116d9705a8", size = 25518 },
+]
+
+[[package]]
+name = "vulture"
+version = "2.14"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/25/925f35db758a0f9199113aaf61d703de891676b082bd7cf73ea01d6000f7/vulture-2.14.tar.gz", hash = "sha256:cb8277902a1138deeab796ec5bef7076a6e0248ca3607a3f3dee0b6d9e9b8415", size = 58823 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/56/0cc15b8ff2613c1d5c3dc1f3f576ede1c43868c1bc2e5ccaa2d4bcd7974d/vulture-2.14-py2.py3-none-any.whl", hash = "sha256:d9a90dba89607489548a49d557f8bac8112bd25d3cbc8aeef23e860811bd5ed9", size = 28915 },
 ]
 
 [[package]]

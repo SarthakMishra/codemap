@@ -8,6 +8,7 @@
 [![codecov](https://codecov.io/gh/SarthakMishra/codemap/branch/main/graph/badge.svg)](https://codecov.io/gh/SarthakMishra/codemap)
 [![Codacy Badge](https://app.codacy.com/project/badge/Grade/95d85720e3a14494abf27b5d2070d92f)](https://app.codacy.com/gh/SarthakMishra/codemap/dashboard?utm_source=gh&utm_medium=referral&utm_content=&utm_campaign=Badge_grade)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit&logoColor=white)](https://github.com/pre-commit/pre-commit)
+[![Interrogate](docs/assets/interrogate_badge.svg)](https://interrogate.readthedocs.io/en/latest/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 > [!Caution]
@@ -29,6 +30,7 @@ CodeMap is an AI-powered developer toolkit designed to enhance your coding workf
 - 🔃 AI-powered PR creation and management
 - 💬 Ask questions about your codebase using RAG
 - 🔍 Index and search your repository for semantic understanding
+
 
 
 ## Installation

@@ -3,7 +3,10 @@ version: "3"
 vars:
   SRC_DIR: src
   TESTS_DIR: tests
+  SCRIPT_DIR: scripts
   COV_MODULE: src/codemap
+  VERSION:
+    sh: python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('src/codemap/__init__.py').read()).group(1))"
 
 tasks:
   default:
@@ -21,51 +24,44 @@ tasks:
   lint:ruff:
     desc: Run ruff linter
     cmds:
-      - uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:fix:
     desc: Run ruff linter with auto-fix
     cmds:
-      - uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:fix-unsafe:
     desc: Run ruff linter with unsafe auto-fixes
     cmds:
-      - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:pylint:
     desc: Run pylint
     cmds:
-      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:pyright:
     desc: Run pyright type checker
     cmds:
-      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:
     desc: Run all formatters
     cmds:
       - task: format:isort
-      - task: format:docformatter
       - task: lint:fix-unsafe
       - task: format:ruff
 
   format:ruff:
     desc: Run ruff formatter
     cmds:
-      - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}}
+      - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:isort:
     desc: Run isort
     cmds:
-      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}}
-
-  format:docformatter:
-    desc: Run docformatter
-    cmds:
-      - cmd: uv run docformatter --recursive --in-place {{.SRC_DIR}} {{.TESTS_DIR}}
-        ignore_error: true
+      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   radon:
     desc: Run radon
@@ -95,6 +91,11 @@ tasks:
     cmds:
       - uv run radon hal {{.SRC_DIR}} -O .radon/hal.txt
 
+  vulture:
+    desc: Finds unused code
+    cmds:
+      - uv run vulture {{.SRC_DIR}} --min-confidence 80
+
   test:
     desc: Run all tests
     cmds:
@@ -118,7 +119,52 @@ tasks:
   docs:
     desc: Check documentation coverage
     cmds:
-      - uv run interrogate --style google --fail-under 90 --color -vv {{.SRC_DIR}}
+      - task: docs:coverage
+      - task: docs:coverage:badge
+      - task: docs:update
+
+  docs:coverage:
+    desc: Check documentation coverage
+    cmds:
+      - uv run interrogate --style google -v --fail-under 100 {{.SRC_DIR}}
+
+  docs:coverage:badge:
+    desc: Generate documentation badge
+    cmds:
+      - uv run interrogate --style google --generate-badge docs/assets --badge-style flat {{.SRC_DIR}}
+
+  docs:update:
+    desc: Update documentation
+    cmds:
+      - uv run python {{.SCRIPT_DIR}}/update_api_docs.py
+
+  docs:mkdocs:
+    desc: Serve documentation from the current version
+    cmds:
+      - uv run mkdocs serve
+
+  docs:mike:
+    desc: Serve documentation from the latest version
+    cmds:
+      - uv run mike serve
+
+  docs:push:
+    desc: Push docs to latest version
+    cmds:
+      - task: docs:update
+      - uv run mike deploy {{.VERSION}} latest --update-aliases --push
+    preconditions:
+      - sh: '! echo "{{.VERSION}}" | grep -q "rc"'
+        msg: "Cannot publish to latest with a pre-release version (contains 'rc'). Use docs:push:pre instead."
+
+  docs:push:pre:
+    desc: Push docs to pre-release version
+    cmds:
+      - task: docs:update
+      - DOCS_PRERELEASE=true uv run mike deploy {{.VERSION}} pre-release --update-aliases --push
+    preconditions:
+      - sh: 'echo "{{.VERSION}}" | grep -q "rc"'
+        msg: "Cannot publish to pre-release with a stable version (missing 'rc'). Use docs:push instead."
 
   ci:
     desc: Run all checks and tests
@@ -134,16 +180,15 @@ tasks:
       - task: test:coverage:xml
 
   pre-commit:
-    desc: Run pre-commit hooks on staged files only
+    desc: Run pre-commit checks on staged files only
     cmds:
       - |
         STAGED_FILES=$(git diff --name-only --cached --diff-filter=ACMR | grep -E '\.py$' | tr '\n' ' ')
         if [ -n "$STAGED_FILES" ]; then
           echo "Running checks on staged files: $STAGED_FILES"
-          uv run ruff check --fix --unsafe-fixes $STAGED_FILES
-          uv run ruff format $STAGED_FILES
-          # Stage the files again in case they were modified
-          git add $STAGED_FILES
+          # Only check, don't fix or format here
+          uv run ruff check $STAGED_FILES
+          uv run ruff format $STAGED_FILES --check
         else
           echo "No Python files staged for commit"
         fi
