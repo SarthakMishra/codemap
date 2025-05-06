@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, TypeVar
 import numpy as np
 
 from codemap.git.diff_splitter import DiffChunk
+from codemap.utils.config_loader import ConfigLoader
 
 if TYPE_CHECKING:
 	from codemap.git.semantic_grouping import SemanticGroup
@@ -53,21 +54,19 @@ class FileIntegrityResolver:
 
 	"""
 
-	def __init__(self, similarity_threshold: float = 0.6) -> None:
+	def __init__(
+		self,
+		similarity_threshold: float = 0.6,
+		config_loader: ConfigLoader | None = None,
+	) -> None:
 		"""
 		Initialize the resolver.
 
 		Args:
 		    similarity_threshold: Threshold for group similarity to trigger merging (0.0-1.0).
-		        Higher values require greater similarity to merge groups:
-		        - Values near 0.5 are permissive and will merge moderately related groups
-		        - Values above 0.7 are strict and will mostly reassign chunks instead of merging
-		        - Default 0.6 provides a balanced approach
-
-		Raises:
-		    ImportError: If scikit-learn is not installed
-
+		    config_loader: Optional ConfigLoader instance.
 		"""
+		self.config_loader = config_loader or ConfigLoader()
 		self.similarity_threshold = similarity_threshold
 
 		# Import here to avoid making sklearn a hard dependency

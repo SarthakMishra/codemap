@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
+from http import HTTPStatus
 from typing import TYPE_CHECKING, Self
 
 import typer
+from packaging.version import InvalidVersion
+from packaging.version import parse as parse_version  # For version comparison
 from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
+from codemap import __version__  # For current version
 from codemap.utils.log_setup import display_error_summary, display_warning_summary
 
 if TYPE_CHECKING:
@@ -298,3 +305,88 @@ def handle_keyboard_interrupt() -> None:
 	"""Handles KeyboardInterrupt by printing a message and exiting cleanly."""
 	console.print("\n[yellow]Operation cancelled by user.[/yellow]")
 	raise typer.Exit(130)  # Standard exit code for SIGINT
+
+
+def check_for_updates(is_verbose_param: bool) -> None:
+	"""Check PyPI for a new version of CodeMap and warn if available."""
+	try:
+		package_name = "codemap"
+		logger.debug(f"Checking for updates for package: {package_name}")
+
+		current_v = parse_version(__version__)
+		is_current_prerelease = current_v.is_prerelease
+		logger.debug(f"Current version: {current_v} (Is pre-release: {is_current_prerelease})")
+
+		req = urllib.request.Request(
+			f"https://pypi.org/pypi/{package_name}/json",
+			headers={"User-Agent": f"CodeMap-CLI-Update-Check/{__version__}"},
+		)
+		with urllib.request.urlopen(req, timeout=5) as response:  # noqa: S310
+			if response.status == HTTPStatus.OK:
+				data = json.load(response)
+				pypi_releases = data.get("releases", {})
+				if not pypi_releases:
+					logger.debug("No releases found in PyPI response.")
+					return
+
+				valid_pypi_versions_str = []
+				for version_str, release_files_list in pypi_releases.items():
+					if not release_files_list:  # Skip if no files for this version
+						continue
+					# Consider version yanked if all its files are yanked
+					version_is_yanked = all(file_info.get("yanked", False) for file_info in release_files_list)
+					if not version_is_yanked:
+						try:
+							# Ensure the version string can be parsed and has a release segment
+							if parse_version(version_str).release is not None:
+								valid_pypi_versions_str.append(version_str)
+						except InvalidVersion:  # Catch specific exception
+							logger.debug(f"Could not parse version string from PyPI: {version_str}")
+
+				if not valid_pypi_versions_str:
+					logger.debug("No valid, non-yanked releases found on PyPI after filtering.")
+					return
+
+				all_pypi_versions = sorted(
+					[parse_version(v) for v in valid_pypi_versions_str],
+					reverse=True,
+				)
+
+				if not all_pypi_versions:
+					logger.debug("No valid parseable releases found on PyPI after filtering.")
+					return
+
+				latest_candidate_v = None
+				if is_current_prerelease:
+					# If current is pre-release, consider the absolute latest version from PyPI
+					latest_candidate_v = all_pypi_versions[0]
+				else:
+					# If current is stable, consider the latest stable version from PyPI
+					stable_pypi_versions = [v for v in all_pypi_versions if not v.is_prerelease]
+					if stable_pypi_versions:
+						latest_candidate_v = stable_pypi_versions[0]
+
+				if latest_candidate_v:
+					logger.debug(f"Latest candidate version for comparison: {latest_candidate_v}")
+					if latest_candidate_v > current_v:
+						typer.secho(
+							f"\n[!] A new version of CodeMap is available: {latest_candidate_v} (You have {current_v})",
+							fg=typer.colors.YELLOW,
+						)
+						typer.secho(
+							f"[!] To update, run: pip install --upgrade {package_name}",
+							fg=typer.colors.YELLOW,
+						)
+					else:
+						logger.debug("No newer version found on PyPI for current version type (stable/prerelease).")
+			else:
+				logger.debug(f"Failed to fetch update info from PyPI. Status: {response.status}")
+
+	except urllib.error.URLError as e:
+		logger.debug(f"Could not connect to PyPI to check for updates (URLError): {e.reason}")
+	except json.JSONDecodeError:
+		logger.debug("Could not parse PyPI response as JSON.")
+	except TimeoutError:
+		logger.debug("Timeout while checking for updates on PyPI.")
+	except Exception as e:  # noqa: BLE001
+		logger.debug(f"An unexpected error occurred during update check: {e}", exc_info=is_verbose_param)

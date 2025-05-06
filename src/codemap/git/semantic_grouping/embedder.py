@@ -1,10 +1,20 @@
 """Module for generating embeddings from diff chunks."""
 
 import logging
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+# Define EmbeddingModelType at module level for type hinting
+if TYPE_CHECKING:
+	from sentence_transformers import SentenceTransformer
+
+	EmbeddingModelType = SentenceTransformer
+else:
+	EmbeddingModelType = Any
+
 from codemap.git.diff_splitter import DiffChunk
+from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -12,25 +22,40 @@ logger = logging.getLogger(__name__)
 class DiffEmbedder:
 	"""Generates embeddings for diff chunks."""
 
-	def __init__(self, model_name: str = "all-MiniLM-L6-v2") -> None:
+	def __init__(
+		self,
+		model: "SentenceTransformer | None",
+		config_loader: ConfigLoader | None = None,
+	) -> None:
 		"""
-		Initialize the embedder with a specific model.
+		Initialize the embedder with a pre-loaded SentenceTransformer model or None.
 
 		Args:
-		    model_name: Name of the sentence-transformers model to use
-
+		    model: The pre-loaded sentence_transformers.SentenceTransformer model instance, or None.
+		    config_loader: Optional ConfigLoader instance.
 		"""
-		# Import here to avoid making sentence-transformers a hard dependency
-		try:
-			from sentence_transformers import SentenceTransformer
+		self.config_loader = config_loader or ConfigLoader()
+		self.model = model
 
-			self.model = SentenceTransformer(model_name)
-		except ImportError as e:
-			logger.exception(
-				"Failed to import sentence-transformers. Please install it with: uv add sentence-transformers"
-			)
-			msg = "sentence-transformers is required for semantic grouping"
-			raise ImportError(msg) from e
+		if self.model is None:
+			logger.error("DiffEmbedder initialized with a None model. Attempting fallback.")
+			# Attempt to load a default model as a last resort.
+			default_model_name = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
+			try:
+				from sentence_transformers import SentenceTransformer as DefaultST
+
+				# Get default model name from config, or use the hardcoded one if config unvailable/doesn't specify
+				default_model_name = self.config_loader.get("semantic_grouping", {}).get(
+					"default_embedding_model", default_model_name
+				)
+				logger.warning(f"DiffEmbedder received None model, attempting to load default: {default_model_name}")
+				self.model = DefaultST(default_model_name)
+			except ImportError:
+				logger.exception("Fallback model load failed: sentence-transformers not found or dependencies missing.")
+				raise
+			except Exception:
+				logger.exception(f"Fallback model load failed for '{default_model_name}'")
+				raise
 
 	def preprocess_diff(self, diff_text: str) -> str:
 		"""
@@ -68,6 +93,12 @@ class DiffEmbedder:
 		    numpy.ndarray: Embedding vector
 
 		"""
+		if self.model is None:
+			# This should not happen if __init__ guarantees a model or raises an error.
+			message = "Attempted to use DiffEmbedder.embed_chunk with no model loaded."
+			logger.error(message)
+			raise RuntimeError(message)
+
 		# Get the diff content from the chunk
 		diff_text = chunk.content
 

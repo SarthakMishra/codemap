@@ -39,24 +39,6 @@ WatchOpt = Annotated[
 	),
 ]
 
-LogLevelOpt = Annotated[
-	str,
-	typer.Option(
-		"--log-level",
-		"-L",
-		help="Set the logging level (e.g., DEBUG, INFO, WARNING).",
-	),
-]
-
-VerboseFlag = Annotated[
-	bool,
-	typer.Option(
-		"--verbose",
-		"-v",
-		help="Enable verbose logging",
-	),
-]
-
 ConfigOpt = Annotated[
 	Path | None,
 	typer.Option(
@@ -77,8 +59,6 @@ def register_command(app: typer.Typer) -> None:
 		path: PathArg = Path(),
 		sync: SyncOpt = True,
 		watch: WatchOpt = False,
-		log_level: LogLevelOpt = "INFO",
-		is_verbose: VerboseFlag = False,
 		config: ConfigOpt = None,
 	) -> None:
 		"""
@@ -92,8 +72,6 @@ def register_command(app: typer.Typer) -> None:
 			path=path,
 			sync=sync,
 			watch=watch,
-			log_level=log_level,
-			is_verbose=is_verbose,
 			config=config,
 		)
 
@@ -105,8 +83,6 @@ def _index_command_impl(
 	path: Path,
 	sync: bool,
 	watch: bool,
-	log_level: str,
-	is_verbose: bool,
 	config: Path | None,
 ) -> None:
 	"""Actual implementation of the index command."""
@@ -116,7 +92,7 @@ def _index_command_impl(
 	from rich.console import Console
 
 	from codemap.processor.pipeline import ProcessingPipeline
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, loading_spinner, setup_logging
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, loading_spinner
 	from codemap.utils.config_loader import ConfigLoader
 
 	console = Console()  # Initialize Console here
@@ -193,13 +169,6 @@ def _index_command_impl(
 				logger.info("Pipeline shutdown complete.")
 
 	# --- Main logic of _index_command_impl ---
-	# Configure logging based on CLI options
-	setup_logging(is_verbose=is_verbose)
-
-	# Override log level if explicitly specified
-	if log_level and log_level != "INFO":
-		logging.getLogger().setLevel(log_level.upper())
-		logger.info(f"Log level set to {log_level.upper()}")
 
 	try:
 		target_path = path.resolve()

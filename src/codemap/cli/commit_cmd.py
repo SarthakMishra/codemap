@@ -38,8 +38,6 @@ BypassHooksFlag = Annotated[
 	bool, typer.Option("--bypass-hooks", "--no-verify", help="Bypass git hooks with --no-verify")
 ]  # Added alias back
 
-VerboseFlag = Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging")]
-
 # --- New options for semantic commit ---
 EmbeddingModelOpt = Annotated[str, typer.Option("--embedding-model", help="Model to use for embedding generation")]
 
@@ -63,10 +61,9 @@ def register_command(app: typer.Typer) -> None:
 		model: ModelOpt = "gpt-4o-mini",
 		non_interactive: NonInteractiveFlag = False,
 		bypass_hooks: BypassHooksFlag = False,
-		embedding_model: EmbeddingModelOpt = "all-MiniLM-L6-v2",
+		embedding_model: EmbeddingModelOpt = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
 		clustering_method: ClusteringMethodOpt = "agglomerative",
 		similarity_threshold: SimilarityThresholdOpt = 0.6,
-		is_verbose: VerboseFlag = False,
 		pathspecs: list[str] | None = None,
 	) -> None:
 		"""
@@ -85,7 +82,6 @@ def register_command(app: typer.Typer) -> None:
 			embedding_model=embedding_model,
 			clustering_method=clustering_method,
 			similarity_threshold=similarity_threshold,
-			is_verbose=is_verbose,
 			pathspecs=pathspecs,
 		)
 
@@ -101,7 +97,6 @@ def _semantic_commit_command_impl(
 	embedding_model: str,
 	clustering_method: str,
 	similarity_threshold: float,
-	is_verbose: bool,
 	pathspecs: list[str] | None = None,
 ) -> None:
 	"""Actual implementation of the semantic commit command."""
@@ -116,7 +111,7 @@ def _semantic_commit_command_impl(
 	from codemap.git.utils import (
 		validate_repo_path,
 	)
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, setup_logging
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 	from codemap.utils.config_loader import ConfigLoader
 
 	# --- Environment Loading ---
@@ -133,7 +128,6 @@ def _semantic_commit_command_impl(
 				logger.debug("Loaded environment variables from %s", env_file)
 
 	# --- Setup & Logic ---
-	setup_logging(is_verbose=is_verbose)
 
 	try:
 		# Validate repo path (optional, defaults to cwd if None)
@@ -149,7 +143,9 @@ def _semantic_commit_command_impl(
 		final_model = model or commit_config.get("model", "gpt-4o-mini")
 		is_non_interactive = non_interactive or semantic_config.get("non_interactive", False)
 		should_bypass_hooks = bypass_hooks or semantic_config.get("bypass_hooks", False)
-		final_embedding_model = embedding_model or semantic_config.get("embedding_model", "all-MiniLM-L6-v2")
+		final_embedding_model = embedding_model or semantic_config.get(
+			"embedding_model", "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
+		)
 		final_clustering_method = clustering_method or semantic_config.get("clustering_method", "agglomerative")
 		final_similarity_threshold = (
 			similarity_threshold

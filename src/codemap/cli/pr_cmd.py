@@ -75,14 +75,6 @@ ModelOpt = Annotated[
 ]
 ApiBaseOpt = Annotated[str | None, typer.Option("--api-base", help="API base URL for LLM")]
 ApiKeyOpt = Annotated[str | None, typer.Option("--api-key", help="API key for LLM")]
-VerboseOpt = Annotated[
-	bool,
-	typer.Option(
-		"--verbose",
-		"-v",
-		help="Enable verbose logging",
-	),
-]
 
 
 # --- Registration Function ---
@@ -108,7 +100,6 @@ def register_command(app: typer.Typer) -> None:
 		model: ModelOpt = None,
 		api_base: ApiBaseOpt = None,
 		api_key: ApiKeyOpt = None,
-		is_verbose: VerboseOpt = False,
 	) -> None:
 		"""Create or update a GitHub/GitLab pull request with generated content."""
 		_pr_command_impl(
@@ -127,7 +118,6 @@ def register_command(app: typer.Typer) -> None:
 			model=model,
 			api_base=api_base,
 			api_key=api_key,
-			is_verbose=is_verbose,
 		)
 
 
@@ -150,7 +140,6 @@ def _pr_command_impl(
 	model: str | None,
 	api_base: str | None,
 	api_key: str | None,
-	is_verbose: bool,
 ) -> None:
 	"""Actual implementation of the pr command with heavy imports."""
 	# --- Heavy Imports ---
@@ -200,7 +189,6 @@ def _pr_command_impl(
 		exit_with_error,
 		handle_keyboard_interrupt,
 		progress_indicator,
-		setup_logging,
 		show_error,
 		show_warning,
 	)
@@ -209,7 +197,6 @@ def _pr_command_impl(
 	# --- Setup ---
 	logger = logging.getLogger(__name__)
 	console = Console()
-	setup_logging(is_verbose=is_verbose)
 	interactive = not non_interactive
 
 	def _exit_command(code: int = 1) -> None:

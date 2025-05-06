@@ -43,7 +43,6 @@ ApiKeyOpt = Annotated[
 
 InteractiveFlag = Annotated[bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")]
 
-VerboseFlag = Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")]
 
 # --- Registration Function ---
 
@@ -60,7 +59,6 @@ def register_command(app: typer.Typer) -> None:
 		api_base: ApiBaseOpt = None,
 		api_key: ApiKeyOpt = None,
 		interactive: InteractiveFlag = False,
-		is_verbose: VerboseFlag = False,
 	) -> None:
 		"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
 		# Defer heavy imports and logic to the implementation function
@@ -71,7 +69,6 @@ def register_command(app: typer.Typer) -> None:
 			api_base=api_base,
 			api_key=api_key,
 			interactive=interactive,
-			is_verbose=is_verbose,
 		)
 
 
@@ -85,7 +82,6 @@ async def _ask_command_impl(
 	api_base: str | None = None,
 	api_key: str | None = None,
 	interactive: bool = False,
-	is_verbose: bool = False,
 ) -> None:
 	"""Implementation of the ask command with heavy imports deferred."""
 	# Import heavy dependencies here instead of at the top
@@ -93,10 +89,9 @@ async def _ask_command_impl(
 
 	from codemap.llm.rag.ask.command import AskCommand
 	from codemap.llm.rag.ask.formatter import print_ask_result
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, setup_logging
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 	from codemap.utils.config_loader import ConfigLoader
 
-	setup_logging(is_verbose=is_verbose)
 	repo_path = path or Path.cwd()
 	logger.info(f"Received ask command for path: {repo_path}")
 

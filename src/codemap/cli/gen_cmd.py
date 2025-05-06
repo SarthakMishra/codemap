@@ -54,15 +54,6 @@ TreeOpt = Annotated[
 	),
 ]
 
-VerboseFlag = Annotated[
-	bool,
-	typer.Option(
-		"--verbose",
-		"-v",
-		help="Enable verbose logging",
-	),
-]
-
 EntityGraphOpt = Annotated[
 	bool | None,
 	typer.Option(
@@ -137,7 +128,6 @@ def register_command(app: typer.Typer) -> None:
 		lod_level_str: LODLevelOpt = "docs",
 		semantic_analysis: SemanticAnalysisOpt = True,
 		tree: TreeOpt = None,
-		is_verbose: VerboseFlag = False,
 		entity_graph: EntityGraphOpt = None,
 		mermaid_entities_str: MermaidEntitiesOpt = None,
 		mermaid_relationships_str: MermaidRelationshipsOpt = None,
@@ -166,7 +156,6 @@ def register_command(app: typer.Typer) -> None:
 			lod_level_str=lod_level_str,
 			semantic_analysis=semantic_analysis,
 			tree=tree,
-			is_verbose=is_verbose,
 			entity_graph=entity_graph,
 			mermaid_entities_str=mermaid_entities_str,
 			mermaid_relationships_str=mermaid_relationships_str,
@@ -186,7 +175,6 @@ def _gen_command_impl(
 	lod_level_str: str = "docs",
 	semantic_analysis: bool = True,
 	tree: bool | None = None,
-	is_verbose: bool = False,
 	entity_graph: bool | None = None,
 	mermaid_entities_str: str | None = None,
 	mermaid_relationships_str: str | None = None,
@@ -197,10 +185,8 @@ def _gen_command_impl(
 	# Import heavy dependencies here instead of at the top
 	from codemap.gen import GenCommand, GenConfig
 	from codemap.processor.lod import LODLevel
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, setup_logging
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 	from codemap.utils.config_loader import ConfigLoader
-
-	setup_logging(is_verbose=is_verbose)
 
 	try:
 		# Save the original path string before resolving

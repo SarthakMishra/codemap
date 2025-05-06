@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 import questionary
 import typer
 
+from codemap.config import DEFAULT_CONFIG
 from codemap.git.commit_generator.utils import (
 	clean_message_for_linting,
 	lint_commit_message,
@@ -27,6 +28,7 @@ from codemap.git.utils import (
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import loading_spinner
+from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.file_utils import read_file_content
 
 from . import (
@@ -58,7 +60,13 @@ class ExitCommandError(Exception):
 class CommitCommand:
 	"""Handles the commit command workflow."""
 
-	def __init__(self, path: Path | None = None, model: str = "gpt-4o-mini", bypass_hooks: bool = False) -> None:
+	def __init__(
+		self,
+		path: Path | None = None,
+		model: str = "gpt-4o-mini",
+		bypass_hooks: bool = False,
+		splitter_instance: DiffSplitter | None = None,
+	) -> None:
 		"""
 		Initialize the commit command.
 
@@ -66,13 +74,30 @@ class CommitCommand:
 		    path: Optional path to start from
 		    model: LLM model to use for commit message generation
 		    bypass_hooks: Whether to bypass git hooks with --no-verify
+		    splitter_instance: Optional pre-configured DiffSplitter instance.
 
 		"""
 		try:
 			self.repo_root = get_repo_root(path)
 			self.ui: CommitUI = CommitUI()
-			self.splitter = DiffSplitter(self.repo_root)
-			self.target_files = []  # Initialize target_files attribute
+
+			# Use provided splitter_instance or create a default one
+			if splitter_instance:
+				self.splitter = splitter_instance
+			else:
+				# Ensure DiffSplitter is imported if not already at module level for this path
+				from codemap.git.diff_splitter.splitter import DiffSplitter
+
+				self.splitter = DiffSplitter(self.repo_root)
+				# Note: This default DiffSplitter will use its own default embedding model
+				# This path should ideally only be taken if not in SemanticCommitCommand context
+
+			self.target_files: list[str] = []
+			self.committed_files: set[str] = set()
+			self.is_pathspec_mode: bool = False
+			self.all_repo_files: set[str] = set()
+			self.error_state: str | None = None  # Tracks reason for failure
+			self.bypass_hooks: bool = bypass_hooks  # Whether to bypass git hooks with --no-verify
 
 			# Store the current branch at initialization to ensure we don't switch branches unexpectedly
 			try:
@@ -95,8 +120,6 @@ class CommitCommand:
 				config_loader=config_loader,
 			)
 
-			self.error_state = None  # Tracks reason for failure: "failed", "aborted", etc.
-			self.bypass_hooks = bypass_hooks  # Whether to bypass git hooks with --no-verify
 		except GitError as e:
 			raise RuntimeError(str(e)) from e
 
@@ -686,39 +709,71 @@ class SemanticCommitCommand(CommitCommand):
 		path: Path | None = None,
 		model: str = "gpt-4o-mini",
 		bypass_hooks: bool = False,
-		embedding_model: str = "all-MiniLM-L6-v2",
-		clustering_method: str = "agglomerative",
-		similarity_threshold: float = 0.6,
+		embedding_model: str | None = None,
+		clustering_method: str | None = None,
+		similarity_threshold: float | None = None,
 	) -> None:
 		"""
-		Initialize the semantic commit command.
+		Initialize the SemanticCommitCommand.
 
-		Args:
-		        path: Optional path to start from
-		        model: LLM model to use for commit message generation
-		        bypass_hooks: Whether to bypass git hooks with --no-verify
-		        embedding_model: Model to use for generating embeddings
-		        clustering_method: Method to use for clustering ("agglomerative" or "dbscan")
-		        similarity_threshold: Threshold for group similarity to trigger merging
-
+		Args are similar to CLI options, allowing for programmatic use.
 		"""
-		super().__init__(path, model, bypass_hooks)
+		temp_repo_root = get_repo_root(path)
+		config_loader = ConfigLoader(repo_root=temp_repo_root)
+		commit_config = config_loader.get("commit", {})
+		semantic_config = config_loader.get("semantic_commit", {})
+		diff_splitter_config = commit_config.get("diff_splitter", {})
 
-		# Import semantic grouping components
+		final_embedding_model_name = (
+			embedding_model
+			or semantic_config.get("embedding_model")
+			or diff_splitter_config.get("model_name")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"]
+		)
+
+		from codemap.git.diff_splitter.splitter import DiffSplitter
+
+		specialized_splitter = DiffSplitter(
+			repo_root=temp_repo_root,
+			embedding_model=final_embedding_model_name,
+			config_loader=config_loader,
+		)
+
+		# Ensure the model is loaded by the splitter and cached at class level
+		if not DiffSplitter.is_model_available():  # Check class flag first
+			specialized_splitter.check_model_availability()  # Trigger load if not available
+
+		loaded_model_object = DiffSplitter.get_embedding_model()
+		if loaded_model_object is None:
+			# This indicates a failure in DiffSplitter's model loading/caching
+			logger.error("Failed to retrieve embedding model from DiffSplitter cache after loading attempt.")
+			# Fallback or raise error - for now, we'll let DiffEmbedder handle its own fallback if model is None
+			# but ideally this path should not be hit if _check_model_availability worked.
+			# To be stricter, one might raise RuntimeError here.
+
+		super().__init__(path=path, model=model, bypass_hooks=bypass_hooks, splitter_instance=specialized_splitter)
+
+		self.config_loader = config_loader
+		self.embedding_model_name = final_embedding_model_name  # Store the name
+		self.clustering_method = clustering_method or semantic_config.get("clustering_method") or "agglomerative"
+		self.similarity_threshold = (
+			similarity_threshold
+			if similarity_threshold is not None
+			else semantic_config.get("similarity_threshold", 0.6)
+		)
+
 		from codemap.git.semantic_grouping.clusterer import DiffClusterer
 		from codemap.git.semantic_grouping.embedder import DiffEmbedder
 		from codemap.git.semantic_grouping.resolver import FileIntegrityResolver
 
-		# Initialize semantic grouping components
-		self.embedder = DiffEmbedder(model_name=embedding_model)
-		self.clusterer = DiffClusterer(method=clustering_method)
-		self.resolver = FileIntegrityResolver(similarity_threshold=similarity_threshold)
+		# Pass the loaded_model_object to DiffEmbedder
+		self.embedder = DiffEmbedder(model=loaded_model_object, config_loader=self.config_loader)
+		self.clusterer = DiffClusterer(method=self.clustering_method)
+		self.resolver = FileIntegrityResolver(
+			similarity_threshold=self.similarity_threshold, config_loader=self.config_loader
+		)
 
-		# Track state for commits
-		self.committed_files: set[str] = set()
-		self.is_pathspec_mode = False
-		self.all_repo_files: set[str] = set()
-		self.target_files: list[str] = []
+		# Attributes like self.committed_files are initialized in super().__init__
 
 	def _get_target_files(self, pathspecs: list[str] | None = None) -> list[str]:
 		"""
@@ -754,7 +809,7 @@ class SemanticCommitCommand(CommitCommand):
 					file_path = line[3:].strip()
 				else:  # Should not happen with standard porcelain v1, but as a fallback
 					file_path = line[2:].strip()
-					logger.warning(f"Porcelain line format anomaly: {line}. Extracted path: {file_path}")
+					logger.debug(f"Porcelain line format anomaly: {line}. Extracted path: {file_path}")
 
 				# Handle renamed files
 				if status.startswith("R"):

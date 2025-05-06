@@ -2,23 +2,30 @@
 
 import logging
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 
 from codemap.config import DEFAULT_CONFIG
+from codemap.git.diff_splitter.strategies import FileSplitStrategy, SemanticSplitStrategy
+from codemap.git.diff_splitter.utils import calculate_semantic_similarity, filter_valid_files, is_test_environment
 from codemap.git.utils import GitDiff
 from codemap.utils.cli_utils import console, loading_spinner
+from codemap.utils.config_loader import ConfigLoader
 
 from .schemas import DiffChunk
-from .strategies import EmbeddingModel, FileSplitStrategy, SemanticSplitStrategy
-from .utils import (
-	calculate_semantic_similarity,
-	filter_valid_files,
-	is_test_environment,
-)
+
+if TYPE_CHECKING:
+	# If SentenceTransformer is importable under TYPE_CHECKING, use it for better type safety
+	# from sentence_transformers import SentenceTransformer as EmbeddingModelType
+	# else:
+	# EmbeddingModelType = Any
+	EmbeddingModelType = Any  # Simpler for now
 
 logger = logging.getLogger(__name__)
+
+# Define EmbeddingModel type alias at module level
+EmbeddingModel = Any  # Placeholder if SentenceTransformer is truly optional for class methods
 
 # Constants for truncation and sampling
 MAX_DIFF_CONTENT_LENGTH = 100000  # ~100KB maximum size for diff content
@@ -30,58 +37,80 @@ COMPLEX_SECTION_SIZE = 100  # Minimum size for a "complex" diff section (with mi
 class DiffSplitter:
 	"""Splits Git diffs into logical chunks."""
 
-	# Class-level cache for the embedding model
-	_embedding_model = None
-	# Track availability of sentence-transformers and the model
-	_sentence_transformers_available = None
-	_model_available = None
+	_embedding_model: EmbeddingModel | None = None  # Type hint for class attribute
+	_sentence_transformers_available: bool | None = None  # Explicitly None initially
+	_model_available: bool | None = None  # Explicitly None initially
 
 	def __init__(
 		self,
 		repo_root: Path,
-		# Defaults are now sourced from DEFAULT_CONFIG
-		similarity_threshold: float = DEFAULT_CONFIG["commit"]["diff_splitter"]["similarity_threshold"],
-		directory_similarity_threshold: float = DEFAULT_CONFIG["commit"]["diff_splitter"][
-			"directory_similarity_threshold"
-		],
-		min_chunks_for_consolidation: int = DEFAULT_CONFIG["commit"]["diff_splitter"]["min_chunks_for_consolidation"],
-		max_chunks_before_consolidation: int = DEFAULT_CONFIG["commit"]["diff_splitter"][
-			"max_chunks_before_consolidation"
-		],
-		max_file_size_for_llm: int = DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"],
-		max_log_diff_size: int = DEFAULT_CONFIG["commit"]["diff_splitter"]["max_log_diff_size"],
-		model_name: str = DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"],
+		config_loader: ConfigLoader | None = None,  # Added config_loader
+		# Parameters will now try to fetch from config_loader first, then DEFAULT_CONFIG
+		embedding_model: str | None = None,  # Renamed from model_name, allow None
+		similarity_threshold: float | None = None,
+		directory_similarity_threshold: float | None = None,
+		min_chunks_for_consolidation: int | None = None,
+		max_chunks_before_consolidation: int | None = None,
+		max_file_size_for_llm: int | None = None,
+		max_log_diff_size: int | None = None,
 	) -> None:
 		"""
 		Initialize the diff splitter.
 
 		Args:
 		    repo_root: Root directory of the Git repository
+		    config_loader: ConfigLoader object for loading configuration
+		    embedding_model: Name of the sentence-transformer model to use
 		    similarity_threshold: Threshold for grouping by content similarity.
 		    directory_similarity_threshold: Threshold for directory similarity.
 		    min_chunks_for_consolidation: Min chunks to trigger consolidation.
 		    max_chunks_before_consolidation: Max chunks allowed before forced consolidation.
 		    max_file_size_for_llm: Max file size (bytes) to process for LLM context.
-		        Defaults to value from `DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"]` if None.
 		    max_log_diff_size: Max diff size (bytes) to log in debug mode.
-		        Defaults to value from `DEFAULT_CONFIG["commit"]["diff_splitter"]["max_log_diff_size"]` if None.
-		    model_name: Name of the sentence-transformer model to use.
-		        Defaults to value from `DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"]` if None.
 
 		"""
 		self.repo_root = repo_root
-		# Store thresholds
-		self.similarity_threshold = similarity_threshold
-		self.directory_similarity_threshold = directory_similarity_threshold
-		self.min_chunks_for_consolidation = min_chunks_for_consolidation
-		self.max_chunks_before_consolidation = max_chunks_before_consolidation
-		# Store other settings
-		self.max_file_size_for_llm = max_file_size_for_llm
-		self.max_log_diff_size = max_log_diff_size
-		self.model_name = model_name
+		self.config_loader = config_loader or ConfigLoader(repo_root=self.repo_root)
 
-		# Do NOT automatically check availability - let the command class do this explicitly
-		# This avoids checks happening during initialization without visible loading states
+		# Get config for diff_splitter, fallback to empty dict if not found
+		ds_config = self.config_loader.get("commit", {}).get("diff_splitter", {})
+
+		# Determine parameters: CLI/direct arg > Config file > DEFAULT_CONFIG
+		self.embedding_model = (
+			embedding_model
+			or ds_config.get("model_name")  # model_name is the key in config
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"]
+		)
+		self.similarity_threshold = (
+			similarity_threshold
+			or ds_config.get("similarity_threshold")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["similarity_threshold"]
+		)
+		self.directory_similarity_threshold = (
+			directory_similarity_threshold
+			or ds_config.get("directory_similarity_threshold")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["directory_similarity_threshold"]
+		)
+		self.min_chunks_for_consolidation = (
+			min_chunks_for_consolidation
+			or ds_config.get("min_chunks_for_consolidation")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["min_chunks_for_consolidation"]
+		)
+		self.max_chunks_before_consolidation = (
+			max_chunks_before_consolidation
+			or ds_config.get("max_chunks_before_consolidation")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["max_chunks_before_consolidation"]
+		)
+		self.max_file_size_for_llm = (
+			max_file_size_for_llm
+			or ds_config.get("max_file_size_for_llm")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"]
+		)
+		self.max_log_diff_size = (
+			max_log_diff_size
+			or ds_config.get("max_log_diff_size")
+			or DEFAULT_CONFIG["commit"]["diff_splitter"]["max_log_diff_size"]
+		)
 
 	@classmethod
 	def _check_sentence_transformers_availability(cls) -> bool:
@@ -172,7 +201,7 @@ class DiffSplitter:
 		"""
 		cls._embedding_model = model
 
-	def _check_model_availability(self) -> bool:
+	def check_model_availability(self) -> bool:
 		"""
 		Check if the embedding model is available using the instance's configured model name.
 
@@ -189,16 +218,16 @@ class DiffSplitter:
 
 			# Use class method to access class-level cache
 			if self.__class__.get_embedding_model() is None:
-				# Use self.model_name from instance configuration
-				logger.debug("Loading embedding model: %s", self.model_name)
+				# Use self.embedding_model from instance configuration
+				logger.debug("Loading embedding model: %s", self.embedding_model)
 
 				try:
 					console.print("Loading embedding model...")
-					# Load the model using self.model_name
-					model = SentenceTransformer(self.model_name)
+					# Load the model using self.embedding_model
+					model = SentenceTransformer(self.embedding_model)
 					self.__class__.set_embedding_model(cast("EmbeddingModel", model))
 					console.print("[green]✓[/green] Model loaded successfully")
-					logger.debug("Initialized embedding model: %s", self.model_name)
+					logger.debug("Initialized embedding model: %s", self.embedding_model)
 					# Set class-level flag via class method
 					self.__class__.set_model_available(True)
 					return True
@@ -238,7 +267,7 @@ class DiffSplitter:
 			return True
 		except Exception as e:
 			# This is the outer exception handler for any unexpected errors
-			logger.exception("Failed to load embedding model %s", self.model_name)
+			logger.exception("Failed to load embedding model %s", self.embedding_model)
 			console.print(f"[red]Failed to load embedding model: {e}[/red]")
 			self.__class__.set_model_available(False)
 			return False
@@ -306,9 +335,9 @@ class DiffSplitter:
 
 		# Try to load the model using the instance method
 		with loading_spinner("Loading embedding model..."):
-			# Use self._check_model_availability() - it uses self.model_name internally
+			# Use self.check_model_availability() - it uses self.embedding_model internally
 			if not self.__class__.is_model_available():
-				self._check_model_availability()
+				self.check_model_availability()
 
 		if not self.__class__.is_model_available():
 			msg = "Semantic splitting failed: embedding model could not be loaded. Check logs for details."
@@ -432,9 +461,9 @@ class DiffSplitter:
 			logger.debug("Sentence transformers not available, returning zero similarity")
 			return 0.0
 
-		# Call instance method self._check_model_availability()
+		# Call instance method self.check_model_availability()
 		if not self.__class__.is_model_available():
-			self._check_model_availability()
+			self.check_model_availability()
 
 		if not self.__class__.is_model_available() or self.__class__.get_embedding_model() is None:
 			logger.debug("Embedding model not available, returning zero similarity")
@@ -473,7 +502,7 @@ class DiffSplitter:
 		"""
 		# Ensure the model is initialized
 		if self.__class__.are_sentence_transformers_available() and not self.__class__.is_model_available():
-			self._check_model_availability()
+			self.check_model_availability()
 
 		if not self.__class__.is_model_available():
 			logger.debug("Embedding model not available, returning empty embeddings")
@@ -488,7 +517,7 @@ class DiffSplitter:
 		if self.__class__.get_embedding_model() is None:
 			logger.debug("Embedding model is None but was marked as available, reinitializing")
 			# Re-check availability using instance method
-			self._check_model_availability()
+			self.check_model_availability()
 
 		# Check again after potential re-initialization and assign to local variable
 		if self.__class__.get_embedding_model() is None:
