@@ -8,7 +8,7 @@ CodeMap currently only supports Unix-based platforms (macOS, Linux). For Windows
 After installation, you can use either `codemap` or the shorter alias `cm` to run the commands.
 ///
 
-## Installation using pipx (Recommended)
+## Installation using uv (Recommended)
 
 Using `uv` is recommended as it installs the package in an isolated environment and automatically manages the PATH.
 
