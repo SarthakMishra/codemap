@@ -39,9 +39,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Constants
-MAX_FILES_BEFORE_BATCHING = 10
-
 # Constants for content truncation
 MAX_FILE_CONTENT_LINES = 300  # Maximum number of lines to include for a single file
 MAX_TOTAL_CONTENT_LINES = 1000  # Maximum total lines across all untracked files
@@ -792,31 +789,9 @@ class SemanticCommitCommand(CommitCommand):
 		        List of SemanticGroup objects with messages
 
 		"""
-		from codemap.git.semantic_grouping.batch_processor import batch_generate_messages
-
 		# Get config loader and settings
 		config_loader = self.message_generator.get_config_loader()
 		llm_config = config_loader.get("llm", {})
-		use_batch_processing = llm_config.get("use_batch_processing", True)
-		model = llm_config.get("model", "openai/gpt-4o-mini")
-
-		# Handle batch processing if enabled and we have multiple groups
-		if use_batch_processing and len(groups) > 1:
-			try:
-				logger.info(f"Using batch processing for {len(groups)} semantic groups")
-				# Get the prompt template from the message generator
-				prompt_template = self.message_generator.prompt_template
-
-				# Run the batch processing
-				return batch_generate_messages(
-					groups=groups, prompt_template=prompt_template, config_loader=config_loader, model=model
-				)
-			except Exception:
-				logger.exception("Batch processing failed")
-				# Show warning message in UI when falling back
-				self.ui.show_warning("Batch processing failed. Falling back to individual message generation.")
-				logger.info("Falling back to individual message generation")
-				# Fall back to individual message generation
 
 		# Process groups individually
 		from codemap.git.diff_splitter import DiffChunk

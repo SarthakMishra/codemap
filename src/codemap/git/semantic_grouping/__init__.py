@@ -10,9 +10,6 @@ from dataclasses import dataclass, field
 
 from codemap.git.diff_splitter import DiffChunk
 
-# isort: skip
-from codemap.git.semantic_grouping.batch_processor import batch_generate_messages
-
 # --- These imports are after the class definition to avoid circular imports ---
 # isort: skip
 from codemap.git.semantic_grouping.clusterer import DiffClusterer
@@ -93,7 +90,6 @@ __all__ = [
 	"DiffEmbedder",
 	"FileIntegrityResolver",
 	"SemanticGroup",
-	"batch_generate_messages",
 	"format_chunk",
 	"prioritize_chunks",
 	"process_chunks_with_lod",

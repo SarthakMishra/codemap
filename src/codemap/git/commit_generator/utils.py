@@ -4,11 +4,8 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Any
 
-from codemap.git.commit_generator.schemas import COMMIT_MESSAGE_SCHEMA
 from codemap.git.commit_linter.linter import CommitLinter
-from codemap.git.utils import GitError, run_git_command
 from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
@@ -72,69 +69,6 @@ def lint_commit_message(
 		# Handle any errors during linting
 		logger.exception("Error linting commit message")
 		return False, f"Linting failed: {e!s}"
-
-
-def save_working_directory_state(files: list[str], output_file: str) -> bool:
-	"""
-	Save the current state of specified files to a patch file.
-
-	Args:
-	        files: List of file paths
-	        output_file: Path to output patch file
-
-	Returns:
-	        bool: Whether the operation was successful
-
-	"""
-	output_path = Path(output_file)
-
-	try:
-		if not files:
-			# Nothing to save
-			with output_path.open("w") as f:
-				f.write("")
-			return True
-
-		# Generate diff for the specified files
-		diff_cmd = ["git", "diff", "--", *files]
-		diff_content = run_git_command(diff_cmd)
-
-		# Write to output file
-		with output_path.open("w") as f:
-			f.write(diff_content)
-
-		return True
-
-	except (OSError, GitError):
-		logger.exception("Error saving working directory state")
-		return False
-
-
-def restore_working_directory_state(patch_file: str) -> bool:
-	"""
-	Restore the working directory state from a patch file.
-
-	Args:
-	        patch_file: Path to patch file
-
-	Returns:
-	        bool: Whether the operation was successful
-
-	"""
-	patch_path = Path(patch_file)
-
-	try:
-		# Check if the patch file exists and is not empty
-		if not patch_path.exists() or patch_path.stat().st_size == 0:
-			return True  # Nothing to restore
-
-		# Apply the patch
-		run_git_command(["git", "apply", patch_file])
-		return True
-
-	except GitError:
-		logger.exception("Error restoring working directory state")
-		return False
 
 
 def format_commit_json(content: str, config_loader: ConfigLoader | None = None) -> str:
@@ -266,49 +200,3 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 		# If parsing or validation fails, return the content as-is, but cleaned
 		logger.warning("Error formatting JSON to commit message: %s. Using raw content.", str(e))
 		return content.strip()
-
-
-def prepare_prompt(
-	template: str,
-	diff_content: str,
-	file_info: dict[str, Any],
-	convention: dict[str, Any],
-	extra_context: dict[str, Any] | None = None,
-) -> str:
-	"""
-	Prepare a prompt for LLM commit message generation.
-
-	Args:
-	        template: The prompt template string
-	        diff_content: The diff content to include in the prompt
-	        file_info: Dictionary of file information
-	        convention: Commit convention configuration
-	        extra_context: Additional context variables for the template
-
-	Returns:
-	        Formatted prompt string
-
-	"""
-	# Create a context dict with default values for template variables
-	context = {
-		"diff": diff_content,
-		"files": file_info,
-		"convention": convention,
-		"schema": COMMIT_MESSAGE_SCHEMA,
-		"original_message": "",  # Default value for original_message
-		"lint_errors": "",  # Default value for lint_errors
-	}
-
-	# Update with any extra context provided
-	if extra_context:
-		context.update(extra_context)
-
-	try:
-		from string import Template
-
-		template_obj = Template(template)
-		return template_obj.safe_substitute(context)
-	except (ValueError, KeyError) as e:
-		logger.warning("Error formatting prompt template: %s", str(e))
-		# Fallback to simple string formatting
-		return template.format(**context)
