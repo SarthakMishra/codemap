@@ -1,12 +1,9 @@
 """Command for asking questions about the codebase using RAG."""
 
 import logging
-import os
 import uuid
 from pathlib import Path
 from typing import Any, TypedDict
-
-from litellm import completion
 
 from codemap.db.client import DatabaseClient
 from codemap.llm import create_client
@@ -201,38 +198,6 @@ class AskCommand:
 			logger.exception("Error retrieving context")
 			return []
 
-	def _extract_answer_from_response(self, response: Any) -> str | None:  # noqa: ANN401
-		"""Safely extract the answer text from a litellm response object."""
-		if response is None:
-			return None
-
-		try:
-			# Handle different response object structures
-			if hasattr(response, "choices") and response.choices:
-				# Try to access as object with attributes
-				choice = response.choices[0]
-				if hasattr(choice, "message"):
-					message = choice.message
-					if hasattr(message, "content"):
-						return message.content
-
-			# Try to access as dictionary
-			if isinstance(response, dict) and "choices" in response and response["choices"]:
-				choice = response["choices"][0]
-				if isinstance(choice, dict) and "message" in choice:
-					message = choice["message"]
-					if isinstance(message, dict) and "content" in message:
-						return message["content"]
-
-			# If we got here, we couldn't extract the answer
-			logger.warning(f"Couldn't extract answer from response of type {type(response)}")
-			return None
-
-		# Fix for BLE001 (blind exception) - catch specific exceptions
-		except (AttributeError, IndexError, KeyError, TypeError) as e:
-			logger.warning(f"Error extracting answer from response: {e}")
-			return None
-
 	async def run(self, question: str) -> AskResult:
 		"""Executes one turn of the ask command, returning the answer and context."""
 		logger.info(f"Processing question for session {self.session_id}: '{question}'")
@@ -252,17 +217,12 @@ class AskCommand:
 			logger.warning(f"Context too long ({len(context_text)} chars), truncating.")
 			context_text = context_text[: self.max_context_length] + "... [truncated]"
 
-		# Construct messages with context included
-		messages = [
-			{"role": "system", "content": SYSTEM_PROMPT},
-			{
-				"role": "user",
-				"content": (
-					f"Here's my question about the codebase: {question}\n\n"
-					f"Relevant context from the codebase:\n{context_text}"
-				),
-			},
-		]
+		# Construct prompt text from the context and question
+		prompt = (
+			f"System: {SYSTEM_PROMPT}\n\n"
+			f"User: Here's my question about the codebase: {question}\n\n"
+			f"Relevant context from the codebase:\n{context_text}"
+		)
 
 		# Store user query in DB
 		db_entry_id = None
@@ -283,28 +243,14 @@ class AskCommand:
 			"temperature": llm_config.get("temperature", 0.7),
 			"max_tokens": llm_config.get("max_tokens", 1024),
 		}
-		model_name = llm_config.get("model", "openai/gpt-4o-mini")
-		api_base = llm_config.get("api_base")
-		api_key_env_var = llm_config.get("api_key_env")
-		api_key = None
-		if isinstance(api_key_env_var, str):
-			api_key = os.getenv(api_key_env_var)
-		api_key = api_key or llm_config.get("api_key")  # Fallback to direct config key
 
 		# Call LLM with context
 		try:
 			with loading_spinner("Waiting for LLM response..."):
-				response = completion(
-					model=model_name,
-					messages=messages,
-					api_base=api_base,
-					api_key=api_key,
-					stream=False,
+				answer = self.llm_client.completion(
+					messages=[{"role": "user", "content": prompt}],
 					**llm_params,
 				)
-
-			# Extract answer from response
-			answer = self._extract_answer_from_response(response)
 
 			# Update DB with answer using the dedicated client method
 			if db_entry_id and answer:
