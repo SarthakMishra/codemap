@@ -11,16 +11,7 @@ Before contributing, please read our [Code of Conduct](code-of-conduct.md) and [
 
 2.  **Install Prerequisites:**
     *   **Task:** Follow the official installation guide: [https://taskfile.dev/installation/](https://taskfile.dev/installation/)
-    *   **uv:** Install the `uv` package manager. We recommend using `pipx`:
-    
-        ```bash
-        # Using pipx (recommended)
-        pipx install uv
-
-        # Or using pip
-        # pip install uv
-        ```
-
+    *   **uv:** Follow the official installation guide: [https://docs.astral.sh/uv/getting-started/installation/](https://docs.astral.sh/uv/getting-started/installation/)   
     *   **Python:** Ensure you have Python 3.12 or later installed.
 
 3.  **Set up the Virtual Environment:**

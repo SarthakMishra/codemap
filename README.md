@@ -42,46 +42,31 @@ CodeMap is an AI-powered developer toolkit designed to enhance your coding workf
 > [!Tip]
 > After installation, use `codemap` or the alias `cm`.
 
-### Recommended: `pipx`
+>[!Note]
+> Ensure uv is installed: `curl -LsSf https://astral.sh/uv/install.sh | sh `
+> To learn more aboyt uv [Click here](https://docs.astral.sh/uv/getting-started/installation/)
 
-`pipx` installs the package in an isolated environment.
-
+### Global Installation
 ```bash
-# Ensure pipx is installed
-# python3 -m pip install --user pipx
-# python3 -m pipx ensurepath
-
-# Install codemap
-pipx install codemap
+# Stable version:
+uv tool install codemap
 ```
 
-### Alternative: `pip`
-
 ```bash
-pip install --user codemap
-# Ensure $HOME/.local/bin is in your PATH
-```
-
-### Development Version
-
-```bash
-pipx install codemap --pip-args='--pre'
+# Development Version:
+uv tool install codemap --prerelease allow
 ```
 
 ### Updating
 
 ```bash
-pipx upgrade codemap
-# Or if installed with pip:
-# pip install --user --upgrade codemap
+uv tool upgrade codemap
 ```
 
 ### Uninstalling
 
 ```bash
-pipx uninstall codemap
-# Or if installed with pip:
-# pip uninstall codemap
+uv tool uninstall codemap
 ```
 
 **For more detailed installation options and troubleshooting, see the [Installation Guide](https://codemap.run/installation/) on our documentation site.**
