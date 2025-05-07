@@ -3,16 +3,29 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, TypedDict
+from typing import Any, Literal, TypedDict, TypeVar
 
-from codemap.utils.config_loader import ConfigLoader
+from pydantic import BaseModel
 
-from .config import DEFAULT_LLM_REQUEST_PARAMS
+from codemap.config import ConfigLoader
+
+# Import Pydantic-AI
+try:
+	from pydantic_ai import Agent
+	from pydantic_ai.result import FinalResult
+	from pydantic_ai.settings import ModelSettings
+	from pydantic_graph import End
+except ImportError:
+	Agent = None
+	FinalResult = None
+	End = None
+	ModelSettings = None
+
 from .errors import LLMError
 
 logger = logging.getLogger(__name__)
 
-# Define a type alias for the response types
+# ResponseType alias is no longer strictly needed for pydantic-ai's RunResult but kept if other parts use it.
 ResponseType = dict[str, Any] | Any
 
 
@@ -23,153 +36,124 @@ class MessageDict(TypedDict):
 	content: str
 
 
-def call_llm_api(
+# TypeVar for dynamic return type based on output_model
+M = TypeVar("M", bound=BaseModel)
+
+
+async def call_llm_api(
 	model: str,
-	api_key: str,
 	messages: list[MessageDict],
-	api_base: str | None = None,
-	json_schema: dict | None = None,
-	config_loader: ConfigLoader | None = None,
+	config_loader: ConfigLoader,
+	output_schema: type[M] | None = None,
 	**kwargs: dict[str, str | int | float | bool | None],
-) -> str:
+) -> str | M:
 	"""
-	Call an LLM API using litellm.
+	Call an LLM API using pydantic-ai.
 
 	Args:
-	    model: The model identifier (including provider prefix)
-	    api_key: The API key to use
+	    model: The model identifier (e.g., "openai:gpt-4o")
 	    messages: The list of messages to send to the LLM
-	    api_base: Optional custom API base URL
-	    json_schema: Optional JSON schema for response validation
-	    config_loader: Optional ConfigLoader instance for additional configuration
-	    **kwargs: Additional parameters to pass to the LLM API
+	    config_loader: ConfigLoader instance for additional configuration
+	    output_schema: Optional Pydantic model to structure the output.
+	                  If provided, the function will return an instance of this model.
+	                  Otherwise, it returns a string.
+	    **kwargs: Additional parameters (e.g., temperature, max_tokens) to pass to the LLM.
 
 	Returns:
-	    The generated text response
+	    The generated response, either as a string or an instance of the output_model.
 
 	Raises:
-	    LLMError: If the API call fails
-
+	    LLMError: If pydantic-ai is not installed or the API call fails.
 	"""
-	try:
-		import litellm
-	except ImportError:
-		msg = "LiteLLM library not installed. Install it with 'pip install litellm'."
+	if Agent is None or End is None or FinalResult is None:  # Check all imports
+		msg = "Pydantic-AI library or its required types (AgentNode, End, FinalResult) not installed/found."
 		logger.exception(msg)
 		raise LLMError(msg) from None
 
-	# Get request parameters from config if available
-	request_params = DEFAULT_LLM_REQUEST_PARAMS.copy()
-
-	if config_loader is not None:
-		llm_config = config_loader.get_llm_config()
-		# Update request params with values from config
-		if "temperature" in llm_config:
-			request_params["temperature"] = llm_config.get("temperature")
-		if "max_tokens" in llm_config:
-			request_params["max_tokens"] = llm_config.get("max_tokens")
-
-	# Override with any passed parameters
-	request_params.update(kwargs)
-
-	# If no system message is provided, add a default one
-	if not any(msg["role"] == "system" for msg in messages):
-		system_message = (
-			"You are an AI programming assistant. Follow the user's requirements carefully and to the letter."
-		)
-
-		if json_schema:
-			system_message += " Your response must be a valid JSON object matching the provided schema."
-
-		messages.insert(
-			0,
-			{
-				"role": "system",
-				"content": system_message,
-			},
-		)
-
-	# Set up final request parameters
-	request_params.update(
-		{
-			"model": model,
-			"messages": messages,
-			"api_key": api_key,
-		}
+	# Determine system prompt
+	system_prompt_str = (
+		"You are an AI programming assistant. Follow the user's requirements carefully and to the letter."
 	)
 
-	# Add API base if provided
-	if api_base:
-		request_params["api_base"] = api_base
+	for msg in messages:
+		if msg["role"] == "system":
+			system_prompt_str = msg["content"]
+			break
 
-	# Add JSON response format if schema provided
-	if json_schema:
-		request_params["response_format"] = {"type": "json_object", "schema": json_schema}
-		# Enable schema validation
-		litellm.enable_json_schema_validation = True
+	# If an output_model is specified, pydantic-ai handles instructing the LLM for structured output.
+	# So, no need to manually add schema instructions to the system_prompt_str here.
 
-	def _raise_extraction_error() -> None:
-		"""Raise an error for failed content extraction."""
-		msg = "Failed to extract content from LLM response"
-		raise LLMError(msg)
+	# Determine the result type for the Pydantic-AI Agent
+	current_output_type: type = str
+	if output_schema:
+		current_output_type = output_schema
 
 	try:
-		logger.debug("Calling LiteLLM with model: %s", model)
-		response = litellm.completion(**request_params)
+		# Initialize Pydantic-AI Agent
+		agent = Agent(
+			model=model,
+			system_prompt=system_prompt_str,
+			output_type=current_output_type,
+		)
 
-		# Extract content from the response
-		content = extract_content_from_response(response)
+		run_settings = {
+			"temperature": config_loader.get.llm.temperature,
+			"max_tokens": config_loader.get.llm.max_output_tokens,
+		}
+		run_settings.update(kwargs)
 
-		if not content:
-			logger.error("Could not extract content from LLM response")
-			_raise_extraction_error()
+		logger.debug(
+			"Calling Pydantic-AI Agent with model: %s, system_prompt: '%s...', output_type: %s, params: %s",
+			model,
+			system_prompt_str[:100],
+			current_output_type.__name__,
+			run_settings,
+		)
 
-		return content
+		if not any(msg.get("role") == "user" for msg in messages):
+			msg = "No user content found in messages for Pydantic-AI agent."
+			logger.exception(msg)
+			raise LLMError(msg)
 
+		if not messages or messages[-1].get("role") != "user":
+			msg = "Last message is not an user prompt"
+			logger.exception(msg)
+			raise LLMError(msg)
+
+		user_prompt = messages[-1]["content"]
+
+		final_data: str | M | None = None
+
+		if ModelSettings is None:
+			msg = "ModelSettings not found in pydantic-ai. Install the correct version."
+			logger.exception(msg)
+			raise LLMError(msg)
+
+		async with agent.iter(user_prompt=user_prompt, model_settings=ModelSettings(**run_settings)) as run:
+			async for chunk in run:
+				if isinstance(chunk, End) and isinstance(chunk.data, FinalResult):
+					final_data = chunk.data.output  # Assuming FinalResult has an 'output' attribute
+					break
+
+		if final_data is not None:
+			if output_schema and not isinstance(final_data, output_schema):
+				# This case should ideally be handled by pydantic-ai if output_type is set
+				msg = (
+					f"Pydantic-AI returned unexpected type. Expected {output_schema.__name__}, "
+					f"got {type(final_data).__name__}."
+				)
+				raise LLMError(msg)
+			return final_data
+
+		msg = "Pydantic-AI call succeeded but returned no structured data or text chunks."
+		logger.error(msg)
+		raise LLMError(msg)
+
+	except ImportError:
+		msg = "Pydantic-AI library not installed. Install it with 'uv add pydantic-ai'."
+		logger.exception(msg)
+		raise LLMError(msg) from None
 	except Exception as e:
-		logger.exception("LLM API call failed")
-		msg = f"LLM API call failed: {e}"
+		logger.exception("Pydantic-AI LLM API call failed")
+		msg = f"Pydantic-AI LLM API call failed: {e}"
 		raise LLMError(msg) from e
-
-
-def extract_content_from_response(response: ResponseType) -> str:
-	"""
-	Extract content from a LiteLLM response.
-
-	Args:
-	    response: LiteLLM response object or dictionary
-
-	Returns:
-	    Extracted content as string
-
-	Raises:
-	    AttributeError: If content cannot be extracted
-
-	"""
-	content = ""
-
-	# Try different response formats
-	if response:
-		# First try the standard OpenAI-like structure
-		if hasattr(response, "choices") and isinstance(getattr(response, "choices", []), list):
-			choices = getattr(response, "choices", [])
-			if choices:
-				first_choice = choices[0]
-				if hasattr(first_choice, "message") and hasattr(first_choice.message, "content"):
-					content = getattr(first_choice.message, "content", "")
-
-		# Then try as dictionary if the above failed
-		if not content and isinstance(response, dict):
-			choices = response.get("choices", [])
-			if choices and isinstance(choices, list) and choices:
-				first_choice = choices[0]
-				if isinstance(first_choice, dict):
-					message = first_choice.get("message", {})
-					if isinstance(message, dict):
-						content = message.get("content", "")
-
-		# Try as direct string for simple APIs
-		if not content and hasattr(response, "text"):
-			content = getattr(response, "text", "")
-
-	return content or ""

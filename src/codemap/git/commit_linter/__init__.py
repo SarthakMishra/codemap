@@ -8,13 +8,12 @@ commit message linting.
 
 from pathlib import Path
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config.config_loader import ConfigLoader
 
 from .config import CommitLintConfig, Rule, RuleLevel
-from .constants import DEFAULT_TYPES
 from .linter import CommitLinter
 
-__all__ = ["DEFAULT_TYPES", "CommitLintConfig", "CommitLinter", "Rule", "RuleLevel", "create_linter"]
+__all__ = ["CommitLintConfig", "CommitLinter", "Rule", "RuleLevel", "create_linter"]
 
 
 def create_linter(
@@ -43,7 +42,7 @@ def create_linter(
 	"""
 	# Create a ConfigLoader if not provided, but repo_root is
 	if config_loader is None and repo_root is not None:
-		config_loader = ConfigLoader(repo_root=repo_root)
+		config_loader = ConfigLoader.get_instance(repo_root=repo_root)
 
 	# Create and return the linter with proper configuration injection
 	return CommitLinter(

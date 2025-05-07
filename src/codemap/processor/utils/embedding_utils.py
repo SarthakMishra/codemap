@@ -6,7 +6,7 @@ from typing import cast
 
 import voyageai
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -17,13 +17,13 @@ logger = logging.getLogger(__name__)
 
 def get_retry_settings(config_loader: ConfigLoader) -> tuple[int, int]:
 	"""Get retry settings from config."""
-	embedding_config = config_loader.get("embedding", {})
+	embedding_config = config_loader.get.embedding
 	# Use max_retries directly for voyageai.Client
-	max_retries = embedding_config.get("max_retries", 3)
+	max_retries = embedding_config.max_retries
 	# retry_delay is handled internally by voyageai client's exponential backoff
 	# We can still keep the config value if needed elsewhere, but timeout is more relevant here.
 	# Increased default timeout
-	timeout = embedding_config.get("timeout", 180)  # Default timeout for requests (increased from 60)
+	timeout = embedding_config.timeout
 	return max_retries, timeout
 
 
@@ -51,10 +51,10 @@ async def generate_embeddings_batch(
 	if config_loader is None:
 		config_loader = ConfigLoader()
 
-	embedding_config = config_loader.get("embedding", {})
+	embedding_config = config_loader.get.embedding
 
 	# Use model from parameter or fallback to config
-	embedding_model = model or embedding_config.get("model_name", "voyage-code-3")
+	embedding_model = model or embedding_config.model_name
 
 	# Get retry and timeout settings from config
 	max_retries, timeout = get_retry_settings(config_loader)
@@ -132,35 +132,3 @@ async def generate_embedding(
 	# Error logging is now handled within generate_embeddings_batch
 	logger.error("Failed to generate embedding for single text using voyageai client.")
 	return None
-
-
-# Example Usage (remains the same, but now uses voyageai backend)
-# import asyncio
-#
-# async def main():
-#     # Ensure VOYAGE_API_KEY is set in your environment for this example
-#     texts_to_embed = [
-#         "This is the first document.",
-#         "This document is the second document.",
-#         "And this is the third one.",
-#         "Is this the first document?",
-#     ]
-#     embeddings = await generate_embeddings_batch(texts_to_embed)
-#
-#     if embeddings:
-#         print(f"Generated {len(embeddings)} embeddings.")
-#         for i, emb in enumerate(embeddings):
-#             print(f"Embedding {i+1} (first 5 dims): {emb[:5]}...")
-#             print(f"Embedding dimension: {len(emb)}")
-#     else:
-#         print("Failed to generate embeddings.")
-#
-#     single_embedding = await generate_embedding("A single piece of text.")
-#     if single_embedding:
-#         print(f"Single embedding (first 5 dims): {single_embedding[:5]}...")
-#         print(f"Single embedding dimension: {len(single_embedding)}")
-#     else:
-#         print("Failed to generate single embedding.")
-#
-# if __name__ == "__main__":
-#    asyncio.run(main())

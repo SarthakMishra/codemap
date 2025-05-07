@@ -3,16 +3,15 @@
 import dataclasses
 import logging
 import re
-from collections.abc import Sequence
 from io import StringIO
 from pathlib import Path
 from re import Pattern
-from typing import Any, Protocol
+from typing import TYPE_CHECKING
 
 import numpy as np
 from unidiff import Hunk, PatchedFile, PatchSet, UnidiffParseError
 
-from codemap.config import DEFAULT_CONFIG
+from codemap.config import ConfigLoader
 from codemap.git.utils import GitDiff
 
 from .constants import (
@@ -28,26 +27,20 @@ from .utils import (
 	is_test_environment,
 )
 
+if TYPE_CHECKING:
+	from sentence_transformers import SentenceTransformer
+
 logger = logging.getLogger(__name__)
 
 # Constants for numeric comparisons
 EXPECTED_TUPLE_SIZE = 2  # Expected size of extract_code_from_diff result
 
 
-class EmbeddingModel(Protocol):
-	"""Protocol for embedding models."""
-
-	def encode(self, texts: Sequence[str], **kwargs: Any) -> np.ndarray:  # noqa: ANN401
-		"""Encode texts into embeddings."""
-		...
-
-
 class BaseSplitStrategy:
 	"""Base class for diff splitting strategies."""
 
-	def __init__(self, embedding_model: EmbeddingModel | None = None) -> None:
+	def __init__(self) -> None:
 		"""Initialize with optional embedding model."""
-		self._embedding_model = embedding_model
 		# Precompile regex patterns for better performance
 		self._file_pattern = re.compile(r"diff --git a/.*? b/(.*?)\n")
 		self._hunk_pattern = re.compile(r"@@ -\d+,\d+ \+\d+,\d+ @@")
@@ -130,53 +123,31 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	def __init__(
 		self,
-		embedding_model: EmbeddingModel | None = None,
-		code_extensions: set[str] | None = None,
-		related_file_patterns: list[tuple[Pattern, Pattern]] | None = None,
-		similarity_threshold: float = 0.4,
-		directory_similarity_threshold: float = 0.3,
-		min_chunks_for_consolidation: int = 2,
-		max_chunks_before_consolidation: int = 20,
-		max_file_size_for_llm: int | None = None,
-		file_move_similarity_threshold: float = 0.85,  # High threshold for file moves
+		model: "SentenceTransformer",
+		config_loader: ConfigLoader,
 	) -> None:
 		"""
 		Initialize the SemanticSplitStrategy.
 
 		Args:
-		    embedding_model: Optional embedding model instance
-		    code_extensions: Optional set of code file extensions. Defaults to config.
-		    related_file_patterns: Optional list of related file patterns
-		    similarity_threshold: Threshold for grouping by content similarity.
-		    directory_similarity_threshold: Threshold for directory similarity.
-		    min_chunks_for_consolidation: Min chunks to trigger consolidation.
-		    max_chunks_before_consolidation: Max chunks allowed before forced consolidation.
-		    max_file_size_for_llm: Max file size for LLM processing.
-		    file_move_similarity_threshold: Threshold for detecting moved files (should be high).
+		    Args:
+		    model: The pre-loaded sentence_transformers.SentenceTransformer model instance.
+		    config_loader: Optional ConfigLoader instance.
 
 		"""
-		super().__init__(embedding_model)
 		# Store thresholds and settings
-		self.similarity_threshold = similarity_threshold
-		self.directory_similarity_threshold = directory_similarity_threshold
-		self.min_chunks_for_consolidation = min_chunks_for_consolidation
-		self.max_chunks_before_consolidation = max_chunks_before_consolidation
-		self.file_move_similarity_threshold = file_move_similarity_threshold
-		# Use default from config if not provided
-		self.max_file_size_for_llm = (
-			max_file_size_for_llm
-			if max_file_size_for_llm is not None
-			else DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"]
-		)
+		self.similarity_threshold = config_loader.get.commit.diff_splitter.similarity_threshold
+		self.directory_similarity_threshold = config_loader.get.commit.diff_splitter.directory_similarity_threshold
+		self.min_chunks_for_consolidation = config_loader.get.commit.diff_splitter.min_chunks_for_consolidation
+		self.max_chunks_before_consolidation = config_loader.get.commit.diff_splitter.max_chunks_before_consolidation
+		self.max_file_size_for_llm = config_loader.get.commit.diff_splitter.max_file_size_for_llm
+		self.file_move_similarity_threshold = config_loader.get.commit.diff_splitter.file_move_similarity_threshold
 
 		# Set up file extensions, defaulting to config if None is passed
-		self.code_extensions = (
-			code_extensions
-			if code_extensions is not None
-			else set(DEFAULT_CONFIG["commit"]["diff_splitter"]["default_code_extensions"])
-		)
+		self.code_extensions = config_loader.get.commit.diff_splitter.default_code_extensions
 		# Initialize patterns for related files
-		self.related_file_patterns = related_file_patterns or self._initialize_related_file_patterns()
+		self.related_file_patterns = self._initialize_related_file_patterns()
+		self._embedding_model = model
 
 	def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""

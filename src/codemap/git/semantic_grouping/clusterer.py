@@ -22,6 +22,7 @@ from typing import TypedDict, TypeVar
 
 import numpy as np
 
+from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ class DiffClusterer:
 
 	"""
 
-	def __init__(self, method: str = "agglomerative", **kwargs: object) -> None:
+	def __init__(self, config_loader: ConfigLoader, **kwargs: object) -> None:
 		"""
 		Initialize the clusterer.
 
@@ -92,7 +93,8 @@ class DiffClusterer:
 		    ImportError: If scikit-learn is not installed
 
 		"""
-		self.method = method
+		self.config = config_loader.get.embedding.clustering
+		self.method = self.config.method
 		self.kwargs = kwargs
 
 		# Import here to avoid making sklearn a hard dependency
@@ -155,9 +157,9 @@ class DiffClusterer:
 			# Default parameters if not provided
 			params = {
 				"n_clusters": None,
-				"distance_threshold": 0.5,  # Threshold for cluster formation (0.5 = moderate similarity)
-				"metric": "precomputed",  # Use metric instead of affinity
-				"linkage": "average",  # Use average linkage for balanced clusters
+				"distance_threshold": self.config.agglomerative.distance_threshold,  # Threshold for cluster formation (0.5 = moderate similarity)
+				"metric": self.config.agglomerative.metric,  # Use metric instead of affinity
+				"linkage": self.config.agglomerative.linkage,  # Use average linkage for balanced clusters
 			}
 			params.update(self.kwargs)
 
@@ -167,9 +169,9 @@ class DiffClusterer:
 		elif self.method == "dbscan":
 			# Default parameters if not provided
 			params = {
-				"eps": 0.3,  # Maximum distance between points in neighborhood (0.3 = high similarity required)
-				"min_samples": 2,  # Minimum points to form a dense region
-				"metric": "precomputed",  # Using precomputed distance matrix
+				"eps": self.config.dbscan.eps,  # Maximum distance between points in neighborhood (0.3 = high similarity required)
+				"min_samples": self.config.dbscan.min_samples,  # Minimum points to form a dense region
+				"metric": self.config.dbscan.metric,  # Using precomputed distance matrix
 			}
 			params.update(self.kwargs)
 

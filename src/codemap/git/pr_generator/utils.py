@@ -169,29 +169,21 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
 	return first_commit
 
 
-def generate_pr_title_with_llm(
+async def generate_pr_title_with_llm(
 	commits: list[str],
-	llm_client: LLMClient | None = None,
-	model: str | None = "gpt-4o-mini",
-	api_key: str | None = None,
-	api_base: str | None = None,
+	llm_client: LLMClient,
 ) -> str:
 	"""
 	Generate a PR title using an LLM.
 
 	Args:
 	    commits: List of commit messages
-	    llm_client: LLMClient instance to use (if provided)
-	    model: LLM model to use (used only if llm_client is None)
-	    api_key: API key for LLM provider (used only if llm_client is None)
-	    api_base: Custom API base URL (used only if llm_client is None)
+	    llm_client: LLMClient instance
 
 	Returns:
 	    Generated PR title
 
 	"""
-	from codemap.llm import create_client
-
 	if not commits:
 		return "Update branch"
 
@@ -200,13 +192,7 @@ def generate_pr_title_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_TITLE_PROMPT.format(commit_list=commit_list)
 
-		# Use provided client or create a new one
-		client = llm_client
-		if client is None:
-			actual_model = model or "gpt-4o-mini"
-			client = create_client(model=actual_model, api_key=api_key, api_base=api_base)
-
-		title = client.completion(
+		title = await llm_client.completion(
 			messages=[
 				{"role": "system", "content": PR_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
@@ -335,29 +321,21 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
 	return description
 
 
-def generate_pr_description_with_llm(
+async def generate_pr_description_with_llm(
 	commits: list[str],
-	llm_client: LLMClient | None = None,
-	model: str | None = "gpt-4o-mini",
-	api_key: str | None = None,
-	api_base: str | None = None,
+	llm_client: LLMClient,
 ) -> str:
 	"""
 	Generate a PR description using an LLM.
 
 	Args:
 	    commits: List of commit messages
-	    llm_client: LLMClient instance to use (if provided)
-	    model: LLM model to use (used only if llm_client is None)
-	    api_key: API key for LLM provider (used only if llm_client is None)
-	    api_base: Custom API base URL (used only if llm_client is None)
+	    llm_client: LLMClient instance
 
 	Returns:
 	    Generated PR description
 
 	"""
-	from codemap.llm import create_client
-
 	if not commits:
 		return "No changes"
 
@@ -366,13 +344,7 @@ def generate_pr_description_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_DESCRIPTION_PROMPT.format(commit_list=commit_list)
 
-		# Use provided client or create a new one
-		client = llm_client
-		if client is None:
-			actual_model = model or "gpt-4o-mini"
-			client = create_client(model=actual_model, api_key=api_key, api_base=api_base)
-
-		return client.completion(
+		return await llm_client.completion(
 			messages=[
 				{"role": "system", "content": PR_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},

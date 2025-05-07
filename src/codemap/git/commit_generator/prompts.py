@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from codemap.config import ConfigLoader
+
 from .schemas import COMMIT_MESSAGE_SCHEMA
 
 COMMIT_SYSTEM_PROMPT = """
@@ -27,7 +29,7 @@ DEFAULT_PROMPT_TEMPLATE = """
 
 **Instructions & Rules:**
 
-1.  **Type:** REQUIRED. Must be lowercase and one of: {convention[types]}.
+1.  **Type:** REQUIRED. Must be lowercase and one of: {convention.types}.
     *   `feat`: New feature (MINOR SemVer).
     *   `fix`: Bug fix (PATCH SemVer).
     *   Other types (`build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`, etc.) are allowed.
@@ -37,7 +39,7 @@ DEFAULT_PROMPT_TEMPLATE = """
     *   Must follow the colon and space.
     *   Must be >= 10 characters.
     *   Must NOT end with a period.
-    *   The entire header line (`<type>[scope]: <description>`) must be <= {convention[max_length]} characters.
+    *   The entire header line (`<type>[scope]: <description>`) must be <= {convention.max_length} characters.
 4.  **Body:** OPTIONAL. Explain *why* and *how*. Start one blank line after the description.
 	*	Use the body only if extra context is needed to understand the changes.
 	*	Do not use the body to add unrelated information.
@@ -104,7 +106,7 @@ You are a helpful assistant that fixes conventional commit messages that have li
 
 [optional footer(s)]
 ```
-2. Types include: {convention[types]}
+2. Types include: {convention.types}
 3. Scope must be short (1-2 words), concise, and represent the specific component affected
 4. The description should be a concise, imperative present tense summary of the code changes,
    focusing on *what* was changed and *why*.
@@ -137,7 +139,7 @@ def prepare_prompt(
 	template: str,
 	diff_content: str,
 	file_info: dict[str, Any],
-	convention: dict[str, Any],
+	config_loader: ConfigLoader,
 	extra_context: dict[str, Any] | None = None,
 ) -> str:
 	"""
@@ -147,7 +149,7 @@ def prepare_prompt(
 	    template: Prompt template to use
 	    diff_content: Diff content to include
 	    file_info: Information about files in the diff
-	    convention: Commit convention settings
+	    config_loader: ConfigLoader instance to use for configuration
 	    extra_context: Optional additional context values for the template
 
 	Returns:
@@ -157,7 +159,7 @@ def prepare_prompt(
 	context = {
 		"diff": diff_content,
 		"files": file_info,
-		"convention": convention,
+		"convention": config_loader.get.commit.convention,
 		"schema": COMMIT_MESSAGE_SCHEMA,
 	}
 
@@ -175,7 +177,7 @@ def prepare_prompt(
 def prepare_lint_prompt(
 	template: str,
 	file_info: dict[str, Any],
-	convention: dict[str, Any],
+	config_loader: ConfigLoader,
 	lint_messages: list[str],
 	original_message: str | None = None,
 ) -> str:
@@ -185,7 +187,7 @@ def prepare_lint_prompt(
 	Args:
 	    template: Prompt template to use
 	    file_info: Information about files in the diff
-	    convention: Commit convention settings
+	    config_loader: ConfigLoader instance to use for configuration
 	    lint_messages: List of linting error messages
 	    original_message: The original failed commit message
 
@@ -214,7 +216,7 @@ def prepare_lint_prompt(
 
 	# Create an enhanced context with linting feedback
 	context = {
-		"convention": convention,
+		"convention": config_loader.get.commit.convention,
 		"schema": COMMIT_MESSAGE_SCHEMA,
 		"lint_feedback": lint_feedback,
 		"original_message": message_to_fix,

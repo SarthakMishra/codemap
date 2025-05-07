@@ -1,7 +1,7 @@
 """Module for generating embeddings from diff chunks."""
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -9,12 +9,8 @@ import numpy as np
 if TYPE_CHECKING:
 	from sentence_transformers import SentenceTransformer
 
-	EmbeddingModelType = SentenceTransformer
-else:
-	EmbeddingModelType = Any
-
+from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
-from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -24,38 +20,18 @@ class DiffEmbedder:
 
 	def __init__(
 		self,
-		model: "SentenceTransformer | None",
-		config_loader: ConfigLoader | None = None,
+		model: "SentenceTransformer",
+		config_loader: ConfigLoader,
 	) -> None:
 		"""
-		Initialize the embedder with a pre-loaded SentenceTransformer model or None.
+		Initialize the embedder with a pre-loaded SentenceTransformer model.
 
 		Args:
-		    model: The pre-loaded sentence_transformers.SentenceTransformer model instance, or None.
+		    model: The pre-loaded sentence_transformers.SentenceTransformer model instance.
 		    config_loader: Optional ConfigLoader instance.
 		"""
 		self.config_loader = config_loader or ConfigLoader()
 		self.model = model
-
-		if self.model is None:
-			logger.error("DiffEmbedder initialized with a None model. Attempting fallback.")
-			# Attempt to load a default model as a last resort.
-			default_model_name = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
-			try:
-				from sentence_transformers import SentenceTransformer as DefaultST
-
-				# Get default model name from config, or use the hardcoded one if config unvailable/doesn't specify
-				default_model_name = self.config_loader.get("semantic_grouping", {}).get(
-					"default_embedding_model", default_model_name
-				)
-				logger.warning(f"DiffEmbedder received None model, attempting to load default: {default_model_name}")
-				self.model = DefaultST(default_model_name)
-			except ImportError:
-				logger.exception("Fallback model load failed: sentence-transformers not found or dependencies missing.")
-				raise
-			except Exception:
-				logger.exception(f"Fallback model load failed for '{default_model_name}'")
-				raise
 
 	def preprocess_diff(self, diff_text: str) -> str:
 		"""

@@ -7,9 +7,11 @@ configuration settings.
 """
 
 import logging
-from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
+
+import yaml
+from xdg.BaseDirectory import xdg_config_home
 
 from codemap.config.config_schema import AppConfigSchema
 
@@ -135,9 +137,6 @@ class ConfigLoader:
 		if local_config.exists():
 			return local_config
 
-		# Lazy import xdg.BaseDirectory
-		from xdg.BaseDirectory import xdg_config_home
-
 		# Try XDG config path
 		xdg_config_dir = Path(xdg_config_home) / "codemap"
 		xdg_config_file = xdg_config_dir / "config.yml"
@@ -153,7 +152,6 @@ class ConfigLoader:
 		return None
 
 	@staticmethod
-	@lru_cache(maxsize=1)  # Cache only the single config file
 	def _parse_yaml_file(file_path: Path) -> dict[str, Any]:
 		"""
 		Parse a YAML file with caching for better performance.
@@ -167,17 +165,6 @@ class ConfigLoader:
 		Raises:
 			yaml.YAMLError: If the file cannot be parsed as valid YAML
 		"""
-		# Lazy import yaml
-		import yaml
-
-		# Try to use C-based YAML parser for better performance
-		try:
-			import yaml.cyaml
-
-			yaml.SafeLoader = yaml.cyaml.CSafeLoader
-		except ImportError:
-			pass  # Fall back to pure Python implementation
-
 		with file_path.open(encoding="utf-8") as f:
 			content = yaml.safe_load(f)
 			if content is None:  # Empty file
