@@ -53,12 +53,12 @@ dependencies = [
     "sentence-transformers>=4.1.0",
     "httpx>=0.28.1",
     "docker>=7.1.0",
-    "asyncer>=0.0.8",
     "psycopg2-binary>=2.9.10",
     "watchdog>=6.0.0",
     "scikit-learn>=1.6.1",
     "pydantic-ai>=0.1.10",
     "nest-asyncio>=1.6.0",
+    "asyncer",
 ]
 
 [project.urls]
