@@ -2,7 +2,7 @@
 
 # LLM configuration
 llm:
-  model: groq/llama-3.3-70b-versatile
+  model: groq:llama-3.3-70b-versatile
   # IMPORTANT: Do NOT add API keys here. Use environment variables or .env files instead.
   api_base: null
 
