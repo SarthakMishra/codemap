@@ -63,14 +63,6 @@ commit:
     # Maximum length for commit message subject line
     max_length: 120
 
-  diff_splitter:
-    # Decrease threshold for consolidation to ensure we consolidate more aggressively
-    min_chunks_for_consolidation: 2  # Was likely higher
-    # Increase similarity threshold for files to be more aggressive in grouping
-    similarity_threshold: 0.6  # Adjust this value as needed (lower = more consolidation)
-    # Increase max_chunks before forcing consolidation
-    max_chunks_before_consolidation: 5  # Lower value forces more consolidation
-
 # Pull request configuration
 pr:
   # Default branch settings
