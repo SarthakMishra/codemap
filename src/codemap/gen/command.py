@@ -52,7 +52,7 @@ def process_codebase(
 
 	# Get processor configuration from ConfigLoader
 	if config_loader is None:
-		config_loader = ConfigLoader()
+		config_loader = ConfigLoader().get_instance()
 		logger.debug("Created new ConfigLoader instance in process_codebase")
 
 	processor_config = config_loader.get.processor
