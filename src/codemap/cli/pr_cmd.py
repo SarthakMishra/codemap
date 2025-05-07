@@ -231,6 +231,7 @@ async def _pr_command_impl(
 		api_key: str | None = field(default=None)
 		workflow_strategy_name: str = field(default="github-flow")  # Default strategy
 		bypass_hooks: bool = field(default=False)
+
 	# --- Helper Functions (Adapted from pr_cmd_old) ---
 
 	def _resolve_description(desc_input: str | None) -> str | None:
