@@ -59,11 +59,10 @@ def mock_analyzer() -> MagicMock:
 def mock_config_loader() -> MagicMock:
 	"""Mock ConfigLoader for testing."""
 	config = MagicMock(spec=ConfigLoader)
-	config.get.return_value = {
-		"batch_size": 32,
-		"qdrant_batch_size": 100,
-		"voyage_token_limit": 80000,
-	}
+	embedding_config = MagicMock()
+	embedding_config.batch_size = 32
+	embedding_config.qdrant_batch_size = 100
+	config.get.embedding = embedding_config
 	return config
 
 
@@ -144,7 +143,6 @@ class TestVectorSynchronizer:
 		assert vector_synchronizer.config_loader == mock_config_loader
 		assert vector_synchronizer.batch_size == 32
 		assert vector_synchronizer.qdrant_batch_size == 100
-		assert vector_synchronizer.voyage_token_limit == 80000
 
 	@pytest.mark.asyncio
 	async def test_get_qdrant_state(self, vector_synchronizer: VectorSynchronizer) -> None:
@@ -253,49 +251,27 @@ class TestVectorSynchronizer:
 	@pytest.mark.asyncio
 	async def test_sync_index(self, vector_synchronizer: VectorSynchronizer, sample_chunks: list[CodeChunk]) -> None:
 		"""Test the full sync_index method."""
-		# Create a mock for the VoyageAI client
-		mock_voyage_client = MagicMock()
-		mock_voyage_client.count_tokens = MagicMock(return_value=50)  # Fixed token count
-		vector_synchronizer.voyage_client = mock_voyage_client
-
 		# Mock git tracked files
 		with patch("codemap.processor.vector.synchronizer.get_git_tracked_files") as mock_git_files:
-			# Return mock file data
-			mock_git_files.return_value = {
-				"file1.py": "abc123",
-				"file3.py": "ghi789",
-			}
+			mock_git_files.return_value = {"file1.py": "abc123", "file2.py": "def456"}
 
-			# Mock Qdrant state
-			mock_qdrant_state = {
-				"/mock/repo/file1.py": {("123", "abc123"), ("456", "abc123")},
-				"/mock/repo/file2.py": {("789", "def456")},
-			}
+			# Mock chunker
+			vector_synchronizer.chunker.chunk_file.return_value = sample_chunks
 
-			# Create a patched version of sync_index to avoid the token counting error
-			with patch.object(vector_synchronizer, "_get_qdrant_state", new_callable=AsyncMock) as mock_get_state:
-				mock_get_state.return_value = mock_qdrant_state
+			# Mock the methods we've already tested
+			mock_get_state = AsyncMock(return_value={})
+			mock_compare = AsyncMock(return_value=({"file1.py", "file2.py"}, set(), set()))
+			mock_process = AsyncMock(return_value=2)
 
-				# Mock _compare_states
-				with patch.object(vector_synchronizer, "_compare_states", new_callable=AsyncMock) as mock_compare:
-					# Set up return value
-					mock_compare.return_value = (
-						{"file3.py"},  # files to process
-						{"file2.py"},  # files to delete
-						{"789"},  # chunks to delete
-					)
+			vector_synchronizer._get_qdrant_state = mock_get_state
+			vector_synchronizer._compare_states = mock_compare
+			vector_synchronizer._process_and_upsert_batch = mock_process
 
-					# Mock chunk_file to return sample_chunks
-					vector_synchronizer.chunker.chunk_file = MagicMock(return_value=sample_chunks)
+			# Call sync_index
+			result = await vector_synchronizer.sync_index()
 
-					# Directly implement a simplified version of sync_index to avoid the token counting issues
-					with patch.object(VectorSynchronizer, "sync_index", new=AsyncMock(return_value=True)) as mock_sync:
-						# Call the patched sync_index
-						result = await mock_sync()
-
-						# Verify sync_index was called
-						assert result is True
-
-						# Since we're testing a mocked implementation, we're not going to test
-						# all the internal calls. We've already tested the component methods
-						# individually in other tests.
+			# Should be successful and call our mocked methods
+			assert result is True
+			mock_get_state.assert_called_once()
+			mock_compare.assert_called_once()
+			assert mock_process.call_count > 0
