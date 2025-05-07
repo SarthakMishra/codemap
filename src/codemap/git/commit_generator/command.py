@@ -100,7 +100,11 @@ class CommitCommand:
 			with loading_spinner("Loading embedding model..."):
 				from sentence_transformers import SentenceTransformer
 
-				self.model = SentenceTransformer(config_loader.get.commit.diff_splitter.model_name)
+				self.model = SentenceTransformer(
+					model_name_or_path=config_loader.get.commit.diff_splitter.model_name,
+					device=config_loader.get.commit.diff_splitter.device,
+					cache_folder=config_loader.get.commit.diff_splitter.model_cache_dir,
+				)
 
 			self.splitter = DiffSplitter(self.repo_root, self.model)
 

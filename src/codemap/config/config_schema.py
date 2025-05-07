@@ -163,6 +163,8 @@ class DiffSplitterSchema(BaseModel):
 	max_file_size_for_llm: int = 50000
 	max_log_diff_size: int = 1000
 	model_name: str = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
+	device: str = "cuda"
+	model_cache_dir: str = ".codemap_cache/models"
 	default_code_extensions: list[str] = Field(
 		default_factory=lambda: [
 			"js",
