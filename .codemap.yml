@@ -20,8 +20,6 @@ gen:
   include_entity_graph: false
   # Enable semantic analysis using LSP
   semantic_analysis: true
-  # Output file for generated documentation (Overrides output_dir if present)
-  # output_file: code_documentation.md # Remove this to use output_dir
   # Level of Detail for code analysis (signatures, structure, docs, full)
   lod_level: full
   # Mermaid entities to include (lowercase EntityType names, e.g., module, class, function)
@@ -62,67 +60,16 @@ commit:
 
   # Commit convention settings
   convention:
-    types:
-      - feat     # New feature
-      - fix      # Bug fix
-      - docs     # Documentation
-      - style    # Formatting, missing semicolons, etc.
-      - refactor # Code change that neither fixes a bug nor adds a feature
-      - perf     # Performance improvement
-      - test     # Adding or updating tests
-      - build    # Build system or external dependencies
-      - ci       # CI configuration
-      - chore    # Other changes that don't modify src or test files
-
-    # Optional scopes for your project (derived from directory structure if empty)
-    scopes: []
-
     # Maximum length for commit message subject line
     max_length: 120
-  
-  # Commit lint rules to match .commitlintrc
-  lint:
-    body_leading_blank:
-      level: WARNING
-      rule: always
-    body_max_line_length:
-      level: ERROR
-      rule: always
-      value: 100
-    footer_leading_blank:
-      level: WARNING
-      rule: always
-    footer_max_line_length:
-      level: ERROR
-      rule: always
-      value: 100
-    header_max_length:
-      level: ERROR
-      rule: always
-      value: 100
-    subject_case:
-      level: ERROR
-      rule: never
-      value: ["sentence-case", "start-case", "pascal-case", "upper-case"]
-    subject_empty:
-      level: ERROR
-      rule: never
-    subject_full_stop:
-      level: ERROR
-      rule: never
-      value: "."
-    type_case:
-      level: ERROR
-      rule: always
-      value: "lower-case"
-    type_empty:
-      level: ERROR
-      rule: never
-    type_enum:
-      level: ERROR
-      rule: always
-      # Use the types defined in convention section above
-      value: ~
+
+  diff_splitter:
+    # Decrease threshold for consolidation to ensure we consolidate more aggressively
+    min_chunks_for_consolidation: 2  # Was likely higher
+    # Increase similarity threshold for files to be more aggressive in grouping
+    similarity_threshold: 0.6  # Adjust this value as needed (lower = more consolidation)
+    # Increase max_chunks before forcing consolidation
+    max_chunks_before_consolidation: 5  # Lower value forces more consolidation
 
 # Pull request configuration
 pr:
