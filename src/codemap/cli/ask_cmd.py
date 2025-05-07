@@ -55,9 +55,6 @@ def register_command(app: typer.Typer) -> None:
 	async def ask_command(
 		question: QuestionArg = None,
 		path: PathOpt = None,
-		model: ModelOpt = None,
-		api_base: ApiBaseOpt = None,
-		api_key: ApiKeyOpt = None,
 		interactive: InteractiveFlag = False,
 	) -> None:
 		"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
@@ -65,9 +62,6 @@ def register_command(app: typer.Typer) -> None:
 		await _ask_command_impl(
 			question=question,
 			path=path,
-			model=model,
-			api_base=api_base,
-			api_key=api_key,
 			interactive=interactive,
 		)
 
@@ -78,9 +72,6 @@ def register_command(app: typer.Typer) -> None:
 async def _ask_command_impl(
 	question: str | None = None,
 	path: Path | None = None,
-	model: str | None = None,
-	api_base: str | None = None,
-	api_key: str | None = None,
 	interactive: bool = False,
 ) -> None:
 	"""Implementation of the ask command with heavy imports deferred."""
@@ -107,9 +98,6 @@ async def _ask_command_impl(
 		# Initialize command once for potentially multiple runs (interactive)
 		command = AskCommand(
 			repo_path=repo_path,
-			model=model,
-			api_base=api_base,
-			api_key=api_key,
 		)
 
 		# Perform async initialization before running any commands

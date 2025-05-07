@@ -215,9 +215,6 @@ class PRWorkflowCommand:
 		repo_path: Path,
 		config_loader: ConfigLoader,
 		llm_client: LLMClient | None = None,
-		model: str | None = None,
-		api_key: str | None = None,
-		api_base: str | None = None,
 	) -> None:
 		"""
 		Initialize the PR workflow command helper.
@@ -226,9 +223,6 @@ class PRWorkflowCommand:
 		        repo_path: Path to the repository.
 		        config_loader: ConfigLoader instance.
 		        llm_client: Optional pre-configured LLMClient.
-		        model: LLM model name (used if llm_client is None).
-		        api_key: API key (used if llm_client is None).
-		        api_base: API base URL (used if llm_client is None).
 
 		"""
 		self.repo_path = repo_path

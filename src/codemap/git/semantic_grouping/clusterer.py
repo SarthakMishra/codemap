@@ -82,9 +82,7 @@ class DiffClusterer:
 		Initialize the clusterer.
 
 		Args:
-		    method: Clustering method to use. Options:
-		        - "agglomerative": Hierarchical clustering (default)
-		        - "dbscan": Density-based spatial clustering
+		    config_loader: ConfigLoader to use for configuration (follows DI pattern)
 		    **kwargs: Additional parameters for the clustering algorithm:
 		        - For agglomerative: distance_threshold, linkage, etc.
 		        - For DBSCAN: eps, min_samples, etc.
@@ -157,9 +155,9 @@ class DiffClusterer:
 			# Default parameters if not provided
 			params = {
 				"n_clusters": None,
-				"distance_threshold": self.config.agglomerative.distance_threshold,  # Threshold for cluster formation (0.5 = moderate similarity)
-				"metric": self.config.agglomerative.metric,  # Use metric instead of affinity
-				"linkage": self.config.agglomerative.linkage,  # Use average linkage for balanced clusters
+				"distance_threshold": self.config.agglomerative.distance_threshold,
+				"metric": self.config.agglomerative.metric,
+				"linkage": self.config.agglomerative.linkage,
 			}
 			params.update(self.kwargs)
 
@@ -169,9 +167,9 @@ class DiffClusterer:
 		elif self.method == "dbscan":
 			# Default parameters if not provided
 			params = {
-				"eps": self.config.dbscan.eps,  # Maximum distance between points in neighborhood (0.3 = high similarity required)
-				"min_samples": self.config.dbscan.min_samples,  # Minimum points to form a dense region
-				"metric": self.config.dbscan.metric,  # Using precomputed distance matrix
+				"eps": self.config.dbscan.eps,
+				"min_samples": self.config.dbscan.min_samples,
+				"metric": self.config.dbscan.metric,
 			}
 			params.update(self.kwargs)
 

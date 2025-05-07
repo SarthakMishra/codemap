@@ -5,6 +5,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Annotated, cast
 
+import asyncer
 import typer
 
 from codemap.config.config_schema import PRGenerateSchema
@@ -90,6 +91,7 @@ def register_command(app: typer.Typer) -> None:
 	"""Register the pr command with the Typer app."""
 
 	@app.command("pr")
+	@asyncer.runnify
 	async def pr_command_entrypoint(
 		path_arg: PathArg = Path(),  # Default path to current dir
 		action: ActionArg = PRAction.CREATE,
@@ -103,9 +105,6 @@ def register_command(app: typer.Typer) -> None:
 		pr_number: PRNumberOpt = None,
 		workflow: WorkflowOpt = None,
 		non_interactive: NonInteractiveOpt = False,
-		model: ModelOpt = None,
-		api_base: ApiBaseOpt = None,
-		api_key: ApiKeyOpt = None,
 		bypass_hooks: BypassHooksFlag = False,
 	) -> None:
 		"""Create or update a GitHub/GitLab pull request with generated content."""
@@ -122,9 +121,6 @@ def register_command(app: typer.Typer) -> None:
 			pr_number=pr_number,
 			workflow=workflow,
 			non_interactive=non_interactive,
-			model=model,
-			api_base=api_base,
-			api_key=api_key,
 			bypass_hooks=bypass_hooks,
 		)
 
@@ -145,9 +141,6 @@ async def _pr_command_impl(
 	pr_number: int | None,
 	workflow: str | None,
 	non_interactive: bool,
-	model: str | None,
-	api_base: str | None,
-	api_key: str | None,
 	bypass_hooks: bool,
 ) -> None:
 	"""Actual implementation of the pr command with heavy imports."""
@@ -380,7 +373,7 @@ async def _pr_command_impl(
 			show_error("No branch name provided and non-interactive mode enabled.")
 			return None
 
-	def _handle_commits(options: PROptions) -> bool:
+	async def _handle_commits(options: PROptions) -> bool:
 		"""Handle committing changes using CommitCommand."""
 		if not options.commit_first:
 			logger.info("Skipping commit step as requested.")
@@ -414,7 +407,7 @@ async def _pr_command_impl(
 			)
 			# The run method handles staging, splitting, generation, and committing
 			# CommitCommand's run now accepts the interactive flag directly
-			success = commit_command.run(interactive=options.interactive)
+			success = await commit_command.run(interactive=options.interactive)
 
 			if not success:
 				# CommitCommand.run should raise exceptions or show errors,
@@ -643,8 +636,9 @@ async def _pr_command_impl(
 			force_push=force_push,
 			pr_number=pr_number,
 			interactive=interactive,
-			model=model or llm_config.model,
+			model=llm_config.model,
 			workflow_strategy_name=workflow_strategy_name,
+			bypass_hooks=bypass_hooks,
 		)
 		logger.debug(f"Resolved PR options: {opts}")
 
@@ -674,7 +668,7 @@ async def _pr_command_impl(
 			opts.branch_name = final_branch_name  # Update options with final name
 
 			# 5b. Handle Commits (Optional)
-			if opts.commit_first and not _handle_commits(opts):
+			if opts.commit_first and not await _handle_commits(opts):
 				_exit_command(1)  # Exit if commit handling failed
 
 			# 5c. Handle Push

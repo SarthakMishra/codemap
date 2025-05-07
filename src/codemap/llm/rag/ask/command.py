@@ -41,9 +41,6 @@ class AskCommand:
 	def __init__(
 		self,
 		repo_path: Path | None = None,
-		model: str | None = None,
-		api_key: str | None = None,
-		api_base: str | None = None,
 		config_loader: ConfigLoader | None = None,
 	) -> None:
 		"""
