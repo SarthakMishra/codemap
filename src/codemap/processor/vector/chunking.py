@@ -5,10 +5,11 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any, TypedDict
 
+from codemap.config import ConfigLoader
+
 # Use LODGenerator instead of directly using TreeSitterAnalyzer
 from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
 from codemap.processor.tree_sitter.base import EntityType
-from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.file_utils import read_file_content
 
 logger = logging.getLogger(__name__)
@@ -51,12 +52,12 @@ class TreeSitterChunker:
 		self.config_loader = config_loader or ConfigLoader()
 
 		# Load configuration values
-		embedding_config = self.config_loader.get("embedding", {})
-		chunking_config = embedding_config.get("chunking", {})
+		embedding_config = self.config_loader.get.embedding
+		chunking_config = embedding_config.chunking
 
 		# Set constants from config with fallbacks
-		self.max_hierarchy_depth = chunking_config.get("max_hierarchy_depth", 2)
-		self.max_file_lines = chunking_config.get("max_file_lines", 1000)
+		self.max_hierarchy_depth = chunking_config.max_hierarchy_depth
+		self.max_file_lines = chunking_config.max_file_lines
 
 	def _get_entity_code_content(self, entity: LODEntity, file_lines: list[str]) -> str | None:
 		"""Extract the raw code content for an entity using its line numbers."""

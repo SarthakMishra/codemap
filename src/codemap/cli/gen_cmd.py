@@ -183,48 +183,34 @@ def _gen_command_impl(
 ) -> None:
 	"""Implementation of the gen command with heavy imports deferred."""
 	# Import heavy dependencies here instead of at the top
+	from codemap.config.config_loader import ConfigLoader
 	from codemap.gen import GenCommand, GenConfig
 	from codemap.processor.lod import LODLevel
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
-	from codemap.utils.config_loader import ConfigLoader
 
 	try:
-		# Save the original path string before resolving
-		original_path_str = str(path)
-
-		# Now resolve the path for actual processing
 		target_path = path.resolve()
 		project_root = Path.cwd()
 
 		# Load config
-		config_loader = ConfigLoader(str(config) if config else None)
-		config_data = config_loader.config
+		config_loader = ConfigLoader.get_instance(config_file=config)
 
 		# Get gen-specific config with defaults
-		gen_config_data = config_data.get("gen", {})
-
-		# Store the original argument in the config data
-		gen_config_data["command_arg"] = original_path_str
+		gen_config_data = config_loader.get.gen
 
 		# Command line arguments override config file
-		content_length = (
-			max_content_length if max_content_length is not None else gen_config_data.get("max_content_length", 5000)
-		)
+		content_length = max_content_length if max_content_length is not None else gen_config_data.max_content_length
 
 		# Handle boolean flags - default to config values if not provided
-		include_tree = tree if tree is not None else gen_config_data.get("include_tree", False)
-		enable_semantic = (
-			semantic_analysis if semantic_analysis is not None else gen_config_data.get("semantic_analysis", True)
-		)
-		include_entity_graph = (
-			entity_graph if entity_graph is not None else gen_config_data.get("include_entity_graph", True)
-		)
+		include_tree = tree if tree is not None else gen_config_data.include_tree
+		enable_semantic = semantic_analysis if semantic_analysis is not None else gen_config_data.semantic_analysis
+		include_entity_graph = entity_graph if entity_graph is not None else gen_config_data.include_entity_graph
 
 		# Initialize lod_level to a default before the try block
 		lod_level: LODLevel = LODLevel.DOCS  # Default if conversion fails somehow
 
 		# Get LOD level from config if not specified
-		config_lod_str = str(gen_config_data.get("lod_level", LODLevel.DOCS.name.lower()))  # Default to 'docs'
+		config_lod_str = str(gen_config_data.lod_level)  # Default to 'docs'
 
 		# Determine the final LOD level string (CLI > Config > Default)
 		final_lod_str = lod_level_str if lod_level_str != LODLevel.DOCS.name.lower() else config_lod_str
@@ -242,14 +228,14 @@ def _gen_command_impl(
 			)
 
 		# Handle Mermaid config (CLI > Config > Default)
-		default_mermaid_entities = gen_config_data.get("mermaid_entities", [])
+		default_mermaid_entities = gen_config_data.mermaid_entities
 		mermaid_entities = (
 			[e.strip().lower() for e in mermaid_entities_str.split(",")]
 			if mermaid_entities_str
 			else default_mermaid_entities
 		)
 
-		default_mermaid_relationships = gen_config_data.get("mermaid_relationships", [])
+		default_mermaid_relationships = gen_config_data.mermaid_relationships
 		mermaid_relationships = (
 			[r.strip().lower() for r in mermaid_relationships_str.split(",")]
 			if mermaid_relationships_str
@@ -258,16 +244,14 @@ def _gen_command_impl(
 
 		# Handle Mermaid legend visibility (CLI > Config > Default)
 		mermaid_show_legend = (
-			mermaid_show_legend_flag
-			if mermaid_show_legend_flag is not None
-			else gen_config_data.get("mermaid_show_legend", True)  # Default to True
+			mermaid_show_legend_flag if mermaid_show_legend_flag is not None else gen_config_data.mermaid_show_legend
 		)
 
 		# Handle Mermaid unconnected node removal (CLI > Config > Default)
 		mermaid_remove_unconnected = (
 			mermaid_remove_unconnected_flag
 			if mermaid_remove_unconnected_flag is not None
-			else gen_config_data.get("mermaid_remove_unconnected", False)  # Default to False
+			else gen_config_data.mermaid_remove_unconnected
 		)
 
 		# Create generation config
@@ -277,8 +261,8 @@ def _gen_command_impl(
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
 			include_entity_graph=include_entity_graph,
-			use_gitignore=gen_config_data.get("use_gitignore", True),
-			output_dir=Path(gen_config_data.get("output_dir", "documentation")),
+			use_gitignore=gen_config_data.use_gitignore,
+			output_dir=Path(gen_config_data.output_dir),
 			mermaid_entities=mermaid_entities,
 			mermaid_relationships=mermaid_relationships,
 			mermaid_show_legend=mermaid_show_legend,
@@ -292,7 +276,7 @@ def _gen_command_impl(
 		logger.debug("Gen config data being passed to determine_output_path: %s", gen_config_data)
 		# ---------------------- #
 
-		output_path = determine_output_path(project_root, output, gen_config_data)
+		output_path = determine_output_path(project_root, config_loader, output)
 
 		# Create and execute the gen command
 		command = GenCommand(gen_config)

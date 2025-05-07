@@ -22,8 +22,8 @@ from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 
+from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
-from codemap.utils.config_loader import ConfigLoader
 
 if TYPE_CHECKING:
 	from codemap.git.semantic_grouping import SemanticGroup

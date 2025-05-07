@@ -9,20 +9,14 @@ from typing import Any, cast
 import voyageai
 from rich.progress import Progress, TaskID
 
+from codemap.config import ConfigLoader
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.utils.embedding_utils import generate_embeddings_batch
 from codemap.processor.utils.git_utils import _should_exclude_path, get_git_tracked_files
 from codemap.processor.vector.chunking import CodeChunk, TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
-from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
-
-# Define a default maximum token limit per batch for Voyage AI
-# This can be overridden in config if needed. Add a safety margin.
-# Reduced token limit to attempt to avoid timeouts
-DEFAULT_VOYAGE_TOKEN_LIMIT = 80000  # Max is 120k, reduced from 110k
-
 
 class VectorSynchronizer:
 	"""Handles asynchronous synchronization between Git repository and Qdrant vector index."""
@@ -56,10 +50,10 @@ class VectorSynchronizer:
 		self.config_loader = config_loader or ConfigLoader()
 
 		# Get configuration values
-		embedding_config = self.config_loader.get("embedding", {})
-		self.batch_size = embedding_config.get("batch_size", 32)
-		self.qdrant_batch_size = embedding_config.get("qdrant_batch_size", 100)
-		self.voyage_token_limit = embedding_config.get("voyage_token_limit", DEFAULT_VOYAGE_TOKEN_LIMIT)
+		embedding_config = self.config_loader.get.embedding
+		self.batch_size = embedding_config.batch_size
+		self.qdrant_batch_size = embedding_config.qdrant_batch_size
+		self.voyage_token_limit = embedding_config.token_limit
 
 		# Instantiate synchronous VoyageAI client for token counting
 		try:

@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from codemap.config import ConfigLoader
 from codemap.git.pr_generator.schemas import PullRequest
 from codemap.git.pr_generator.strategies import create_strategy
 from codemap.git.pr_generator.utils import (
@@ -20,7 +21,6 @@ from codemap.git.pr_generator.utils import (
 from codemap.git.utils import GitError, get_repo_root, run_git_command
 from codemap.llm import LLMClient, LLMError
 from codemap.utils.cli_utils import loading_spinner
-from codemap.utils.config_loader import ConfigLoader
 
 from . import PRGenerator
 from .constants import MIN_COMMIT_PARTS
@@ -34,22 +34,22 @@ logger = logging.getLogger(__name__)
 class PRCommand:
 	"""Handles the PR generation command workflow."""
 
-	def __init__(self, path: Path | None = None, model: str = "gpt-4o-mini") -> None:
+	def __init__(self, config_loader: ConfigLoader, path: Path | None = None) -> None:
 		"""
 		Initialize the PR command.
 
 		Args:
+		    config_loader: ConfigLoader instance
 		    path: Optional path to start from
-		    model: LLM model to use for PR description generation
 
 		"""
 		try:
 			self.repo_root = get_repo_root(path)
 
 			# Create LLM client and configs
-			from codemap.llm import create_client
+			from codemap.llm import LLMClient
 
-			llm_client = create_client(repo_path=self.repo_root, model=model)
+			llm_client = LLMClient(config_loader=config_loader, repo_path=self.repo_root)
 
 			# Create the PR generator with required parameters
 			self.pr_generator = PRGenerator(
@@ -123,7 +123,7 @@ class PRCommand:
 			msg = f"Failed to get commit history: {e}"
 			raise RuntimeError(msg) from e
 
-	def _generate_pr_description(self, branch_info: dict[str, str], _commits: list[dict[str, str]]) -> str:
+	async def _generate_pr_description(self, branch_info: dict[str, str], _commits: list[dict[str, str]]) -> str:
 		"""
 		Generate PR description based on branch info and commit history.
 
@@ -141,7 +141,7 @@ class PRCommand:
 		try:
 			with loading_spinner("Generating PR description using LLM..."):
 				# Use the PR generator to create content
-				content = self.pr_generator.generate_content_from_commits(
+				content = await self.pr_generator.generate_content_from_commits(
 					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=True
 				)
 				return content["description"]
@@ -151,7 +151,7 @@ class PRCommand:
 
 			# Generate a simple fallback description without LLM
 			with loading_spinner("Falling back to simple PR description generation..."):
-				content = self.pr_generator.generate_content_from_commits(
+				content = await self.pr_generator.generate_content_from_commits(
 					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=False
 				)
 				return content["description"]
@@ -233,22 +233,20 @@ class PRWorkflowCommand:
 		"""
 		self.repo_path = repo_path
 		self.config_loader = config_loader
-		self.pr_config = self.config_loader.config.get("pr", {})
-		self.content_config = self.pr_config.get("content", {})
-		self.workflow_strategy_name = self.config_loader.get_workflow_strategy()
+		self.pr_config = self.config_loader.get.pr
+		self.content_config = self.pr_config.generate
+		self.workflow_strategy_name = self.config_loader.get.pr.strategy
 		self.workflow = create_strategy(self.workflow_strategy_name)
 
 		# Initialize LLM client if needed
 		if llm_client:
 			self.llm_client = llm_client
 		else:
-			from codemap.llm import create_client
+			from codemap.llm import LLMClient
 
-			self.llm_client = create_client(
+			self.llm_client = LLMClient(
+				config_loader=self.config_loader,
 				repo_path=self.repo_path,
-				model=model,
-				api_key=api_key,
-				api_base=api_base,
 			)
 
 		self.pr_generator = PRGenerator(repo_path=self.repo_path, llm_client=self.llm_client)
@@ -272,9 +270,9 @@ class PRWorkflowCommand:
 		description = f"# Release {version}\n\nThis pull request merges release {version} into {base_branch}."
 		return {"title": title, "description": description}
 
-	def _generate_title(self, commits: list[str], branch_name: str, branch_type: str) -> str:
+	async def _generate_title(self, commits: list[str], branch_name: str, branch_type: str) -> str:
 		"""Core logic for generating PR title."""
-		title_strategy = self.content_config.get("title_strategy", "commits")
+		title_strategy = self.content_config.title_strategy
 
 		if not commits:
 			if branch_type == "release":
@@ -283,13 +281,15 @@ class PRWorkflowCommand:
 			return f"{branch_type.capitalize()}: {clean_name.capitalize()}"
 
 		if title_strategy == "llm":
-			return generate_pr_title_with_llm(commits, llm_client=self.llm_client)
+			return await generate_pr_title_with_llm(commits, llm_client=self.llm_client)
 
 		return generate_pr_title_from_commits(commits)
 
-	def _generate_description(self, commits: list[str], branch_name: str, branch_type: str, base_branch: str) -> str:
+	async def _generate_description(
+		self, commits: list[str], branch_name: str, branch_type: str, base_branch: str
+	) -> str:
 		"""Core logic for generating PR description."""
-		description_strategy = self.content_config.get("description_strategy", "commits")
+		description_strategy = self.content_config.description_strategy
 
 		if not commits:
 			if branch_type == "release" and self.workflow_strategy_name == "gitflow":
@@ -299,10 +299,10 @@ class PRWorkflowCommand:
 			return f"Changes in {branch_name}"
 
 		if description_strategy == "llm":
-			return generate_pr_description_with_llm(commits, llm_client=self.llm_client)
+			return await generate_pr_description_with_llm(commits, llm_client=self.llm_client)
 
-		if description_strategy == "template" and not self.content_config.get("use_workflow_templates", True):
-			template = self.content_config.get("description_template", "")
+		if description_strategy == "template" and self.content_config.use_workflow_templates:
+			template = self.content_config.description_template
 			if template:
 				commit_description = "\n".join([f"- {commit}" for commit in commits])
 				# Note: Other template variables like testing_instructions might need context
@@ -314,7 +314,7 @@ class PRWorkflowCommand:
 
 		return generate_pr_description_from_commits(commits)
 
-	def create_pr_workflow(
+	async def create_pr_workflow(
 		self, base_branch: str, head_branch: str, title: str | None = None, description: str | None = None
 	) -> PullRequest:
 		"""Orchestrates the PR creation process (non-interactive part)."""
@@ -334,8 +334,8 @@ class PRWorkflowCommand:
 			branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
 
 			# Generate title and description if not provided
-			final_title = title or self._generate_title(commits, head_branch, branch_type)
-			final_description = description or self._generate_description(
+			final_title = title or await self._generate_title(commits, head_branch, branch_type)
+			final_description = description or await self._generate_description(
 				commits, head_branch, branch_type, base_branch
 			)
 
@@ -352,7 +352,7 @@ class PRWorkflowCommand:
 			msg = f"Unexpected error creating PR: {e}"
 			raise PRCreationError(msg) from e
 
-	def update_pr_workflow(
+	async def update_pr_workflow(
 		self,
 		pr_number: int,
 		title: str | None = None,
@@ -379,9 +379,9 @@ class PRWorkflowCommand:
 				branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
 
 				if title is None:
-					final_title = self._generate_title(commits, head_branch, branch_type)
+					final_title = await self._generate_title(commits, head_branch, branch_type)
 				if description is None:
-					final_description = self._generate_description(commits, head_branch, branch_type, base_branch)
+					final_description = await self._generate_description(commits, head_branch, branch_type, base_branch)
 
 			if final_title is None or final_description is None:
 				msg = "Could not determine final title or description for PR update."

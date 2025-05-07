@@ -91,9 +91,9 @@ def _index_command_impl(
 
 	from rich.console import Console
 
+	from codemap.config import ConfigLoader
 	from codemap.processor.pipeline import ProcessingPipeline
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, loading_spinner
-	from codemap.utils.config_loader import ConfigLoader
 
 	console = Console()  # Initialize Console here
 
@@ -135,8 +135,8 @@ def _index_command_impl(
 			if watch_flag:
 				logger.info("Watch mode enabled. Initializing file watcher...")
 				# Get debounce delay from config_loader
-				watcher_config = config_loader.get("watcher", {})
-				debounce_delay = float(watcher_config.get("debounce_delay", 2.0))
+				watcher_config = config_loader.get.processor.watcher
+				debounce_delay = float(watcher_config.debounce_delay)
 
 				with loading_spinner("Starting file watcher..."):
 					pipeline.initialize_watcher(debounce_delay=debounce_delay)
@@ -174,7 +174,7 @@ def _index_command_impl(
 		target_path = path.resolve()
 
 		# Load config directly instead of getting from context
-		config_loader = ConfigLoader(str(config) if config else None)
+		config_loader = ConfigLoader.get_instance(config_file=config)
 
 		# Run the indexing operation using the nested async helper
 		asyncio.run(_index_repo_async(target_path, sync, watch, config_loader))

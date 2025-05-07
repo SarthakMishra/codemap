@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
 from codemap.utils.file_utils import is_binary_file
 
@@ -222,14 +223,14 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 	return "\n".join(tree_lines)
 
 
-def determine_output_path(project_root: Path, output: Path | None, config_data: dict) -> Path:
+def determine_output_path(project_root: Path, config_loader: ConfigLoader, output: Path | None) -> Path:
 	"""
 	Determine the output path for documentation.
 
 	Args:
 	    project_root: Root directory of the project
+	    config_loader: ConfigLoader instance
 	    output: Optional output path from command line
-	    config_data: Gen-specific configuration data
 
 	Returns:
 	    The determined output path
@@ -241,15 +242,8 @@ def determine_output_path(project_root: Path, output: Path | None, config_data: 
 	if output:
 		return output.resolve()
 
-	# Check for output file in config
-	if "output_file" in config_data:
-		output_file = Path(config_data["output_file"])
-		if output_file.is_absolute():
-			return output_file
-		return project_root / output_file
-
 	# Get output directory from config
-	output_dir = config_data.get("output_dir", "documentation")
+	output_dir = config_loader.get.gen.output_dir
 
 	# If output_dir is absolute, use it directly
 	output_dir_path = Path(output_dir)

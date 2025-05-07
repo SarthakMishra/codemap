@@ -5,11 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, ClassVar
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config import ConfigLoader
 
-from .api import MessageDict, call_llm_api
-from .config import LLMConfig
-from .errors import LLMError
+from .api import M, MessageDict, call_llm_api
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -25,20 +23,16 @@ class LLMClient:
 
 	def __init__(
 		self,
-		config: LLMConfig | None = None,
+		config_loader: ConfigLoader,
 		repo_path: Path | None = None,
-		config_loader: ConfigLoader | None = None,
 	) -> None:
 		"""
 		Initialize the LLM client.
 
 		Args:
-		    config: LLM configuration
-		    repo_path: Repository path (for loading configuration)
-		    config_loader: Optional ConfigLoader instance to use
-
+		    config_loader: ConfigLoader instance to use
+		    repo_path: Path to the repository (for loading configuration)
 		"""
-		self.config = config or LLMConfig()
 		self.repo_path = repo_path
 		self.config_loader = config_loader
 		self._templates = self.DEFAULT_TEMPLATES.copy()
@@ -73,33 +67,20 @@ class LLMClient:
 			raise ValueError(msg)
 		return self._templates[name]
 
-	def _get_default_model(self) -> str:
-		"""
-		Get the default model from config or use a fallback.
-
-		Returns:
-		        Default model name
-
-		"""
-		if self.config_loader:
-			llm_config = self.config_loader.get_llm_config()
-			return llm_config.get("model", "openai/gpt-4o-mini")
-		return "openai/gpt-4o-mini"  # Hardcoded fallback
-
-	def completion(
+	async def completion(
 		self,
 		messages: list[MessageDict],
 		model: str | None = None,
-		json_schema: dict | None = None,
+		pydantic_model: type[M] | None = None,
 		**kwargs: dict[str, str | int | float | bool | None],
-	) -> str:
+	) -> str | M:
 		"""
 		Generate text using the configured LLM.
 
 		Args:
 		    messages: List of messages to send to the LLM
 		    model: Optional model override
-		    json_schema: Optional JSON schema for response validation
+		    pydantic_model: Optional Pydantic model for response validation
 		    **kwargs: Additional parameters to pass to the LLM API
 
 		Returns:
@@ -110,20 +91,13 @@ class LLMClient:
 
 		"""
 		# Get API configuration
-		model_to_use = model or self.config.model or self._get_default_model()
-		api_key = self.config.get_api_key()
-
-		if not api_key:
-			msg = f"No API key available for {self.config.provider or 'default'} provider"
-			raise LLMError(msg)
+		model_to_use = model or self.config_loader.get.llm.model
 
 		# Call the API
-		return call_llm_api(
+		return await call_llm_api(
 			messages=messages,
 			model=model_to_use,
-			api_key=api_key,
-			api_base=self.config.api_base,
-			json_schema=json_schema,
+			output_schema=pydantic_model,
 			config_loader=self.config_loader,
 			**kwargs,
 		)

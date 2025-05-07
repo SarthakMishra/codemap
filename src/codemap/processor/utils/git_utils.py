@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _get_exclude_patterns() -> list[str]:
 	config_loader = ConfigLoader.get_instance()
 
 	# Get exclude patterns from config, falling back to defaults if not present
-	config_patterns = config_loader.get("sync.exclude_patterns", [])
+	config_patterns = config_loader.get.sync.exclude_patterns
 
 	# Default patterns to exclude
 	default_patterns = [

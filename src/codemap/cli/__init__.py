@@ -5,9 +5,11 @@ from __future__ import annotations
 import datetime
 import logging
 import sys
+import tracemalloc
 from pathlib import Path
 from typing import Annotated
 
+import nest_asyncio
 import typer
 
 from codemap import __version__
@@ -20,6 +22,9 @@ from .commit_cmd import register_command as register_commit_command
 from .gen_cmd import register_command as register_gen_command
 from .index_cmd import register_command as register_index_command
 from .pr_cmd import register_command as register_pr_command
+
+# Apply nest_asyncio patch early to allow nested asyncio event loops
+nest_asyncio.apply()
 
 # Configure logging early for import error handling
 logger = logging.getLogger(__name__)
@@ -86,6 +91,7 @@ def global_options(
 		bool,
 		typer.Option(
 			"--save-log",
+			"-l",
 			help="Enable logging to a file. Logs to logs/codemap_{datetime}.log.",
 		),
 	] = False,
@@ -95,6 +101,7 @@ def global_options(
 	] = None,
 ) -> None:
 	"""Global CLI options and logging setup."""
+	tracemalloc.start()
 	ctx.meta["is_verbose"] = is_verbose
 	ctx.meta["is_output_log"] = is_output_log
 

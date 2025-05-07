@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 import questionary
 import typer
 
-from codemap.config import DEFAULT_CONFIG
+from codemap.config import ConfigLoader
 from codemap.git.commit_generator.utils import (
 	clean_message_for_linting,
 	lint_commit_message,
@@ -28,7 +28,6 @@ from codemap.git.utils import (
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import loading_spinner
-from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.file_utils import read_file_content
 
 from . import (
@@ -63,9 +62,7 @@ class CommitCommand:
 	def __init__(
 		self,
 		path: Path | None = None,
-		model: str = "gpt-4o-mini",
 		bypass_hooks: bool = False,
-		splitter_instance: DiffSplitter | None = None,
 	) -> None:
 		"""
 		Initialize the commit command.
@@ -74,23 +71,11 @@ class CommitCommand:
 		    path: Optional path to start from
 		    model: LLM model to use for commit message generation
 		    bypass_hooks: Whether to bypass git hooks with --no-verify
-		    splitter_instance: Optional pre-configured DiffSplitter instance.
 
 		"""
 		try:
 			self.repo_root = get_repo_root(path)
 			self.ui: CommitUI = CommitUI()
-
-			# Use provided splitter_instance or create a default one
-			if splitter_instance:
-				self.splitter = splitter_instance
-			else:
-				# Ensure DiffSplitter is imported if not already at module level for this path
-				from codemap.git.diff_splitter.splitter import DiffSplitter
-
-				self.splitter = DiffSplitter(self.repo_root)
-				# Note: This default DiffSplitter will use its own default embedding model
-				# This path should ideally only be taken if not in SemanticCommitCommand context
 
 			self.target_files: list[str] = []
 			self.committed_files: set[str] = set()
@@ -106,11 +91,18 @@ class CommitCommand:
 				self.original_branch = None
 
 			# Create LLM client and configs
-			from codemap.llm import create_client
-			from codemap.utils.config_loader import ConfigLoader
+			from codemap.config import ConfigLoader
+			from codemap.llm import LLMClient
 
-			config_loader = ConfigLoader(repo_root=self.repo_root)
-			llm_client = create_client(repo_path=self.repo_root, model=model)
+			config_loader = ConfigLoader.get_instance(repo_root=self.repo_root)
+			llm_client = LLMClient(config_loader=config_loader)
+
+			with loading_spinner("Loading embedding model..."):
+				from sentence_transformers import SentenceTransformer
+
+				self.model = SentenceTransformer(config_loader.get.commit.diff_splitter.model_name)
+
+			self.splitter = DiffSplitter(self.repo_root, self.model)
 
 			# Create the commit message generator with required parameters
 			self.message_generator = CommitMessageGenerator(
@@ -287,7 +279,7 @@ class CommitCommand:
 			self.error_state = "failed"
 			return False
 
-	def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
+	async def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
 		"""
 		Process a single chunk interactively.
 
@@ -331,7 +323,7 @@ class CommitCommand:
 					passed_validation,
 					is_json_error,
 					error_messages,
-				) = self.message_generator.generate_message_with_linting(chunk)
+				) = await self.message_generator.generate_message_with_linting(chunk)
 
 				# Store the potentially failed message in the chunk for display/editing
 				chunk.description = message
@@ -464,7 +456,7 @@ class CommitCommand:
 			logger.error("Unhandled action in _process_chunk: %s", action)
 			return False
 
-	def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
+	async def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
 		"""
 		Process all generated chunks.
 
@@ -485,7 +477,7 @@ class CommitCommand:
 		for i, chunk in enumerate(chunks):
 			if interactive:
 				try:
-					if not self._process_chunk(chunk, i, grand_total):
+					if not await self._process_chunk(chunk, i, grand_total):
 						success = False
 						break
 				except typer.Exit:
@@ -500,9 +492,13 @@ class CommitCommand:
 				# Non-interactive mode: generate and attempt commit
 				try:
 					# Unpack 5 elements now
-					message, _, passed_validation, is_json_error, error_messages = (
-						self.message_generator.generate_message_with_linting(chunk)
-					)
+					(
+						message,
+						_,
+						passed_validation,
+						is_json_error,
+						error_messages,
+					) = await self.message_generator.generate_message_with_linting(chunk)
 					if not passed_validation:
 						error_type = "JSON validation" if is_json_error else "linting"
 						logger.warning(
@@ -523,7 +519,7 @@ class CommitCommand:
 
 		return success
 
-	def run(self, interactive: bool = True) -> bool:
+	async def run(self, interactive: bool = True) -> bool:
 		"""
 		Run the commit command workflow.
 
@@ -591,7 +587,7 @@ class CommitCommand:
 					return False
 
 			# Process chunks, passing the interactive flag
-			success = self.process_all_chunks(chunks, total_chunks, interactive=interactive)
+			success = await self.process_all_chunks(chunks, total_chunks, interactive=interactive)
 
 			if self.error_state == "aborted":
 				self.ui.show_message("Commit process aborted by user.")
@@ -707,73 +703,33 @@ class SemanticCommitCommand(CommitCommand):
 	def __init__(
 		self,
 		path: Path | None = None,
-		model: str = "gpt-4o-mini",
 		bypass_hooks: bool = False,
-		embedding_model: str | None = None,
-		clustering_method: str | None = None,
-		similarity_threshold: float | None = None,
 	) -> None:
 		"""
 		Initialize the SemanticCommitCommand.
 
 		Args are similar to CLI options, allowing for programmatic use.
 		"""
+		# Call parent class initializer first
+		super().__init__(path=path, bypass_hooks=bypass_hooks)
+
 		temp_repo_root = get_repo_root(path)
-		config_loader = ConfigLoader(repo_root=temp_repo_root)
-		commit_config = config_loader.get("commit", {})
-		semantic_config = config_loader.get("semantic_commit", {})
-		diff_splitter_config = commit_config.get("diff_splitter", {})
-
-		final_embedding_model_name = (
-			embedding_model
-			or semantic_config.get("embedding_model")
-			or diff_splitter_config.get("model_name")
-			or DEFAULT_CONFIG["commit"]["diff_splitter"]["model_name"]
-		)
-
-		from codemap.git.diff_splitter.splitter import DiffSplitter
-
-		specialized_splitter = DiffSplitter(
-			repo_root=temp_repo_root,
-			embedding_model=final_embedding_model_name,
-			config_loader=config_loader,
-		)
-
-		# Ensure the model is loaded by the splitter and cached at class level
-		if not DiffSplitter.is_model_available():  # Check class flag first
-			specialized_splitter.check_model_availability()  # Trigger load if not available
-
-		loaded_model_object = DiffSplitter.get_embedding_model()
-		if loaded_model_object is None:
-			# This indicates a failure in DiffSplitter's model loading/caching
-			logger.error("Failed to retrieve embedding model from DiffSplitter cache after loading attempt.")
-			# Fallback or raise error - for now, we'll let DiffEmbedder handle its own fallback if model is None
-			# but ideally this path should not be hit if _check_model_availability worked.
-			# To be stricter, one might raise RuntimeError here.
-
-		super().__init__(path=path, model=model, bypass_hooks=bypass_hooks, splitter_instance=specialized_splitter)
+		config_loader = ConfigLoader.get_instance(repo_root=temp_repo_root)
 
 		self.config_loader = config_loader
-		self.embedding_model_name = final_embedding_model_name  # Store the name
-		self.clustering_method = clustering_method or semantic_config.get("clustering_method") or "agglomerative"
-		self.similarity_threshold = (
-			similarity_threshold
-			if similarity_threshold is not None
-			else semantic_config.get("similarity_threshold", 0.6)
-		)
+		self.clustering_method = config_loader.get.embedding.clustering.method
+		self.similarity_threshold = config_loader.get.commit.diff_splitter.similarity_threshold
 
 		from codemap.git.semantic_grouping.clusterer import DiffClusterer
 		from codemap.git.semantic_grouping.embedder import DiffEmbedder
 		from codemap.git.semantic_grouping.resolver import FileIntegrityResolver
 
 		# Pass the loaded_model_object to DiffEmbedder
-		self.embedder = DiffEmbedder(model=loaded_model_object, config_loader=self.config_loader)
-		self.clusterer = DiffClusterer(method=self.clustering_method)
+		self.embedder = DiffEmbedder(model=self.model, config_loader=self.config_loader)
+		self.clusterer = DiffClusterer(config_loader=self.config_loader)
 		self.resolver = FileIntegrityResolver(
 			similarity_threshold=self.similarity_threshold, config_loader=self.config_loader
 		)
-
-		# Attributes like self.committed_files are initialized in super().__init__
 
 	def _get_target_files(self, pathspecs: list[str] | None = None) -> list[str]:
 		"""
@@ -923,7 +879,7 @@ class SemanticCommitCommand(CommitCommand):
 		# Resolve file integrity constraints
 		return self.resolver.resolve_violations(initial_groups, chunk_embeddings)
 
-	def _generate_group_messages(self, groups: list[SemanticGroup]) -> list[SemanticGroup]:
+	async def _generate_group_messages(self, groups: list[SemanticGroup]) -> list[SemanticGroup]:
 		"""
 		Generate commit messages for semantic groups.
 
@@ -936,15 +892,14 @@ class SemanticCommitCommand(CommitCommand):
 		"""
 		# Get config loader and settings
 		config_loader = self.message_generator.get_config_loader()
-		llm_config = config_loader.get("llm", {})
 
 		# Process groups individually
 		from codemap.git.diff_splitter import DiffChunk
 		from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
 
 		# Get max token limit and settings from message generator's config
-		max_tokens = llm_config.get("max_context_tokens", 4000)
-		use_lod_context = llm_config.get("use_lod_context", True)
+		max_tokens = config_loader.get.llm.max_output_tokens
+		use_lod_context = config_loader.get.commit.use_lod_context
 
 		for group in groups:
 			try:
@@ -972,7 +927,7 @@ class SemanticCommitCommand(CommitCommand):
 				# Generate message with linting
 				# We ignore linting status - SemanticCommitCommand is less strict
 				# Unpack 5 elements, ignore validation/error status for semantic commit
-				message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+				message, _, _, _, _ = await self.message_generator.generate_message_with_linting(temp_chunk)
 
 				# Store the message with the group
 				group.message = message
@@ -984,7 +939,7 @@ class SemanticCommitCommand(CommitCommand):
 
 		return groups
 
-	def _stage_and_commit_group(self, group: SemanticGroup) -> bool:
+	async def _stage_and_commit_group(self, group: SemanticGroup) -> bool:
 		"""
 		Stage and commit a semantic group.
 
@@ -1048,11 +1003,13 @@ class SemanticCommitCommand(CommitCommand):
 								temp_chunk = DiffChunk(files=group.files, content=group.content)
 
 								# Use the linting-aware prompt this time (unpack 5, ignore validation/errors)
-								message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+								message, _, _, _, _ = await self.message_generator.generate_message_with_linting(
+									temp_chunk
+								)
 								group.message = message
 
 								# Try again with the new message
-								return self._stage_and_commit_group(group)
+								return await self._stage_and_commit_group(group)
 							except (LLMError, GitError, RuntimeError) as e:
 								self.ui.show_error(f"Error regenerating message: {e}")
 								return False
@@ -1071,7 +1028,7 @@ class SemanticCommitCommand(CommitCommand):
 						elif lint_action == ChunkAction.EDIT:
 							edited_message = self.ui.edit_message(group.message or "")  # Empty string as fallback
 							group.message = edited_message
-							return self._stage_and_commit_group(group)
+							return await self._stage_and_commit_group(group)
 						elif lint_action == ChunkAction.SKIP:
 							self.ui.show_skipped(group.files)
 							return False
@@ -1104,18 +1061,18 @@ class SemanticCommitCommand(CommitCommand):
 							temp_chunk = DiffChunk(files=group.files, content=group.content)
 
 							# Use the linting-aware prompt this time (unpack 5, ignore validation/errors)
-							message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+							message, _, _, _, _ = await self.message_generator.generate_message_with_linting(temp_chunk)
 							group.message = message
 
 							# Try again with the new message
-							return self._stage_and_commit_group(group)
+							return await self._stage_and_commit_group(group)
 						except (LLMError, GitError, RuntimeError) as e:
 							self.ui.show_error(f"Error regenerating message: {e}")
 							return False
 					elif hook_action == ChunkAction.EDIT:
 						edited_message = self.ui.edit_message(group.message or "")  # Empty string as fallback
 						group.message = edited_message
-						return self._stage_and_commit_group(group)
+						return await self._stage_and_commit_group(group)
 					elif hook_action == ChunkAction.SKIP:
 						self.ui.show_skipped(group.files)
 						return False
@@ -1136,7 +1093,7 @@ class SemanticCommitCommand(CommitCommand):
 			logger.exception("Unexpected error in _stage_and_commit_group")
 			return False
 
-	def run(self, interactive: bool = True, pathspecs: list[str] | None = None) -> bool:
+	async def run(self, interactive: bool = True, pathspecs: list[str] | None = None) -> bool:
 		"""
 		Run the semantic commit command workflow.
 
@@ -1216,7 +1173,7 @@ class SemanticCommitCommand(CommitCommand):
 					return False
 
 				# Generate messages for groups
-				groups = self._generate_group_messages(groups)
+				groups = await self._generate_group_messages(groups)
 
 			# Process groups
 			self.ui.show_message(f"Found {len(groups)} semantic groups of changes.")
@@ -1233,7 +1190,7 @@ class SemanticCommitCommand(CommitCommand):
 
 					if action == ChunkAction.COMMIT:
 						self.ui.show_message(f"\nCommitting: {group.message}")
-						if self._stage_and_commit_group(group):
+						if await self._stage_and_commit_group(group):
 							committed_count += 1
 						# If commit failed, potentially due to exit request during hook failure
 						elif self.error_state == "aborted":
@@ -1249,7 +1206,7 @@ class SemanticCommitCommand(CommitCommand):
 
 						# Commit immediately after editing
 						self.ui.show_message(f"\nCommitting: {group.message}")
-						if self._stage_and_commit_group(group):
+						if await self._stage_and_commit_group(group):
 							committed_count += 1
 						# If commit failed, potentially due to exit request during hook failure
 						elif self.error_state == "aborted":
@@ -1264,14 +1221,14 @@ class SemanticCommitCommand(CommitCommand):
 							from codemap.git.diff_splitter import DiffChunk
 
 							temp_chunk = DiffChunk(files=group.files, content=group.content)
-							message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
+							message, _, _, _, _ = await self.message_generator.generate_message_with_linting(temp_chunk)
 							group.message = message
 
 							# Show the regenerated message
 							self.ui.display_group(group, i, len(groups))
 							if questionary.confirm("Commit with regenerated message?", default=True).ask():
 								self.ui.show_message(f"\nCommitting: {group.message}")
-								if self._stage_and_commit_group(group):
+								if await self._stage_and_commit_group(group):
 									committed_count += 1
 								# If commit failed, potentially due to exit request during hook failure
 								elif self.error_state == "aborted":
@@ -1297,7 +1254,7 @@ class SemanticCommitCommand(CommitCommand):
 					# In non-interactive mode, commit each group immediately
 					group.message = group.message or f"update: changes to {len(group.files)} files"
 					self.ui.show_message(f"\nCommitting: {group.message}")
-					if self._stage_and_commit_group(group):
+					if await self._stage_and_commit_group(group):
 						committed_count += 1
 					# If commit failed, potentially due to exit request during hook failure
 					elif self.error_state == "aborted":

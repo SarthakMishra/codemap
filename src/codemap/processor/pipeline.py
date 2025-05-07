@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Self
 from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
 from rich.progress import Progress, TaskID
 
+from codemap.config import ConfigError, ConfigLoader
 from codemap.db.client import DatabaseClient
 from codemap.processor.tree_sitter import TreeSitterAnalyzer
 
@@ -28,7 +29,6 @@ from codemap.processor.utils.embedding_utils import (
 from codemap.processor.vector.chunking import TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager
 from codemap.processor.vector.synchronizer import VectorSynchronizer
-from codemap.utils.config_loader import ConfigError, ConfigLoader
 from codemap.utils.docker_utils import ensure_qdrant_running
 from codemap.utils.path_utils import find_project_root
 from codemap.watcher.file_watcher import Watcher
@@ -77,10 +77,9 @@ class ProcessingPipeline:
 			raise ValueError(msg)
 
 		self.config_loader = config_loader or ConfigLoader()
-		self.config = self.config_loader.load_config()
 
-		if not isinstance(self.config, dict):
-			logger.error(f"Config loading failed or returned unexpected type: {type(self.config)}")
+		if not isinstance(self.config_loader, ConfigLoader):
+			logger.error(f"Config loading failed or returned unexpected type: {type(self.config_loader)}")
 			msg = "Failed to load a valid Config object."
 			raise ConfigError(msg)
 
@@ -91,10 +90,10 @@ class ProcessingPipeline:
 
 		# --- Load Configuration --- #
 		# Get embedding configuration
-		embedding_config = self.config_loader.get("embedding", {})
-		embedding_model = embedding_config.get("model_name")
-		qdrant_dimension = embedding_config.get("dimension")
-		distance_metric = embedding_config.get("dimension_metric", "cosine")
+		embedding_config = self.config_loader.get.embedding
+		embedding_model = embedding_config.model_name
+		qdrant_dimension = embedding_config.dimension
+		distance_metric = embedding_config.dimension_metric
 
 		# Make sure embedding_model_name is always a string
 		self.embedding_model_name: str = "voyage-code-3"  # Default
@@ -108,11 +107,11 @@ class ProcessingPipeline:
 		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {qdrant_dimension}")
 
 		# Get Qdrant configuration
-		vector_config = self.config_loader.get("embedding", {})
-		qdrant_location = vector_config.get("qdrant_location")
-		qdrant_collection = vector_config.get("qdrant_collection_name", "codemap_vectors")
-		qdrant_url = vector_config.get("url")
-		qdrant_api_key = vector_config.get("api_key")
+		vector_config = self.config_loader.get.embedding
+		qdrant_location = vector_config.qdrant_location
+		qdrant_collection = vector_config.qdrant_collection_name
+		qdrant_url = vector_config.url
+		qdrant_api_key = vector_config.api_key
 
 		# Convert distance metric string to enum
 		distance_enum = qdrant_models.Distance.COSINE
@@ -180,8 +179,8 @@ class ProcessingPipeline:
 
 		try:
 			# Get embedding configuration for Qdrant URL
-			embedding_config = self.config_loader.get("embedding", {})
-			qdrant_url = embedding_config.get("url")
+			embedding_config = self.config_loader.get.embedding
+			qdrant_url = embedding_config.url
 
 			# Check for Docker containers
 			if qdrant_url:

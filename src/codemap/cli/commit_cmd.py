@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Annotated
 
+import asyncer
 import typer
 
 logger = logging.getLogger(__name__)
@@ -18,35 +19,10 @@ PathArg = Annotated[
 	),
 ]
 
-ModelOpt = Annotated[
-	str,
-	typer.Option(
-		"--model",
-		"-m",  # Added alias back if it was intended
-		help="LLM model to use for message generation",
-	),
-]
-
-# StrategyOpt removed as strategy parameter is unused
-# StrategyOpt = Annotated[str, typer.Option("--strategy", "-s", help="Strategy for splitting diffs")]
-
-NonInteractiveFlag = Annotated[
-	bool, typer.Option("--non-interactive", "-y", help="Run in non-interactive mode")
-]  # Added alias back
+NonInteractiveFlag = Annotated[bool, typer.Option("--non-interactive", "-y", help="Run in non-interactive mode")]
 
 BypassHooksFlag = Annotated[
 	bool, typer.Option("--bypass-hooks", "--no-verify", help="Bypass git hooks with --no-verify")
-]  # Added alias back
-
-# --- New options for semantic commit ---
-EmbeddingModelOpt = Annotated[str, typer.Option("--embedding-model", help="Model to use for embedding generation")]
-
-ClusteringMethodOpt = Annotated[
-	str, typer.Option("--clustering-method", help="Method to use for clustering ('agglomerative' or 'dbscan')")
-]
-
-SimilarityThresholdOpt = Annotated[
-	float, typer.Option("--similarity-threshold", help="Threshold for group similarity to trigger merging (0.0-1.0)")
 ]
 
 # --- Registration Function ---
@@ -56,14 +32,11 @@ def register_command(app: typer.Typer) -> None:
 	"""Register the commit commands with the CLI app."""
 
 	@app.command(name="commit")
-	def semantic_commit_command(
+	@asyncer.runnify
+	async def semantic_commit_command(
 		path: PathArg = None,
-		model: ModelOpt = "gpt-4o-mini",
 		non_interactive: NonInteractiveFlag = False,
 		bypass_hooks: BypassHooksFlag = False,
-		embedding_model: EmbeddingModelOpt = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled",
-		clustering_method: ClusteringMethodOpt = "agglomerative",
-		similarity_threshold: SimilarityThresholdOpt = 0.6,
 		pathspecs: list[str] | None = None,
 	) -> None:
 		"""
@@ -74,14 +47,10 @@ def register_command(app: typer.Typer) -> None:
 
 		"""
 		# Defer heavy imports and logic to the implementation function
-		_semantic_commit_command_impl(
+		await _semantic_commit_command_impl(
 			path=path,
-			model=model,
 			non_interactive=non_interactive,
 			bypass_hooks=bypass_hooks,
-			embedding_model=embedding_model,
-			clustering_method=clustering_method,
-			similarity_threshold=similarity_threshold,
 			pathspecs=pathspecs,
 		)
 
@@ -89,43 +58,21 @@ def register_command(app: typer.Typer) -> None:
 # --- Implementation Function (Heavy imports deferred here) ---
 
 
-def _semantic_commit_command_impl(
+async def _semantic_commit_command_impl(
 	path: Path | None,
-	model: str,
 	non_interactive: bool,
 	bypass_hooks: bool,
-	embedding_model: str,
-	clustering_method: str,
-	similarity_threshold: float,
 	pathspecs: list[str] | None = None,
 ) -> None:
 	"""Actual implementation of the semantic commit command."""
 	# --- Heavy Imports ---
 
-	try:
-		from dotenv import load_dotenv
-	except ImportError:
-		load_dotenv = None
-
+	from codemap.config import ConfigLoader
 	from codemap.git.commit_generator.command import SemanticCommitCommand
 	from codemap.git.utils import (
 		validate_repo_path,
 	)
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
-	from codemap.utils.config_loader import ConfigLoader
-
-	# --- Environment Loading ---
-	if load_dotenv:
-		# Try to load from .env.local first, then fall back to .env
-		env_local = Path(".env.local")
-		if env_local.exists():
-			load_dotenv(dotenv_path=env_local)
-			logger.debug("Loaded environment variables from %s", env_local)
-		else:
-			env_file = Path(".env")
-			if env_file.exists():
-				load_dotenv(dotenv_path=env_file)
-				logger.debug("Loaded environment variables from %s", env_file)
 
 	# --- Setup & Logic ---
 
@@ -133,38 +80,21 @@ def _semantic_commit_command_impl(
 		# Validate repo path (optional, defaults to cwd if None)
 		repo_path = validate_repo_path(path) if path else Path.cwd()
 
-		# Load config
-		config_loader = ConfigLoader(repo_root=repo_path)
-		config = config_loader.load_config()
-		commit_config = config.get("commit", {})
-		semantic_config = config.get("semantic_commit", {})
+		# Use get_instance to avoid creating multiple ConfigLoader instances
+		config = ConfigLoader.get_instance(repo_root=repo_path)
 
 		# Determine parameters (CLI > Config > Default)
-		final_model = model or commit_config.get("model", "gpt-4o-mini")
-		is_non_interactive = non_interactive or semantic_config.get("non_interactive", False)
-		should_bypass_hooks = bypass_hooks or semantic_config.get("bypass_hooks", False)
-		final_embedding_model = embedding_model or semantic_config.get(
-			"embedding_model", "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
-		)
-		final_clustering_method = clustering_method or semantic_config.get("clustering_method", "agglomerative")
-		final_similarity_threshold = (
-			similarity_threshold
-			if similarity_threshold is not None
-			else semantic_config.get("similarity_threshold", 0.6)
-		)
+		is_non_interactive = non_interactive or config.get.commit.is_non_interactive
+		should_bypass_hooks = bypass_hooks or config.get.commit.bypass_hooks
 
 		# Create the semantic commit command
 		semantic_workflow = SemanticCommitCommand(
 			path=repo_path,
-			model=final_model,
 			bypass_hooks=should_bypass_hooks,
-			embedding_model=final_embedding_model,
-			clustering_method=final_clustering_method,
-			similarity_threshold=final_similarity_threshold,
 		)
 
 		# Run the semantic commit process
-		success = semantic_workflow.run(
+		success = await semantic_workflow.run(
 			interactive=not is_non_interactive,
 			pathspecs=pathspecs,
 		)

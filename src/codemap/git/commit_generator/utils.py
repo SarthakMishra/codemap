@@ -5,8 +5,8 @@ import logging
 import re
 from pathlib import Path
 
+from codemap.config import ConfigLoader
 from codemap.git.commit_linter.linter import CommitLinter
-from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +58,7 @@ def lint_commit_message(
 	"""
 	# Get config loader if not provided
 	if config_loader is None:
-		config_loader = ConfigLoader(repo_root=repo_root)
+		config_loader = ConfigLoader.get_instance(repo_root=repo_root)
 
 	try:
 		# Create a CommitLinter instance with the config_loader
@@ -144,7 +144,7 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 
 		# Check for valid commit type if config_loader is provided
 		if config_loader:
-			valid_types = config_loader.get_commit_convention().get("types", [])
+			valid_types = config_loader.get.commit.convention.types
 			if valid_types and commit_type not in valid_types:
 				logger.warning("Invalid commit type: %s. Valid types: %s", commit_type, valid_types)
 				# Try to find a valid type as fallback
@@ -164,7 +164,7 @@ def format_commit_json(content: str, config_loader: ConfigLoader | None = None) 
 
 		# Ensure description doesn't start with another type prefix
 		if config_loader:
-			valid_types = config_loader.get_commit_convention().get("types", [])
+			valid_types = config_loader.get.commit.convention.types
 			for valid_type in valid_types:
 				if description.lower().startswith(f"{valid_type}:"):
 					description = description.split(":", 1)[1].strip()

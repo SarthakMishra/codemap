@@ -7,13 +7,6 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from codemap.utils.config_loader import ConfigLoader
-
-from .api import extract_content_from_response as _extract_content
-from .client import LLMClient
-from .config import get_llm_config
-from .errors import LLMError
-
 logger = logging.getLogger(__name__)
 
 
@@ -40,87 +33,5 @@ def load_prompt_template(template_path: str | None) -> str | None:
 		return None
 
 
-def get_llm_client(config_loader: ConfigLoader | None = None) -> LLMClient:
-	"""
-	Create and return a LLM client.
-
-	Args:
-	        config_loader: Optional ConfigLoader instance to use
-
-	Returns:
-	    LLMClient instance
-
-	Raises:
-	    RuntimeError: If client creation fails
-
-	"""
-	try:
-		config = get_llm_config(config_loader=config_loader)
-		return LLMClient(config=config, config_loader=config_loader)
-
-	except LLMError as e:
-		logger.exception("LLM error")
-		msg = f"Failed to create LLM client: {e}"
-		raise RuntimeError(msg) from e
-
-
 # Define a type for the response that covers all expected formats
 LLMResponseType = dict[str, Any] | Mapping[str, Any] | object
-
-
-def extract_content_from_response(response: LLMResponseType) -> str:
-	"""
-	Extract content from a LLM response.
-
-	Args:
-	    response: LLM response object or dictionary
-
-	Returns:
-	    Extracted content as string
-
-	"""
-	return _extract_content(response)
-
-
-def create_client(
-	repo_path: Path | None = None,
-	model: str | None = None,
-	api_key: str | None = None,
-	api_base: str | None = None,
-	config_loader: ConfigLoader | None = None,
-) -> LLMClient:
-	"""
-	Create an LLMClient with the specified configuration.
-
-	Args:
-	    repo_path: Repository path for configuration loading
-	    model: Model identifier to use
-	    api_key: API key to use
-	    api_base: API base URL to use
-	    config_loader: Optional ConfigLoader instance to use
-
-	Returns:
-	    Configured LLMClient instance
-
-	Raises:
-	    RuntimeError: If client creation fails
-
-	"""
-	try:
-		# Get configuration
-		config = get_llm_config(
-			config_loader=config_loader,
-			overrides={
-				"model": model,
-				"api_key": api_key,
-				"api_base": api_base,
-			},
-		)
-
-		# Create client
-		return LLMClient(config=config, repo_path=repo_path, config_loader=config_loader)
-
-	except Exception as e:
-		logger.exception("Error creating LLM client")
-		msg = f"Failed to create LLM client: {e}"
-		raise RuntimeError(msg) from e

@@ -5,11 +5,11 @@ import uuid
 from pathlib import Path
 from typing import Any, TypedDict
 
+from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
-from codemap.llm import create_client
+from codemap.llm.client import LLMClient
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import loading_spinner, progress_indicator
-from codemap.utils.config_loader import ConfigLoader
 
 from .formatter import format_content_for_context
 from .prompts import SYSTEM_PROMPT
@@ -70,21 +70,15 @@ class AskCommand:
 			logger.debug("Using provided ConfigLoader instance")
 
 		# Get RAG configuration
-		rag_config = self.config_loader.get("rag", {})
-		self.max_context_length = rag_config.get("max_context_length", DEFAULT_MAX_CONTEXT_LENGTH)
-		self.max_context_results = rag_config.get("max_context_results", DEFAULT_MAX_CONTEXT_RESULTS)
+		rag_config = self.config_loader.get.rag
+		self.max_context_length = rag_config.max_context_length
+		self.max_context_results = rag_config.max_context_results
 		logger.debug(
 			f"Using max_context_length: {self.max_context_length}, max_context_results: {self.max_context_results}"
 		)
 
 		self.db_client = DatabaseClient()  # Uses config path by default
-		self.llm_client = create_client(
-			repo_path=self.repo_path,
-			model=model,  # create_client handles defaults/config
-			api_key=api_key,
-			api_base=api_base,
-			config_loader=self.config_loader,  # Pass the config_loader down
-		)
+		self.llm_client = LLMClient(config_loader=self.config_loader)
 		# Initialize ProcessingPipeline correctly
 		try:
 			# Show a spinner while initializing the pipeline
@@ -238,19 +232,16 @@ class AskCommand:
 
 		# Get LLM config from the injected ConfigLoader
 		# At this point self.config_loader is guaranteed to be a valid instance
-		llm_config = self.config_loader.get_llm_config()
-		llm_params = {
-			"temperature": llm_config.get("temperature", 0.7),
-			"max_tokens": llm_config.get("max_tokens", 1024),
-		}
+		llm_config = self.config_loader.get.llm.model_dump()
 
 		# Call LLM with context
 		try:
 			with loading_spinner("Waiting for LLM response..."):
-				answer = self.llm_client.completion(
+				answer = await self.llm_client.completion(
 					messages=[{"role": "user", "content": prompt}],
-					**llm_params,
+					**llm_config,
 				)
+			logger.debug(f"LLM response: {answer}")
 
 			# Update DB with answer using the dedicated client method
 			if db_entry_id and answer:

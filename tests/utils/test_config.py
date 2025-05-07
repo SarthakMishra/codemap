@@ -149,7 +149,7 @@ commit:
 
 		# Create loader with mocked yaml loader
 		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader(config_file=str(config_file))
+			loader = ConfigLoader.get_instance(config_file=str(config_file))
 			# Test get_bypass_hooks returns the configured value
 			assert loader.get_bypass_hooks() is True
 
@@ -164,7 +164,7 @@ commit:
 """
 		config_file.write_text(config_content)
 		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader(config_file=str(config_file))
+			loader = ConfigLoader.get_instance(config_file=str(config_file))
 			assert loader.get_bypass_hooks() is False
 
 		# Test with commit section but no bypass_hooks (should default to False)
@@ -178,7 +178,7 @@ commit:
 """
 		config_file.write_text(config_content)
 		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader(config_file=str(config_file))
+			loader = ConfigLoader.get_instance(config_file=str(config_file))
 			assert loader.get_bypass_hooks() is False
 
 		# Test with no commit section (should default to False)
@@ -190,5 +190,5 @@ token_limit: 5000
 """
 		config_file.write_text(config_content)
 		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader(config_file=str(config_file))
+			loader = ConfigLoader.get_instance(config_file=str(config_file))
 			assert loader.get_bypass_hooks() is False

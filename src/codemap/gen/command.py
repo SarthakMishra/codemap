@@ -7,9 +7,9 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity
 from codemap.utils.cli_utils import console, show_error
-from codemap.utils.config_loader import ConfigLoader
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
 from .models import GenConfig
@@ -55,16 +55,9 @@ def process_codebase(
 		config_loader = ConfigLoader()
 		logger.debug("Created new ConfigLoader instance in process_codebase")
 
-	processor_config = config_loader.get("processor", {})
-	gen_config_data = config_loader.get("gen", {})
-	max_workers = processor_config.get("max_workers", 4)
+	processor_config = config_loader.get.processor
+	max_workers = processor_config.max_workers
 	logger.debug(f"Using max_workers: {max_workers} from configuration")
-
-	# Debug the command_arg if present
-	if "command_arg" in gen_config_data:
-		logger.debug(f"Found command_arg in gen_config_data: '{gen_config_data['command_arg']}'")
-	else:
-		logger.debug("No command_arg found in gen_config_data")
 
 	try:
 		# Need project root to correctly locate .gitignore
@@ -110,11 +103,6 @@ def process_codebase(
 			"languages": list(languages),
 		},
 	}
-
-	# Add command_arg directly from config if available
-	if "command_arg" in gen_config_data:
-		metadata["command_arg"] = gen_config_data["command_arg"]
-		logger.debug(f"Adding command_arg to metadata: '{gen_config_data['command_arg']}'")
 
 	# Generate directory tree if requested
 	if config.include_tree:
@@ -175,11 +163,6 @@ class GenCommand:
 				entities, metadata = process_codebase(
 					target_path, self.config, progress, task_id, config_loader=self.config_loader
 				)
-
-				# Extract the command_arg from config_loader and add it to metadata
-				gen_config_data = self.config_loader.get("gen", {})
-				if "command_arg" in gen_config_data:
-					metadata["command_arg"] = gen_config_data["command_arg"]
 
 			# Generate documentation
 			console.print("[green]Processing complete. Generating documentation...")

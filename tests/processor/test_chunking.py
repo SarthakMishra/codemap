@@ -8,10 +8,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity, LODGenerator
 from codemap.processor.tree_sitter.base import EntityType
 from codemap.processor.vector.chunking import TreeSitterChunker
-from codemap.utils.config_loader import ConfigLoader
 
 
 @pytest.fixture

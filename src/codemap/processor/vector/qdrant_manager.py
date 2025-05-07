@@ -9,7 +9,7 @@ from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import Distance, ExtendedPointId, PointStruct, VectorParams
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -57,25 +57,25 @@ class QdrantManager:
 		"""
 		# Get embedding configuration
 		self.config_loader = config_loader
-		embedding_config = self.config_loader.get("embedding", {})
+		embedding_config = self.config_loader.get.embedding
 
 		# Get distance metric from config or parameter
-		distance_metric_str = embedding_config.get("dimension_metric", "cosine").upper()
+		distance_metric_str = embedding_config.dimension_metric.upper()
 		default_distance = (
 			getattr(Distance, distance_metric_str) if hasattr(Distance, distance_metric_str) else Distance.COSINE
 		)
 
 		# Load values from parameters or fall back to config
-		self.collection_name = collection_name or embedding_config.get("qdrant_collection_name", "codemap_vectors")
-		self.dim = dim or embedding_config.get("dimension", 1024)
+		self.collection_name = collection_name or embedding_config.qdrant_collection_name
+		self.dim = dim or embedding_config.dimension
 		self.distance = distance or default_distance
 
 		# Build client args
 		self.client_args = {
-			"api_key": api_key or embedding_config.get("api_key"),
-			"url": url or embedding_config.get("url"),
-			"prefer_grpc": prefer_grpc if prefer_grpc is not None else embedding_config.get("prefer_grpc", True),
-			"timeout": timeout or embedding_config.get("timeout"),
+			"api_key": api_key or embedding_config.api_key,
+			"url": url or embedding_config.url,
+			"prefer_grpc": prefer_grpc if prefer_grpc is not None else embedding_config.prefer_grpc,
+			"timeout": timeout or embedding_config.timeout,
 		}
 		# Remove None values from args
 		self.client_args = {k: v for k, v in self.client_args.items() if v is not None}

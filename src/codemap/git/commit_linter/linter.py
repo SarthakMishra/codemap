@@ -4,16 +4,12 @@ import re
 from pathlib import Path
 from typing import Any
 
-from codemap.config import DEFAULT_CONFIG
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config import ConfigLoader
 
 from .config import CommitLintConfig, Rule, RuleLevel
 from .constants import ASCII_MAX_VALUE, BREAKING_CHANGE
 from .parser import CommitParser
 from .validators import CommitValidators
-
-# Get default body max line length from config for use in validation methods
-BODY_MAX_LINE_LENGTH = DEFAULT_CONFIG["commit"]["lint"]["body_max_line_length"]["value"]
 
 
 class CommitLinter:
@@ -34,16 +30,15 @@ class CommitLinter:
 		    config (CommitLintConfig, optional): Configuration object for the linter.
 		    config_path (str, optional): Path to a configuration file (.codemap.yml).
 		    config_loader (ConfigLoader, optional): Config loader instance to use (dependency injection).
-
 		"""
 		# Get configuration loader following the Chain of Responsibility pattern
 		repo_root = Path(config_path).parent if config_path else None
-		self.config_loader = config_loader or ConfigLoader(config_file=config_path, repo_root=repo_root)
+		self.config_loader = config_loader or ConfigLoader.get_instance(repo_root=repo_root)
 
 		# Get default types from central config via config_loader
-		commit_config = self.config_loader.get("commit", {})
-		convention_config = commit_config.get("convention", {})
-		default_types = convention_config.get("types", DEFAULT_CONFIG["commit"]["convention"]["types"])
+		commit_config = self.config_loader.get.commit
+		convention_config = commit_config.convention
+		default_types = convention_config.types
 
 		self.allowed_types = {t.lower() for t in (allowed_types or default_types)}
 		self.parser = CommitParser()
@@ -53,19 +48,18 @@ class CommitLinter:
 			self.config = config
 		else:
 			# Convert the config to CommitLintConfig, using config_loader's config
-			config_data = self.config_loader.config
-			self.config = CommitLintConfig.from_dict(config_data, config_loader=self.config_loader)
+			self.config = CommitLintConfig.get_rules(self.config_loader)
 
 			# Get commit convention from config loader
-			commit_convention = self.config_loader.get_commit_convention()
-			if commit_convention.get("types"):
-				self.config.type_enum.value = commit_convention["types"]
-			if commit_convention.get("scopes"):
-				self.config.scope_enum.value = commit_convention["scopes"]
+			commit_convention = self.config_loader.get.commit.convention
+			if commit_convention.types:
+				self.config.type_enum.value = commit_convention.types
+			if commit_convention.scopes:
+				self.config.scope_enum.value = commit_convention.scopes
 				if self.config.scope_enum.value:  # If scopes are provided, enable the rule
 					self.config.scope_enum.level = RuleLevel.ERROR
-			if "max_length" in commit_convention:
-				self.config.header_max_length.value = commit_convention["max_length"]
+			if commit_convention.max_length:
+				self.config.header_max_length.value = commit_convention.max_length
 
 		# Override type_enum value with allowed_types if provided
 		if allowed_types:
@@ -546,10 +540,7 @@ class CommitLinter:
 		# Check body line length
 		rule = self.config.body_max_line_length
 		if rule.level != RuleLevel.DISABLED and body:
-			if isinstance(rule.value, float) and rule.value == float("inf"):
-				max_line_length = BODY_MAX_LINE_LENGTH  # Use default BODY_MAX_LINE_LENGTH for infinity
-			else:
-				max_line_length = int(rule.value)
+			max_line_length = int(rule.value)
 			invalid_lines = CommitValidators.validate_line_length(body, max_line_length)
 			for line_idx in invalid_lines:
 				line = body.splitlines()[line_idx]
@@ -674,10 +665,7 @@ class CommitLinter:
 		# Check footer line length
 		rule = self.config.footer_max_line_length
 		if footers_str and rule.level != RuleLevel.DISABLED:
-			if isinstance(rule.value, float) and rule.value == float("inf"):
-				max_line_length = BODY_MAX_LINE_LENGTH  # Use default BODY_MAX_LINE_LENGTH for infinity
-			else:
-				max_line_length = int(rule.value)
+			max_line_length = int(rule.value)
 			invalid_lines = CommitValidators.validate_line_length(footers_str, max_line_length)
 			for line_idx in invalid_lines:
 				line = footers_str.splitlines()[line_idx]

@@ -51,7 +51,7 @@ def register_command(app: typer.Typer) -> None:
 	"""Register the ask command with the CLI app."""
 
 	@app.command(name="ask")
-	@asyncer.runnify  # Apply runnify directly to the command function
+	@asyncer.runnify
 	async def ask_command(
 		question: QuestionArg = None,
 		path: PathOpt = None,
@@ -87,18 +87,18 @@ async def _ask_command_impl(
 	# Import heavy dependencies here instead of at the top
 	from rich.prompt import Prompt
 
+	from codemap.config import ConfigLoader
 	from codemap.llm.rag.ask.command import AskCommand
 	from codemap.llm.rag.ask.formatter import print_ask_result
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
-	from codemap.utils.config_loader import ConfigLoader
 
 	repo_path = path or Path.cwd()
 	logger.info(f"Received ask command for path: {repo_path}")
 
 	# Determine if running in interactive mode (flag or config)
 	config_loader = ConfigLoader.get_instance(repo_root=repo_path)
-	config = config_loader.load_config()
-	is_interactive = interactive or config.get("ask", {}).get("interactive_chat", False)
+	config = config_loader.get_instance()
+	is_interactive = interactive or config.get.ask.interactive_chat
 
 	if not is_interactive and question is None:
 		exit_with_error("You must provide a question or use the --interactive flag.")

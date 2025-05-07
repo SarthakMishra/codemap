@@ -7,6 +7,9 @@ from typing import Annotated, cast
 
 import typer
 
+from codemap.config.config_schema import PRGenerateSchema
+from codemap.llm.client import LLMClient
+
 
 class PRAction(str, Enum):
 	"""Actions for PR command."""
@@ -75,6 +78,9 @@ ModelOpt = Annotated[
 ]
 ApiBaseOpt = Annotated[str | None, typer.Option("--api-base", help="API base URL for LLM")]
 ApiKeyOpt = Annotated[str | None, typer.Option("--api-key", help="API key for LLM")]
+BypassHooksFlag = Annotated[
+	bool, typer.Option("--bypass-hooks", "--no-verify", help="Bypass git hooks with --no-verify")
+]
 
 
 # --- Registration Function ---
@@ -84,7 +90,7 @@ def register_command(app: typer.Typer) -> None:
 	"""Register the pr command with the Typer app."""
 
 	@app.command("pr")
-	def pr_command_entrypoint(
+	async def pr_command_entrypoint(
 		path_arg: PathArg = Path(),  # Default path to current dir
 		action: ActionArg = PRAction.CREATE,
 		branch_name: BranchNameOpt = None,
@@ -100,9 +106,10 @@ def register_command(app: typer.Typer) -> None:
 		model: ModelOpt = None,
 		api_base: ApiBaseOpt = None,
 		api_key: ApiKeyOpt = None,
+		bypass_hooks: BypassHooksFlag = False,
 	) -> None:
 		"""Create or update a GitHub/GitLab pull request with generated content."""
-		_pr_command_impl(
+		await _pr_command_impl(
 			path_arg=path_arg,
 			action=action,
 			branch_name=branch_name,
@@ -118,13 +125,14 @@ def register_command(app: typer.Typer) -> None:
 			model=model,
 			api_base=api_base,
 			api_key=api_key,
+			bypass_hooks=bypass_hooks,
 		)
 
 
 # --- Command Implementation (Heavy imports inside) ---
 
 
-def _pr_command_impl(
+async def _pr_command_impl(
 	path_arg: Path,
 	action: PRAction,
 	branch_name: str | None,
@@ -140,6 +148,7 @@ def _pr_command_impl(
 	model: str | None,
 	api_base: str | None,
 	api_key: str | None,
+	bypass_hooks: bool,
 ) -> None:
 	"""Actual implementation of the pr command with heavy imports."""
 	# --- Heavy Imports ---
@@ -153,7 +162,8 @@ def _pr_command_impl(
 	from rich.rule import Rule
 	from rich.text import Text
 
-	from codemap.git.commit_generator.command import CommitCommand
+	from codemap.config import ConfigLoader
+	from codemap.git.commit_generator.command import SemanticCommitCommand
 	from codemap.git.pr_generator.command import PRWorkflowCommand
 	from codemap.git.pr_generator.strategies import (
 		WorkflowStrategy,
@@ -184,7 +194,6 @@ def _pr_command_impl(
 		validate_repo_path,
 	)
 	from codemap.llm import LLMError  # Import LLMError
-	from codemap.llm.utils import create_client
 	from codemap.utils.cli_utils import (
 		exit_with_error,
 		handle_keyboard_interrupt,
@@ -192,7 +201,6 @@ def _pr_command_impl(
 		show_error,
 		show_warning,
 	)
-	from codemap.utils.config_loader import ConfigLoader
 
 	# --- Setup ---
 	logger = logging.getLogger(__name__)
@@ -229,7 +237,7 @@ def _pr_command_impl(
 		api_base: str | None = field(default=None)
 		api_key: str | None = field(default=None)
 		workflow_strategy_name: str = field(default="github-flow")  # Default strategy
-
+		bypass_hooks: bool = field(default=False)
 	# --- Helper Functions (Adapted from pr_cmd_old) ---
 
 	def _resolve_description(desc_input: str | None) -> str | None:
@@ -400,11 +408,9 @@ def _pr_command_impl(
 
 			# Use CommitCommand for the commit process
 			logger.info("Starting commit process...")
-			commit_command = CommitCommand(
+			commit_command = SemanticCommitCommand(
 				path=options.repo_path,
-				model=options.model or "gpt-4o-mini",  # Provide default model if None
-				# api_key=options.api_key, # CommitCommand gets these via config/llm client
-				# api_base=options.api_base,
+				bypass_hooks=options.bypass_hooks,
 			)
 			# The run method handles staging, splitting, generation, and committing
 			# CommitCommand's run now accepts the interactive flag directly
@@ -446,7 +452,7 @@ def _pr_command_impl(
 			show_error(f"Error pushing branch '{branch_name}': {e}")
 			return False
 
-	def _interactive_pr_review(
+	async def _interactive_pr_review(
 		initial_title: str,
 		initial_description: str,
 		options: PROptions,
@@ -454,7 +460,7 @@ def _pr_command_impl(
 		branch_name: str,
 		branch_type: str,
 		base_branch: str,
-		content_config: dict,
+		content_config: PRGenerateSchema,
 		workflow_strategy_name: str,
 	) -> tuple[str | None, str | None]:
 		"""Interactive loop for reviewing and editing PR title and description."""
@@ -496,10 +502,10 @@ def _pr_command_impl(
 					description = new_description
 			elif action == "Regenerate":
 				console.print("[cyan]Regenerating title and description...[/cyan]")
-				title_strategy = content_config.get("title_strategy", "commits")
-				description_strategy = content_config.get("description_strategy", "commits")
-				title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
-				description = _generate_description(
+				title_strategy = content_config.title_strategy
+				description_strategy = content_config.description_strategy
+				title = await _generate_title(options, title_strategy, commits, branch_name, branch_type)
+				description = await _generate_description(
 					options,
 					description_strategy,
 					commits,
@@ -517,7 +523,7 @@ def _pr_command_impl(
 				return None, None
 
 	# --- Generation Helpers (Adapted from pr_cmd_old, now use options dataclass) ---
-	def _generate_title(
+	async def _generate_title(
 		options: PROptions, title_strategy: str, commits: list[str], branch_name: str, branch_type: str
 	) -> str:
 		"""Generate PR title based on the chosen strategy."""
@@ -533,17 +539,17 @@ def _pr_command_impl(
 
 		if title_strategy == "llm":
 			try:
-				client = create_client(
-					model=options.model, api_key=options.api_key, api_base=options.api_base, repo_path=options.repo_path
+				client = LLMClient(
+					config_loader=config_loader,
 				)
-				return generate_pr_title_with_llm(commits=commits, llm_client=client)
+				return await generate_pr_title_with_llm(commits=commits, llm_client=client)
 			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError) as e:
 				show_warning(f"LLM title generation failed: {e}. Falling back to commit-based title.")
 				# Fall through to commit-based
 		# Default to commit-based
 		return generate_pr_title_from_commits(commits)
 
-	def _generate_description(
+	async def _generate_description(
 		options: PROptions,
 		description_strategy: str,
 		commits: list[str],
@@ -551,7 +557,7 @@ def _pr_command_impl(
 		branch_type: str,
 		workflow_strategy_name: str,
 		base_branch: str,
-		content_config: dict,
+		content_config: PRGenerateSchema,
 	) -> str:
 		"""Generate PR description based on the chosen strategy."""
 		# Handle explicit description (file or text)
@@ -576,17 +582,17 @@ def _pr_command_impl(
 
 		if description_strategy == "llm":
 			try:
-				client = create_client(
-					model=options.model, api_key=options.api_key, api_base=options.api_base, repo_path=options.repo_path
+				client = LLMClient(
+					config_loader=config_loader,
 				)
-				return generate_pr_description_with_llm(commits, llm_client=client)
+				return await generate_pr_description_with_llm(commits, llm_client=client)
 			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError) as e:
 				show_warning(f"LLM description generation failed: {e}. Falling back to commit-based description.")
 				# Fall through to commit-based
 
 		if description_strategy == "template":
 			# Logic for template-based generation (from pr_cmd_old)
-			template = content_config.get("description_template", "")
+			template = content_config.description_template
 			if template:
 				commit_summary = "\n".join([f"- {commit}" for commit in commits])
 				try:
@@ -612,13 +618,13 @@ def _pr_command_impl(
 		logger.info(f"Operating in repository: {repo_path}")
 
 		# 2. Load Configuration
-		config_loader = ConfigLoader(repo_root=repo_path)
-		pr_config = config_loader.get_pr_config()
-		llm_config = config_loader.get_llm_config()
-		content_config = pr_config.get("content", {})
+		config_loader = ConfigLoader.get_instance(repo_root=repo_path)
+		pr_config = config_loader.get.pr
+		llm_config = config_loader.get.llm
+		content_config = pr_config.generate
 
 		# Determine workflow strategy (CLI > Config > Default)
-		workflow_strategy_name = workflow or config_loader.get_workflow_strategy()
+		workflow_strategy_name = workflow or pr_config.strategy
 		try:
 			strategy = create_strategy(workflow_strategy_name)
 		except ValueError as e:
@@ -637,17 +643,15 @@ def _pr_command_impl(
 			force_push=force_push,
 			pr_number=pr_number,
 			interactive=interactive,
-			model=model or llm_config.get("model"),
-			api_base=api_base or llm_config.get("api_base"),
-			api_key=api_key or llm_config.get("api_key"),
+			model=model or llm_config.model,
 			workflow_strategy_name=workflow_strategy_name,
 		)
 		logger.debug(f"Resolved PR options: {opts}")
 
 		# 4. Instantiate Workflow Command
 		# Create LLM client separately first
-		llm_client = create_client(
-			repo_path=opts.repo_path, model=opts.model, api_key=opts.api_key, api_base=opts.api_base
+		llm_client = LLMClient(
+			config_loader=config_loader,
 		)
 		# Ensure repo_path is not None before passing to PRWorkflowCommand
 		if opts.repo_path is None:
@@ -744,11 +748,13 @@ def _pr_command_impl(
 
 			commits = get_commit_messages(opts.base_branch, final_branch_name)
 			detected_branch_type = strategy.detect_branch_type(final_branch_name) or "feature"  # Default type
-			title_strategy = content_config.get("title_strategy", "commits")
-			description_strategy = content_config.get("description_strategy", "commits")
+			title_strategy = content_config.title_strategy
+			description_strategy = content_config.description_strategy
 
-			initial_title = _generate_title(opts, title_strategy, commits, final_branch_name, detected_branch_type)
-			initial_description = _generate_description(
+			initial_title = await _generate_title(
+				opts, title_strategy, commits, final_branch_name, detected_branch_type
+			)
+			initial_description = await _generate_description(
 				opts,
 				description_strategy,
 				commits,
@@ -762,7 +768,7 @@ def _pr_command_impl(
 			# 5f. Interactive Review (if applicable)
 			final_title, final_description = initial_title, initial_description
 			if opts.interactive:
-				final_title, final_description = _interactive_pr_review(
+				final_title, final_description = await _interactive_pr_review(
 					initial_title,
 					initial_description,
 					opts,
@@ -780,7 +786,7 @@ def _pr_command_impl(
 			console.print(Rule("Creating Pull Request", style="bold blue"))
 			try:
 				with progress_indicator("Creating PR on GitHub/GitLab...", style="spinner"):
-					pr = pr_workflow.create_pr_workflow(
+					pr = await pr_workflow.create_pr_workflow(
 						base_branch=opts.base_branch,
 						head_branch=final_branch_name,
 						title=final_title,
@@ -869,16 +875,13 @@ def _pr_command_impl(
 				update_head_branch = current_branch  # Head is the current branch
 
 				with progress_indicator(f"Updating PR #{pr_num_to_update} on GitHub/GitLab...", style="spinner"):
-					updated_pr = pr_workflow.update_pr_workflow(
+					updated_pr = await pr_workflow.update_pr_workflow(
 						pr_number=pr_num_to_update,
 						title=opts.title,  # Pass provided title, None to regenerate
 						description=resolved_description,  # Pass resolved description, None to regenerate
 						# Pass branches needed ONLY if regeneration might happen
 						base_branch=update_base_branch if opts.title is None or resolved_description is None else None,
 						head_branch=update_head_branch if opts.title is None or resolved_description is None else None,
-						# Interactive flag needs to be passed down to the workflow command
-						# if it needs to handle interactive edits. Let's assume it does for now.
-						# interactive=opts.interactive, # REMOVED: update_pr_workflow doesn't take interactive
 					)
 				console.print(f"[green]Successfully updated PR #{updated_pr.number}: {updated_pr.url}[/green]")
 				# Ensure title and description are not None before passing to Panel

@@ -10,7 +10,7 @@ import enum
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from codemap.utils.config_loader import ConfigLoader
+from codemap.config import ConfigLoader
 
 # Default values are now defined in src/codemap/config.py
 
@@ -384,68 +384,41 @@ class CommitLintConfig:
 	)
 
 	@classmethod
-	def from_dict(cls, config_dict: dict[str, Any], config_loader: ConfigLoader | None = None) -> "CommitLintConfig":
+	def get_rules(cls, config_loader: ConfigLoader) -> "CommitLintConfig":
 		"""
-		Create a CommitLintConfig from a dictionary.
+		Get the rules from the config.
 
 		Args:
-		    config_dict: Configuration dictionary to parse
-		    config_loader: Optional ConfigLoader instance for retrieving additional configuration
+		    config_loader: ConfigLoader instance for retrieving additional configuration
 
 		Returns:
 		    CommitLintConfig: Configured instance
-
 		"""
 		config = cls()
+		commit_config = config_loader.get.commit
+		lint_config = commit_config.lint
 
-		# Use config_loader if provided, otherwise just use the provided config_dict
-		commit_config = config_loader.get("commit", {}) if config_loader else config_dict.get("commit", {})
-
-		lint_config = commit_config.get("lint", {})
-
-		# Merge rules from config dict into config object
-		for rule_name, rule_config in lint_config.items():
-			if hasattr(config, rule_name):
+		# Update all rules from lint config
+		for rule_name in dir(config):
+			if not rule_name.startswith("_") and isinstance(getattr(config, rule_name), Rule):
 				rule_obj = getattr(config, rule_name)
+				rule_config = getattr(lint_config, rule_name, None)
 
-				# Update rule configuration
-				if "rule" in rule_config:
-					rule_obj.rule = rule_config["rule"]
-				if "value" in rule_config:
-					rule_obj.value = rule_config["value"]
-				if "level" in rule_config:
-					level_str = rule_config["level"].upper()
-					try:
-						rule_obj.level = RuleLevel[level_str]
-					except KeyError:
-						# Default to ERROR if invalid level
-						rule_obj.level = RuleLevel.ERROR
+				if rule_config:
+					rule_obj.rule = rule_config.rule
+					rule_obj.value = rule_config.value
+					rule_obj.level = RuleLevel[rule_config.level]
 
-		# Special handling for type-enum from convention.types
-		if "convention" in commit_config and "types" in commit_config["convention"]:
-			config.type_enum.value = commit_config["convention"]["types"]
+		# Handle special cases from commit convention
+		if commit_config.convention.types:
+			config.type_enum.value = commit_config.convention.types
 
-		# Special handling for scope-enum from convention.scopes
-		if "convention" in commit_config and "scopes" in commit_config["convention"]:
-			config.scope_enum.value = commit_config["convention"]["scopes"]
-			if config.scope_enum.value:  # If scopes are provided, enable the rule
+		if commit_config.convention.scopes:
+			config.scope_enum.value = commit_config.convention.scopes
+			if config.scope_enum.value:
 				config.scope_enum.level = RuleLevel.ERROR
 
-		# Special handling for header-max-length from convention.max_length
-		# Only set this if header_max_length wasn't already set in the lint section
-		if (
-			"convention" in commit_config
-			and "max_length" in commit_config["convention"]
-			and "header_max_length" not in lint_config
-		):
-			config.header_max_length.value = commit_config["convention"]["max_length"]
+		if commit_config.convention.max_length and not lint_config.header_max_length:
+			config.header_max_length.value = commit_config.convention.max_length
 
 		return config
-
-	def get_all_rules(self) -> list[Rule]:
-		"""Get all rules as a list."""
-		return [
-			getattr(self, name)
-			for name in dir(self)
-			if not name.startswith("_") and isinstance(getattr(self, name), Rule)
-		]

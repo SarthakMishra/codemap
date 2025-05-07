@@ -9,10 +9,10 @@ import re
 from pathlib import Path
 from typing import Any
 
+from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
 from codemap.llm import LLMClient, LLMError
-from codemap.utils.config_loader import ConfigLoader
 
 from .prompts import (
 	COMMIT_SYSTEM_PROMPT,
@@ -65,11 +65,10 @@ class CommitMessageGenerator:
 		self.client.set_template("commit", self.prompt_template)
 
 		# Get max token limit from config
-		llm_config = self._config_loader.get("llm", {})
-		self.max_tokens = llm_config.get("max_context_tokens", 4000)
+		self.max_tokens = config_loader.get.llm.max_output_tokens
 
 		# Flag to control whether to use the LOD-based context processing
-		self.use_lod_context = llm_config.get("use_lod_context", True)
+		self.use_lod_context = config_loader.get.commit.use_lod_context
 
 	def extract_file_info(self, chunk: DiffChunk) -> dict[str, Any]:
 		"""
@@ -108,11 +107,6 @@ class CommitMessageGenerator:
 				continue
 		return file_info
 
-	def get_commit_convention(self) -> dict[str, Any]:
-		"""Get commit convention settings from config."""
-		# Use the centralized ConfigLoader to get the convention
-		return self._config_loader.get_commit_convention()
-
 	def _prepare_prompt(self, chunk: DiffChunk) -> str:
 		"""
 		Prepare the prompt for the LLM.
@@ -125,7 +119,6 @@ class CommitMessageGenerator:
 
 		"""
 		file_info = self.extract_file_info(chunk)
-		convention = self.get_commit_convention()
 
 		# Get the diff content
 		diff_content = chunk.content
@@ -250,7 +243,7 @@ class CommitMessageGenerator:
 		context = {
 			"diff": diff_content,
 			"files": file_info,
-			"convention": convention,
+			"config_loader": self._config_loader,
 			"schema": COMMIT_MESSAGE_SCHEMA,
 			"original_message": "",  # Default value for original_message
 			"lint_errors": "",  # Default value for lint_errors
@@ -305,7 +298,7 @@ class CommitMessageGenerator:
 			template=self.prompt_template,
 			diff_content=diff_content,
 			file_info=file_info,
-			convention=convention,
+			config_loader=self._config_loader,
 			extra_context=context,  # Pass the context with default values
 		)
 
@@ -480,7 +473,7 @@ class CommitMessageGenerator:
 		logger.debug("Generated fallback message: %s", message)
 		return message
 
-	def generate_message(self, chunk: DiffChunk) -> tuple[str, bool]:
+	async def generate_message(self, chunk: DiffChunk) -> tuple[str, bool]:
 		"""
 		Generate a commit message for a diff chunk.
 
@@ -497,7 +490,7 @@ class CommitMessageGenerator:
 			logger.debug("Prompt prepared successfully")
 
 			# Generate message using configured LLM provider
-			message = self._call_llm_api(prompt)
+			message = await self._call_llm_api(prompt)
 			logger.debug("LLM generated message: %s", message)
 
 			# Return generated message with success flag
@@ -507,7 +500,7 @@ class CommitMessageGenerator:
 			# Fall back to heuristic generation
 			return self.fallback_generation(chunk), False
 
-	def _call_llm_api(self, prompt: str) -> str:
+	async def _call_llm_api(self, prompt: str) -> str:
 		"""
 		Call the LLM API with the given prompt.
 
@@ -522,7 +515,7 @@ class CommitMessageGenerator:
 
 		"""
 		# Directly use the generate_text method from the LLMClient
-		return self.client.completion(
+		return await self.client.completion(
 			messages=[
 				{"role": "system", "content": COMMIT_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
@@ -530,7 +523,7 @@ class CommitMessageGenerator:
 			json_schema=COMMIT_MESSAGE_SCHEMA,
 		)
 
-	def generate_message_with_linting(
+	async def generate_message_with_linting(
 		self, chunk: DiffChunk, retry_count: int = 1, max_retries: int = 3
 	) -> tuple[str, bool, bool, bool, list[str]]:
 		"""
@@ -557,7 +550,7 @@ class CommitMessageGenerator:
 
 		try:
 			# --- Initial Generation ---
-			raw_llm_message, used_llm = self.generate_message(chunk)
+			raw_llm_message, used_llm = await self.generate_message(chunk)
 			logger.debug("Generated initial raw message: %s", raw_llm_message)
 
 			# --- Format JSON ---
@@ -590,13 +583,13 @@ class CommitMessageGenerator:
 				enhanced_prompt = prepare_lint_prompt(
 					template=lint_template,
 					file_info=self.extract_file_info(chunk),
-					convention=self.get_commit_convention(),
+					config_loader=self._config_loader,
 					lint_messages=initial_lint_messages,  # Use initial messages for feedback
 					original_message=message,  # Pass the original formatted message that failed linting
 				)
 
 				# Generate message with the enhanced prompt
-				regenerated_raw_message = self._call_llm_api(enhanced_prompt)
+				regenerated_raw_message = await self._call_llm_api(enhanced_prompt)
 				logger.debug("Regenerated message (RAW LLM output): %s", regenerated_raw_message)
 
 				# --- Format JSON (Regeneration) ---
