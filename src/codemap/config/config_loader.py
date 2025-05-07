@@ -91,7 +91,9 @@ class ConfigLoader:
 		self.repo_root = repo_root
 		self._config_file = config_file
 		self._resolved_config_file = self._resolve_config_file(config_file)
-		self._app_config: Any = None  # Lazy load on first access
+		# Load configuration eagerly during initialization instead of lazy loading
+		self._app_config = self._load_config()
+		logger.debug("ConfigLoader initialized with eager configuration loading")
 
 	def reload_config(self, config_file: Path | None = None, repo_root: Path | None = None) -> None:
 		"""
@@ -106,8 +108,9 @@ class ConfigLoader:
 		if repo_root is not None:
 			self.repo_root = repo_root
 		self._resolved_config_file = self._resolve_config_file(self._config_file)
-		# Clear the cached config to force reload
-		self._app_config = None
+		# Reload the configuration immediately
+		self._app_config = self._load_config()
+		logger.debug("Configuration reloaded")
 
 	def _resolve_config_file(self, config_file: Path | None = None) -> Path | None:
 		"""
@@ -242,11 +245,8 @@ class ConfigLoader:
 		"""
 		Get the current application configuration.
 
-		Lazily loads configuration on first access.
-
 		Returns:
 			AppConfigSchema: The current configuration
 		"""
-		if self._app_config is None:
-			self._app_config = self._load_config()
+		# Configuration is now loaded during initialization, no need for lazy loading
 		return self._app_config
