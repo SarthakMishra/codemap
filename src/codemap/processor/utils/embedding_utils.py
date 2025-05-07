@@ -3,14 +3,15 @@
 import asyncio
 import logging
 import os
-from typing import Literal, cast
-
-from voyageai.client import Client
-from voyageai.client_async import AsyncClient
+from typing import TYPE_CHECKING, Literal, cast
 
 from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+	from voyageai.client import Client
+	from voyageai.client_async import AsyncClient
 
 # Create a synchronous client for token counting
 _sync_voyage_client = None
@@ -28,7 +29,7 @@ def get_retry_settings(config_loader: ConfigLoader) -> tuple[int, int]:
 	return max_retries, timeout
 
 
-def get_voyage_client() -> Client:
+def get_voyage_client() -> "Client":
 	"""
 	Get or initialize the synchronous VoyageAI client for token counting.
 
@@ -38,6 +39,9 @@ def get_voyage_client() -> Client:
 	global _sync_voyage_client  # noqa: PLW0603
 	if _sync_voyage_client is None:
 		try:
+			# Import lazily - only when needed
+			from voyageai.client import Client
+
 			# API key is picked up from environment automatically
 			_sync_voyage_client = Client()
 			logger.debug("Initialized synchronous VoyageAI client for token counting")
@@ -122,7 +126,7 @@ def split_batch(texts: list[str], token_limit: int, model: str) -> list[list[str
 
 
 async def process_batch_with_backoff(
-	client: AsyncClient,
+	client: "AsyncClient",
 	texts: list[str],
 	model: str,
 	output_dimension: Literal[256, 512, 1024, 2048],
@@ -222,20 +226,24 @@ async def generate_embeddings_batch(
 		logger.error("VOYAGE_API_KEY environment variable not set, but required for model '%s'", embedding_model)
 		return None
 
+	# Import AsyncClient lazily
+	from voyageai.client_async import AsyncClient
+
+	# Initialize the async client with retry settings
+	client = AsyncClient(max_retries=max_retries, timeout=timeout)
+	logger.info("Initialized Voyage AI async client for batch embeddings")
+
 	try:
 		# Split into batches based on token limit
 		all_batches = split_batch(texts, token_limit, embedding_model)
 		logger.info(f"Split {len(texts)} texts into {len(all_batches)} batches based on token limit")
-
-		# Initialize client
-		vo = AsyncClient(max_retries=max_retries, timeout=timeout)
 
 		# Process each batch with backoff and combine results
 		all_embeddings = []
 		for i, batch in enumerate(all_batches):
 			logger.info(f"Processing batch {i + 1}/{len(all_batches)} with {len(batch)} texts")
 			batch_embeddings = await process_batch_with_backoff(
-				client=vo,
+				client=client,
 				texts=batch,
 				model=embedding_model,
 				output_dimension=output_dimension,
