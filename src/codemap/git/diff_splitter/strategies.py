@@ -6,12 +6,12 @@ import re
 from io import StringIO
 from pathlib import Path
 from re import Pattern
-from typing import TYPE_CHECKING
+from typing import cast
 
-import numpy as np
 from unidiff import Hunk, PatchedFile, PatchSet, UnidiffParseError
 
 from codemap.config import ConfigLoader
+from codemap.git.semantic_grouping.embedder import DiffEmbedder
 from codemap.git.utils import GitDiff
 
 from .constants import (
@@ -24,11 +24,7 @@ from .utils import (
 	create_chunk_description,
 	determine_commit_type,
 	get_language_specific_patterns,
-	is_test_environment,
 )
-
-if TYPE_CHECKING:
-	from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +41,7 @@ class BaseSplitStrategy:
 		self._file_pattern = re.compile(r"diff --git a/.*? b/(.*?)\n")
 		self._hunk_pattern = re.compile(r"@@ -\d+,\d+ \+\d+,\d+ @@")
 
-	def split(self, diff: GitDiff) -> list[DiffChunk]:
+	async def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Split the diff into chunks.
 
@@ -63,7 +59,7 @@ class BaseSplitStrategy:
 class FileSplitStrategy(BaseSplitStrategy):
 	"""Strategy to split diffs by file."""
 
-	def split(self, diff: GitDiff) -> list[DiffChunk]:
+	async def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Split a diff into chunks by file.
 
@@ -123,17 +119,13 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	def __init__(
 		self,
-		model: "SentenceTransformer",
 		config_loader: ConfigLoader,
 	) -> None:
 		"""
 		Initialize the SemanticSplitStrategy.
 
 		Args:
-		    Args:
-		    model: The pre-loaded sentence_transformers.SentenceTransformer model instance.
-		    config_loader: Optional ConfigLoader instance.
-
+		    config_loader: ConfigLoader instance.
 		"""
 		# Store thresholds and settings
 		self.similarity_threshold = config_loader.get.commit.diff_splitter.similarity_threshold
@@ -147,9 +139,12 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		self.code_extensions = config_loader.get.commit.diff_splitter.default_code_extensions
 		# Initialize patterns for related files
 		self.related_file_patterns = self._initialize_related_file_patterns()
-		self._embedding_model = model
+		self.config_loader = config_loader
 
-	def split(self, diff: GitDiff) -> list[DiffChunk]:
+		# Create DiffEmbedder instance for embedding operations
+		self.embedder = DiffEmbedder(config_loader=config_loader)
+
+	async def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Split a diff into chunks based on semantic relationships.
 
@@ -165,7 +160,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			return []
 
 		# Detect moved files
-		moved_files = self._detect_moved_files(diff)
+		moved_files = await self._detect_moved_files(diff)
 		if moved_files:
 			logger.info("Detected %d moved files", len(moved_files))
 			move_chunks = self._create_move_chunks(moved_files, diff)
@@ -173,8 +168,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				return move_chunks
 
 		# If no moved files or couldn't create move chunks, continue with normal processing
-		# Validate embedding model is available
-		self._validate_embedding_model()
 
 		# Handle files in manageable groups
 		if len(diff.files) > MAX_FILES_PER_GROUP:
@@ -201,14 +194,15 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 						content=diff.content,  # Pass the original full diff content
 						is_staged=diff.is_staged,
 					)
-					all_chunks.extend(self._process_group(batch_diff))
+					chunks = await self._process_group(batch_diff)
+					all_chunks.extend(chunks)
 
 			return all_chunks
 
 		# For smaller groups, process normally
-		return self._process_group(diff)
+		return await self._process_group(diff)
 
-	def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
+	async def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Process a GitDiff with one or more files.
 
@@ -233,7 +227,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 					# Create a new diff for just this file
 					file_diff = GitDiff(files=[file_path], content=file_diff_content, is_staged=diff.is_staged)
 					# Process it and add the resulting chunks
-					enhanced_chunks = self._enhance_semantic_split(file_diff)
+					enhanced_chunks = await self._enhance_semantic_split(file_diff)
 					chunks.extend(enhanced_chunks)
 				else:
 					# If we couldn't extract just this file's diff, create a simple chunk
@@ -255,7 +249,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		file_path = diff.files[0]
 
 		# Enhance this single file diff
-		enhanced_chunks = self._enhance_semantic_split(diff)  # Pass the original diff directly
+		enhanced_chunks = await self._enhance_semantic_split(diff)  # Pass the original diff directly
 
 		if not enhanced_chunks:
 			logger.warning("No chunk generated for file: %s after enhancement.", file_path)
@@ -314,15 +308,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		return file_diff
 
-	def _validate_embedding_model(self) -> None:
-		"""Validate that the embedding model is available."""
-		if self._embedding_model is None and not is_test_environment():
-			msg = (
-				"Semantic analysis unavailable: embedding model not available. "
-				"Make sure the model is properly loaded before calling this method."
-			)
-			raise ValueError(msg)
-
 	def _group_chunks_by_directory(self, chunks: list[DiffChunk]) -> dict[str, list[DiffChunk]]:
 		"""Group chunks by their containing directory."""
 		dir_groups: dict[str, list[DiffChunk]] = {}
@@ -341,7 +326,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		return dir_groups
 
-	def _process_directory_group(
+	async def _process_directory_group(
 		self, chunks: list[DiffChunk], processed_files: set[str], semantic_chunks: list[DiffChunk]
 	) -> None:
 		"""Process chunks in a single directory group."""
@@ -355,33 +340,95 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			dir_processed: set[str] = set()
 
 			# First try to group by related file patterns
-			self._group_related_files(chunks, dir_processed, semantic_chunks)
+			await self._group_related_files(chunks, dir_processed, semantic_chunks)
 
 			# Then try to group remaining files by content similarity
 			remaining_chunks = [c for c in chunks if not c.files or c.files[0] not in dir_processed]
 
 			if remaining_chunks:
 				# Use default similarity threshold instead
-				self._group_by_content_similarity(remaining_chunks, semantic_chunks)
+				await self._group_by_content_similarity(remaining_chunks, semantic_chunks)
 
 			# Add all processed files to the global processed set
 			processed_files.update(dir_processed)
 
-	def _process_remaining_chunks(
+	async def _process_remaining_chunks(
 		self, all_chunks: list[DiffChunk], processed_files: set[str], semantic_chunks: list[DiffChunk]
 	) -> None:
 		"""Process any remaining chunks that weren't grouped by directory."""
 		remaining_chunks = [c for c in all_chunks if c.files and c.files[0] not in processed_files]
 
 		if remaining_chunks:
-			self._group_by_content_similarity(remaining_chunks, semantic_chunks)
+			await self._group_by_content_similarity(remaining_chunks, semantic_chunks)
 
-	def _consolidate_if_needed(self, semantic_chunks: list[DiffChunk]) -> list[DiffChunk]:
+	async def _consolidate_small_chunks(self, initial_chunks: list[DiffChunk]) -> list[DiffChunk]:
+		"""
+		Merge small or related chunks together.
+
+		First, consolidates chunks originating from the same file.
+		Then, consolidates remaining single-file chunks by directory.
+
+		Args:
+		    initial_chunks: List of diff chunks to consolidate
+
+		Returns:
+		    Consolidated list of chunks
+
+		"""
+		# Use instance variable for threshold
+		if len(initial_chunks) < self.min_chunks_for_consolidation:
+			return initial_chunks
+
+		# Consolidate small chunks for the same file or related files
+		consolidated_chunks = []
+		processed_indices = set()
+
+		for i, chunk1 in enumerate(initial_chunks):
+			if i in processed_indices:
+				continue
+
+			merged_chunk = chunk1
+			processed_indices.add(i)
+
+			# Check subsequent chunks for merging
+			for j in range(i + 1, len(initial_chunks)):
+				if j in processed_indices:
+					continue
+
+				chunk2 = initial_chunks[j]
+
+				# Check if chunks should be merged (same file or related)
+				if self._should_merge_chunks(merged_chunk, chunk2):
+					# Combine files if merging related chunks, not just same file chunks
+					new_files = merged_chunk.files
+					if (
+						len(merged_chunk.files) == 1
+						and len(chunk2.files) == 1
+						and merged_chunk.files[0] != chunk2.files[0]
+					):
+						new_files = sorted(set(merged_chunk.files + chunk2.files))
+
+					# Merge content and potentially other attributes
+					# Ensure a newline between merged content if needed
+					separator = "\n" if merged_chunk.content and chunk2.content else ""
+					merged_chunk = dataclasses.replace(
+						merged_chunk,
+						files=new_files,
+						content=merged_chunk.content + separator + chunk2.content,
+						description=merged_chunk.description,  # Keep first description
+					)
+					processed_indices.add(j)
+
+			consolidated_chunks.append(merged_chunk)
+
+		return consolidated_chunks
+
+	async def _consolidate_if_needed(self, semantic_chunks: list[DiffChunk]) -> list[DiffChunk]:
 		"""Consolidate chunks if we have too many small ones."""
 		has_single_file_chunks = any(len(chunk.files) == 1 for chunk in semantic_chunks)
 
 		if len(semantic_chunks) > self.max_chunks_before_consolidation and has_single_file_chunks:
-			return self._consolidate_small_chunks(semantic_chunks)
+			return await self._consolidate_small_chunks(semantic_chunks)
 
 		return semantic_chunks
 
@@ -531,64 +578,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		return related_file_patterns
 
-	def _get_code_embedding(self, content: str) -> list[float] | None:
-		"""
-		Get embedding vector for code content.
-
-		Args:
-		    content: Code content to embed
-
-		Returns:
-		    List of floats representing code embedding or None if unavailable
-
-		"""
-		# Skip empty content
-		if not content or not content.strip():
-			return None
-
-		# Check if embedding model exists
-		if self._embedding_model is None:
-			logger.warning("Embedding model is None, cannot generate embedding")
-			return None
-
-		# Generate embedding with error handling
-		try:
-			embeddings = self._embedding_model.encode([content], show_progress_bar=False)
-			# Check if the result is valid and has the expected structure
-			if embeddings is not None and len(embeddings) > 0 and isinstance(embeddings[0], np.ndarray):
-				return embeddings[0].tolist()
-			logger.warning("Embedding model returned unexpected result type: %s", type(embeddings))
-			return None
-		except (ValueError, TypeError, RuntimeError, IndexError, AttributeError) as e:
-			# Catch a broader range of potential exceptions during encode/toList
-			logger.warning("Failed to generate embedding for content snippet: %s", e)
-			return None
-		except Exception:  # Catch any other unexpected errors
-			logger.exception("Unexpected error during embedding generation")
-			return None
-
-	def _calculate_semantic_similarity(self, content1: str, content2: str) -> float:
-		"""
-		Calculate semantic similarity between two code chunks.
-
-		Args:
-		    content1: First code content
-		    content2: Second code content
-
-		Returns:
-		    Similarity score between 0 and 1
-
-		"""
-		# Get embeddings
-		emb1 = self._get_code_embedding(content1)
-		emb2 = self._get_code_embedding(content2)
-
-		if not emb1 or not emb2:
-			return 0.0
-
-		# Calculate cosine similarity using utility function
-		return calculate_semantic_similarity(emb1, emb2)
-
 	# --- New Helper Methods for Refactoring _enhance_semantic_split ---
 
 	def _parse_file_diff(self, diff_content: str, file_path: str) -> PatchedFile | None:
@@ -719,7 +708,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	# --- Refactored Orchestrator Method ---
 
-	def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
+	async def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Enhance the semantic split by using NLP and chunk detection.
 
@@ -820,7 +809,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	# --- Existing Helper Methods (Potentially need review/updates) ---
 
-	def _group_by_content_similarity(
+	async def _group_by_content_similarity(
 		self,
 		chunks: list[DiffChunk],
 		result_chunks: list[DiffChunk],
@@ -838,42 +827,16 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not chunks:
 			return
 
-		# Check if model is available
-		if self._embedding_model is None:
-			logger.debug("Embedding model not available, using fallback grouping strategy")
-			# If model is unavailable, try to group by file path patterns
-			grouped_paths: dict[str, list[DiffChunk]] = {}
-
-			# Group by common path prefixes
-			for chunk in chunks:
-				if not chunk.files:
-					result_chunks.append(chunk)
-					continue
-
-				file_path = chunk.files[0]
-				# Get directory or file prefix as the grouping key
-				if "/" in file_path:
-					# Use directory as key
-					key = file_path.rsplit("/", 1)[0]
-				else:
-					# Use file prefix (before extension) as key
-					key = file_path.split(".", 1)[0] if "." in file_path else file_path
-
-				if key not in grouped_paths:
-					grouped_paths[key] = []
-				grouped_paths[key].append(chunk)
-
-			# Create chunks from each group
-			for related_chunks in grouped_paths.values():
-				self._create_semantic_chunk(related_chunks, result_chunks)
-			return
-
 		processed_indices = set()
 		threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
 
+		# Extract content from all chunks and get embeddings in batch
+		chunk_contents = [chunk.content for chunk in chunks]
+		chunk_embeddings = await self.embedder.embed_contents(chunk_contents)
+
 		# For each chunk, find similar chunks and group them
 		for i, chunk in enumerate(chunks):
-			if i in processed_indices:
+			if i in processed_indices or not chunk_embeddings[i]:
 				continue
 
 			related_chunks = [chunk]
@@ -881,11 +844,14 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 			# Find similar chunks
 			for j, other_chunk in enumerate(chunks):
-				if i == j or j in processed_indices:
+				if i == j or j in processed_indices or not chunk_embeddings[j]:
 					continue
 
-				# Calculate similarity between chunks
-				similarity = self._calculate_semantic_similarity(chunk.content, other_chunk.content)
+				# Calculate similarity between chunks using embeddings
+				# Cast to remove None type since we've checked above
+				emb1 = cast("list[float]", chunk_embeddings[i])
+				emb2 = cast("list[float]", chunk_embeddings[j])
+				similarity = calculate_semantic_similarity(emb1, emb2)
 
 				if similarity >= threshold:
 					related_chunks.append(other_chunk)
@@ -895,7 +861,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			if related_chunks:
 				self._create_semantic_chunk(related_chunks, result_chunks)
 
-	def _group_related_files(
+	async def _group_related_files(
 		self,
 		file_chunks: list[DiffChunk],
 		processed_files: set[str],
@@ -996,68 +962,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		# Return True if either condition is met
 		return same_file or related_files
 
-	def _consolidate_small_chunks(self, initial_chunks: list[DiffChunk]) -> list[DiffChunk]:
-		"""
-		Merge small or related chunks together.
-
-		First, consolidates chunks originating from the same file.
-		Then, consolidates remaining single-file chunks by directory.
-
-		Args:
-		    initial_chunks: List of diff chunks to consolidate
-
-		Returns:
-		    Consolidated list of chunks
-
-		"""
-		# Use instance variable for threshold
-		if len(initial_chunks) < self.min_chunks_for_consolidation:
-			return initial_chunks
-
-		# Consolidate small chunks for the same file or related files
-		consolidated_chunks = []
-		processed_indices = set()
-
-		for i, chunk1 in enumerate(initial_chunks):
-			if i in processed_indices:
-				continue
-
-			merged_chunk = chunk1
-			processed_indices.add(i)
-
-			# Check subsequent chunks for merging
-			for j in range(i + 1, len(initial_chunks)):
-				if j in processed_indices:
-					continue
-
-				chunk2 = initial_chunks[j]
-
-				# Check if chunks should be merged (same file or related)
-				if self._should_merge_chunks(merged_chunk, chunk2):
-					# Combine files if merging related chunks, not just same file chunks
-					new_files = merged_chunk.files
-					if (
-						len(merged_chunk.files) == 1
-						and len(chunk2.files) == 1
-						and merged_chunk.files[0] != chunk2.files[0]
-					):
-						new_files = sorted(set(merged_chunk.files + chunk2.files))
-
-					# Merge content and potentially other attributes
-					# Ensure a newline between merged content if needed
-					separator = "\n" if merged_chunk.content and chunk2.content else ""
-					merged_chunk = dataclasses.replace(
-						merged_chunk,
-						files=new_files,
-						content=merged_chunk.content + separator + chunk2.content,
-						description=merged_chunk.description,  # Keep first description
-					)
-					processed_indices.add(j)
-
-			consolidated_chunks.append(merged_chunk)
-
-		return consolidated_chunks
-
 	def _split_by_semantic_patterns(self, patched_file: PatchedFile, patterns: list[str]) -> list[DiffChunk]:
 		"""
 		Split a PatchedFile's content by grouping hunks based on semantic patterns.
@@ -1132,7 +1036,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		invalid_chars = ["*", "+", "{", "}", "\\"]
 		return not (any(char in filename for char in invalid_chars) or filename.startswith('"'))
 
-	def _detect_moved_files(self, diff: GitDiff) -> dict[str, str]:
+	async def _detect_moved_files(self, diff: GitDiff) -> dict[str, str]:
 		"""
 		Detect files that have been moved (deleted and added elsewhere).
 
@@ -1145,10 +1049,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		Returns:
 		    Dictionary mapping from deleted file paths to their new locations
 		"""
-		# Skip if we don't have embedding model for content comparison
-		if self._embedding_model is None:
-			return {}
-
 		# Parse the diff to identify deleted and added files with their content
 		deleted_files: dict[str, str] = {}  # path -> content
 		added_files: dict[str, str] = {}  # path -> content
@@ -1187,46 +1087,66 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		# Match deleted files with added files based on content similarity
 		moved_files = {}
 
+		# Group files with same name to avoid unnecessary embedding comparisons
+		potential_moves = {}
 		for deleted_path, deleted_content in deleted_files.items():
-			# Skip empty content
 			if not deleted_content.strip():
 				continue
 
 			deleted_name = Path(deleted_path).name
-			best_match = None
-			best_similarity = 0.0
+			potential_moves.setdefault(deleted_name, {"deleted": [], "added": []})
+			potential_moves[deleted_name]["deleted"].append((deleted_path, deleted_content))
 
-			for added_path, added_content in added_files.items():
-				# Skip empty content
-				if not added_content.strip():
+		for added_path, added_content in added_files.items():
+			if not added_content.strip():
+				continue
+
+			added_name = Path(added_path).name
+			if added_name in potential_moves:  # Only add if there's a matching deleted file
+				potential_moves[added_name]["added"].append((added_path, added_content))
+
+		# Process each group of potential moves
+		for group in potential_moves.values():
+			deleted_items = group["deleted"]
+			added_items = group["added"]
+
+			if not deleted_items or not added_items:
+				continue
+
+			# Get embeddings for all deleted and added contents in batch
+			all_contents = [content for _, content in deleted_items + added_items]
+			all_embeddings = await self.embedder.embed_contents(all_contents)
+
+			# Split embeddings back to deleted and added
+			deleted_count = len(deleted_items)
+			deleted_embeddings = all_embeddings[:deleted_count]
+			added_embeddings = all_embeddings[deleted_count:]
+
+			# Match deleted and added files based on embedding similarity
+			for i, (deleted_path, _) in enumerate(deleted_items):
+				if deleted_embeddings[i] is None:
 					continue
 
-				# Quick check: files should have the same name
-				# (can be relaxed if needed, but helps avoid unnecessary embedding comparisons)
-				added_name = Path(added_path).name
-				if deleted_name != added_name:
-					continue
+				best_match = None
+				best_similarity = 0.0
 
-				# Calculate content similarity
-				try:
-					# Get embeddings
-					deleted_emb = self._get_code_embedding(deleted_content)
-					added_emb = self._get_code_embedding(added_content)
+				for j, (added_path, _) in enumerate(added_items):
+					if added_embeddings[j] is None:
+						continue
 
-					if deleted_emb and added_emb:
-						similarity = calculate_semantic_similarity(deleted_emb, added_emb)
+					# Cast to remove None type since we've checked above
+					emb1 = cast("list[float]", deleted_embeddings[i])
+					emb2 = cast("list[float]", added_embeddings[j])
+					similarity = calculate_semantic_similarity(emb1, emb2)
 
-						# Update best match if this is the best similarity so far
-						if similarity > best_similarity:
-							best_similarity = similarity
-							best_match = added_path
-				except Exception:
-					logger.exception(f"Error calculating similarity for {deleted_path} and potential move target")
+					if similarity > best_similarity:
+						best_similarity = similarity
+						best_match = added_path
 
-			# If we found a good match above the threshold, consider it a move
-			if best_match and best_similarity >= self.file_move_similarity_threshold:
-				moved_files[deleted_path] = best_match
-				logger.debug(f"Detected move: {deleted_path} -> {best_match} (similarity: {best_similarity:.2f})")
+				# If we found a good match above the threshold, consider it a move
+				if best_match and best_similarity >= self.file_move_similarity_threshold:
+					moved_files[deleted_path] = best_match
+					logger.debug(f"Detected move: {deleted_path} -> {best_match} (similarity: {best_similarity:.2f})")
 
 		return moved_files
 

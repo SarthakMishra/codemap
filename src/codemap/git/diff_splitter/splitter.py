@@ -2,7 +2,6 @@
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from codemap.config import ConfigLoader
 from codemap.git.diff_splitter.strategies import FileSplitStrategy, SemanticSplitStrategy
@@ -10,9 +9,6 @@ from codemap.git.diff_splitter.utils import filter_valid_files, is_test_environm
 from codemap.git.utils import GitDiff
 
 from .schemas import DiffChunk
-
-if TYPE_CHECKING:
-	from sentence_transformers import SentenceTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +25,6 @@ class DiffSplitter:
 	def __init__(
 		self,
 		repo_root: Path,
-		embedding_model: "SentenceTransformer",
 		config_loader: ConfigLoader | None = None,
 	) -> None:
 		"""
@@ -37,7 +32,6 @@ class DiffSplitter:
 
 		Args:
 		    repo_root: Root directory of the Git repository
-		    embedding_model: Pre-loaded sentence_transformers.SentenceTransformer model instance
 		    config_loader: ConfigLoader object for loading configuration
 
 		"""
@@ -48,7 +42,6 @@ class DiffSplitter:
 		ds_config = self.config_loader.get.commit.diff_splitter
 
 		# Determine parameters: CLI/direct arg > Config file > DEFAULT_CONFIG
-		self.embedding_model = embedding_model
 		self.similarity_threshold = ds_config.similarity_threshold
 		self.directory_similarity_threshold = ds_config.directory_similarity_threshold
 		self.min_chunks_for_consolidation = ds_config.min_chunks_for_consolidation
@@ -56,7 +49,7 @@ class DiffSplitter:
 		self.max_file_size_for_llm = ds_config.max_file_size_for_llm
 		self.max_log_diff_size = ds_config.max_log_diff_size
 
-	def split_diff(self, diff: GitDiff) -> tuple[list[DiffChunk], list[str]]:
+	async def split_diff(self, diff: GitDiff) -> tuple[list[DiffChunk], list[str]]:
 		"""
 		Split a diff into logical chunks using semantic splitting.
 
@@ -109,8 +102,8 @@ class DiffSplitter:
 			return [], []  # Return empty lists
 
 		try:
-			semantic_strategy = SemanticSplitStrategy(config_loader=self.config_loader, model=self.embedding_model)
-			chunks = semantic_strategy.split(diff)
+			semantic_strategy = SemanticSplitStrategy(config_loader=self.config_loader)
+			chunks = await semantic_strategy.split(diff)
 
 			# If we truncated the content, restore the original content for the actual chunks
 			if diff.content and chunks:
@@ -156,9 +149,9 @@ class DiffSplitter:
 			# Try basic splitting as a fallback
 			logger.warning("Falling back to basic file splitting")
 			# Return empty list for filtered_large_files as it's no longer tracked here
-			return self._create_basic_file_chunk(diff), []
+			return await self._create_basic_file_chunk(diff), []
 
-	def _create_basic_file_chunk(self, diff: GitDiff) -> list[DiffChunk]:
+	async def _create_basic_file_chunk(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Create a basic chunk per file without semantic analysis.
 
@@ -174,6 +167,6 @@ class DiffSplitter:
 		if diff.files:
 			# Create a basic chunk, one per file in this strategy, no semantic grouping
 			strategy = FileSplitStrategy()
-			chunks = strategy.split(diff)
+			chunks = await strategy.split(diff)
 
 		return chunks

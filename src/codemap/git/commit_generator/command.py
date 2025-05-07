@@ -97,16 +97,7 @@ class CommitCommand:
 			config_loader = ConfigLoader.get_instance(repo_root=self.repo_root)
 			llm_client = LLMClient(config_loader=config_loader)
 
-			with loading_spinner("Loading embedding model..."):
-				from sentence_transformers import SentenceTransformer
-
-				self.model = SentenceTransformer(
-					model_name_or_path=config_loader.get.commit.diff_splitter.model_name,
-					device=config_loader.get.commit.diff_splitter.device,
-					cache_folder=config_loader.get.commit.diff_splitter.model_cache_dir,
-				)
-
-			self.splitter = DiffSplitter(self.repo_root, self.model)
+			self.splitter = DiffSplitter(self.repo_root)
 
 			# Create the commit message generator with required parameters
 			self.message_generator = CommitMessageGenerator(
@@ -547,7 +538,7 @@ class CommitCommand:
 
 			for diff in changes:
 				# Process each diff individually
-				diff_chunks, _ = self.splitter.split_diff(diff)
+				diff_chunks, _ = await self.splitter.split_diff(diff)
 				chunks.extend(diff_chunks)
 
 			total_chunks = len(chunks)
@@ -729,7 +720,7 @@ class SemanticCommitCommand(CommitCommand):
 		from codemap.git.semantic_grouping.resolver import FileIntegrityResolver
 
 		# Pass the loaded_model_object to DiffEmbedder
-		self.embedder = DiffEmbedder(model=self.model, config_loader=self.config_loader)
+		self.embedder = DiffEmbedder(config_loader=self.config_loader)
 		self.clusterer = DiffClusterer(config_loader=self.config_loader)
 		self.resolver = FileIntegrityResolver(
 			similarity_threshold=self.similarity_threshold, config_loader=self.config_loader
@@ -844,7 +835,7 @@ class SemanticCommitCommand(CommitCommand):
 			logger.exception(msg)
 			raise RuntimeError(msg) from e
 
-	def _create_semantic_groups(self, chunks: list[DiffChunk]) -> list[SemanticGroup]:
+	async def _create_semantic_groups(self, chunks: list[DiffChunk]) -> list[SemanticGroup]:
 		"""
 		Create semantic groups from diff chunks.
 
@@ -871,7 +862,7 @@ class SemanticCommitCommand(CommitCommand):
 			return [single_group]
 
 		# Generate embeddings for chunks
-		chunk_embedding_tuples = self.embedder.embed_chunks(chunks)
+		chunk_embedding_tuples = await self.embedder.embed_chunks(chunks)
 		chunk_embeddings = {ce[0]: ce[1] for ce in chunk_embedding_tuples}
 
 		# Cluster chunks
@@ -1135,7 +1126,7 @@ class SemanticCommitCommand(CommitCommand):
 				from codemap.git.diff_splitter import DiffChunk
 
 				# Split diff into chunks
-				chunks, _ = self.splitter.split_diff(combined_diff)
+				chunks, _ = await self.splitter.split_diff(combined_diff)
 				logger.debug(f"Initial chunks created: {len(chunks)}")
 
 				# If no chunks created but we have combined diff content, create a single chunk
@@ -1170,7 +1161,7 @@ class SemanticCommitCommand(CommitCommand):
 					groups = [single_group]
 				else:
 					# Normal case - use clustering
-					groups = self._create_semantic_groups(chunks)
+					groups = await self._create_semantic_groups(chunks)
 
 				if not groups:
 					self.ui.show_error("Failed to create semantic groups.")
