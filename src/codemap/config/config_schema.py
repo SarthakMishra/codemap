@@ -29,7 +29,7 @@ class AgglomerativeClusteringSchema(BaseModel):
 	"""Configuration for the agglomerative clustering."""
 
 	metric: Literal["cosine", "euclidean", "manhattan", "l1", "l2", "precomputed"] = "precomputed"
-	distance_threshold: float = 0.2
+	distance_threshold: float = 0.3
 	linkage: Literal["ward", "complete", "average", "single"] = "complete"
 
 
