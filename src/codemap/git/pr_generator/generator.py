@@ -58,9 +58,7 @@ class PRGenerator:
 		self.repo_path = repo_path
 		self.client = llm_client
 
-	async def generate_content_from_commits(
-		self, base_branch: str, head_branch: str, use_llm: bool = True
-	) -> PRContent:
+	def generate_content_from_commits(self, base_branch: str, head_branch: str, use_llm: bool = True) -> PRContent:
 		"""
 		Generate PR content (title and description) from commits.
 
@@ -81,8 +79,8 @@ class PRGenerator:
 
 		if use_llm:
 			# Generate title and description using LLM
-			title = await generate_pr_title_with_llm(commits, self.client)
-			description = await generate_pr_description_with_llm(commits, self.client)
+			title = generate_pr_title_with_llm(commits, self.client)
+			description = generate_pr_description_with_llm(commits, self.client)
 		else:
 			# Generate title and description using rule-based approach
 			title = generate_pr_title_from_commits(commits)
@@ -171,7 +169,7 @@ class PRGenerator:
 		"""
 		return get_existing_pr(branch_name)
 
-	async def create_or_update_pr(
+	def create_or_update_pr(
 		self,
 		base_branch: str | None = None,
 		head_branch: str | None = None,
@@ -231,7 +229,7 @@ class PRGenerator:
 
 		# Generate content if not provided
 		if title is None or description is None:
-			content = await self.generate_content_from_commits(base_branch, head_branch, use_llm)
+			content = self.generate_content_from_commits(base_branch, head_branch, use_llm)
 			if title is None:
 				title = content["title"]
 			if description is None:

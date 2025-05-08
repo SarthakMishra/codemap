@@ -123,7 +123,7 @@ class PRCommand:
 			msg = f"Failed to get commit history: {e}"
 			raise RuntimeError(msg) from e
 
-	async def _generate_pr_description(self, branch_info: dict[str, str], _commits: list[dict[str, str]]) -> str:
+	def _generate_pr_description(self, branch_info: dict[str, str], _commits: list[dict[str, str]]) -> str:
 		"""
 		Generate PR description based on branch info and commit history.
 
@@ -141,7 +141,7 @@ class PRCommand:
 		try:
 			with progress_indicator("Generating PR description using LLM..."):
 				# Use the PR generator to create content
-				content = await self.pr_generator.generate_content_from_commits(
+				content = self.pr_generator.generate_content_from_commits(
 					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=True
 				)
 				return content["description"]
@@ -151,7 +151,7 @@ class PRCommand:
 
 			# Generate a simple fallback description without LLM
 			with progress_indicator("Falling back to simple PR description generation..."):
-				content = await self.pr_generator.generate_content_from_commits(
+				content = self.pr_generator.generate_content_from_commits(
 					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=False
 				)
 				return content["description"]
@@ -264,7 +264,7 @@ class PRWorkflowCommand:
 		description = f"# Release {version}\n\nThis pull request merges release {version} into {base_branch}."
 		return {"title": title, "description": description}
 
-	async def _generate_title(self, commits: list[str], branch_name: str, branch_type: str) -> str:
+	def _generate_title(self, commits: list[str], branch_name: str, branch_type: str) -> str:
 		"""Core logic for generating PR title."""
 		title_strategy = self.content_config.title_strategy
 
@@ -275,13 +275,11 @@ class PRWorkflowCommand:
 			return f"{branch_type.capitalize()}: {clean_name.capitalize()}"
 
 		if title_strategy == "llm":
-			return await generate_pr_title_with_llm(commits, llm_client=self.llm_client)
+			return generate_pr_title_with_llm(commits, llm_client=self.llm_client)
 
 		return generate_pr_title_from_commits(commits)
 
-	async def _generate_description(
-		self, commits: list[str], branch_name: str, branch_type: str, base_branch: str
-	) -> str:
+	def _generate_description(self, commits: list[str], branch_name: str, branch_type: str, base_branch: str) -> str:
 		"""Core logic for generating PR description."""
 		description_strategy = self.content_config.description_strategy
 
@@ -293,7 +291,7 @@ class PRWorkflowCommand:
 			return f"Changes in {branch_name}"
 
 		if description_strategy == "llm":
-			return await generate_pr_description_with_llm(commits, llm_client=self.llm_client)
+			return generate_pr_description_with_llm(commits, llm_client=self.llm_client)
 
 		if description_strategy == "template" and self.content_config.use_workflow_templates:
 			template = self.content_config.description_template
@@ -308,7 +306,7 @@ class PRWorkflowCommand:
 
 		return generate_pr_description_from_commits(commits)
 
-	async def create_pr_workflow(
+	def create_pr_workflow(
 		self, base_branch: str, head_branch: str, title: str | None = None, description: str | None = None
 	) -> PullRequest:
 		"""Orchestrates the PR creation process (non-interactive part)."""
@@ -328,8 +326,8 @@ class PRWorkflowCommand:
 			branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
 
 			# Generate title and description if not provided
-			final_title = title or await self._generate_title(commits, head_branch, branch_type)
-			final_description = description or await self._generate_description(
+			final_title = title or self._generate_title(commits, head_branch, branch_type)
+			final_description = description or self._generate_description(
 				commits, head_branch, branch_type, base_branch
 			)
 
@@ -346,7 +344,7 @@ class PRWorkflowCommand:
 			msg = f"Unexpected error creating PR: {e}"
 			raise PRCreationError(msg) from e
 
-	async def update_pr_workflow(
+	def update_pr_workflow(
 		self,
 		pr_number: int,
 		title: str | None = None,
@@ -373,9 +371,9 @@ class PRWorkflowCommand:
 				branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
 
 				if title is None:
-					final_title = await self._generate_title(commits, head_branch, branch_type)
+					final_title = self._generate_title(commits, head_branch, branch_type)
 				if description is None:
-					final_description = await self._generate_description(commits, head_branch, branch_type, base_branch)
+					final_description = self._generate_description(commits, head_branch, branch_type, base_branch)
 
 			if final_title is None or final_description is None:
 				msg = "Could not determine final title or description for PR update."

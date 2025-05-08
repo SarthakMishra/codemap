@@ -169,7 +169,7 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
 	return first_commit
 
 
-async def generate_pr_title_with_llm(
+def generate_pr_title_with_llm(
 	commits: list[str],
 	llm_client: LLMClient,
 ) -> str:
@@ -192,7 +192,7 @@ async def generate_pr_title_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_TITLE_PROMPT.format(commit_list=commit_list)
 
-		title = await llm_client.completion(
+		title = llm_client.completion(
 			messages=[
 				{"role": "system", "content": PR_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
@@ -321,7 +321,7 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
 	return description
 
 
-async def generate_pr_description_with_llm(
+def generate_pr_description_with_llm(
 	commits: list[str],
 	llm_client: LLMClient,
 ) -> str:
@@ -344,7 +344,7 @@ async def generate_pr_description_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_DESCRIPTION_PROMPT.format(commit_list=commit_list)
 
-		return await llm_client.completion(
+		return llm_client.completion(
 			messages=[
 				{"role": "system", "content": PR_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
