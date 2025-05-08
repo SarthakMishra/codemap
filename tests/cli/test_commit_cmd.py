@@ -1,29 +1,26 @@
-"""Tests for the commit command CLI."""
+"""Tests for commit command CLI."""
 
 from __future__ import annotations
 
+import importlib
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from typer.testing import CliRunner
-
-from tests.base import FileSystemTestBase
 
 if TYPE_CHECKING:
 	from collections.abc import Iterator
-	from pathlib import Path
 
 
-# Mock the SemanticCommitCommand implementation
 @pytest.fixture
-def mock_semantic_commit_impl() -> Iterator[MagicMock]:
+def mock_semantic_commit_impl() -> Iterator[AsyncMock]:
 	"""Fixture to mock the _semantic_commit_command_impl function."""
 	with patch("codemap.cli.commit_cmd._semantic_commit_command_impl") as mock_impl:
+		# Use AsyncMock since it's an async function
+		mock_impl.return_value = None
 		yield mock_impl
 
 
-# Mock git utilities
 @pytest.fixture
 def mock_git_utils() -> Iterator[dict[str, MagicMock]]:
 	"""Fixture to mock git utility functions."""
@@ -40,64 +37,39 @@ def mock_git_utils() -> Iterator[dict[str, MagicMock]]:
 		yield mocks
 
 
+@pytest.mark.unit
 @pytest.mark.cli
-@pytest.mark.fs
-class TestCommitCommand(FileSystemTestBase):
-	"""Test cases for the 'commit' CLI command."""
+class TestCommitCommandModule:
+	"""Test the commit command module structure."""
 
-	runner: CliRunner
+	def test_commit_command_structure(self) -> None:
+		"""Test that the commit command module has the expected structure."""
+		# Import the module
+		commit_cmd = importlib.import_module("codemap.cli.commit_cmd")
 
-	@pytest.fixture(autouse=True)
-	def setup_cli(self, temp_dir: Path) -> None:
-		"""Set up CLI test environment."""
-		self.temp_dir = temp_dir
-		self.runner = CliRunner()
-		# Create a dummy repo structure if needed (might not be necessary with mocks)
-		(self.temp_dir / ".git").mkdir(exist_ok=True)
+		# Check that the key functions exist
+		assert hasattr(commit_cmd, "register_command"), "register_command function is missing"
+		assert hasattr(commit_cmd, "_semantic_commit_command_impl"), "Implementation function is missing"
 
-	def test_commit_default(
-		self,
-		mock_semantic_commit_impl: MagicMock,
-		mock_git_utils: dict[str, MagicMock],
-	) -> None:
-		"""Test default commit command invocation."""
-		# This test is simplified due to complexity in maintenance
-		# and because the 'commit' command may not be registered in tests
+		# Check that the command annotations are defined
+		assert hasattr(commit_cmd, "NonInteractiveFlag"), "NonInteractiveFlag annotation is missing"
+		assert hasattr(commit_cmd, "BypassHooksFlag"), "BypassHooksFlag annotation is missing"
 
-	def test_commit_all_files(
-		self,
-		mock_semantic_commit_impl: MagicMock,
-		mock_git_utils: dict[str, MagicMock],
-	) -> None:
-		"""Test commit command with --all flag."""
-		# This test is simplified due to complexity in maintenance
-		# and because the 'commit' command may not be registered in tests
+	def test_semantic_commit_command_impl_signature(self) -> None:
+		"""Test the signature of the _semantic_commit_command_impl function."""
+		# Ensure the function has the correct signature
+		from inspect import iscoroutinefunction, signature
 
-	@patch("codemap.cli.commit_cmd._semantic_commit_command_impl")
-	def test_commit_with_message(
-		self,
-		mock_impl: MagicMock,
-		mock_git_utils: dict[str, MagicMock],
-	) -> None:
-		"""Test commit command with -m flag."""
-		# This test is simplified due to complexity in maintenance
-		# and because the 'commit' command may not be registered in tests
+		from codemap.cli.commit_cmd import _semantic_commit_command_impl
 
-	def test_commit_non_interactive(
-		self,
-		mock_semantic_commit_impl: MagicMock,
-		mock_git_utils: dict[str, MagicMock],
-	) -> None:
-		"""Test commit command with --non-interactive flag."""
-		# This test is simplified due to complexity in maintenance
-		# and because the 'commit' command may not be registered in tests
+		# Check if it's an async function directly
+		assert iscoroutinefunction(_semantic_commit_command_impl), "Should be an async function"
 
-	@patch("codemap.cli.commit_cmd._semantic_commit_command_impl")
-	@patch("codemap.utils.cli_utils.exit_with_error")
-	def test_commit_invalid_repo(
-		self,
-		mock_exit_with_error: MagicMock,
-		mock_semantic_commit_impl: MagicMock,
-	) -> None:
-		"""Test commit command with invalid repo path - simplified test."""
-		# This test is simplified due to complexity in maintenance
+		sig = signature(_semantic_commit_command_impl)
+
+		# Check parameter names and defaults
+		parameters = sig.parameters
+		assert "non_interactive" in parameters, "non_interactive parameter is missing"
+		assert "bypass_hooks" in parameters, "bypass_hooks parameter is missing"
+		assert "pathspecs" in parameters, "pathspecs parameter is missing"
+		assert parameters["pathspecs"].default is None, "pathspecs should default to None"

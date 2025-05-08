@@ -10,12 +10,10 @@ from codemap.git.diff_splitter.schemas import DiffChunk
 from codemap.git.diff_splitter.splitter import DiffSplitter
 from codemap.git.utils import GitDiff
 from tests.base import GitTestBase
-from tests.conftest import skip_git_tests
 
 
 @pytest.mark.unit
 @pytest.mark.git
-@skip_git_tests
 class TestDiffSplitter(GitTestBase):
 	"""Tests for the DiffSplitter class."""
 

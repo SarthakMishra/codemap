@@ -22,50 +22,11 @@ if TYPE_CHECKING:
 	from collections.abc import Generator
 
 
-# Skip git-dependent tests when SKIP_GIT_TESTS environment variable is set
-skip_git_tests = pytest.mark.skipif(
-	os.environ.get("SKIP_GIT_TESTS") == "1", reason="Git-dependent tests are skipped in CI environment"
-)
-
 # Skip database-dependent tests when SKIP_DB_TESTS environment variable is set
 skip_db_tests = pytest.mark.skipif(
 	os.environ.get("SKIP_DB_TESTS") == "1",
 	reason="Database-dependent tests are skipped in environments without PostgreSQL",
 )
-
-
-@pytest.fixture(autouse=True)
-def cleanup_docs_dir() -> Generator[None, None, None]:
-	"""
-	Auto-use fixture to clean up any docs directories created by tests.
-
-	This ensures we don't leave behind test files in the actual project
-	directory.
-
-	"""
-	# Setup - nothing to do
-	yield
-
-	# Cleanup
-	project_root = Path.cwd()
-	docs_paths = [project_root / "docs", project_root / "documentation", project_root / "custom_docs_dir"]
-
-	for path in docs_paths:
-		if path.exists() and path.is_dir():
-			# Don't delete the directory if it's part of the original repo structure
-			# Instead, just delete any files that were created during tests
-			for item in path.iterdir():
-				# Skip .gitkeep and other special files
-				if item.name.startswith("."):
-					continue
-
-				try:
-					if item.is_dir():
-						shutil.rmtree(item)
-					else:
-						item.unlink()
-				except (PermissionError, OSError):
-					pass
 
 
 @pytest.fixture
@@ -122,15 +83,145 @@ index 2345678..bcdefgh 100644
 	)
 
 
+@pytest.fixture(autouse=os.environ.get("SKIP_GIT_TESTS") == "1")
+def auto_mock_git_utils() -> Generator[dict[str, Mock], None, None]:
+	"""
+	Automatically mock git utils when SKIP_GIT_TESTS is enabled.
+
+	This fixture replaces the skip_git_tests marker and automatically
+	patches all Git utility functions when tests are run in CI or
+	other environments with SKIP_GIT_TESTS=1.
+	"""
+	if os.environ.get("SKIP_GIT_TESTS") == "1":
+		with (
+			patch("codemap.git.utils.run_git_command") as mock_run_git_command,
+			patch("codemap.git.utils.get_repo_root") as mock_get_repo_root,
+			patch("codemap.git.utils.validate_repo_path") as mock_validate_repo_path,
+			patch("codemap.git.utils.get_staged_diff") as mock_staged,
+			patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged,
+			patch("codemap.git.utils.stage_files") as mock_stage_files,
+			patch("codemap.git.utils.commit") as mock_commit_command,
+			patch("codemap.git.utils.get_other_staged_files") as mock_get_other_staged,
+			patch("codemap.git.utils.stash_staged_changes") as mock_stash,
+			patch("codemap.git.utils.unstash_changes") as mock_unstash,
+			patch("codemap.git.utils.get_untracked_files") as mock_untracked,
+			patch("codemap.git.utils.commit_only_files") as mock_commit,
+			patch("codemap.git.utils.unstage_files") as mock_unstage,
+			patch("codemap.git.utils.switch_branch") as mock_switch_branch,
+			patch("codemap.git.utils.get_current_branch") as mock_current_branch,
+			patch("codemap.git.utils.is_git_ignored") as mock_is_git_ignored,
+		):
+			# Mock run_git_command
+			mock_run_git_command.return_value = "mock command output"
+
+			# Mock get_repo_root
+			mock_get_repo_root.return_value = Path("/mock/repo/root")
+
+			# Mock validate_repo_path
+			mock_validate_repo_path.return_value = Path("/mock/repo/root")
+
+			# Mock the staged diff
+			staged_diff = GitDiff(
+				files=["file1.py"],
+				content="diff content for file1.py",
+				is_staged=True,
+			)
+			mock_staged.return_value = staged_diff
+
+			# Mock the unstaged diff
+			unstaged_diff = GitDiff(
+				files=["file2.py"],
+				content="diff content for file2.py",
+				is_staged=False,
+			)
+			mock_unstaged.return_value = unstaged_diff
+
+			# Mock stage_files (void function)
+			mock_stage_files.return_value = None
+
+			# Mock commit (void function)
+			mock_commit_command.return_value = None
+
+			# Mock get_other_staged_files
+			mock_get_other_staged.return_value = []
+
+			# Mock stash_staged_changes
+			mock_stash.return_value = False
+
+			# Mock unstash_changes (void function)
+			mock_unstash.return_value = None
+
+			# Mock untracked files
+			mock_untracked.return_value = ["file3.py"]
+
+			# Mock commit_only_files
+			mock_commit.return_value = []
+
+			# Mock unstage_files (void function)
+			mock_unstage.return_value = None
+
+			# Mock switch_branch (void function)
+			mock_switch_branch.return_value = None
+
+			# Mock get_current_branch
+			mock_current_branch.return_value = "main"
+
+			# Mock is_git_ignored
+			mock_is_git_ignored.return_value = False
+
+			yield {
+				"run_git_command": mock_run_git_command,
+				"get_repo_root": mock_get_repo_root,
+				"validate_repo_path": mock_validate_repo_path,
+				"get_staged_diff": mock_staged,
+				"get_unstaged_diff": mock_unstaged,
+				"stage_files": mock_stage_files,
+				"commit": mock_commit_command,
+				"get_other_staged_files": mock_get_other_staged,
+				"stash_staged_changes": mock_stash,
+				"unstash_changes": mock_unstash,
+				"get_untracked_files": mock_untracked,
+				"commit_only_files": mock_commit,
+				"unstage_files": mock_unstage,
+				"switch_branch": mock_switch_branch,
+				"get_current_branch": mock_current_branch,
+				"is_git_ignored": mock_is_git_ignored,
+			}
+	else:
+		# When SKIP_GIT_TESTS is not enabled, do nothing
+		yield {}
+
+
 @pytest.fixture
 def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
-	"""Create a standardized mock for git utilities."""
+	"""Create a standardized mock for all git utilities."""
 	with (
+		patch("codemap.git.utils.run_git_command") as mock_run_git_command,
+		patch("codemap.git.utils.get_repo_root") as mock_get_repo_root,
+		patch("codemap.git.utils.validate_repo_path") as mock_validate_repo_path,
 		patch("codemap.git.utils.get_staged_diff") as mock_staged,
 		patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged,
+		patch("codemap.git.utils.stage_files") as mock_stage_files,
+		patch("codemap.git.utils.commit") as mock_commit_command,
+		patch("codemap.git.utils.get_other_staged_files") as mock_get_other_staged,
+		patch("codemap.git.utils.stash_staged_changes") as mock_stash,
+		patch("codemap.git.utils.unstash_changes") as mock_unstash,
 		patch("codemap.git.utils.get_untracked_files") as mock_untracked,
 		patch("codemap.git.utils.commit_only_files") as mock_commit,
+		patch("codemap.git.utils.unstage_files") as mock_unstage,
+		patch("codemap.git.utils.switch_branch") as mock_switch_branch,
+		patch("codemap.git.utils.get_current_branch") as mock_current_branch,
+		patch("codemap.git.utils.is_git_ignored") as mock_is_git_ignored,
 	):
+		# Mock run_git_command
+		mock_run_git_command.return_value = "mock command output"
+
+		# Mock get_repo_root
+		mock_get_repo_root.return_value = Path("/mock/repo/root")
+
+		# Mock validate_repo_path
+		mock_validate_repo_path.return_value = Path("/mock/repo/root")
+
 		# Mock the staged diff
 		staged_diff = GitDiff(
 			files=["file1.py"],
@@ -147,17 +238,56 @@ def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 		)
 		mock_unstaged.return_value = unstaged_diff
 
+		# Mock stage_files (void function)
+		mock_stage_files.return_value = None
+
+		# Mock commit (void function)
+		mock_commit_command.return_value = None
+
+		# Mock get_other_staged_files
+		mock_get_other_staged.return_value = []
+
+		# Mock stash_staged_changes
+		mock_stash.return_value = False
+
+		# Mock unstash_changes (void function)
+		mock_unstash.return_value = None
+
 		# Mock untracked files
 		mock_untracked.return_value = ["file3.py"]
 
-		# Mock commit
+		# Mock commit_only_files
 		mock_commit.return_value = []
 
+		# Mock unstage_files (void function)
+		mock_unstage.return_value = None
+
+		# Mock switch_branch (void function)
+		mock_switch_branch.return_value = None
+
+		# Mock get_current_branch
+		mock_current_branch.return_value = "main"
+
+		# Mock is_git_ignored
+		mock_is_git_ignored.return_value = False
+
 		yield {
+			"run_git_command": mock_run_git_command,
+			"get_repo_root": mock_get_repo_root,
+			"validate_repo_path": mock_validate_repo_path,
 			"get_staged_diff": mock_staged,
 			"get_unstaged_diff": mock_unstaged,
+			"stage_files": mock_stage_files,
+			"commit": mock_commit_command,
+			"get_other_staged_files": mock_get_other_staged,
+			"stash_staged_changes": mock_stash,
+			"unstash_changes": mock_unstash,
 			"get_untracked_files": mock_untracked,
 			"commit_only_files": mock_commit,
+			"unstage_files": mock_unstage,
+			"switch_branch": mock_switch_branch,
+			"get_current_branch": mock_current_branch,
+			"is_git_ignored": mock_is_git_ignored,
 		}
 
 

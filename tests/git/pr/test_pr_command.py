@@ -2,396 +2,291 @@
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, patch
+import importlib
+from typing import TYPE_CHECKING
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 import typer
 
-from codemap.git.pr_generator.schemas import PullRequest
-from codemap.git.utils import GitDiff
-
 if TYPE_CHECKING:
-	from collections.abc import Generator
+	from collections.abc import Iterator
 
-# Get app from the CLI module
-from codemap import cli
-
-app = cli.app
+	from codemap.git.pr_generator.command import PRWorkflowCommand
 
 
 @pytest.fixture
-def mock_branch_operations() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock git branch operations."""
-	with (
-		patch("codemap.git.pr_generator.utils.get_current_branch") as mock_get_current_branch,
-		patch("codemap.git.pr_generator.utils.get_default_branch") as mock_get_default_branch,
-		patch("codemap.git.pr_generator.utils.branch_exists") as mock_branch_exists,
-		patch("codemap.git.pr_generator.utils.create_branch") as mock_create_branch,
-		patch("codemap.git.pr_generator.utils.checkout_branch") as mock_checkout_branch,
-		patch("codemap.git.pr_generator.utils.push_branch") as mock_push_branch,
-		patch("codemap.git.pr_generator.utils.list_branches") as mock_list_branches,
-	):
-		mock_get_current_branch.return_value = "feature-branch"
-		mock_get_default_branch.return_value = "main"
-		mock_branch_exists.return_value = False
-		mock_list_branches.return_value = ["main", "dev", "feature-branch"]
-
-		yield {
-			"get_current_branch": mock_get_current_branch,
-			"get_default_branch": mock_get_default_branch,
-			"branch_exists": mock_branch_exists,
-			"create_branch": mock_create_branch,
-			"checkout_branch": mock_checkout_branch,
-			"push_branch": mock_push_branch,
-			"list_branches": mock_list_branches,
-		}
-
-
-@pytest.fixture
-def mock_pr_operations() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock PR operations."""
-	with (
-		patch("codemap.git.pr_generator.utils.get_commit_messages") as mock_get_commit_messages,
-		patch("codemap.git.pr_generator.utils.create_pull_request") as mock_create_pull_request,
-		patch("codemap.git.pr_generator.utils.get_existing_pr") as mock_get_existing_pr,
-		patch("codemap.git.pr_generator.utils.update_pull_request") as mock_update_pull_request,
-	):
-		# Mock commit messages
-		mock_get_commit_messages.return_value = ["feat: Add new feature", "fix: Fix bug"]
-
-		# Mock PR creation
-		mock_pr = PullRequest(
-			branch="feature-branch",
-			title="Add new feature",
-			description="## Changes\n\n### Features\n\n- Add new feature\n\n### Fixes\n\n- Fix bug\n\n",
-			url="https://github.com/user/repo/pull/1",
-			number=1,
-		)
-		mock_create_pull_request.return_value = mock_pr
-		mock_update_pull_request.return_value = mock_pr
-		mock_get_existing_pr.return_value = None
-
-		yield {
-			"get_commit_messages": mock_get_commit_messages,
-			"create_pull_request": mock_create_pull_request,
-			"get_existing_pr": mock_get_existing_pr,
-			"update_pull_request": mock_update_pull_request,
-		}
-
-
-@pytest.fixture
-def mock_git_diff_operations() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock git diff operations."""
-	with (
-		patch("codemap.git.utils.validate_repo_path") as mock_validate_repo_path,
-		patch("codemap.git.utils.get_staged_diff") as mock_get_staged_diff,
-		patch("codemap.git.utils.get_unstaged_diff") as mock_get_unstaged_diff,
-		patch("codemap.git.utils.get_untracked_files") as mock_get_untracked_files,
-	):
-		mock_validate_repo_path.return_value = Path("/fake/repo")
-
-		# Mock git utilities
-		mock_staged_diff = GitDiff(
-			files=["file1.py"],
-			content="diff content for file1.py",
-			is_staged=True,
-		)
-		mock_get_staged_diff.return_value = mock_staged_diff
-
-		mock_unstaged_diff = GitDiff(
-			files=["file2.py"],
-			content="diff content for file2.py",
-			is_staged=False,
-		)
-		mock_get_unstaged_diff.return_value = mock_unstaged_diff
-
-		mock_get_untracked_files.return_value = ["file3.py"]
-
-		yield {
-			"validate_repo_path": mock_validate_repo_path,
-			"get_staged_diff": mock_get_staged_diff,
-			"get_unstaged_diff": mock_get_unstaged_diff,
-			"get_untracked_files": mock_get_untracked_files,
-		}
-
-
-@pytest.fixture
-def mock_diff_processing() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock diff processing operations."""
-	with (
-		patch("codemap.git.diff_splitter.DiffSplitter") as mock_diff_splitter,
-		patch("codemap.cli.pr_cmd.create_universal_generator") as mock_create_universal_generator,
-		patch("codemap.git.commit_generator.command.CommitCommand.process_all_chunks") as mock_process_all_chunks,
-	):
-		# Mock DiffSplitter
-		mock_splitter = MagicMock()
-		mock_chunk = MagicMock()
-		mock_chunk.files = ["file1.py"]
-		mock_splitter.split_diff.return_value = [mock_chunk]
-		mock_diff_splitter.return_value = mock_splitter
-
-		# Mock message generator
-		mock_generator = MagicMock()
-		mock_generator.generate_message.return_value = ("feat: Add new feature", True)
-		mock_create_universal_generator.return_value = mock_generator
-
-		# Mock process_all_chunks
-		mock_process_all_chunks.return_value = 0
-
-		yield {
-			"diff_splitter": mock_diff_splitter,
-			"create_universal_generator": mock_create_universal_generator,
-			"process_all_chunks": mock_process_all_chunks,
-		}
-
-
-@pytest.fixture
-def mock_user_input() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock user input operations."""
-	with (
-		patch("questionary.confirm") as mock_confirm,
-		patch("questionary.text") as mock_text,
-		patch("questionary.select") as mock_select,
-	):
-		# Mock questionary
-		mock_confirm.return_value.ask.return_value = True
-		mock_text.return_value.ask.return_value = "feature-branch"
-		mock_select.return_value.ask.return_value = "commit"
-
-		yield {
-			"confirm": mock_confirm,
-			"text": mock_text,
-			"select": mock_select,
-		}
-
-
-@pytest.fixture
-def mock_llm_config() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock LLM configuration loading."""
-	with patch("codemap.cli.pr_cmd._load_llm_config") as mock_load_config:
-		# Return a default configuration for testing
-		mock_load_config.return_value = {
-			"model": "gpt-3.5-turbo",
-			"api_key": "test-api-key",
-			"api_base": "https://api.example.com",
-		}
-
-		yield {
-			"load_llm_config": mock_load_config,
-		}
-
-
-@pytest.fixture
-def mock_subprocess() -> Generator[dict[str, MagicMock], None, None]:
-	"""Mock subprocess run calls."""
-	with patch("subprocess.run") as mock_run:
-		# Create a mock result for GitHub CLI commands
-		mock_result = MagicMock()
-		mock_result.returncode = 0
-		mock_result.stdout = json.dumps(
-			{
-				"number": 42,
-				"title": "Test PR",
-				"body": "Test description",
-				"headRefName": "feature-branch",
-				"url": "https://github.com/user/repo/pull/42",
-			}
-		)
-
-		# Set the return value of the mock
-		mock_run.return_value = mock_result
-
-		yield {"subprocess_run": mock_run}
-
-
-@pytest.fixture
-def mock_git_utils(
-	mock_branch_operations: dict[str, MagicMock],
-	mock_pr_operations: dict[str, MagicMock],
-	mock_git_diff_operations: dict[str, MagicMock],
-	mock_diff_processing: dict[str, MagicMock],
-	mock_user_input: dict[str, MagicMock],
-	mock_llm_config: dict[str, MagicMock],
-	mock_subprocess: dict[str, MagicMock],
-) -> dict[str, Any]:
-	"""Combine all mock fixtures into one dictionary for convenience."""
-	return {
-		**mock_branch_operations,
-		**mock_pr_operations,
-		**mock_git_diff_operations,
-		**mock_diff_processing,
-		**mock_user_input,
-		**mock_llm_config,
-		**mock_subprocess,
-	}
-
-
-@pytest.fixture
-def mock_exit_with_error() -> Generator[MagicMock, None, None]:
-	"""Mock the _exit_with_error function."""
-	with patch("codemap.cli.pr_cmd._exit_with_error") as mock_exit:
-		# Instead of exiting, just capture the error message for debugging
-		mock_exit.side_effect = lambda _msg, *_args, **_kwargs: None
-		yield mock_exit
+def mock_pr_command_impl() -> Iterator[AsyncMock]:
+	"""Fixture to mock the _pr_command_impl function."""
+	with patch("codemap.cli.pr_cmd._pr_command_impl") as mock_impl:
+		# Use AsyncMock since it's an async function
+		mock_impl.return_value = None
+		yield mock_impl
 
 
 @pytest.mark.unit
-@pytest.mark.git
 @pytest.mark.cli
-@pytest.mark.skip(reason="PR command integration test needs deeper mocking strategy")
-def test_pr_create_command(mock_git_utils: dict[str, Any], mock_exit_with_error: MagicMock) -> None:
-	"""Test the PR create command."""
-	# Test skipped - requires deeper mocking strategy
-
-
-@pytest.mark.unit
 @pytest.mark.git
-@pytest.mark.cli
-@pytest.mark.skip(reason="PR command integration test needs deeper mocking strategy")
-def test_pr_update_command(mock_git_utils: dict[str, Any], mock_exit_with_error: MagicMock) -> None:
-	"""Test the PR update command."""
-	# Test skipped - requires deeper mocking strategy
+class TestPRCommandModule:
+	"""Test the PR command module structure."""
 
+	def test_pr_command_structure(self) -> None:
+		"""Test that the PR command module has the expected structure."""
+		# Import the module
+		pr_cmd = importlib.import_module("codemap.cli.pr_cmd")
 
-@pytest.mark.unit
-@pytest.mark.git
-class TestPRCommandHelpers:
-	"""Test helper functions in PR command module."""
+		# Check that the key functions exist
+		assert hasattr(pr_cmd, "register_command"), "register_command function is missing"
+		assert hasattr(pr_cmd, "_pr_command_impl"), "Implementation function is missing"
+		assert hasattr(pr_cmd, "PRAction"), "PRAction enum is missing"
+		assert hasattr(pr_cmd, "validate_workflow_strategy"), "Validation function is missing"
 
-	@pytest.mark.skip(reason="Function no longer directly accessible")
-	def test_validate_branch_name_valid(self) -> None:
-		"""Test branch name validation with valid inputs."""
+		# Check that PRAction has the expected values
+		assert pr_cmd.PRAction.CREATE == "create", "PRAction.CREATE should be 'create'"
+		assert pr_cmd.PRAction.UPDATE == "update", "PRAction.UPDATE should be 'update'"
 
-	@pytest.mark.skip(reason="Function no longer directly accessible")
-	def test_validate_branch_name_invalid(self) -> None:
-		"""Test branch name validation with invalid inputs."""
+		# Check that the command annotations are defined
+		assert hasattr(pr_cmd, "ActionArg"), "ActionArg annotation is missing"
+		assert hasattr(pr_cmd, "BranchNameOpt"), "BranchNameOpt annotation is missing"
+		assert hasattr(pr_cmd, "WorkflowOpt"), "WorkflowOpt annotation is missing"
 
-	@pytest.mark.skip(reason="Function no longer directly accessible")
-	def test_exit_with_error(self) -> None:
-		"""Test exit with error function."""
+	def test_pr_command_impl_signature(self) -> None:
+		"""Test the signature of the _pr_command_impl function."""
+		# Ensure the function has the correct signature
+		from inspect import iscoroutinefunction, signature
 
-	@pytest.mark.skip(reason="Function no longer directly accessible")
-	def test_exit_with_error_exception(self) -> None:
-		"""Test exit with error function with exception."""
+		from codemap.cli.pr_cmd import _pr_command_impl
 
-	@pytest.mark.skip(reason="Function no longer directly accessible")
-	def test_generate_release_pr_content(self) -> None:
-		"""Test generation of release PR content."""
+		# Check if it's an async function directly
+		assert iscoroutinefunction(_pr_command_impl), "Should be an async function"
 
+		sig = signature(_pr_command_impl)
 
-@pytest.mark.unit
-@pytest.mark.git
-class TestHandleBranchCreation:
-	"""Test branch creation and selection handling."""
+		# Check required parameters
+		parameters = sig.parameters
+		assert "action" in parameters, "action parameter is missing"
+		assert "branch_name" in parameters, "branch_name parameter is missing"
+		assert "workflow" in parameters, "workflow parameter is missing"
+		assert "non_interactive" in parameters, "non_interactive parameter is missing"
 
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_handle_branch_creation_existing_branch(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test handling branch creation when user wants to use current branch."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_handle_branch_creation_specified_branch(self) -> None:
-		"""Test handling branch creation with specified branch name."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_handle_branch_creation_invalid_branch(self) -> None:
-		"""Test handling branch creation with invalid branch name."""
-
-
-@pytest.mark.unit
-@pytest.mark.git
-class TestGenerateTitleAndDescription:
-	"""Test generation of PR title and description."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_generate_title_from_commits(self) -> None:
-		"""Test generating PR title from commits."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_generate_title_with_llm(self) -> None:
-		"""Test generating PR title with LLM."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_generate_description_from_commits(self) -> None:
-		"""Test generating PR description from commits."""
-
-
-@pytest.mark.unit
-@pytest.mark.git
-class TestHandleCommits:
-	"""Test handling commits for PR creation."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_handle_commits_skip(self) -> None:
-		"""Test handling commits when skipping commit process."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_handle_commits_no_changes(self) -> None:
-		"""Test handling commits when there are no changes."""
-
-
-@pytest.mark.unit
-@pytest.mark.git
-class TestLoadLLMConfig:
-	"""Test loading LLM configuration."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_load_llm_config(self) -> None:
-		"""Test loading LLM configuration."""
-
-
-@pytest.mark.unit
-@pytest.mark.git
-class TestHandlePRCreation:
-	"""Test PR creation handling."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_pr_creation_with_branch_selection(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test PR creation with branch selection when no branch mapping exists."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_pr_display_panels(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test that PR title and description are displayed in panels."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_pr_edit_title_and_description(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test editing PR title and description in interactive mode."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_pr_regenerate_description(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test regenerating PR description with LLM."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_pr_update_with_panels(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test PR update with panel display."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_pr_update_by_number(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test PR update by number."""
-
-	@pytest.mark.skip(reason="Function now inside _pr_command_impl")
-	def test_markdown_formatting_in_panels(self, mock_git_utils: dict[str, Any]) -> None:
-		"""Test Markdown formatting in description panels."""
-
-
-@pytest.mark.unit
-@pytest.mark.git
-class TestWorkflowStrategy:
-	"""Test workflow strategy validation."""
-
-	def test_validate_workflow_strategy_valid(self) -> None:
-		"""Test validation of valid workflow strategies."""
+	def test_validate_workflow_strategy(self) -> None:
+		"""Test the validate_workflow_strategy function."""
 		from codemap.cli.pr_cmd import validate_workflow_strategy
 
+		# Test valid strategies
 		valid_strategies = ["github-flow", "gitflow", "trunk-based"]
 		for strategy in valid_strategies:
 			assert validate_workflow_strategy(strategy) == strategy
 
-	def test_validate_workflow_strategy_invalid(self) -> None:
-		"""Test validation of invalid workflow strategies."""
-		from codemap.cli.pr_cmd import validate_workflow_strategy
+		# Test None is allowed
+		assert validate_workflow_strategy(None) is None
 
+		# Test invalid strategy raises error
 		with pytest.raises(typer.BadParameter):
 			validate_workflow_strategy("invalid-strategy")
+
+
+@pytest.mark.unit
+@pytest.mark.git
+class TestPRWorkflowCommand:
+	"""Test the PRWorkflowCommand class."""
+
+	@pytest.fixture
+	def mock_llm_client(self) -> MagicMock:
+		"""Create a mock LLM client for testing."""
+		client = MagicMock()
+
+		# Support different completion methods based on API changes
+		client.chat_completion.return_value = '{"title": "Test PR", "description": "Test description"}'
+		client.get_completion.return_value = '{"title": "Test PR", "description": "Test description"}'
+		client.completion.return_value = '{"title": "Test PR", "description": "Test description"}'
+
+		return client
+
+	@pytest.fixture
+	def mock_config_loader(self) -> MagicMock:
+		"""Create a mock config loader."""
+		config = MagicMock()
+
+		# Set up the config to return values for PR generation
+		config.get.return_value = {
+			"pr": {"generate": {"title_strategy": "llm", "description_strategy": "llm"}, "strategy": "github-flow"}
+		}
+		return config
+
+	@pytest.fixture
+	def mock_pr_generator(self) -> Iterator[MagicMock]:
+		"""Create a mock PR generator."""
+		generator = MagicMock()
+		generator.create_pr.return_value = MagicMock(
+			branch="feature/test",
+			title="Test PR",
+			description="Test description",
+			url="https://github.com/org/repo/pull/1",
+			number=1,
+		)
+		generator.update_pr.return_value = MagicMock(
+			branch="feature/test",
+			title="Updated PR",
+			description="Updated description",
+			url="https://github.com/org/repo/pull/1",
+			number=1,
+		)
+		return generator
+
+	@pytest.fixture
+	def workflow_command(
+		self, mock_llm_client: MagicMock, mock_config_loader: MagicMock, mock_pr_generator: MagicMock
+	) -> Iterator[PRWorkflowCommand]:
+		"""Create a mock PRWorkflowCommand with necessary patches."""
+		with (
+			patch("codemap.git.pr_generator.command.PRGenerator", return_value=mock_pr_generator),
+			patch("codemap.git.pr_generator.command.get_repo_root", return_value="/path/to/repo"),
+			patch("codemap.git.pr_generator.command.create_strategy") as mock_create_strategy,
+			patch(
+				"codemap.git.pr_generator.command.get_commit_messages",
+				return_value=["fix: bug fix", "feat: new feature"],
+			),
+			patch("codemap.git.pr_generator.command.get_existing_pr", return_value=None),
+			patch("codemap.git.pr_generator.command.generate_pr_title_with_llm", return_value="Test PR Title"),
+			patch(
+				"codemap.git.pr_generator.command.generate_pr_description_with_llm", return_value="Test PR Description"
+			),
+		):
+			# Configure strategy mock
+			strategy_mock = MagicMock()
+			strategy_mock.detect_branch_type.return_value = "feature"
+			mock_create_strategy.return_value = strategy_mock
+
+			# Import here to avoid circular imports
+			from codemap.git.pr_generator.command import PRWorkflowCommand
+
+			command = PRWorkflowCommand(
+				config_loader=mock_config_loader,
+				llm_client=mock_llm_client,
+			)
+
+			# Manually set some attributes that might not be initialized correctly in tests
+			command.content_config = MagicMock()
+			command.content_config.title_strategy = "llm"
+			command.content_config.description_strategy = "llm"
+			command.pr_generator = mock_pr_generator
+
+			yield command
+
+	@pytest.mark.asyncio
+	async def test_generate_title(self, workflow_command, mock_llm_client: MagicMock) -> None:
+		"""Test title generation from commits."""
+		with patch("codemap.git.pr_generator.command.generate_pr_title_with_llm") as mock_title_gen:
+			mock_title_gen.return_value = "Test PR Title"
+
+			# Test LLM-based title generation
+			commits = ["fix: bug fix", "feat: new feature"]
+			title = workflow_command._generate_title(commits, "feature/test-branch", "feature")
+
+			# Verify LLM was called
+			mock_title_gen.assert_called_once_with(commits, llm_client=mock_llm_client)
+			assert title == "Test PR Title"
+
+			# Test fallback for empty commits
+			with patch("codemap.git.pr_generator.command.generate_pr_title_with_llm") as mock_empty_title:
+				title = workflow_command._generate_title([], "feature/test-branch", "feature")
+				assert "Feature: Test branch" in title
+				assert not mock_empty_title.called
+
+	@pytest.mark.asyncio
+	async def test_generate_description(self, workflow_command, mock_llm_client: MagicMock) -> None:
+		"""Test description generation from commits."""
+		with patch("codemap.git.pr_generator.command.generate_pr_description_with_llm") as mock_desc_gen:
+			mock_desc_gen.return_value = "Test PR Description"
+
+			# Test LLM-based description generation
+			commits = ["fix: bug fix", "feat: new feature"]
+			description = workflow_command._generate_description(commits, "feature/test-branch", "feature", "main")
+
+			# Verify LLM was called
+			mock_desc_gen.assert_called_once_with(commits, llm_client=mock_llm_client)
+			assert description == "Test PR Description"
+
+			# Test fallback for empty commits
+			with patch("codemap.git.pr_generator.command.generate_pr_description_with_llm") as mock_empty_desc:
+				description = workflow_command._generate_description([], "feature/test-branch", "feature", "main")
+				assert "Changes in feature/test-branch" in description
+				assert not mock_empty_desc.called
+
+	@pytest.mark.asyncio
+	async def test_create_pr_workflow(self, workflow_command, mock_pr_generator: MagicMock) -> None:
+		"""Test the PR creation workflow."""
+		with (
+			patch("codemap.git.pr_generator.command.get_commit_messages") as mock_get_commits,
+			patch("codemap.git.pr_generator.command.generate_pr_title_with_llm") as mock_title_gen,
+			patch("codemap.git.pr_generator.command.generate_pr_description_with_llm") as mock_desc_gen,
+		):
+			# Set up mocks
+			mock_get_commits.return_value = ["fix: bug fix", "feat: new feature"]
+			mock_title_gen.return_value = "Test PR Title"
+			mock_desc_gen.return_value = "Test PR Description"
+
+			# Test PR creation
+			pr = workflow_command.create_pr_workflow("main", "feature/test-branch")
+
+			# Verify the correct methods were called
+			mock_get_commits.assert_called_once_with("main", "feature/test-branch")
+			mock_title_gen.assert_called_once()
+			mock_desc_gen.assert_called_once()
+
+			# Verify PR generator was called correctly
+			mock_pr_generator.create_pr.assert_called_once_with(
+				"main", "feature/test-branch", "Test PR Title", "Test PR Description"
+			)
+
+			# Verify the returned PR object
+			assert pr.number == 1
+			assert pr.url is not None
+
+	@pytest.mark.asyncio
+	async def test_update_pr_workflow(self, workflow_command, mock_pr_generator: MagicMock) -> None:
+		"""Test the PR update workflow."""
+		with (
+			patch("codemap.git.pr_generator.command.get_commit_messages") as mock_get_commits,
+			patch("codemap.git.pr_generator.command.generate_pr_title_with_llm") as mock_title_gen,
+			patch("codemap.git.pr_generator.command.generate_pr_description_with_llm") as mock_desc_gen,
+		):
+			# Set up mocks
+			mock_get_commits.return_value = ["fix: bug fix", "feat: new feature"]
+			mock_title_gen.return_value = "Updated PR Title"
+			mock_desc_gen.return_value = "Updated PR Description"
+
+			# Test PR update with auto-generated title and description
+			pr = workflow_command.update_pr_workflow(pr_number=1, base_branch="main", head_branch="feature/test-branch")
+
+			# Verify the correct methods were called
+			mock_get_commits.assert_called_once_with("main", "feature/test-branch")
+			mock_title_gen.assert_called_once()
+			mock_desc_gen.assert_called_once()
+
+			# Verify PR generator was called correctly
+			mock_pr_generator.update_pr.assert_called_once_with(1, "Updated PR Title", "Updated PR Description")
+
+			# Verify the returned PR object
+			assert pr.number == 1
+			assert pr.url is not None
+
+			# Reset mocks
+			mock_get_commits.reset_mock()
+			mock_title_gen.reset_mock()
+			mock_desc_gen.reset_mock()
+			mock_pr_generator.update_pr.reset_mock()
+
+			# Test PR update with provided title and description
+			pr = workflow_command.update_pr_workflow(
+				pr_number=1, title="Custom Title", description="Custom Description"
+			)
+
+			# Verify no generation was needed
+			assert not mock_get_commits.called
+			assert not mock_title_gen.called
+			assert not mock_desc_gen.called
+
+			# Verify PR generator was called correctly with provided values
+			mock_pr_generator.update_pr.assert_called_once_with(1, "Custom Title", "Custom Description")
