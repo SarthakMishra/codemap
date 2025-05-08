@@ -358,7 +358,7 @@ async def _pr_command_impl(
 			logger.exception("No branch name provided and non-interactive mode enabled.")
 			return None
 
-	def _handle_commits(options: PROptions) -> bool:
+	async def _handle_commits(options: PROptions) -> bool:
 		"""Handle committing changes using CommitCommand."""
 		if not options.commit_first:
 			logger.info("Skipping commit step as requested.")
@@ -390,8 +390,8 @@ async def _pr_command_impl(
 				bypass_hooks=options.bypass_hooks,
 			)
 			# The run method handles staging, splitting, generation, and committing
-			# CommitCommand's run now accepts the interactive flag directly
-			success = commit_command.run(interactive=options.interactive)
+			# Properly await the async run method
+			success = await commit_command.run(interactive=options.interactive)
 
 			if not success:
 				# CommitCommand.run should raise exceptions or show errors,
@@ -640,7 +640,7 @@ async def _pr_command_impl(
 			opts.branch_name = final_branch_name  # Update options with final name
 
 			# 5b. Handle Commits (Optional)
-			if opts.commit_first and not _handle_commits(opts):
+			if opts.commit_first and not await _handle_commits(opts):
 				_exit_command(1)  # Exit if commit handling failed
 
 			# 5c. Handle Push
@@ -702,9 +702,6 @@ async def _pr_command_impl(
 					)
 					# Optionally switch to update flow or exit
 					_exit_command(0)  # Exit gracefully if PR exists
-				else:
-					exit_with_error("Could not finalize branch name for PR creation.")
-					return
 
 			# 5e. Generate Title & Description
 			console.print(Rule("Generating PR Content", style="bold blue"))
@@ -819,7 +816,7 @@ async def _pr_command_impl(
 				return
 
 			# 5b. Handle Commits (Optional, might be needed before push/update)
-			if opts.commit_first and not _handle_commits(opts):
+			if opts.commit_first and not await _handle_commits(opts):
 				_exit_command(1)
 
 			# 5c. Handle Push (Optional but likely needed before update)
