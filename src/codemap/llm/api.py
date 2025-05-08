@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Literal, TypedDict, TypeVar
+from typing import Literal, TypedDict, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from codemap.config import ConfigLoader
 
@@ -25,8 +25,7 @@ from .errors import LLMError
 
 logger = logging.getLogger(__name__)
 
-# ResponseType alias is no longer strictly needed for pydantic-ai's RunResult but kept if other parts use it.
-ResponseType = dict[str, Any] | Any
+PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
 
 
 class MessageDict(TypedDict):
@@ -36,31 +35,30 @@ class MessageDict(TypedDict):
 	content: str
 
 
-# TypeVar for dynamic return type based on output_model
-M = TypeVar("M", bound=BaseModel)
+def validate_schema(model: type[PydanticModelT], input_data: str | object) -> PydanticModelT:
+	"""Validate the schema of the input data."""
+	if isinstance(input_data, str):
+		return model.model_validate_json(input_data)
+	return model.model_validate(input_data)
 
 
-async def call_llm_api(
-	model: str,
+def call_llm_api(
 	messages: list[MessageDict],
 	config_loader: ConfigLoader,
-	output_schema: type[M] | None = None,
-	**kwargs: dict[str, str | int | float | bool | None],
-) -> str | M:
+	pydantic_model: type[PydanticModelT] | None = None,
+) -> str | PydanticModelT:
 	"""
 	Call an LLM API using pydantic-ai.
 
 	Args:
-	    model: The model identifier (e.g., "openai:gpt-4o")
 	    messages: The list of messages to send to the LLM
 	    config_loader: ConfigLoader instance for additional configuration
-	    output_schema: Optional Pydantic model to structure the output.
+	    pydantic_model: Optional Pydantic model class to structure the output.
 	                  If provided, the function will return an instance of this model.
 	                  Otherwise, it returns a string.
-	    **kwargs: Additional parameters (e.g., temperature, max_tokens) to pass to the LLM.
 
 	Returns:
-	    The generated response, either as a string or an instance of the output_model.
+	    The generated response, either as a string or an instance of the pydantic_model.
 
 	Raises:
 	    LLMError: If pydantic-ai is not installed or the API call fails.
@@ -83,30 +81,26 @@ async def call_llm_api(
 	# If an output_model is specified, pydantic-ai handles instructing the LLM for structured output.
 	# So, no need to manually add schema instructions to the system_prompt_str here.
 
-	# Determine the result type for the Pydantic-AI Agent
-	current_output_type: type = str
-	if output_schema:
-		current_output_type = output_schema
+	# Determine the output_type for the Pydantic-AI Agent
+	agent_output_type: type = pydantic_model if pydantic_model else str
 
 	try:
 		# Initialize Pydantic-AI Agent
 		agent = Agent(
-			model=model,
+			model=config_loader.get.llm.model,
 			system_prompt=system_prompt_str,
-			output_type=current_output_type,
+			output_type=agent_output_type,
 		)
 
 		run_settings = {
 			"temperature": config_loader.get.llm.temperature,
 			"max_tokens": config_loader.get.llm.max_output_tokens,
 		}
-		run_settings.update(kwargs)
 
 		logger.debug(
-			"Calling Pydantic-AI Agent with model: %s, system_prompt: '%s...', output_type: %s, params: %s",
-			model,
+			"Calling Pydantic-AI Agent with model: %s, system_prompt: '%s...', params: %s",
+			config_loader.get.llm.model,
 			system_prompt_str[:100],
-			current_output_type.__name__,
 			run_settings,
 		)
 
@@ -122,30 +116,24 @@ async def call_llm_api(
 
 		user_prompt = messages[-1]["content"]
 
-		final_data: str | M | None = None
-
 		if ModelSettings is None:
 			msg = "ModelSettings not found in pydantic-ai. Install the correct version."
 			logger.exception(msg)
 			raise LLMError(msg)
 
-		async with agent.iter(user_prompt=user_prompt, model_settings=ModelSettings(**run_settings)) as run:
-			async for chunk in run:
-				if isinstance(chunk, End) and isinstance(chunk.data, FinalResult):
-					final_data = chunk.data.output  # Assuming FinalResult has an 'output' attribute
-					break
+		# Run the agent and validate the output
+		run = agent.run_sync(user_prompt=user_prompt, model_settings=ModelSettings(**run_settings))
 
-		if final_data is not None:
-			if output_schema and not isinstance(final_data, output_schema):
-				# This case should ideally be handled by pydantic-ai if output_type is set
-				msg = (
-					f"Pydantic-AI returned unexpected type. Expected {output_schema.__name__}, "
-					f"got {type(final_data).__name__}."
-				)
-				raise LLMError(msg)
-			return final_data
+		if run.output is not None:
+			if pydantic_model:
+				try:
+					return validate_schema(pydantic_model, run.output)
+				except ValidationError as e:
+					raise LLMError from e
+			elif isinstance(run.output, (str, BaseModel)):
+				return run.output  # type: ignore[return-value]
 
-		msg = "Pydantic-AI call succeeded but returned no structured data or text chunks."
+		msg = "Pydantic-AI call succeeded but returned no structured data or text."
 		logger.error(msg)
 		raise LLMError(msg)
 
