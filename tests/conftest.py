@@ -7,11 +7,13 @@ import shutil
 from io import StringIO
 from pathlib import Path
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 from rich.console import Console
 
+from codemap.config.config_loader import ConfigLoader
+from codemap.config.config_schema import AppConfigSchema, LLMSchema
 from codemap.git.commit_generator import CommitMessageGenerator
 from codemap.git.diff_splitter import DiffChunk, DiffSplitter
 from codemap.git.utils import GitDiff
@@ -194,3 +196,40 @@ def mock_stdin() -> Generator[StringIO, None, None]:
 	stdin = StringIO()
 	with patch("sys.stdin", stdin):
 		yield stdin
+
+
+@pytest.fixture
+def mock_config_loader():
+	"""Create a mock ConfigLoader for tests, reflecting new Pydantic schema."""
+	mock_loader = Mock(spec=ConfigLoader)
+
+	# Mock the AppConfigSchema instance that config_loader.get would return
+	mock_app_config = Mock(spec=AppConfigSchema)
+
+	# Mock the LLMSchema for the .llm attribute of AppConfigSchema
+	mock_llm_settings = Mock(spec=LLMSchema)
+	# Preserve test values, adapt to new schema (provider merged into model, max_tokens -> max_output_tokens)
+	mock_llm_settings.model = "openai:gpt-4"
+	mock_llm_settings.temperature = 0.7
+	mock_llm_settings.max_output_tokens = 1000
+
+	# Assign the mocked LLMSchema to the .llm attribute of the mocked AppConfigSchema
+	mock_app_config.llm = mock_llm_settings
+
+	# Mock embedding configuration for TreeSitterChunker tests
+	from codemap.config.config_schema import EmbeddingChunkingSchema, EmbeddingSchema
+
+	mock_chunking_config = Mock(spec=EmbeddingChunkingSchema)
+	mock_chunking_config.max_hierarchy_depth = 2
+	mock_chunking_config.max_file_lines = 1000
+
+	mock_embedding_config = Mock(spec=EmbeddingSchema)
+	mock_embedding_config.chunking = mock_chunking_config
+
+	mock_app_config.embedding = mock_embedding_config
+
+	# Make the .get property of the mock_loader return the mock_app_config
+	# We use type() to mock a property on an instance
+	type(mock_loader).get = PropertyMock(return_value=mock_app_config)
+
+	return mock_loader

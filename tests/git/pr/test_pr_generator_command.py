@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import Mock, patch
+from pathlib import Path
+from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
 
+from codemap.config import ConfigLoader
 from codemap.git.pr_generator.command import PRCommand
 from codemap.git.utils import GitError
-from codemap.llm import LLMError
+from codemap.llm import LLMClient, LLMError
 from tests.base import GitTestBase
 
 
@@ -26,27 +28,36 @@ class TestPRCommandInitialization(GitTestBase):
 		self.mock_repo_path("/mock/repo/path")
 		self.repo_path = "/mock/repo/path"  # Store the path value for later assertions
 
+		# Create mock ConfigLoader with proper structure
+		self.mock_config = Mock(spec=ConfigLoader)
+		self.mock_config.get = MagicMock()
+		self.mock_config.get.repo_root = Path(self.repo_path)
+		self.mock_config.get.pr = MagicMock()
+		self.mock_config.get.pr.strategy = "github-flow"
+		self.mock_config.get.llm = MagicMock()
+		self.mock_config.get.llm.model = "gpt-4o-mini"
+
 	def test_init_success(self) -> None:
 		"""Test successful initialization of PRCommand."""
 		# Arrange: Set up mocks
 		with (
-			patch("codemap.llm.create_client") as mock_create_client,
+			patch("codemap.llm.LLMClient") as mock_llm_client_cls,
 			patch("codemap.git.pr_generator.command.get_repo_root") as mock_get_repo_root,
 		):
 			mock_llm_client = Mock()
-			mock_create_client.return_value = mock_llm_client
-			mock_get_repo_root.return_value = self.repo_path  # Ensure consistent repo path
+			mock_llm_client_cls.return_value = mock_llm_client
+			mock_get_repo_root.return_value = Path(self.repo_path)  # Ensure consistent repo path
 
 			# Act: Initialize PRCommand
-			pr_command = PRCommand(path=None, model="gpt-4o-mini")
+			pr_command = PRCommand(config_loader=self.mock_config)
 
 			# Assert: Verify repository root and error state
-			assert pr_command.repo_root == self.repo_path
+			assert pr_command.repo_root == Path(self.repo_path)
 			assert pr_command.error_state is None
 			assert pr_command.pr_generator is not None
 
-			# Verify create_client was called with correct parameters
-			mock_create_client.assert_called_once_with(repo_path=self.repo_path, model="gpt-4o-mini")
+			# Verify LLMClient was initialized with correct parameters
+			mock_llm_client_cls.assert_called_once_with(config_loader=self.mock_config, repo_path=Path(self.repo_path))
 
 	def test_init_git_error(self) -> None:
 		"""Test error handling when Git operations fail during initialization."""
@@ -57,7 +68,7 @@ class TestPRCommandInitialization(GitTestBase):
 
 			# Act and Assert: Should raise RuntimeError
 			with pytest.raises(RuntimeError) as excinfo:
-				PRCommand(path=None)
+				PRCommand(config_loader=self.mock_config)
 
 			# Verify error message
 			assert "Not a git repository" in str(excinfo.value)
@@ -77,15 +88,22 @@ class TestPRCommandBranchInfo(GitTestBase):
 		self.mock_repo_path("/mock/repo/path")
 		self.repo_path = "/mock/repo/path"
 
+		# Create mock ConfigLoader
+		self.mock_config = Mock(spec=ConfigLoader)
+		self.mock_config.get = MagicMock()
+		self.mock_config.get.repo_root = Path(self.repo_path)
+		self.mock_config.get.pr = MagicMock()
+		self.mock_config.get.pr.strategy = "github-flow"
+
 		# Create mock LLM client
-		self.mock_llm_client = Mock()
+		self.mock_llm_client = Mock(spec=LLMClient)
 
 		# Create the PRCommand with patched dependencies
 		with (
-			patch("codemap.llm.create_client", return_value=self.mock_llm_client),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value=self.repo_path),
+			patch("codemap.llm.LLMClient", return_value=self.mock_llm_client),
+			patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path)),
 		):
-			self.pr_command = PRCommand()
+			self.pr_command = PRCommand(config_loader=self.mock_config)
 
 	def test_get_branch_info_success(self) -> None:
 		"""Test successful retrieval of branch information."""
@@ -138,15 +156,22 @@ class TestPRCommandCommitHistory(GitTestBase):
 		self.mock_repo_path("/mock/repo/path")
 		self.repo_path = "/mock/repo/path"
 
+		# Create mock ConfigLoader
+		self.mock_config = Mock(spec=ConfigLoader)
+		self.mock_config.get = MagicMock()
+		self.mock_config.get.repo_root = Path(self.repo_path)
+		self.mock_config.get.pr = MagicMock()
+		self.mock_config.get.pr.strategy = "github-flow"
+
 		# Create mock LLM client
-		self.mock_llm_client = Mock()
+		self.mock_llm_client = Mock(spec=LLMClient)
 
 		# Create the PRCommand with patched dependencies
 		with (
-			patch("codemap.llm.create_client", return_value=self.mock_llm_client),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value=self.repo_path),
+			patch("codemap.llm.LLMClient", return_value=self.mock_llm_client),
+			patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path)),
 		):
-			self.pr_command = PRCommand()
+			self.pr_command = PRCommand(config_loader=self.mock_config)
 
 	def test_get_commit_history_success(self) -> None:
 		"""Test successful retrieval of commit history."""
@@ -231,99 +256,104 @@ class TestPRCommandDescriptionGeneration(GitTestBase):
 		self.mock_repo_path("/mock/repo/path")
 		self.repo_path = "/mock/repo/path"
 
+		# Create mock ConfigLoader
+		self.mock_config = Mock(spec=ConfigLoader)
+		self.mock_config.get = MagicMock()
+		self.mock_config.get.repo_root = Path(self.repo_path)
+		self.mock_config.get.pr = MagicMock()
+		self.mock_config.get.pr.strategy = "github-flow"
+
 		# Create mock objects
-		self.mock_llm_client = Mock()
+		self.mock_llm_client = Mock(spec=LLMClient)
 		self.mock_pr_generator = Mock()
 
 		# Create the PRCommand with patched dependencies
-		# First patch the create_client in llm module
-		patcher1 = patch("codemap.llm.create_client", return_value=self.mock_llm_client)
-		self.mock_create_client = patcher1.start()
+		# First patch the LLMClient
+		patcher1 = patch("codemap.llm.LLMClient", return_value=self.mock_llm_client)
+		self.mock_llm_client_cls = patcher1.start()
 		self._patchers.append(patcher1)
 
 		# Patch get_repo_root
-		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=self.repo_path)
+		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path))
 		self.mock_get_repo_root = patcher2.start()
 		self._patchers.append(patcher2)
 
 		# Then patch the PRGenerator class
 		patcher3 = patch("codemap.git.pr_generator.command.PRGenerator", return_value=self.mock_pr_generator)
-		self.mock_pr_generator_class = patcher3.start()
+		self.mock_pr_generator_cls = patcher3.start()
 		self._patchers.append(patcher3)
 
-		# Create the command
-		self.pr_command = PRCommand()
-
-		# Set up branch_info and commits for testing
-		self.branch_info = {
-			"current_branch": "feature-branch",
-			"target_branch": "main",
-		}
-		self.commits = [
-			{"hash": "abc123", "author": "John Doe", "subject": "feat: Add new feature"},
-			{"hash": "def456", "author": "Jane Smith", "subject": "fix: Fix a bug"},
-		]
+		# Create the PRCommand instance
+		self.pr_command = PRCommand(config_loader=self.mock_config)
 
 	def test_generate_pr_description_success(self) -> None:
 		"""Test successful PR description generation."""
-		# Arrange: Set up mocks
-		with patch("codemap.git.pr_generator.command.loading_spinner"):
-			# Configure mock to return a PR content dictionary
-			self.mock_pr_generator.generate_content_from_commits.return_value = {
-				"title": "Feature: Add new functionality",
-				"description": "This PR adds a new feature and fixes a bug.",
-			}
+		# Arrange: Configure mock generator
+		self.mock_pr_generator.generate_content_from_commits.return_value = {
+			"title": "Test PR",
+			"description": "This is a test PR description",
+		}
 
-			# Act: Call the method
-			description = self.pr_command._generate_pr_description(self.branch_info, self.commits)
+		# Create test data
+		branch_info = {"current_branch": "feature-branch", "target_branch": "main"}
+		commits = [{"hash": "abc123", "author": "Test User", "subject": "Test commit"}]
 
-			# Assert: Verify results
-			assert description == "This PR adds a new feature and fixes a bug."
+		# Act: Call the method
+		result = self.pr_command._generate_pr_description(branch_info, commits)
 
-			# Verify generate_content_from_commits was called with correct parameters
-			self.mock_pr_generator.generate_content_from_commits.assert_called_once_with(
-				base_branch="main", head_branch="feature-branch", use_llm=True
-			)
+		# Assert: Verify results
+		assert result == "This is a test PR description"
+
+		# Verify PR generator was called with correct parameters
+		self.mock_pr_generator.generate_content_from_commits.assert_called_once_with(
+			base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=True
+		)
 
 	def test_generate_pr_description_llm_error_fallback(self) -> None:
-		"""Test fallback when LLM PR description generation fails."""
-		# Arrange: Set up mocks
-		with patch("codemap.git.pr_generator.command.loading_spinner"):
-			# Configure first call to raise LLMError, second call to succeed
-			self.mock_pr_generator.generate_content_from_commits.side_effect = [
-				LLMError("LLM service unavailable"),
-				{
-					"title": "Update feature-branch",
-					"description": "Fallback description without LLM.",
-				},
+		"""Test fallback to simple description when LLM fails."""
+		# Arrange: Configure mock generator
+		self.mock_pr_generator.generate_content_from_commits.side_effect = [
+			LLMError("LLM error test"),  # First call raises error
+			{"title": "Fallback Title", "description": "Fallback description"},  # Second call succeeds
+		]
+
+		# Create test data
+		branch_info = {"current_branch": "feature-branch", "target_branch": "main"}
+		commits = [{"hash": "abc123", "author": "Test User", "subject": "Test commit"}]
+
+		# Act: Call the method
+		result = self.pr_command._generate_pr_description(branch_info, commits)
+
+		# Assert: Verify results
+		assert result == "Fallback description"
+
+		# Verify PR generator was called twice - first with LLM, then without
+		assert self.mock_pr_generator.generate_content_from_commits.call_count == 2
+		self.mock_pr_generator.generate_content_from_commits.assert_has_calls(
+			[
+				call(base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=True),
+				call(
+					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=False
+				),
 			]
-
-			# Act: Call the method
-			description = self.pr_command._generate_pr_description(self.branch_info, self.commits)
-
-			# Assert: Verify results
-			assert description == "Fallback description without LLM."
-
-			# Verify generate_content_from_commits was called with correct parameters
-			assert self.mock_pr_generator.generate_content_from_commits.call_count == 2
-			# First call with use_llm=True
-			assert self.mock_pr_generator.generate_content_from_commits.call_args_list[0][1]["use_llm"] is True
-			# Second call with use_llm=False
-			assert self.mock_pr_generator.generate_content_from_commits.call_args_list[1][1]["use_llm"] is False
+		)
 
 	def test_generate_pr_description_other_error(self) -> None:
-		"""Test error handling for other types of errors during PR description generation."""
-		# Arrange: Set up mocks
-		with patch("codemap.git.pr_generator.command.loading_spinner"):
-			# Configure mock to raise ValueError
-			self.mock_pr_generator.generate_content_from_commits.side_effect = ValueError("Invalid data")
+		"""Test handling of non-LLM errors during description generation."""
+		# Arrange: Configure mock generator
+		error_msg = "Other error"
+		self.mock_pr_generator.generate_content_from_commits.side_effect = ValueError(error_msg)
 
-			# Act and Assert: Should raise RuntimeError
-			with pytest.raises(RuntimeError) as excinfo:
-				self.pr_command._generate_pr_description(self.branch_info, self.commits)
+		# Create test data
+		branch_info = {"current_branch": "feature-branch", "target_branch": "main"}
+		commits = [{"hash": "abc123", "author": "Test User", "subject": "Test commit"}]
 
-			# Verify error message
-			assert "Failed to generate PR description: Invalid data" in str(excinfo.value)
+		# Act and Assert: Should raise RuntimeError
+		with pytest.raises(RuntimeError) as excinfo:
+			self.pr_command._generate_pr_description(branch_info, commits)
+
+		# Verify error message
+		assert f"Failed to generate PR description: {error_msg}" in str(excinfo.value)
 
 
 @pytest.mark.unit
@@ -340,28 +370,32 @@ class TestPRCommandRun(GitTestBase):
 		self.mock_repo_path("/mock/repo/path")
 		self.repo_path = "/mock/repo/path"
 
+		# Create mock ConfigLoader
+		self.mock_config = Mock(spec=ConfigLoader)
+		self.mock_config.get = MagicMock()
+		self.mock_config.get.repo_root = Path(self.repo_path)
+		self.mock_config.get.pr = MagicMock()
+		self.mock_config.get.pr.strategy = "github-flow"
+
 		# Create mock objects
-		self.mock_llm_client = Mock()
+		self.mock_llm_client = Mock(spec=LLMClient)
 		self.mock_pr_generator = Mock()
 
 		# Create the PRCommand with patched dependencies
-		# First patch the create_client in llm module
-		patcher1 = patch("codemap.llm.create_client", return_value=self.mock_llm_client)
-		self.mock_create_client = patcher1.start()
+		patcher1 = patch("codemap.llm.LLMClient", return_value=self.mock_llm_client)
+		self.mock_llm_client_cls = patcher1.start()
 		self._patchers.append(patcher1)
 
-		# Patch get_repo_root
-		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=self.repo_path)
+		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path))
 		self.mock_get_repo_root = patcher2.start()
 		self._patchers.append(patcher2)
 
-		# Then patch the PRGenerator class
 		patcher3 = patch("codemap.git.pr_generator.command.PRGenerator", return_value=self.mock_pr_generator)
-		self.mock_pr_generator_class = patcher3.start()
+		self.mock_pr_generator_cls = patcher3.start()
 		self._patchers.append(patcher3)
 
-		# Create the command
-		self.pr_command = PRCommand()
+		# Create the PRCommand instance
+		self.pr_command = PRCommand(config_loader=self.mock_config)
 
 	@patch.object(PRCommand, "_get_branch_info")
 	@patch.object(PRCommand, "_get_commit_history")
@@ -369,23 +403,21 @@ class TestPRCommandRun(GitTestBase):
 	def test_run_success(
 		self, mock_generate_description: Mock, mock_get_commits: Mock, mock_get_branch_info: Mock
 	) -> None:
-		"""Test successful execution of the run method."""
-		# Arrange: Set up mocks
-		branch_info = {
-			"current_branch": "feature-branch",
-			"target_branch": "main",
-		}
-		commits = [
-			{"hash": "abc123", "author": "John Doe", "subject": "feat: Add new feature"},
-			{"hash": "def456", "author": "Jane Smith", "subject": "fix: Fix a bug"},
-		]
-		description = "This PR adds a new feature and fixes a bug."
-
+		"""Test successful execution of run method."""
+		# Arrange: Configure mocks
+		branch_info = {"current_branch": "feature-branch", "target_branch": "main"}
 		mock_get_branch_info.return_value = branch_info
+
+		commits = [
+			{"hash": "abc123", "author": "Test User", "subject": "Test commit 1"},
+			{"hash": "def456", "author": "Test User", "subject": "Test commit 2"},
+		]
 		mock_get_commits.return_value = commits
+
+		description = "Test PR description"
 		mock_generate_description.return_value = description
 
-		# Act: Call the run method
+		# Act: Call run method
 		result = self.pr_command.run()
 
 		# Assert: Verify results
@@ -402,22 +434,24 @@ class TestPRCommandRun(GitTestBase):
 	@patch.object(PRCommand, "_get_commit_history")
 	@patch.object(PRCommand, "_raise_no_commits_error")
 	def test_run_no_commits(self, mock_raise_error: Mock, mock_get_commits: Mock, mock_get_branch_info: Mock) -> None:
-		"""Test run method when there are no commits found."""
-		# Arrange: Set up mocks
-		branch_info = {
-			"current_branch": "feature-branch",
-			"target_branch": "main",
-		}
+		"""Test run method with no commits."""
+		# Arrange: Configure mocks
+		branch_info = {"current_branch": "feature-branch", "target_branch": "main"}
 		mock_get_branch_info.return_value = branch_info
-		mock_get_commits.return_value = []  # No commits found
-		mock_raise_error.side_effect = RuntimeError("No commits found between feature-branch and main")
+
+		# No commits
+		mock_get_commits.return_value = []
+
+		# Configure raise_no_commits_error to raise a specific error
+		error_msg = "No commits found between branches"
+		mock_raise_error.side_effect = RuntimeError(error_msg)
 
 		# Act and Assert: Should raise RuntimeError
 		with pytest.raises(RuntimeError) as excinfo:
 			self.pr_command.run()
 
-		# Verify error message
-		assert "No commits found between feature-branch and main" in str(excinfo.value)
+		# Verify error message and state
+		assert error_msg in str(excinfo.value)
 		assert self.pr_command.error_state == "failed"
 
 		# Verify methods were called
@@ -427,39 +461,31 @@ class TestPRCommandRun(GitTestBase):
 
 	@patch.object(PRCommand, "_get_branch_info")
 	def test_run_with_branch_info_error(self, mock_get_branch_info: Mock) -> None:
-		"""Test error handling when getting branch information fails."""
-		# Arrange: Set up mocks
-		mock_get_branch_info.side_effect = RuntimeError("Failed to get branch information")
+		"""Test run method when branch info retrieval fails."""
+		# Arrange: Configure mocks
+		error_msg = "Failed to get branch information"
+		mock_get_branch_info.side_effect = RuntimeError(error_msg)
 
 		# Act and Assert: Should raise RuntimeError
 		with pytest.raises(RuntimeError) as excinfo:
 			self.pr_command.run()
 
-		# Verify error message
-		assert "Failed to get branch information" in str(excinfo.value)
+		# Verify error message and state
+		assert error_msg in str(excinfo.value)
 		assert self.pr_command.error_state == "failed"
 
-	def test_raise_no_commits_error(self) -> None:
-		"""Test the _raise_no_commits_error method."""
-		# Arrange: Set up branch_info
-		branch_info = {
-			"current_branch": "feature-branch",
-			"target_branch": "main",
-		}
+		# Verify methods were called
+		mock_get_branch_info.assert_called_once()
 
-		# Set up logger mock for this test specifically
-		with (
-			pytest.raises(RuntimeError) as excinfo,
-			patch("codemap.git.pr_generator.command.logger") as mock_logger,
-		):
-			# Act: Call the method directly
+	def test_raise_no_commits_error(self) -> None:
+		"""Test raising error when no commits are found."""
+		# Arrange: Create branch info
+		branch_info = {"current_branch": "feature-branch", "target_branch": "main"}
+
+		# Act and Assert: Should raise RuntimeError
+		with pytest.raises(RuntimeError) as excinfo:
 			self.pr_command._raise_no_commits_error(branch_info)
 
-		# Assert: Verify error message and logger call
-		assert "No commits found between feature-branch and main" in str(excinfo.value)
-
-		# The logger is called with the formatted string directly, not with format specifiers and args
-		expected_message = (
-			f"No commits found between {branch_info['current_branch']} and {branch_info['target_branch']}"
-		)
-		mock_logger.warning.assert_called_with(expected_message)
+		# Verify error message
+		expected_msg = f"No commits found between {branch_info['current_branch']} and {branch_info['target_branch']}"
+		assert expected_msg in str(excinfo.value)

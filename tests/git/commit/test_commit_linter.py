@@ -1,5 +1,7 @@
 """Tests for the commit linter module."""
 
+from __future__ import annotations
+
 from codemap.git.commit_linter import CommitLintConfig, CommitLinter, RuleLevel
 
 
@@ -161,24 +163,6 @@ def test_disabled_rule() -> None:
 
 	# Should be valid since the rule is disabled
 	assert is_valid
-
-
-def test_from_dict() -> None:
-	"""Test creating config from dict."""
-	config_dict = {
-		"commit": {
-			"convention": {"types": ["custom1", "custom2"], "scopes": ["scope1", "scope2"], "max_length": 50},
-			"lint": {"header_max_length": {"value": 60, "rule": "always", "level": "WARNING"}},
-		}
-	}
-
-	config = CommitLintConfig.from_dict(config_dict)
-
-	# Check that values are correctly loaded
-	assert config.type_enum.value == ["custom1", "custom2"]
-	assert config.scope_enum.value == ["scope1", "scope2"]
-	assert config.header_max_length.value == 60
-	assert config.header_max_length.level == RuleLevel.WARNING
 
 
 def test_scope_rule_configuration() -> None:

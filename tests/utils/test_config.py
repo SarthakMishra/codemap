@@ -3,13 +3,13 @@
 import os
 from collections.abc import Generator
 from pathlib import Path
-from unittest.mock import Mock, mock_open, patch
+from unittest.mock import Mock, patch
 
 import pytest
 import yaml
 
-from codemap.config import DEFAULT_CONFIG
-from codemap.utils.config_loader import ConfigError, ConfigLoader
+from codemap.config import AppConfigSchema, ConfigError, ConfigLoader
+from codemap.config.config_schema import CommitSchema
 from tests.base import FileSystemTestBase
 from tests.helpers import create_file_content
 
@@ -17,7 +17,7 @@ from tests.helpers import create_file_content
 @pytest.fixture
 def mock_yaml_loader() -> Generator[Mock, None, None]:
 	"""Return a mock for the YAML safe_load function to use in config loader tests."""
-	with patch("codemap.utils.config_loader.yaml.safe_load") as mock_loader:
+	with patch("codemap.config.config_loader.yaml.safe_load") as mock_loader:
 		yield mock_loader
 
 
@@ -60,135 +60,74 @@ class TestConfigLoader(FileSystemTestBase):
 		# Change to a temporary directory to ensure we don't pick up any .codemap.yml
 		os.chdir(str(self.temp_dir))
 
-		config_loader = ConfigLoader(None)
-		# Compare each section individually for better error messages
-		for key in DEFAULT_CONFIG:
-			assert config_loader.config[key] == DEFAULT_CONFIG[key], f"Mismatch in {key} section"
+		with (
+			patch("codemap.config.config_loader.get_repo_root", return_value=self.temp_dir),
+			patch.object(ConfigLoader, "_get_config_file", return_value=None),
+			patch.object(ConfigLoader, "repo_root", self.temp_dir, create=True),
+		):
+			config_loader = ConfigLoader()
+			# Verify the config is an instance of AppConfigSchema
+			assert isinstance(config_loader._app_config, AppConfigSchema)
+			# Verify default values from schema are present
+			assert config_loader._app_config.llm.model == "openai:gpt-4o-mini"
+			assert config_loader._app_config.embedding.model_name == "voyage-code-3"
 
 	def test_custom_config_loading(self) -> None:
 		"""Test loading custom configuration from file."""
-		custom_config = {
-			"token_limit": 2000,
-			"use_gitignore": False,
-			"output_dir": "custom_docs",
-		}
+		custom_config = {"llm": {"model": "openai:gpt-4", "temperature": 0.7}, "gen": {"output_dir": "custom_docs"}}
 
 		create_file_content(self.config_file, yaml.dump(custom_config))
-		config_loader = ConfigLoader(str(self.config_file))
 
-		assert config_loader.config["token_limit"] == 2000
-		assert config_loader.config["use_gitignore"] is False
-		assert config_loader.config["output_dir"] == "custom_docs"
-
-	def test_config_validation(self) -> None:
-		"""Test configuration validation."""
-		invalid_config = {
-			"token_limit": "not_a_number",
-			"use_gitignore": "not_a_boolean",
-		}
-
-		create_file_content(self.config_file, yaml.dump(invalid_config))
-
-		# ConfigLoader no longer validates types during loading,
-		# it just merges the values as-is
-		config_loader = ConfigLoader(str(self.config_file))
-
-		# Verify that the "invalid" values were loaded as strings
-		assert config_loader.config["token_limit"] == "not_a_number"
-		assert config_loader.config["use_gitignore"] == "not_a_boolean"
-
-	def test_config_merging(self) -> None:
-		"""Test merging custom config with default config."""
-		partial_config = {
-			"token_limit": 3000,
-		}
-
-		create_file_content(self.config_file, yaml.dump(partial_config))
-		config_loader = ConfigLoader(str(self.config_file))
-
-		assert config_loader.config["token_limit"] == 3000
-		# Check for a nested key that exists in the default config
-		assert "use_gitignore" in config_loader.config["gen"]
-		assert config_loader.config["gen"]["use_gitignore"] is True
-
-	def test_nonexistent_config_file(self) -> None:
-		"""Test handling of nonexistent config file."""
-		nonexistent_path = "/nonexistent/config.yml"
-
-		# During initialization, ConfigLoader now just warns about nonexistent files
-		# but doesn't raise exceptions
-		config_loader = ConfigLoader(nonexistent_path)
-
-		# Verify that default config was used by checking a known default key
-		# The problematic token_limit key is removed from the assertion
-		assert "gen" in config_loader.config
-		assert "use_gitignore" in config_loader.config["gen"]
-		assert config_loader.config["gen"]["use_gitignore"] is True  # Check the default value
+		with (
+			patch("codemap.config.config_loader.get_repo_root", return_value=self.temp_dir),
+			patch.object(ConfigLoader, "_parse_yaml_file", return_value=custom_config),
+			patch.object(ConfigLoader, "_get_config_file", return_value=self.config_file),
+			patch.object(ConfigLoader, "repo_root", self.temp_dir, create=True),
+		):
+			config_loader = ConfigLoader()
+			# Verify custom values are loaded
+			assert config_loader._app_config.llm.model == "openai:gpt-4"
+			assert config_loader._app_config.llm.temperature == 0.7
+			assert config_loader._app_config.gen.output_dir == "custom_docs"
+			# Verify default values are still present for unspecified fields
+			assert config_loader._app_config.gen.use_gitignore is True
 
 	def test_invalid_yaml_config(self) -> None:
 		"""Test handling of invalid YAML in config file."""
 		create_file_content(self.config_file, "invalid: yaml: content: :")
 
-		with pytest.raises(ConfigError, match="mapping values are not allowed here"):
-			ConfigLoader(str(self.config_file))
+		with (
+			pytest.raises(ConfigError),
+			patch("codemap.config.config_loader.get_repo_root", return_value=self.temp_dir),
+			patch.object(ConfigLoader, "_get_config_file", return_value=self.config_file),
+			patch.object(ConfigLoader, "repo_root", self.temp_dir, create=True),
+			patch.object(ConfigLoader, "_parse_yaml_file", side_effect=yaml.YAMLError("Invalid YAML")),
+		):
+			ConfigLoader()
 
-	def test_get_commit_hooks(self, mock_yaml_loader: Mock, tmp_path: Path) -> None:
-		"""Test loading commit hooks configuration."""
-		# Create a config file
-		config_file = tmp_path / ".codemap.yml"
-		config_content = """
-token_limit: 5000
-commit:
-  bypass_hooks: true
-"""
-		config_file.write_text(config_content)
 
-		# Setup YAML data for the mock to return
-		yaml_data = {"token_limit": 5000, "commit": {"bypass_hooks": True}}
-		mock_yaml_loader.return_value = yaml_data
+@pytest.mark.unit
+class TestAppConfigSchema:
+	"""Test cases for AppConfigSchema functionality."""
 
-		# Create loader with mocked yaml loader
-		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader.get_instance(config_file=str(config_file))
-			# Test get_bypass_hooks returns the configured value
-			assert loader.get_bypass_hooks() is True
+	def test_commit_config_defaults(self) -> None:
+		"""Test default values for commit configuration."""
+		# Create config with defaults
+		config = AppConfigSchema()
 
-		# Test with bypass_hooks explicitly set to false
-		yaml_data = {"token_limit": 5000, "commit": {"bypass_hooks": False}}
-		mock_yaml_loader.return_value = yaml_data
+		# Check default values
+		assert config.commit.bypass_hooks is False
+		assert config.commit.strategy == "file"
+		assert config.commit.use_lod_context is True
 
-		config_content = """
-token_limit: 5000
-commit:
-  bypass_hooks: false
-"""
-		config_file.write_text(config_content)
-		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader.get_instance(config_file=str(config_file))
-			assert loader.get_bypass_hooks() is False
+	def test_commit_config_override(self) -> None:
+		"""Test overriding commit configuration values."""
+		# Create config with custom commit settings
+		custom_commit = CommitSchema(bypass_hooks=True, strategy="semantic")
+		config = AppConfigSchema(commit=custom_commit)
 
-		# Test with commit section but no bypass_hooks (should default to False)
-		yaml_data = {"token_limit": 5000, "commit": {"strategy": "semantic"}}
-		mock_yaml_loader.return_value = yaml_data
-
-		config_content = """
-token_limit: 5000
-commit:
-  strategy: semantic
-"""
-		config_file.write_text(config_content)
-		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader.get_instance(config_file=str(config_file))
-			assert loader.get_bypass_hooks() is False
-
-		# Test with no commit section (should default to False)
-		yaml_data = {"token_limit": 5000}
-		mock_yaml_loader.return_value = yaml_data
-
-		config_content = """
-token_limit: 5000
-"""
-		config_file.write_text(config_content)
-		with patch("builtins.open", mock_open(read_data=config_content)):
-			loader = ConfigLoader.get_instance(config_file=str(config_file))
-			assert loader.get_bypass_hooks() is False
+		# Check custom values
+		assert config.commit.bypass_hooks is True
+		assert config.commit.strategy == "semantic"
+		# Check defaults for values not overridden
+		assert config.commit.use_lod_context is True

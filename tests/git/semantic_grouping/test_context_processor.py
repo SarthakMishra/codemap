@@ -125,43 +125,54 @@ class TestContextProcessor:
 		assert "**CLASS**: `TestClass` - `class TestClass:`" in signatures_result
 		assert "**METHOD**: `test_method` - `def test_method(self):`" in signatures_result
 
-	@patch("codemap.processor.lod.LODGenerator")
+	@patch("codemap.git.semantic_grouping.context_processor.LODGenerator")
 	@patch("codemap.git.semantic_grouping.context_processor.Path")
-	def test_process_chunks_with_lod(self, mock_path, mock_lod_generator):
+	@patch("codemap.git.semantic_grouping.context_processor.MAX_SIMPLE_CHUNKS", 1)  # Force LOD processing path
+	def test_process_chunks_with_lod(self, mock_path_cls, mock_lod_generator_cls):
 		"""Test LOD processing of chunks."""
-		# Create mock LOD generator and entity
-		mock_lod_instance = MagicMock()
-		mock_lod_generator.return_value = mock_lod_instance
+		# Create mock LOD generator
+		mock_lod_generator = MagicMock()
+		mock_lod_generator_cls.return_value = mock_lod_generator
 
-		# Create a mock LOD entity with structure
-		mock_lod_entity = MagicMock()
-		mock_lod_entity.name = "TestClass"
-		mock_lod_entity.entity_type = EntityType.CLASS
-		mock_lod_entity.signature = "class TestClass:"
-		mock_lod_entity.children = []
+		# Create a mock LOD entity
+		mock_entity = MagicMock()
+		mock_entity.name = "TestClass"
+		mock_entity.entity_type = EntityType.CLASS
+		mock_entity.signature = "class TestClass:"
+		mock_entity.children = []
 
-		mock_lod_instance.generate_lod.return_value = mock_lod_entity
+		# Set up the generate_lod mock
+		mock_lod_generator.generate_lod.return_value = mock_entity
 
 		# Set up Path mock
 		mock_path_instance = MagicMock()
 		mock_path_instance.exists.return_value = True
-		mock_path.return_value = mock_path_instance
+		mock_path_cls.return_value = mock_path_instance
 
-		# Create chunks
+		# Create chunks - more than MAX_SIMPLE_CHUNKS to trigger LOD processing
 		chunks = [
 			DiffChunk(files=["test.py"], content="Python content"),
 			DiffChunk(files=["other.py"], content="More Python content"),
+			DiffChunk(files=["third.py"], content="Even more Python content"),
+			DiffChunk(files=["fourth.py"], content="Yet more Python content"),
 		]
 
-		# Process chunks
-		result = process_chunks_with_lod(chunks, 1000)
+		# Mock format_lod_entity to return a known string
+		with patch("codemap.git.semantic_grouping.context_processor.format_lod_entity") as mock_format_lod:
+			mock_format_lod.return_value = "Formatted LOD entity"
 
-		# Verify LOD generator was called
-		assert mock_lod_instance.generate_lod.called
+			# Process chunks
+			result = process_chunks_with_lod(chunks, 1000)
 
-		# Result should be a string
-		assert isinstance(result, str)
-		assert result  # Not empty
+			# Verify result contains our mock formatting
+			assert "Formatted LOD entity" in result
+
+			# Verify LOD generator was called
+			assert mock_lod_generator.generate_lod.called
+
+			# Result should be a string
+			assert isinstance(result, str)
+			assert result  # Not empty
 
 	def test_small_chunks_use_regular_formatting(self):
 		"""Test that small chunk sets use regular formatting."""

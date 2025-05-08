@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
 
@@ -23,13 +23,28 @@ def mock_lod_generator() -> MagicMock:
 @pytest.fixture
 def mock_config_loader() -> MagicMock:
 	"""Mock ConfigLoader for testing."""
+	from codemap.config.config_schema import AppConfigSchema, EmbeddingChunkingSchema, EmbeddingSchema
+
 	mock_config = MagicMock(spec=ConfigLoader)
-	mock_config.get.return_value = {
-		"chunking": {
-			"max_hierarchy_depth": 2,
-			"max_file_lines": 1000,
-		}
-	}
+
+	# Create mock for app config
+	mock_app_config = MagicMock(spec=AppConfigSchema)
+
+	# Create mock for embedding config
+	mock_embedding_config = MagicMock(spec=EmbeddingSchema)
+
+	# Create mock for chunking config
+	mock_chunking_config = MagicMock(spec=EmbeddingChunkingSchema)
+	mock_chunking_config.max_hierarchy_depth = 2
+	mock_chunking_config.max_file_lines = 1000
+
+	# Set up the property chain
+	mock_embedding_config.chunking = mock_chunking_config
+	mock_app_config.embedding = mock_embedding_config
+
+	# Set up the get property to return the app config
+	type(mock_config).get = PropertyMock(return_value=mock_app_config)
+
 	return mock_config
 
 

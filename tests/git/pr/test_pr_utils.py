@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from codemap.config import ConfigLoader
 from codemap.git.pr_generator.schemas import PullRequest
 from codemap.git.pr_generator.utils import (
 	PRCreationError,
@@ -30,7 +31,7 @@ from codemap.git.pr_generator.utils import (
 	update_pull_request,
 )
 from codemap.git.utils import GitError
-from codemap.llm import LLMClient
+from codemap.llm.client import LLMClient
 from tests.base import GitTestBase
 
 
@@ -238,35 +239,42 @@ class TestPRUtilsCommitOperations(GitTestBase):
 		assert result == "Docs: Update readme"
 		# It should use the first commit, which is a docs commit
 
-	@patch("codemap.llm.create_client")
-	def test_generate_pr_title_with_llm(self, mock_create_client) -> None:
+	@patch("codemap.llm.client.LLMClient")
+	@patch("codemap.config.ConfigLoader")
+	def test_generate_pr_title_with_llm(self, mock_config_loader, mock_llm_client_cls) -> None:
 		"""Test generating PR title with LLM."""
 		# Arrange
 		commits = ["feat: Add user authentication", "fix: Fix login form validation"]
 
 		# Mock the LLMClient
+		mock_config = MagicMock(spec=ConfigLoader)
+		mock_config_loader.return_value = mock_config
+
 		mock_client = MagicMock(spec=LLMClient)
-		mock_client.generate_text.return_value = "Add user authentication feature"
-		mock_create_client.return_value = mock_client
+		mock_client.completion.return_value = "Add user authentication feature"
+		mock_llm_client_cls.return_value = mock_client
 
 		# Act
-		result = generate_pr_title_with_llm(commits)
+		result = generate_pr_title_with_llm(commits, mock_client)
 
 		# Assert
 		assert result == "Add user authentication feature"
-		mock_create_client.assert_called_once()
-		mock_client.generate_text.assert_called_once()
-		# Ensure the provided commits are included in the prompt
-		assert "user authentication" in mock_client.generate_text.call_args[1]["prompt"]
+		mock_client.completion.assert_called_once()
+		# Ensure the provided commits are included in the messages
+		assert any("user authentication" in str(arg) for arg in mock_client.completion.call_args[1]["messages"])
 
 	def test_generate_pr_title_with_llm_empty_commits(self) -> None:
 		"""Test generating PR title with LLM and empty commits."""
+		# Create a mock LLMClient
+		mock_client = MagicMock(spec=LLMClient)
+
 		# Act
-		result = generate_pr_title_with_llm([])
+		result = generate_pr_title_with_llm([], mock_client)
 
 		# Assert
 		assert result == "Update branch"
 		# Should return default title without calling LLM
+		mock_client.completion.assert_not_called()
 
 	def test_generate_pr_description_from_commits_empty(self) -> None:
 		"""Test generating PR description with empty commits."""
@@ -300,35 +308,43 @@ class TestPRUtilsCommitOperations(GitTestBase):
 		assert "- [x] Bug Fix" in result
 		assert "- [x] Documentation" in result
 
-	@patch("codemap.llm.create_client")
-	def test_generate_pr_description_with_llm(self, mock_create_client) -> None:
+	@patch("codemap.llm.client.LLMClient")
+	@patch("codemap.config.ConfigLoader")
+	def test_generate_pr_description_with_llm(self, mock_config_loader, mock_llm_client_cls) -> None:
 		"""Test generating PR description with LLM."""
 		# Arrange
 		commits = ["feat: Add user authentication", "fix: Fix login form validation"]
 
 		# Mock the LLM client
+		mock_config = MagicMock(spec=ConfigLoader)
+		mock_config_loader.return_value = mock_config
+
 		mock_client = MagicMock(spec=LLMClient)
-		mock_client.generate_text.return_value = "This PR adds user authentication and fixes login form validation."
-		mock_create_client.return_value = mock_client
+		mock_client.completion.return_value = "This PR adds user authentication and fixes login form validation."
+		mock_llm_client_cls.return_value = mock_client
 
 		# Act
 		result = generate_pr_description_with_llm(commits, mock_client)
 
 		# Assert
 		assert result == "This PR adds user authentication and fixes login form validation."
-		mock_client.generate_text.assert_called_once()
-		# Make sure the commits are included in the prompt
-		assert "user authentication" in mock_client.generate_text.call_args[1]["prompt"]
-		assert "login form validation" in mock_client.generate_text.call_args[1]["prompt"]
+		mock_client.completion.assert_called_once()
+		# Make sure the commits are included in the messages
+		assert any("user authentication" in str(arg) for arg in mock_client.completion.call_args[1]["messages"])
+		assert any("login form validation" in str(arg) for arg in mock_client.completion.call_args[1]["messages"])
 
 	def test_generate_pr_description_with_llm_empty_commits(self) -> None:
 		"""Test generating PR description with LLM and empty commits."""
+		# Create a mock LLMClient
+		mock_client = MagicMock(spec=LLMClient)
+
 		# Act
-		result = generate_pr_description_with_llm([])
+		result = generate_pr_description_with_llm([], mock_client)
 
 		# Assert
 		assert result == "No changes"
 		# Should return default description without calling LLM
+		mock_client.completion.assert_not_called()
 
 
 @pytest.mark.unit

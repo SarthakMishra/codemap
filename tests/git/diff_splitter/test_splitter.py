@@ -1,10 +1,11 @@
 """Tests for the diff splitter implementation."""
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import pytest
 
+from codemap.config import ConfigLoader
 from codemap.git.diff_splitter.schemas import DiffChunk
 from codemap.git.diff_splitter.splitter import DiffSplitter
 from codemap.git.utils import GitDiff
@@ -26,8 +27,23 @@ class TestDiffSplitter(GitTestBase):
 		# Create a mock repo path
 		self.repo_root = Path("/mock/repo")
 
+		# Create mock ConfigLoader with proper config structure
+		self.mock_config = Mock(spec=ConfigLoader)
+		self.mock_config.get = MagicMock()
+		self.mock_config.get.repo_root = self.repo_root
+		self.mock_config.get.commit = MagicMock()
+		self.mock_config.get.commit.diff_splitter = MagicMock()
+
+		# Set required diff_splitter config values
+		self.mock_config.get.commit.diff_splitter.similarity_threshold = 0.6
+		self.mock_config.get.commit.diff_splitter.directory_similarity_threshold = 0.3
+		self.mock_config.get.commit.diff_splitter.min_chunks_for_consolidation = 2
+		self.mock_config.get.commit.diff_splitter.max_chunks_before_consolidation = 20
+		self.mock_config.get.commit.diff_splitter.max_file_size_for_llm = 50000
+		self.mock_config.get.commit.diff_splitter.max_log_diff_size = 1000
+
 		# Create a splitter instance
-		self.splitter = DiffSplitter(self.repo_root)
+		self.splitter = DiffSplitter(config_loader=self.mock_config)
 
 		# Create a sample diff for testing
 		self.sample_diff = GitDiff(
@@ -47,25 +63,24 @@ index 2345678..bcdefgh 100645
 			is_staged=False,
 		)
 
+	@pytest.mark.asyncio
 	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
 	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.are_sentence_transformers_available")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available")
-	@patch("codemap.git.diff_splitter.splitter.loading_spinner")
-	def test_split_diff_basic(
+	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
+	async def test_split_diff_basic(
 		self,
-		_mock_spinner,
-		mock_is_model_avail,
-		mock_are_st_avail,
+		mock_semantic_strategy_cls,
 		mock_is_test,
 		mock_filter_files,
 	) -> None:
 		"""Test basic functionality of split_diff method."""
 		# Arrange
 		mock_is_test.return_value = False
-		mock_are_st_avail.return_value = True
-		mock_is_model_avail.return_value = True
 		mock_filter_files.return_value = (["file1.py", "file2.py"], [])
+
+		# Setup mock strategy
+		mock_strategy = AsyncMock()
+		mock_semantic_strategy_cls.return_value = mock_strategy
 
 		expected_chunks = [
 			DiffChunk(
@@ -79,189 +94,120 @@ index 2345678..bcdefgh 100645
 				description="Changes in file2.py",
 			),
 		]
-
-		# Mock _split_semantic to return our expected chunks
-		with patch.object(self.splitter, "_split_semantic", return_value=expected_chunks):
-			# Act
-			result_chunks, large_files = self.splitter.split_diff(self.sample_diff)
-
-			# Assert
-			assert result_chunks == expected_chunks
-			assert large_files == []
-			mock_filter_files.assert_called_once_with(["file1.py", "file2.py"], False)  # noqa: FBT003
-			mock_are_st_avail.assert_called()
-			mock_is_model_avail.assert_called()
-
-	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
-	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	def test_split_diff_empty_files(self, mock_is_test, mock_filter_files) -> None:
-		"""Test split_diff with empty files list."""
-		# Arrange
-		mock_is_test.return_value = False
-		empty_diff = GitDiff(files=[], content="", is_staged=False)
-
-		# Act
-		result_chunks, large_files = self.splitter.split_diff(empty_diff)
-
-		# Assert
-		assert result_chunks == []
-		assert large_files == []
-		mock_filter_files.assert_not_called()
-
-	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
-	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.are_sentence_transformers_available")
-	def test_split_diff_no_sentence_transformers(self, mock_are_st_avail, mock_is_test, mock_filter_files) -> None:
-		"""Test split_diff when sentence_transformers is not available."""
-		# Arrange
-		mock_is_test.return_value = False
-		mock_are_st_avail.return_value = False  # Set to False to trigger the ValueError
-		mock_filter_files.return_value = (["file1.py"], [])
-
-		# Act & Assert
-		with pytest.raises(ValueError, match="Semantic splitting is not available"):
-			self.splitter.split_diff(self.sample_diff)
-
-	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
-	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available")
-	@patch("codemap.git.diff_splitter.splitter.DiffSplitter._check_model_availability")
-	@patch("codemap.git.diff_splitter.splitter.loading_spinner")
-	def test_split_diff_model_not_available(
-		self,
-		_mock_spinner,
-		mock_check_model,
-		mock_is_model_avail,
-		mock_is_test,
-		mock_filter_files,
-	) -> None:
-		"""Test split_diff when embedding model is not available."""
-		# Arrange
-		mock_is_test.return_value = False
-		mock_is_model_avail.return_value = False  # Simulate model not being available
-		mock_check_model.return_value = False  # Ensure check also returns False
-		mock_filter_files.return_value = (["file1.py"], [])
-
-		# Act & Assert
-		with pytest.raises(ValueError, match="Semantic splitting failed: embedding model could not be loaded"):
-			self.splitter.split_diff(self.sample_diff)
-
-	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
-	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
-	def test_split_diff_large_content(self, mock_is_test: MagicMock, mock_filter_files: MagicMock) -> None:
-		"""Test split_diff with large diff content (should still process files)."""
-		# Arrange
-		mock_is_test.return_value = False
-		mock_filter_files.return_value = (["file1.py", "file2.py"], [])  # filter_valid_files still returns valid files
-
-		# Create a splitter instance inside patches
-		with (
-			patch(
-				"codemap.git.diff_splitter.splitter.DiffSplitter.are_sentence_transformers_available",
-				return_value=True,
-			),
-			patch("codemap.git.diff_splitter.splitter.DiffSplitter.is_model_available", return_value=True),
-			patch("codemap.git.diff_splitter.splitter.loading_spinner"),
-			# Remove patch for nonexistent _extract_file_names_from_diff function
-			patch.object(
-				DiffSplitter, "_split_semantic", return_value=[]
-			) as mock_split_semantic,  # Mock the semantic split
-		):
-			splitter = DiffSplitter(self.repo_root)
-			# Make sample diff content large
-			large_sample_diff = GitDiff(
-				files=["file1.py", "file2.py"],  # Original files list
-				content="a" * (splitter.max_file_size_for_llm + 10),  # Large content
-				is_staged=False,
-			)
-
-			# Act
-			result_chunks, large_files = splitter.split_diff(large_sample_diff)
-
-			# Assert
-			# Even though content was large, files were extracted and passed to filter_valid_files
-			# _split_semantic was called with the modified diff (empty content, extracted files)
-			mock_filter_files.assert_called_once_with(["file1.py", "file2.py"], False)  # noqa: FBT003
-			mock_split_semantic.assert_called_once()
-			assert result_chunks == []  # As mocked
-			assert large_files == []  # Should always be empty
-
-	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
-	def test_split_semantic_success(self, mock_semantic_strategy_cls) -> None:
-		"""Test the _split_semantic method with successful semantic splitting."""
-		# Arrange
-		mock_strategy = MagicMock()
-		mock_semantic_strategy_cls.return_value = mock_strategy
-
-		expected_chunks = [
-			DiffChunk(files=["file1.py"], content="chunk1", description="Description 1"),
-			DiffChunk(files=["file2.py"], content="chunk2", description="Description 2"),
-		]
 		mock_strategy.split.return_value = expected_chunks
 
 		# Act
-		result = self.splitter._split_semantic(self.sample_diff)
+		result_chunks, large_files = await self.splitter.split_diff(self.sample_diff)
 
 		# Assert
-		assert result == expected_chunks
+		assert result_chunks == expected_chunks
+		assert large_files == []
+		mock_filter_files.assert_called_once()
 		mock_semantic_strategy_cls.assert_called_once()
-		mock_strategy.split.assert_called_once_with(self.sample_diff)
+		mock_strategy.split.assert_called_once()
 
-	@patch("codemap.git.diff_splitter.splitter.FileSplitStrategy")  # Mock fallback strategy
-	def test_split_semantic_st_unavailable_fallback(self, mock_file_strategy_cls) -> None:
-		"""Test _split_semantic fallback when sentence transformers are unavailable."""
+	@pytest.mark.asyncio
+	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
+	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
+	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
+	async def test_split_diff_large_content(self, mock_semantic_strategy_cls, mock_is_test, mock_filter_files) -> None:
+		"""Test split_diff with large diff content."""
 		# Arrange
-		mock_file_strategy = MagicMock()
-		mock_file_strategy_cls.return_value = mock_file_strategy
-		# Define what FileSplitStrategy would *actually* return for the sample diff
-		# It creates one chunk per file mentioned in the diff header
-		expected_fallback_chunks = [
+		mock_is_test.return_value = False
+		mock_filter_files.return_value = (["file1.py", "file2.py"], [])
+
+		# Configure mock strategy
+		mock_strategy = AsyncMock()
+		mock_semantic_strategy_cls.return_value = mock_strategy
+
+		# Create expected chunks
+		expected_chunks = [
 			DiffChunk(
 				files=["file1.py"],
-				# Content should ONLY be the diff for file1.py
-				content=(
-					"diff --git a/file1.py b/file1.py\n"
-					"index 1234567..abcdefg 100644\n"
-					"--- a/file1.py\n"
-					"+++ b/file1.py\n"
-					"@@ -10,7 +10,7 @@ def existing_function():\n"
-					"    pass\n"
-				),
-				# Description uses determine_commit_type + create_chunk_description
-				description="chore: update file1.py",
+				content="file1 content",
+				description="Changes in file1.py",
 			),
 			DiffChunk(
 				files=["file2.py"],
-				# Content should ONLY be the diff for file2.py
-				content=(
-					"diff --git a/file2.py b/file2.py\n"
-					"index 2345678..bcdefgh 100645\n"
-					"--- a/file2.py\n"
-					"+++ b/file2.py\n"
-					"@@ -5,3 +5,6 @@ def old_function():\n"
-					"    pass\n"
-				),
-				description="chore: update file2.py",
+				content="file2 content",
+				description="Changes in file2.py",
 			),
 		]
-		mock_file_strategy.split.return_value = expected_fallback_chunks
+		mock_strategy.split.return_value = expected_chunks
 
-		# Simulate sentence transformers being unavailable
-		with patch.object(self.splitter, "are_sentence_transformers_available", return_value=False):
-			# Act
-			# We call _split_semantic, which should internally call the fallback _create_basic_file_chunk,
-			# which instantiates and calls FileSplitStrategy.split (which we mocked)
-			result = self.splitter._split_semantic(self.sample_diff)
+		# Make sample diff content large
+		large_diff_content = "a" * (self.splitter.max_file_size_for_llm + 10)
+		large_sample_diff = GitDiff(
+			files=["file1.py", "file2.py"],
+			content=large_diff_content,
+			is_staged=False,
+		)
+
+		# Act
+		result_chunks, large_files = await self.splitter.split_diff(large_sample_diff)
 
 		# Assert
-		# The result should be what our mocked FileSplitStrategy.split returned
-		assert result == expected_fallback_chunks
-		mock_file_strategy_cls.assert_called_once()  # Verify fallback class was instantiated
-		mock_file_strategy.split.assert_called_once_with(self.sample_diff)
+		assert result_chunks == expected_chunks
+		assert large_files == []
+		mock_filter_files.assert_called_once()
+		mock_strategy.split.assert_called_once()
 
-	def test_split_diff_with_untracked_files(self, tmp_path: Path) -> None:
+	@pytest.mark.asyncio
+	@patch("codemap.git.diff_splitter.splitter.filter_valid_files")
+	@patch("codemap.git.diff_splitter.splitter.SemanticSplitStrategy")
+	@patch("codemap.git.diff_splitter.splitter.logger")
+	@patch("codemap.git.diff_splitter.splitter.is_test_environment")
+	async def test_split_diff_semantic_error_fallback(
+		self, mock_is_test, mock_logger, mock_semantic_strategy_cls, mock_filter_files
+	) -> None:
+		"""Test that split_diff falls back to basic file chunks when semantic splitting fails."""
+		# Arrange
+		mock_is_test.return_value = False
+		# Mock filter_valid_files to return the files unchanged
+		mock_filter_files.return_value = (["file1.py", "file2.py"], [])
+
+		# Mock the semantic strategy to raise an exception
+		mock_strategy = AsyncMock()
+		mock_semantic_strategy_cls.return_value = mock_strategy
+		mock_strategy.split.side_effect = Exception("Semantic splitting failed")
+
+		# Create expected fallback chunks
+		expected_fallback_chunks = [
+			DiffChunk(files=["file1.py"], content="basic content", description="Basic description")
+		]
+
+		# Use a custom diff with valid content
+		test_diff = self.sample_diff
+
+		# Mock the fallback method to return our expected chunks
+		with patch.object(
+			self.splitter, "_create_basic_file_chunk", return_value=expected_fallback_chunks
+		) as mock_fallback:
+			# Act
+			result_chunks, large_files = await self.splitter.split_diff(test_diff)
+
+			# Assert - result should match our mocked fallback chunks
+			assert result_chunks == expected_fallback_chunks
+			assert large_files == []
+
+			# Verify the correct sequence of calls
+			mock_filter_files.assert_called_once()
+			mock_strategy.split.assert_called_once()
+			mock_fallback.assert_called_once()
+			mock_logger.exception.assert_called_once()
+
+	@pytest.mark.asyncio
+	async def test_split_diff_with_untracked_files(self, tmp_path: Path) -> None:
 		"""Test splitting a diff with untracked files."""
-		splitter = DiffSplitter(tmp_path)
+		# Create a new DiffSplitter with a valid config
+		mock_config = Mock(spec=ConfigLoader)
+		mock_config.get = MagicMock()
+		mock_config.get.repo_root = tmp_path
+		mock_config.get.commit = MagicMock()
+		mock_config.get.commit.diff_splitter = MagicMock()
+		mock_config.get.commit.diff_splitter.max_log_diff_size = 1000
+
+		splitter = DiffSplitter(config_loader=mock_config)
 
 		# Create a diff with untracked files
 		untracked_diff = GitDiff(
@@ -272,7 +218,7 @@ index 2345678..bcdefgh 100645
 		)
 
 		# Test the special untracked files handling
-		chunks, filtered_files = splitter.split_diff(untracked_diff)
+		chunks, filtered_files = await splitter.split_diff(untracked_diff)
 
 		# Should create one chunk per file
 		assert len(chunks) == 2

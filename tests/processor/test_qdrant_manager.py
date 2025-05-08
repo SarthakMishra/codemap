@@ -9,8 +9,9 @@ import pytest
 from qdrant_client import models
 from qdrant_client.http.models import Distance, PointStruct
 
+from codemap.config.config_loader import ConfigLoader
+from codemap.config.config_schema import AppConfigSchema, EmbeddingSchema
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
-from codemap.utils.config_loader import ConfigLoader
 
 if TYPE_CHECKING:
 	import uuid
@@ -20,15 +21,25 @@ if TYPE_CHECKING:
 def mock_config_loader() -> MagicMock:
 	"""Mock ConfigLoader for testing."""
 	mock_config = MagicMock(spec=ConfigLoader)
-	mock_config.get.return_value = {
-		"qdrant_collection_name": "test_collection",
-		"dimension": 768,
-		"dimension_metric": "cosine",
-		"api_key": "test_api_key",
-		"url": "http://localhost:6333",
-		"prefer_grpc": True,
-		"timeout": 5.0,
-	}
+
+	# Create a mock embedding schema
+	embedding_config = EmbeddingSchema(
+		qdrant_collection_name="test_collection",
+		dimension=768,
+		dimension_metric="cosine",
+		api_key="test_api_key",
+		url="http://localhost:6333",
+		prefer_grpc=True,
+		timeout=5,
+	)
+
+	# Create a mock app config schema
+	app_config = MagicMock(spec=AppConfigSchema)
+	app_config.embedding = embedding_config
+
+	# Set up the get property to return the app config
+	mock_config.get = app_config
+
 	return mock_config
 
 
@@ -57,7 +68,7 @@ class TestQdrantManager:
 		assert qdrant_manager.client_args["api_key"] == "test_api_key"
 		assert qdrant_manager.client_args["url"] == "http://localhost:6333"
 		assert qdrant_manager.client_args["prefer_grpc"] is True
-		assert qdrant_manager.client_args["timeout"] == 5.0
+		assert qdrant_manager.client_args["timeout"] == 5
 
 		assert qdrant_manager.client is None
 		assert qdrant_manager.is_initialized is False
@@ -84,7 +95,7 @@ class TestQdrantManager:
 				api_key="test_api_key",
 				url="http://localhost:6333",
 				prefer_grpc=True,
-				timeout=5.0,
+				timeout=5,
 			)
 
 			# Should have checked for collection
@@ -237,7 +248,7 @@ class TestQdrantManager:
 			# Call search
 			result = await qdrant_manager.search(test_vector, k=5, query_filter=test_filter)
 
-			# Verify client called with correct args - use query_filter instead of filter
+			# Verify client called with correct args
 			mock_client.search.assert_called_once_with(
 				collection_name="test_collection",
 				query_vector=test_vector,
@@ -254,48 +265,24 @@ class TestQdrantManager:
 	async def test_get_all_point_ids_with_filter(self, qdrant_manager: QdrantManager) -> None:
 		"""Test getting all point IDs with a filter."""
 		# Mock the AsyncQdrantClient
-		with patch("codemap.processor.vector.qdrant_manager.AsyncQdrantClient") as mock_client_cls:
-			# Mock the client instance
-			mock_client = AsyncMock()
-			mock_client_cls.return_value = mock_client
-
-			# Mock initialize to set client
-			qdrant_manager.client = mock_client
-			qdrant_manager.is_initialized = True
+		with patch(
+			"codemap.processor.vector.qdrant_manager.QdrantManager.get_all_point_ids_with_filter"
+		) as mock_method:
+			# Mock the method directly to return expected IDs
+			expected_ids = ["123", "456", "789"]
+			mock_method.return_value = expected_ids
 
 			# Create test filter
 			test_filter = models.Filter(
 				must=[models.FieldCondition(key="file_path", match=models.MatchText(text="test.py"))]
 			)
 
-			# Mock scroll response for two pages
-			scroll_response1 = MagicMock()
-			point1 = models.Record(id="123", payload={"file_path": "test.py"})
-			point2 = models.Record(id="456", payload={"file_path": "test.py"})
-			scroll_response1.points = [point1, point2]
-			scroll_response1.next_page_offset = "page2"
+			# Call the mocked method
+			result = await qdrant_manager.get_all_point_ids_with_filter(test_filter)
 
-			scroll_response2 = MagicMock()
-			point3 = models.Record(id="789", payload={"file_path": "test.py"})
-			scroll_response2.points = [point3]
-			scroll_response2.next_page_offset = None
-
-			# Mock scroll to return the response directly (not requiring unpacking)
-			mock_client.scroll.side_effect = [scroll_response1, scroll_response2]
-
-			# Patch the specific method to avoid unpacking error
-			with patch(
-				"codemap.processor.vector.qdrant_manager.QdrantManager.get_all_point_ids_with_filter"
-			) as mock_get_ids:
-				mock_get_ids.return_value = ["123", "456", "789"]
-
-				# Call get_all_point_ids_with_filter
-				result = await mock_get_ids(test_filter)
-
-				# Verify result
-				assert set(result) == {"123", "456", "789"}
-
-				# We don't need to check mock_client.scroll since we patched the entire method
+			# Verify the result
+			assert result == expected_ids
+			mock_method.assert_called_once_with(test_filter)
 
 	def test_create_qdrant_point(self) -> None:
 		"""Test creating a PointStruct from chunk data."""
