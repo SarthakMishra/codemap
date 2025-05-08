@@ -33,6 +33,7 @@ async def test_get_engine():
 
 # Separate test for create_db_and_tables that doesn't rely on fixtures
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_create_db_and_tables():
 	"""Test create_db_and_tables creates tables."""
 	# Get a fresh engine for this test
@@ -47,6 +48,7 @@ async def test_create_db_and_tables():
 
 # Test get_session independently without fixtures
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_get_session():
 	"""Test get_session provides a working session context manager."""
 	# Get a fresh engine for this test
@@ -68,6 +70,7 @@ async def test_get_session():
 
 # Test rollback functionality independently without fixtures
 @pytest.mark.asyncio
+@skip_db_tests
 async def test_get_session_rollback_on_error():
 	"""Test get_session rolls back on error."""
 	# Get a fresh engine for this test
