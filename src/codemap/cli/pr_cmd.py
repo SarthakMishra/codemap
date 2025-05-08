@@ -8,9 +8,6 @@ from typing import Annotated, cast
 import asyncer
 import typer
 
-from codemap.config.config_schema import PRGenerateSchema
-from codemap.llm.client import LLMClient
-
 
 class PRAction(str, Enum):
 	"""Actions for PR command."""
@@ -144,6 +141,7 @@ async def _pr_command_impl(
 	from rich.text import Text
 
 	from codemap.config import ConfigLoader
+	from codemap.config.config_schema import PRGenerateSchema
 	from codemap.git.commit_generator.command import SemanticCommitCommand
 	from codemap.git.pr_generator.command import PRWorkflowCommand
 	from codemap.git.pr_generator.strategies import (
@@ -174,6 +172,7 @@ async def _pr_command_impl(
 		run_git_command,
 	)
 	from codemap.llm import LLMError  # Import LLMError
+	from codemap.llm.client import LLMClient
 	from codemap.utils.cli_utils import (
 		exit_with_error,
 		handle_keyboard_interrupt,
