@@ -1,11 +1,15 @@
-# CodeMap Configuration File
+"""Default configuration template for CodeMap."""
+
+# ruff: noqa: E501
+
+DEFAULT_CONFIG_TEMPLATE = """# CodeMap Configuration File
 # -------------------------
 # This file configures CodeMap's behavior. Uncomment and modify settings as needed.
 
 # LLM Configuration - Controls which model is used for AI operations
 llm:
   # Format: "provider:model-name", e.g., "openai:gpt-4o", "anthropic:claude-3-opus"
-  model: "groq:llama-3.3-70b-versatile"
+  model: "openai:gpt-4o-mini"
   temperature: 0.5  # Lower for more deterministic outputs, higher for creativity
   max_output_tokens: 1024  # Maximum tokens in responses
 
@@ -60,20 +64,20 @@ rag:
 sync:
   exclude_patterns:
     - "^node_modules/"
-    - "^\\.venv/"
+    - "^\\\\.venv/"
     - "^venv/"
     - "^env/"
     - "^__pycache__/"
-    - "^\\.mypy_cache/"
-    - "^\\.pytest_cache/"
-    - "^\\.ruff_cache/"
+    - "^\\\\.mypy_cache/"
+    - "^\\\\.pytest_cache/"
+    - "^\\\\.ruff_cache/"
     - "^dist/"
     - "^build/"
-    - "^\\.git/"
-    - "\\\\.pyc$"
-    - "\\\\.pyo$"
-    - "\\\\.so$"
-    - "\\\\.dll$"
+    - "^\\\\.git/"
+    - "\\\\\\\\.pyc$"
+    - "\\\\\\\\.pyo$"
+    - "\\\\\\\\.so$"
+    - "\\\\\\\\.dll$"
 
 # Generation Configuration - Controls documentation generation
 gen:
@@ -288,3 +292,4 @@ pr:
 # Ask Command Configuration
 ask:
   interactive_chat: false  # Enable interactive chat mode for the 'ask' command
+"""
