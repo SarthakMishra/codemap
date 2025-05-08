@@ -39,15 +39,6 @@ WatchOpt = Annotated[
 	),
 ]
 
-ConfigOpt = Annotated[
-	Path | None,
-	typer.Option(
-		"--config",
-		"-c",
-		help="Path to config file",
-	),
-]
-
 # --- Registration Function ---
 
 
@@ -59,7 +50,6 @@ def register_command(app: typer.Typer) -> None:
 		path: PathArg = Path(),
 		sync: SyncOpt = True,
 		watch: WatchOpt = False,
-		config: ConfigOpt = None,
 	) -> None:
 		"""
 		Index the repository: Process files, generate embeddings, and store in the vector database.
@@ -72,7 +62,6 @@ def register_command(app: typer.Typer) -> None:
 			path=path,
 			sync=sync,
 			watch=watch,
-			config=config,
 		)
 
 
@@ -83,7 +72,6 @@ def _index_command_impl(
 	path: Path,
 	sync: bool,
 	watch: bool,
-	config: Path | None,
 ) -> None:
 	"""Actual implementation of the index command."""
 	# --- Heavy Imports ---
@@ -111,7 +99,7 @@ def _index_command_impl(
 			# --- Initialize Pipeline --- #
 			with progress_indicator("Initializing indexing pipeline..."):
 				try:
-					pipeline = ProcessingPipeline(repo_path=target_path, config_loader=config_loader)
+					pipeline = ProcessingPipeline(config_loader=config_loader)
 					logger.info(f"Pipeline initialized for {target_path}")
 				except ValueError:
 					logger.exception("Initialization failed")
@@ -174,7 +162,7 @@ def _index_command_impl(
 		target_path = path.resolve()
 
 		# Load config directly instead of getting from context
-		config_loader = ConfigLoader.get_instance(config_file=config)
+		config_loader = ConfigLoader.get_instance()
 
 		# Run the indexing operation using the nested async helper
 		asyncio.run(_index_repo_async(target_path, sync, watch, config_loader))

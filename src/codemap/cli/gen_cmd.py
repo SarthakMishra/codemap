@@ -123,7 +123,6 @@ def register_command(app: typer.Typer) -> None:
 	def gen_command(
 		path: PathArg = Path(),
 		output: OutputOpt = None,
-		config: ConfigOpt = None,
 		max_content_length: MaxContentLengthOpt = None,
 		lod_level_str: LODLevelOpt = "docs",
 		semantic_analysis: SemanticAnalysisOpt = True,
@@ -151,7 +150,6 @@ def register_command(app: typer.Typer) -> None:
 		_gen_command_impl(
 			path=path,
 			output=output,
-			config=config,
 			max_content_length=max_content_length,
 			lod_level_str=lod_level_str,
 			semantic_analysis=semantic_analysis,
@@ -170,7 +168,6 @@ def register_command(app: typer.Typer) -> None:
 def _gen_command_impl(
 	path: Path = Path(),
 	output: Path | None = None,
-	config: Path | None = None,
 	max_content_length: int | None = None,
 	lod_level_str: str = "docs",
 	semantic_analysis: bool = True,
@@ -193,7 +190,7 @@ def _gen_command_impl(
 		project_root = Path.cwd()
 
 		# Load config
-		config_loader = ConfigLoader.get_instance(config_file=config)
+		config_loader = ConfigLoader.get_instance()
 
 		# Get gen-specific config with defaults
 		gen_config_data = config_loader.get.gen

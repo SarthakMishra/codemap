@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import questionary
 import typer
@@ -38,9 +37,6 @@ from .utils import (
 	CommitFormattingError,
 )
 
-if TYPE_CHECKING:
-	from pathlib import Path
-
 logger = logging.getLogger(__name__)
 
 # Constants for content truncation
@@ -60,20 +56,16 @@ class CommitCommand:
 
 	def __init__(
 		self,
-		path: Path | None = None,
 		bypass_hooks: bool = False,
 	) -> None:
 		"""
 		Initialize the commit command.
 
 		Args:
-		    path: Optional path to start from
-		    model: LLM model to use for commit message generation
 		    bypass_hooks: Whether to bypass git hooks with --no-verify
 
 		"""
 		try:
-			self.repo_root = get_repo_root(path)
 			self.ui: CommitUI = CommitUI()
 
 			self.target_files: list[str] = []
@@ -93,10 +85,15 @@ class CommitCommand:
 			from codemap.config import ConfigLoader
 			from codemap.llm import LLMClient
 
-			self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_root)
+			self.config_loader = ConfigLoader.get_instance()
 			self.llm_client = LLMClient(config_loader=self.config_loader)
 
-			self.splitter = DiffSplitter(self.repo_root)
+			if self.config_loader.get.repo_root is None:
+				self.repo_root = get_repo_root()
+			else:
+				self.repo_root = self.config_loader.get.repo_root
+
+			self.splitter = DiffSplitter()
 
 			# Create the commit message generator with required parameters
 			self.message_generator = CommitMessageGenerator(
@@ -366,9 +363,7 @@ class CommitCommand:
 				# Original error was linting, user is editing a formatted message
 				edited_message = self.ui.edit_message(current_message_to_edit)
 				cleaned_edited_message = clean_message_for_linting(edited_message)
-				edited_is_valid, edited_error_msg = lint_commit_message(
-					cleaned_edited_message, self.repo_root, self.config_loader
-				)
+				edited_is_valid, edited_error_msg = lint_commit_message(cleaned_edited_message, self.config_loader)
 
 				if edited_is_valid:
 					# Commit with the user-edited, now valid message
@@ -655,7 +650,6 @@ class SemanticCommitCommand(CommitCommand):
 
 	def __init__(
 		self,
-		path: Path | None = None,
 		bypass_hooks: bool = False,
 	) -> None:
 		"""
@@ -664,10 +658,9 @@ class SemanticCommitCommand(CommitCommand):
 		Args are similar to CLI options, allowing for programmatic use.
 		"""
 		# Call parent class initializer first
-		super().__init__(path=path, bypass_hooks=bypass_hooks)
+		super().__init__(bypass_hooks=bypass_hooks)
 
-		temp_repo_root = get_repo_root(path)
-		config_loader = ConfigLoader.get_instance(repo_root=temp_repo_root)
+		config_loader = ConfigLoader.get_instance()
 
 		self.config_loader = config_loader
 		self.clustering_method = config_loader.get.embedding.clustering.method

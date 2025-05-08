@@ -1,7 +1,6 @@
 """CLI command for asking questions about the codebase using RAG."""
 
 import logging
-from pathlib import Path
 from typing import Annotated, Any, cast
 
 import asyncer
@@ -13,32 +12,6 @@ logger = logging.getLogger(__name__)
 
 QuestionArg = Annotated[
 	str | None, typer.Argument(help="Your question about the codebase (omit for interactive mode).")
-]
-
-PathOpt = Annotated[
-	Path | None,
-	typer.Option(
-		"--path",
-		"-p",
-		help="Path to the repository root (defaults to current directory).",
-		exists=True,
-		file_okay=False,
-		dir_okay=True,
-		resolve_path=True,
-	),
-]
-
-ModelOpt = Annotated[
-	str | None,
-	typer.Option(
-		"--model", "-m", help="LLM model to use (e.g., 'openai/gpt-4o-mini'). Overrides config."
-	),  # Added alias
-]
-
-ApiBaseOpt = Annotated[str | None, typer.Option("--api-base", help="Override the LLM API base URL.")]
-
-ApiKeyOpt = Annotated[
-	str | None, typer.Option("--api-key", help="Override the LLM API key (use environment variables for security).")
 ]
 
 InteractiveFlag = Annotated[bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")]
@@ -54,14 +27,12 @@ def register_command(app: typer.Typer) -> None:
 	@asyncer.runnify
 	async def ask_command(
 		question: QuestionArg = None,
-		path: PathOpt = None,
 		interactive: InteractiveFlag = False,
 	) -> None:
 		"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
 		# Defer heavy imports and logic to the implementation function
 		await _ask_command_impl(
 			question=question,
-			path=path,
 			interactive=interactive,
 		)
 
@@ -71,7 +42,6 @@ def register_command(app: typer.Typer) -> None:
 
 async def _ask_command_impl(
 	question: str | None = None,
-	path: Path | None = None,
 	interactive: bool = False,
 ) -> None:
 	"""Implementation of the ask command with heavy imports deferred."""
@@ -83,22 +53,16 @@ async def _ask_command_impl(
 	from codemap.llm.rag.ask.formatter import print_ask_result
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
-	repo_path = path or Path.cwd()
-	logger.info(f"Received ask command for path: {repo_path}")
-
 	# Determine if running in interactive mode (flag or config)
-	config_loader = ConfigLoader.get_instance(repo_root=repo_path)
-	config = config_loader.get_instance()
-	is_interactive = interactive or config.get.ask.interactive_chat
+	config_loader = ConfigLoader.get_instance()
+	is_interactive = interactive or config_loader.get.ask.interactive_chat
 
 	if not is_interactive and question is None:
 		exit_with_error("You must provide a question or use the --interactive flag.")
 
 	try:
 		# Initialize command once for potentially multiple runs (interactive)
-		command = AskCommand(
-			repo_path=repo_path,
-		)
+		command = AskCommand()
 
 		# Perform async initialization before running any commands
 		await command.initialize()

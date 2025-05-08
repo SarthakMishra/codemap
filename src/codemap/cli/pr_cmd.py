@@ -31,15 +31,6 @@ def validate_workflow_strategy(value: str | None) -> str | None:
 
 # --- Command Argument Annotations (Keep these lightweight) ---
 
-
-PathArg = Annotated[
-	Path,
-	typer.Argument(
-		exists=True,
-		help="Path to the codebase to analyze",
-		show_default=False,  # Default handled in impl or Pydantic model later
-	),
-]
 ActionArg = Annotated[PRAction, typer.Argument(help="Action to perform: create or update")]
 BranchNameOpt = Annotated[str | None, typer.Option("--branch", "-b", help="Target branch name")]
 BranchTypeOpt = Annotated[
@@ -93,7 +84,6 @@ def register_command(app: typer.Typer) -> None:
 	@app.command("pr")
 	@asyncer.runnify
 	async def pr_command_entrypoint(
-		path_arg: PathArg = Path(),  # Default path to current dir
 		action: ActionArg = PRAction.CREATE,
 		branch_name: BranchNameOpt = None,
 		branch_type: BranchTypeOpt = None,
@@ -109,7 +99,6 @@ def register_command(app: typer.Typer) -> None:
 	) -> None:
 		"""Create or update a GitHub/GitLab pull request with generated content."""
 		await _pr_command_impl(
-			path_arg=path_arg,
 			action=action,
 			branch_name=branch_name,
 			branch_type=branch_type,
@@ -129,7 +118,6 @@ def register_command(app: typer.Typer) -> None:
 
 
 async def _pr_command_impl(
-	path_arg: Path,
 	action: PRAction,
 	branch_name: str | None,
 	branch_type: str | None,
@@ -184,7 +172,6 @@ async def _pr_command_impl(
 		get_unstaged_diff,
 		get_untracked_files,
 		run_git_command,
-		validate_repo_path,
 	)
 	from codemap.llm import LLMError  # Import LLMError
 	from codemap.utils.cli_utils import (
@@ -214,7 +201,6 @@ async def _pr_command_impl(
 	class PROptions:
 		"""Internal options bundle."""
 
-		repo_path: Path
 		branch_name: str | None = field(default=None)
 		branch_type: str | None = field(default=None)
 		base_branch: str | None = field(default=None)
@@ -401,7 +387,6 @@ async def _pr_command_impl(
 			# Use CommitCommand for the commit process
 			logger.info("Starting commit process...")
 			commit_command = SemanticCommitCommand(
-				path=options.repo_path,
 				bypass_hooks=options.bypass_hooks,
 			)
 			# The run method handles staging, splitting, generation, and committing
@@ -602,15 +587,8 @@ async def _pr_command_impl(
 
 	# --- Main Logic ---
 	try:
-		# 1. Validate repo path
-		repo_path = validate_repo_path(path_arg)
-		if repo_path is None:
-			exit_with_error("Repository path could not be determined after validation.")
-			return
-		logger.info(f"Operating in repository: {repo_path}")
-
 		# 2. Load Configuration
-		config_loader = ConfigLoader.get_instance(repo_root=repo_path)
+		config_loader = ConfigLoader.get_instance()
 		pr_config = config_loader.get.pr
 		llm_config = config_loader.get.llm
 		content_config = pr_config.generate
@@ -625,7 +603,6 @@ async def _pr_command_impl(
 
 		# 3. Consolidate Options
 		opts = PROptions(
-			repo_path=repo_path,
 			branch_name=branch_name,
 			branch_type=branch_type,
 			base_branch=base_branch,
@@ -646,11 +623,7 @@ async def _pr_command_impl(
 		llm_client = LLMClient(
 			config_loader=config_loader,
 		)
-		# Ensure repo_path is not None before passing to PRWorkflowCommand
-		if opts.repo_path is None:
-			exit_with_error("Repository path could not be determined.")
-			return
-		pr_workflow = PRWorkflowCommand(repo_path=opts.repo_path, llm_client=llm_client, config_loader=config_loader)
+		pr_workflow = PRWorkflowCommand(llm_client=llm_client, config_loader=config_loader)
 
 		# 5. Execute Action
 		if action == PRAction.CREATE:

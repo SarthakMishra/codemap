@@ -2,11 +2,11 @@
 
 import logging
 import uuid
-from pathlib import Path
 from typing import Any, TypedDict
 
 from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
+from codemap.git.utils import get_repo_root
 from codemap.llm.client import LLMClient
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
@@ -40,31 +40,16 @@ class AskCommand:
 
 	def __init__(
 		self,
-		repo_path: Path | None = None,
-		config_loader: ConfigLoader | None = None,
 	) -> None:
-		"""
-		Initializes the AskCommand, setting up clients and pipeline.
-
-		Args:
-		        repo_path: Path to the repository to analyze
-		        model: LLM model to use for answering questions
-		        api_key: API key for LLM provider
-		        api_base: API base URL for LLM provider
-		        config_loader: ConfigLoader to use for configuration (follows DI pattern)
-
-		"""
-		self.repo_path = repo_path or Path.cwd()
+		"""Initializes the AskCommand, setting up clients and pipeline."""
 		self.session_id = str(uuid.uuid4())  # Unique session ID for DB logging
 
-		# Accept ConfigLoader from higher-level components
-		# Always ensure we have a valid ConfigLoader instance
-		if config_loader is None:
-			self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_path)
-			logger.debug("Created fallback ConfigLoader instance")
+		self.config_loader = ConfigLoader.get_instance()
+
+		if self.config_loader.get.repo_root is None:
+			self.repo_root = get_repo_root()
 		else:
-			self.config_loader = config_loader
-			logger.debug("Using provided ConfigLoader instance")
+			self.repo_root = self.config_loader.get.repo_root
 
 		# Get RAG configuration
 		rag_config = self.config_loader.get.rag
@@ -82,8 +67,7 @@ class AskCommand:
 			with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
 				# Use the provided ConfigLoader instance
 				self.pipeline = ProcessingPipeline(
-					repo_path=self.repo_path,  # Pipeline still needs repo_path directly
-					config_loader=self.config_loader,  # Pass the correctly initialized loader
+					config_loader=self.config_loader,
 				)
 
 			# Progress context manager handles completion message
@@ -156,8 +140,8 @@ class AskCommand:
 
 					# Get the file content from the repo
 					try:
-						if self.repo_path and file_path and start_line > 0 and end_line > 0:
-							repo_file_path = self.repo_path / file_path
+						if self.repo_root and file_path and start_line > 0 and end_line > 0:
+							repo_file_path = self.repo_root / file_path
 							if repo_file_path.exists():
 								with repo_file_path.open(encoding="utf-8") as f:
 									file_content = f.read()
