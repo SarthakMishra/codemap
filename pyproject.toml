@@ -25,7 +25,6 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "litellm>=1.67.0",
     "numpy>=2.2.5",
     "pygments>=2.19.1",
     "python-dotenv>=1.1.0",
