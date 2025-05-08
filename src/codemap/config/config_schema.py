@@ -360,7 +360,6 @@ class AppConfigSchema(BaseModel):
 	ask: AskSchema = AskSchema()
 	repo_root: Path | None = None
 
-	class Config:
-		"""Configuration for the application config."""
-
-		validate_assignment = True  # Useful for ensuring type checks on assignment if loaded config is modified
+	model_config = {
+		"validate_assignment": True  # Useful for ensuring type checks on assignment if loaded config is modified
+	}
