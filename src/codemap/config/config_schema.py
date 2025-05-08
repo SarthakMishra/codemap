@@ -312,8 +312,8 @@ class PRBranchMappingSchema(BaseModel):
 class PRGenerateSchema(BaseModel):
 	"""Configuration for the pull request generate."""
 
-	title_strategy: str = "commits"
-	description_strategy: str = "commits"
+	title_strategy: Literal["commits", "llm"] = "llm"
+	description_strategy: Literal["commits", "llm"] = "llm"
 	description_template: str = Field(
 		default_factory=lambda: dedent(
 			"""
