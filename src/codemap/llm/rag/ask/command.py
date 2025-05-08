@@ -9,7 +9,7 @@ from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
 from codemap.llm.client import LLMClient
 from codemap.processor.pipeline import ProcessingPipeline
-from codemap.utils.cli_utils import loading_spinner, progress_indicator
+from codemap.utils.cli_utils import progress_indicator
 
 from .formatter import format_content_for_context
 from .prompts import SYSTEM_PROMPT
@@ -233,7 +233,7 @@ class AskCommand:
 
 		# Call LLM with context
 		try:
-			with loading_spinner("Waiting for LLM response..."):
+			with progress_indicator("Waiting for LLM response..."):
 				answer = await self.llm_client.completion(
 					messages=[{"role": "user", "content": prompt}],
 					**llm_config,

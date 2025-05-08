@@ -93,7 +93,7 @@ def _index_command_impl(
 
 	from codemap.config import ConfigLoader
 	from codemap.processor.pipeline import ProcessingPipeline
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, loading_spinner
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, progress_indicator
 
 	console = Console()  # Initialize Console here
 
@@ -109,7 +109,7 @@ def _index_command_impl(
 
 		try:
 			# --- Initialize Pipeline --- #
-			with loading_spinner("Initializing indexing pipeline..."):
+			with progress_indicator("Initializing indexing pipeline..."):
 				try:
 					pipeline = ProcessingPipeline(repo_path=target_path, config_loader=config_loader)
 					logger.info(f"Pipeline initialized for {target_path}")
@@ -126,7 +126,7 @@ def _index_command_impl(
 				exit_with_error("Pipeline initialization failed unexpectedly")
 
 			# async_init handles the initial sync if sync_flag is True
-			with loading_spinner("Initializing vector database..."):
+			with progress_indicator("Initializing vector database..."):
 				pipeline = cast("ProcessingPipeline", pipeline)
 				await pipeline.async_init(sync_on_init=sync_flag, progress=None, task_id=None)
 				logger.info("Vector database initialized")
@@ -138,7 +138,7 @@ def _index_command_impl(
 				watcher_config = config_loader.get.processor.watcher
 				debounce_delay = float(watcher_config.debounce_delay)
 
-				with loading_spinner("Starting file watcher..."):
+				with progress_indicator("Starting file watcher..."):
 					pipeline.initialize_watcher(debounce_delay=debounce_delay)
 					await pipeline.start_watcher()
 
