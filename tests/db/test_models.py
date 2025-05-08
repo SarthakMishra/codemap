@@ -54,6 +54,11 @@ async def test_chat_history_db_interaction():
 	# Get a fresh engine
 	engine = await get_engine()
 
+	# Create tables before testing
+	from sqlmodel import SQLModel
+
+	SQLModel.metadata.create_all(engine)
+
 	# Use the engine directly
 	with get_session(engine) as session:
 		# Add to session
