@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-# Import collections.abc for type annotation
 import logging
 import os
 import re
@@ -21,11 +20,11 @@ from .prompts import (
 	prepare_lint_prompt,
 	prepare_prompt,
 )
-from .schemas import COMMIT_MESSAGE_SCHEMA
+from .schemas import CommitMessageSchema
 from .utils import (
-	JSONFormattingError,
+	CommitFormattingError,
 	clean_message_for_linting,
-	format_commit_json,
+	format_commit,
 	lint_commit_message,
 )
 
@@ -244,7 +243,7 @@ class CommitMessageGenerator:
 			"diff": diff_content,
 			"files": file_info,
 			"config_loader": self._config_loader,
-			"schema": COMMIT_MESSAGE_SCHEMA,
+			"schema": CommitMessageSchema,
 			"original_message": "",  # Default value for original_message
 			"lint_errors": "",  # Default value for lint_errors
 		}
@@ -473,7 +472,7 @@ class CommitMessageGenerator:
 		logger.debug("Generated fallback message: %s", message)
 		return message
 
-	async def generate_message(self, chunk: DiffChunk) -> tuple[str, bool]:
+	def generate_message(self, chunk: DiffChunk) -> tuple[CommitMessageSchema, bool]:
 		"""
 		Generate a commit message for a diff chunk.
 
@@ -485,45 +484,27 @@ class CommitMessageGenerator:
 
 		"""
 		# Prepare prompt with chunk data
-		try:
-			prompt = self._prepare_prompt(chunk)
-			logger.debug("Prompt prepared successfully")
+		prompt = self._prepare_prompt(chunk)
+		logger.debug("Prompt prepared successfully")
 
-			# Generate message using configured LLM provider
-			message = await self._call_llm_api(prompt)
-			logger.debug("LLM generated message: %s", message)
-
-			# Return generated message with success flag
-			return message, True
-		except (ValueError, TypeError, KeyError, LLMError):
-			logger.exception("Error during LLM generation")
-			# Fall back to heuristic generation
-			return self.fallback_generation(chunk), False
-
-	async def _call_llm_api(self, prompt: str) -> str:
-		"""
-		Call the LLM API with the given prompt.
-
-		Args:
-		    prompt: Prompt to send to the LLM
-
-		Returns:
-		    Raw response content from the LLM
-
-		Raises:
-		    LLMError: If the API call fails
-
-		"""
-		# Directly use the generate_text method from the LLMClient
-		return await self.client.completion(
+		# Generate message using configured LLM provider
+		message = self.client.completion(
 			messages=[
 				{"role": "system", "content": COMMIT_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
 			],
-			json_schema=COMMIT_MESSAGE_SCHEMA,
+			pydantic_model=CommitMessageSchema,
 		)
+		logger.debug("LLM generated message: %s", message)
 
-	async def generate_message_with_linting(
+		if isinstance(message, str):
+			msg = "LLM generated message is not a BaseModel"
+			logger.error(msg)
+			raise TypeError(msg)
+
+		return message, True
+
+	def generate_message_with_linting(
 		self, chunk: DiffChunk, retry_count: int = 1, max_retries: int = 3
 	) -> tuple[str, bool, bool, bool, list[str]]:
 		"""
@@ -535,12 +516,12 @@ class CommitMessageGenerator:
 		        max_retries: Maximum number of retries for linting (default: 3)
 
 		Returns:
-		        Tuple of (message, used_llm, passed_validation, is_json_error, error_messages)
-		        - message: Generated message, or original raw content if JSON validation failed.
+		        Tuple of (message, used_llm, passed_validation, is_formatting_error, error_messages)
+		        - message: Generated message, or original raw content if CommitFormatting failed.
 		        - used_llm: Whether LLM was used.
-		        - passed_validation: True if both JSON formatting and linting passed.
-		        - is_json_error: True if JSON formatting failed.
-		        - error_messages: List of lint or JSON error messages.
+		        - passed_validation: True if both CommitFormatting and linting passed.
+		        - is_formatting_error: True if CommitFormatting failed.
+		        - error_messages: List of lint or CommitFormatting error messages.
 
 		"""
 		# First, generate the initial message
@@ -550,12 +531,12 @@ class CommitMessageGenerator:
 
 		try:
 			# --- Initial Generation ---
-			raw_llm_message, used_llm = await self.generate_message(chunk)
-			logger.debug("Generated initial raw message: %s", raw_llm_message)
+			commit_obj, used_llm = self.generate_message(chunk)
+			logger.debug("Generated initial raw message: %s", commit_obj)
 
-			# --- Format JSON ---
-			# This is where JSONFormattingError can occur
-			message = format_commit_json(raw_llm_message, self._config_loader)
+			# --- Format Commit ---
+			# This is where CommitFormattingError can occur
+			message = format_commit(commit_obj, self._config_loader)
 			logger.debug("Formatted initial message: %s", message)
 
 			# --- Clean and Lint ---
@@ -589,12 +570,22 @@ class CommitMessageGenerator:
 				)
 
 				# Generate message with the enhanced prompt
-				regenerated_raw_message = await self._call_llm_api(enhanced_prompt)
+				regenerated_raw_message = self.client.completion(
+					messages=[
+						{"role": "system", "content": COMMIT_SYSTEM_PROMPT},
+						{"role": "user", "content": enhanced_prompt},
+					],
+					pydantic_model=CommitMessageSchema,
+				)
 				logger.debug("Regenerated message (RAW LLM output): %s", regenerated_raw_message)
+				if isinstance(regenerated_raw_message, str):
+					msg = "Regenerated message is not a BaseModel"
+					logger.error(msg)
+					raise TypeError(msg)
 
-				# --- Format JSON (Regeneration) ---
+				# --- Format Commit (Regeneration) ---
 				# This can also raise JSONFormattingError
-				regenerated_message = format_commit_json(regenerated_raw_message, self._config_loader)
+				regenerated_message = format_commit(regenerated_raw_message, self._config_loader)
 				logger.debug("Formatted regenerated message: %s", regenerated_message)
 
 				# --- Clean and Lint (Regeneration) ---
@@ -612,35 +603,23 @@ class CommitMessageGenerator:
 				# is_json_error is False here
 				return cleaned_message, True, final_is_valid, False, [] if final_is_valid else final_lint_messages
 
-			except JSONFormattingError as json_err:
-				# Catch JSON error during REGENERATION
-				logger.warning("JSON formatting failed during regeneration: %s", str(json_err))
-				# Return the RAW content from regeneration attempt, marked as JSON error
-				return json_err.original_content, True, False, True, [str(json_err)]
+			except CommitFormattingError:
+				# Catch CommitFormattingError during REGENERATION
+				logger.exception("Commit formatting failed during regeneration")
+				raise
 			except (ValueError, TypeError, KeyError, LLMError):
 				# If regeneration itself fails (LLM call, prompt prep), log it
 				# Return the ORIGINAL message and its lint errors
 				logger.exception("Error during message regeneration attempt")
-				return message, used_llm, False, False, initial_lint_messages
+				raise
 
-		except JSONFormattingError as json_err:
-			# Catch JSON error during INITIAL formatting
-			logger.warning("Initial JSON formatting failed: %s", str(json_err))
-			# Return the ORIGINAL RAW LLM content, marked as JSON error
-			return json_err.original_content, used_llm, False, True, [str(json_err)]
+		except CommitFormattingError:
+			# Catch CommitFormattingError during INITIAL formatting
+			logger.exception("Initial commit formatting failed")
+			raise
 		except (ValueError, TypeError, KeyError, LLMError):
 			# If initial generation or formatting (non-JSON error) fails completely
 			logger.exception("Error during initial message generation/formatting")
 			# Use a fallback (fallback doesn't lint, so passed_validation=True, is_json_error=False, empty messages)
 			fallback_message = self.fallback_generation(chunk)
 			return fallback_message, False, True, False, []
-
-	def get_config_loader(self) -> ConfigLoader:
-		"""
-		Get the ConfigLoader instance used by this generator.
-
-		Returns:
-		    ConfigLoader instance
-
-		"""
-		return self._config_loader

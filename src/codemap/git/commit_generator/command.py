@@ -35,8 +35,7 @@ from . import (
 )
 from .prompts import DEFAULT_PROMPT_TEMPLATE
 from .utils import (
-	JSONFormattingError,
-	format_commit_json,
+	CommitFormattingError,
 )
 
 if TYPE_CHECKING:
@@ -94,17 +93,17 @@ class CommitCommand:
 			from codemap.config import ConfigLoader
 			from codemap.llm import LLMClient
 
-			config_loader = ConfigLoader.get_instance(repo_root=self.repo_root)
-			llm_client = LLMClient(config_loader=config_loader)
+			self.config_loader = ConfigLoader.get_instance(repo_root=self.repo_root)
+			self.llm_client = LLMClient(config_loader=self.config_loader)
 
 			self.splitter = DiffSplitter(self.repo_root)
 
 			# Create the commit message generator with required parameters
 			self.message_generator = CommitMessageGenerator(
 				repo_root=self.repo_root,
-				llm_client=llm_client,
+				llm_client=self.llm_client,
 				prompt_template=DEFAULT_PROMPT_TEMPLATE,
-				config_loader=config_loader,
+				config_loader=self.config_loader,
 			)
 
 		except GitError as e:
@@ -274,7 +273,7 @@ class CommitCommand:
 			self.error_state = "failed"
 			return False
 
-	async def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
+	def _process_chunk(self, chunk: DiffChunk, index: int, total_chunks: int) -> bool:
 		"""
 		Process a single chunk interactively.
 
@@ -318,7 +317,7 @@ class CommitCommand:
 					passed_validation,
 					is_json_error,
 					error_messages,
-				) = await self.message_generator.generate_message_with_linting(chunk)
+				) = self.message_generator.generate_message_with_linting(chunk)
 
 				# Store the potentially failed message in the chunk for display/editing
 				chunk.description = message
@@ -362,74 +361,33 @@ class CommitCommand:
 				return False  # Abort on commit failure
 			if action == ChunkAction.EDIT:
 				# Edit the message (could be formatted message or raw JSON)
-				current_message_to_edit = chunk.description or ""  # Default to empty string if None
+				current_message_to_edit = message or ""  # Default to empty string if None
 
-				if is_json_error:
-					# If it was a JSON error, the user is editing the raw content from LLM
-					edited_raw_content = self.ui.edit_message(current_message_to_edit)
-					try:
-						# Try to format the edited raw content
-						edited_formatted_message = format_commit_json(
-							edited_raw_content, self.message_generator.get_config_loader()
-						)
-						# Lint the newly formatted message
-						edited_formatted_message = clean_message_for_linting(edited_formatted_message)
-						edited_is_valid, edited_error_msg = lint_commit_message(
-							edited_formatted_message, self.repo_root, self.message_generator.get_config_loader()
-						)
+				# Original error was linting, user is editing a formatted message
+				edited_message = self.ui.edit_message(current_message_to_edit)
+				cleaned_edited_message = clean_message_for_linting(edited_message)
+				edited_is_valid, edited_error_msg = lint_commit_message(
+					cleaned_edited_message, self.repo_root, self.config_loader
+				)
 
-						if edited_is_valid:
-							# Commit with the user-edited, formatted, and valid message
-							if self._perform_commit(chunk, edited_formatted_message):
-								return True  # Continue
-							self.error_state = "failed"
-							return False  # Abort
-						# Show lint errors for the formatted message and loop back
-						edited_error_messages = [edited_error_msg] if edited_error_msg else []
-						self.ui.show_warning("Edited message failed linting after formatting.")
-						self.ui.display_failed_lint_message(
-							edited_formatted_message, edited_error_messages, is_llm_generated=False
-						)
-						# Loop back to prompt again with the lint failure message
-						chunk.description = edited_formatted_message
-						chunk.is_llm_generated = False
-						continue  # Re-evaluate with the formatted but lint-failed message
-					except JSONFormattingError as json_fmt_err:
-						# Show JSON error for the edited content and loop back
-						self.ui.show_warning("Edited content still failed JSON validation.")
-						self.ui.display_failed_json_message(
-							json_fmt_err.original_content, [str(json_fmt_err)], is_llm_generated=False
-						)
-						# Loop back to prompt again with the JSON failure message
-						chunk.description = json_fmt_err.original_content  # Keep raw content in chunk
-						chunk.is_llm_generated = False
-						continue
-				else:
-					# Original error was linting, user is editing a formatted message
-					edited_message = self.ui.edit_message(current_message_to_edit)
-					cleaned_edited_message = clean_message_for_linting(edited_message)
-					edited_is_valid, edited_error_msg = lint_commit_message(
-						cleaned_edited_message, self.repo_root, self.message_generator.get_config_loader()
-					)
+				if edited_is_valid:
+					# Commit with the user-edited, now valid message
+					if self._perform_commit(chunk, cleaned_edited_message):
+						return True  # Continue to next chunk
+					self.error_state = "failed"
+					return False  # Abort on commit failure
 
-					if edited_is_valid:
-						# Commit with the user-edited, now valid message
-						if self._perform_commit(chunk, cleaned_edited_message):
-							return True  # Continue to next chunk
-						self.error_state = "failed"
-						return False  # Abort on commit failure
-
-					# If edited message is still invalid, show errors and loop back
-					self.ui.show_warning("Edited message still failed linting.")
-					# Show the lint errors for the edited message
-					edited_error_messages = [edited_error_msg] if edited_error_msg else []
-					self.ui.display_failed_lint_message(
-						cleaned_edited_message, edited_error_messages, is_llm_generated=False
-					)
-					# Loop back to prompt again with the lint failure message
-					chunk.description = cleaned_edited_message  # Keep cleaned message in chunk
-					chunk.is_llm_generated = False
-					continue  # Go back to the start of the while loop
+				# If edited message is still invalid, show errors and loop back
+				self.ui.show_warning("Edited message still failed linting.")
+				# Show the lint errors for the edited message
+				edited_error_messages = [edited_error_msg] if edited_error_msg else []
+				self.ui.display_failed_lint_message(
+					cleaned_edited_message, edited_error_messages, is_llm_generated=False
+				)
+				# Loop back to prompt again with the lint failure message
+				chunk.description = cleaned_edited_message  # Keep cleaned message in chunk
+				chunk.is_llm_generated = False
+				continue  # Go back to the start of the while loop
 
 			if action == ChunkAction.REGENERATE:
 				self.ui.show_regenerating()
@@ -451,7 +409,7 @@ class CommitCommand:
 			logger.error("Unhandled action in _process_chunk: %s", action)
 			return False
 
-	async def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
+	def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
 		"""
 		Process all generated chunks.
 
@@ -472,7 +430,7 @@ class CommitCommand:
 		for i, chunk in enumerate(chunks):
 			if interactive:
 				try:
-					if not await self._process_chunk(chunk, i, grand_total):
+					if not self._process_chunk(chunk, i, grand_total):
 						success = False
 						break
 				except typer.Exit:
@@ -493,7 +451,7 @@ class CommitCommand:
 						passed_validation,
 						is_json_error,
 						error_messages,
-					) = await self.message_generator.generate_message_with_linting(chunk)
+					) = self.message_generator.generate_message_with_linting(chunk)
 					if not passed_validation:
 						error_type = "JSON validation" if is_json_error else "linting"
 						logger.warning(
@@ -507,7 +465,7 @@ class CommitCommand:
 					if not self._perform_commit(chunk, message):
 						success = False
 						break
-				except (LLMError, RuntimeError, GitError, JSONFormattingError) as e:
+				except (LLMError, RuntimeError, GitError, CommitFormattingError) as e:
 					self.ui.show_error(f"Error processing chunk non-interactively: {e}")
 					success = False
 					break
@@ -582,7 +540,7 @@ class CommitCommand:
 					return False
 
 			# Process chunks, passing the interactive flag
-			success = await self.process_all_chunks(chunks, total_chunks, interactive=interactive)
+			success = self.process_all_chunks(chunks, total_chunks, interactive=interactive)
 
 			if self.error_state == "aborted":
 				self.ui.show_message("Commit process aborted by user.")
@@ -885,16 +843,13 @@ class SemanticCommitCommand(CommitCommand):
 		        List of SemanticGroup objects with messages
 
 		"""
-		# Get config loader and settings
-		config_loader = self.message_generator.get_config_loader()
-
 		# Process groups individually
 		from codemap.git.diff_splitter import DiffChunk
 		from codemap.git.semantic_grouping.context_processor import process_chunks_with_lod
 
 		# Get max token limit and settings from message generator's config
-		max_tokens = config_loader.get.llm.max_output_tokens
-		use_lod_context = config_loader.get.commit.use_lod_context
+		max_tokens = self.config_loader.get.llm.max_output_tokens
+		use_lod_context = self.config_loader.get.commit.use_lod_context
 
 		for group in groups:
 			try:
@@ -922,7 +877,7 @@ class SemanticCommitCommand(CommitCommand):
 				# Generate message with linting
 				# We ignore linting status - SemanticCommitCommand is less strict
 				# Unpack 5 elements, ignore validation/error status for semantic commit
-				message, _, _, _, _ = await self.message_generator.generate_message_with_linting(temp_chunk)
+				message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
 
 				# Store the message with the group
 				group.message = message
@@ -998,9 +953,7 @@ class SemanticCommitCommand(CommitCommand):
 								temp_chunk = DiffChunk(files=group.files, content=group.content)
 
 								# Use the linting-aware prompt this time (unpack 5, ignore validation/errors)
-								message, _, _, _, _ = await self.message_generator.generate_message_with_linting(
-									temp_chunk
-								)
+								message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
 								group.message = message
 
 								# Try again with the new message
@@ -1056,7 +1009,7 @@ class SemanticCommitCommand(CommitCommand):
 							temp_chunk = DiffChunk(files=group.files, content=group.content)
 
 							# Use the linting-aware prompt this time (unpack 5, ignore validation/errors)
-							message, _, _, _, _ = await self.message_generator.generate_message_with_linting(temp_chunk)
+							message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
 							group.message = message
 
 							# Try again with the new message
@@ -1216,7 +1169,7 @@ class SemanticCommitCommand(CommitCommand):
 							from codemap.git.diff_splitter import DiffChunk
 
 							temp_chunk = DiffChunk(files=group.files, content=group.content)
-							message, _, _, _, _ = await self.message_generator.generate_message_with_linting(temp_chunk)
+							message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
 							group.message = message
 
 							# Show the regenerated message

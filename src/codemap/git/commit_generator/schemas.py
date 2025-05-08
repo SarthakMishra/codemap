@@ -2,52 +2,22 @@
 
 from __future__ import annotations
 
-from typing import TypedDict
+from pydantic import BaseModel, Field
 
 
-class CommitMessageSchema(TypedDict):
-	"""TypedDict representing the structured commit message output."""
+class Footer(BaseModel):
+	"""Footer token and value."""
 
-	type: str
-	scope: str | None
-	description: str
-	body: str | None
-	breaking: bool
-	footers: list[dict[str, str]]
+	token: str = Field(description="Footer token (e.g., 'BREAKING CHANGE', 'Fixes', 'Refs')")
+	value: str = Field(description="Footer value")
 
 
-# Define a schema for structured commit message output
-COMMIT_MESSAGE_SCHEMA = {
-	"type": "object",
-	"properties": {
-		"commit_message": {
-			"type": {
-				"type": "string",
-				"description": "The type of change (e.g., feat, fix, docs, style, refactor, perf, test, chore)",
-			},
-			"scope": {"type": ["string", "null"], "description": "The scope of the change (e.g., component affected)"},
-			"description": {"type": "string", "description": "A short, imperative-tense description of the change"},
-			"body": {
-				"type": ["string", "null"],
-				"description": "A longer description of the changes, explaining why and how",
-			},
-			"breaking": {"type": "boolean", "description": "Whether this is a breaking change", "default": False},
-			"footers": {
-				"type": "array",
-				"items": {
-					"type": "object",
-					"properties": {
-						"token": {
-							"type": "string",
-							"description": "Footer token (e.g., 'BREAKING CHANGE', 'Fixes', 'Refs')",
-						},
-						"value": {"type": "string", "description": "Footer value"},
-					},
-					"required": ["token", "value"],
-				},
-				"default": [],
-			},
-		},
-	},
-	"required": ["type", "description"],
-}
+class CommitMessageSchema(BaseModel):
+	"""Commit message schema for LLM output."""
+
+	type: str = Field(description="The type of change (e.g., feat, fix, docs, style, refactor, perf, test, chore)")
+	scope: str | None = Field(description="The scope of the change (e.g., component affected). This is optional.")
+	description: str = Field(description="A short, imperative-tense description of the change")
+	body: str | None = Field(description="A longer description of the changes. This is optional.")
+	breaking: bool = Field(description="Whether this is a breaking change", default=False)
+	footers: list[Footer] = Field(description="Footer tokens and values. This is optional.", default=[])

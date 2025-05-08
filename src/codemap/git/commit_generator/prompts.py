@@ -7,7 +7,7 @@ from typing import Any
 
 from codemap.config import ConfigLoader
 
-from .schemas import COMMIT_MESSAGE_SCHEMA
+from .schemas import CommitMessageSchema
 
 COMMIT_SYSTEM_PROMPT = """
 You are an AI assistant knowledgeable in Git best practices.
@@ -160,7 +160,7 @@ def prepare_prompt(
 		"diff": diff_content,
 		"files": file_info,
 		"convention": config_loader.get.commit.convention,
-		"schema": COMMIT_MESSAGE_SCHEMA,
+		"schema": CommitMessageSchema,
 	}
 
 	# Add any extra context values
@@ -217,7 +217,7 @@ def prepare_lint_prompt(
 	# Create an enhanced context with linting feedback
 	context = {
 		"convention": config_loader.get.commit.convention,
-		"schema": COMMIT_MESSAGE_SCHEMA,
+		"schema": CommitMessageSchema,
 		"lint_feedback": lint_feedback,
 		"original_message": message_to_fix,
 		"files_summary": files_summary_text,
