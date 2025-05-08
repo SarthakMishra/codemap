@@ -234,7 +234,7 @@ class AskCommand:
 		# Call LLM with context
 		try:
 			with progress_indicator("Waiting for LLM response..."):
-				answer = await self.llm_client.completion(
+				answer = self.llm_client.completion(
 					messages=[{"role": "user", "content": prompt}],
 					**llm_config,
 				)
