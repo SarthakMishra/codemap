@@ -13,8 +13,6 @@ from pathlib import Path
 
 from rich.console import Console
 from rich.logging import RichHandler
-from rich.rule import Rule
-from rich.text import Text
 
 # Initialize console for rich output
 console = Console()
@@ -24,6 +22,8 @@ def setup_logging(
 	is_verbose: bool = False,
 	log_to_console: bool = True,
 	log_file_path: Path | str | None = None,
+	log_level_default: int = logging.ERROR,
+	log_level_verbose: int = logging.DEBUG,
 ) -> None:
 	"""
 	Set up logging configuration.
@@ -32,10 +32,11 @@ def setup_logging(
 	    is_verbose: Enable verbose logging
 	    log_to_console: Whether to log to the console
 	    log_file_path: Optional path to a file for logging. If None, no file logging.
-
+	    log_level_default: The log level to use for default logging.
+	    log_level_verbose: The log level to use for verbose logging.
 	"""
 	# Determine log level
-	log_level = logging.DEBUG if is_verbose else logging.WARNING
+	log_level = log_level_default if not is_verbose else log_level_verbose
 
 	# Root logger configuration
 	root_logger = logging.getLogger()
@@ -82,55 +83,3 @@ def setup_logging(
 			crit_logger.addHandler(console_err_handler)
 			crit_logger.propagate = False
 			crit_logger.critical(console_error_msg)
-
-
-def log_environment_info() -> None:
-	"""Log information about the execution environment."""
-	logger = logging.getLogger(__name__)
-
-	try:
-		import platform
-
-		from codemap import __version__
-
-		logger.info("CodeMap version: %s", __version__)
-		logger.info("Python version: %s", platform.python_version())
-		logger.info("Platform: %s", platform.platform())
-
-	except Exception:
-		# logger.exception automatically handles exception info
-		logger.exception("Error logging environment info:")
-
-
-def display_error_summary(error_message: str) -> None:
-	"""
-	Display an error summary with a divider and a title.
-
-	Args:
-	        error_message: The error message to display
-
-	"""
-	title = Text("Error Summary", style="bold red")
-
-	console.print()
-	console.print(Rule(title, style="red"))
-	console.print(f"\n{error_message}\n")
-	console.print(Rule(style="red"))
-	console.print()
-
-
-def display_warning_summary(warning_message: str) -> None:
-	"""
-	Display a warning summary with a divider and a title.
-
-	Args:
-	        warning_message: The warning message to display
-
-	"""
-	title = Text("Warning Summary", style="bold yellow")
-
-	console.print()
-	console.print(Rule(title, style="yellow"))
-	console.print(f"\n{warning_message}\n")
-	console.print(Rule(style="yellow"))
-	console.print()

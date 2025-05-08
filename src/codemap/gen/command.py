@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity
-from codemap.utils.cli_utils import console, show_error
+from codemap.utils.cli_utils import console
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
 from .models import GenConfig
@@ -79,7 +79,6 @@ def process_codebase(
 	except Exception as e:
 		logger.exception("Error during LOD file processing")
 		error_msg = f"LOD processing failed: {e}"
-		show_error(error_msg)
 		raise RuntimeError(error_msg) from e
 
 	# Update counts based on actual processed entities
@@ -177,9 +176,6 @@ class GenCommand:
 
 			return True
 
-		except Exception as e:
+		except Exception:
 			logger.exception("Error during gen command execution")
-			# Show a clean error message to the user
-			error_msg = f"Generation failed: {e!s}"
-			show_error(error_msg)
 			return False

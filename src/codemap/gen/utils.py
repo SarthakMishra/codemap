@@ -269,13 +269,14 @@ def write_documentation(output_path: Path, documentation: str) -> None:
 	    documentation: Documentation content to write
 
 	"""
-	from codemap.utils.cli_utils import console, ensure_directory_exists, show_error
+	from codemap.utils.cli_utils import console
+	from codemap.utils.file_utils import ensure_directory_exists
 
 	try:
 		# Ensure parent directory exists
 		ensure_directory_exists(output_path.parent)
 		output_path.write_text(documentation)
 		console.print(f"[green]Documentation written to {output_path}")
-	except (PermissionError, OSError) as e:
-		show_error(f"Error writing documentation to {output_path}: {e!s}")
+	except (PermissionError, OSError):
+		logger.exception(f"Error writing documentation to {output_path}")
 		raise
