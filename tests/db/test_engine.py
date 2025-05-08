@@ -71,6 +71,9 @@ async def test_get_session_rollback_on_error():
 	# Get a fresh engine for this test
 	engine = await get_engine()
 
+	# Ensure tables are created
+	create_db_and_tables(engine)
+
 	# Add an initial record
 	chat = ChatHistory(session_id="test-rollback-error", user_query="Initial query")
 
