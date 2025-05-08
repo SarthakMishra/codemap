@@ -9,6 +9,7 @@ import tracemalloc
 from pathlib import Path
 from typing import Annotated
 
+import nest_asyncio
 import typer
 
 from codemap import __version__
@@ -16,6 +17,10 @@ from codemap import __version__
 # Apply nest_asyncio patch early to allow nested asyncio event loops
 # Deferred imports to improve startup speed
 logger = logging.getLogger(__name__)
+tracemalloc.start()
+
+# Apply nest_asyncio patch early to allow nested asyncio event loops
+nest_asyncio.apply()
 
 # Determine the invoked command name for help message customization
 invoked_command = Path(sys.argv[0]).name
@@ -61,12 +66,6 @@ def global_options(
 	] = None,
 ) -> None:
 	"""Global CLI options and logging setup."""
-	# Apply nest_asyncio patch only when needed (not at import time)
-	import nest_asyncio
-
-	nest_asyncio.apply()
-
-	tracemalloc.start()
 	ctx.meta["is_verbose"] = is_verbose
 	ctx.meta["is_output_log"] = is_output_log
 
@@ -122,7 +121,7 @@ def _register_all_commands() -> None:
 
 	register_gen_command(app)
 	register_ask_command(app)
-	register_commit_command(app)
+	register_commit_command(app=app)
 	register_index_command(app)
 	register_pr_command(app)
 

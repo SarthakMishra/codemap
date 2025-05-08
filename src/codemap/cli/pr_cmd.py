@@ -372,7 +372,7 @@ async def _pr_command_impl(
 			logger.exception("No branch name provided and non-interactive mode enabled.")
 			return None
 
-	async def _handle_commits(options: PROptions) -> bool:
+	def _handle_commits(options: PROptions) -> bool:
 		"""Handle committing changes using CommitCommand."""
 		if not options.commit_first:
 			logger.info("Skipping commit step as requested.")
@@ -406,7 +406,7 @@ async def _pr_command_impl(
 			)
 			# The run method handles staging, splitting, generation, and committing
 			# CommitCommand's run now accepts the interactive flag directly
-			success = await commit_command.run(interactive=options.interactive)
+			success = commit_command.run(interactive=options.interactive)
 
 			if not success:
 				# CommitCommand.run should raise exceptions or show errors,
@@ -444,7 +444,7 @@ async def _pr_command_impl(
 			logger.exception(f"Error pushing branch '{branch_name}'")
 			return False
 
-	async def _interactive_pr_review(
+	def _interactive_pr_review(
 		initial_title: str,
 		initial_description: str,
 		options: PROptions,
@@ -496,8 +496,8 @@ async def _pr_command_impl(
 				console.print("[cyan]Regenerating title and description...[/cyan]")
 				title_strategy = content_config.title_strategy
 				description_strategy = content_config.description_strategy
-				title = await _generate_title(options, title_strategy, commits, branch_name, branch_type)
-				description = await _generate_description(
+				title = _generate_title(options, title_strategy, commits, branch_name, branch_type)
+				description = _generate_description(
 					options,
 					description_strategy,
 					commits,
@@ -515,7 +515,7 @@ async def _pr_command_impl(
 				return None, None
 
 	# --- Generation Helpers (Adapted from pr_cmd_old, now use options dataclass) ---
-	async def _generate_title(
+	def _generate_title(
 		options: PROptions, title_strategy: str, commits: list[str], branch_name: str, branch_type: str
 	) -> str:
 		"""Generate PR title based on the chosen strategy."""
@@ -534,14 +534,14 @@ async def _pr_command_impl(
 				client = LLMClient(
 					config_loader=config_loader,
 				)
-				return await generate_pr_title_with_llm(commits=commits, llm_client=client)
+				return generate_pr_title_with_llm(commits=commits, llm_client=client)
 			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError):
 				logger.exception("LLM title generation failed. Falling back to commit-based title.")
 				# Fall through to commit-based
 		# Default to commit-based
 		return generate_pr_title_from_commits(commits)
 
-	async def _generate_description(
+	def _generate_description(
 		options: PROptions,
 		description_strategy: str,
 		commits: list[str],
@@ -577,7 +577,7 @@ async def _pr_command_impl(
 				client = LLMClient(
 					config_loader=config_loader,
 				)
-				return await generate_pr_description_with_llm(commits, llm_client=client)
+				return generate_pr_description_with_llm(commits, llm_client=client)
 			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError):
 				logger.exception("LLM description generation failed. Falling back to commit-based description.")
 				# Fall through to commit-based
@@ -667,7 +667,7 @@ async def _pr_command_impl(
 			opts.branch_name = final_branch_name  # Update options with final name
 
 			# 5b. Handle Commits (Optional)
-			if opts.commit_first and not await _handle_commits(opts):
+			if opts.commit_first and not _handle_commits(opts):
 				_exit_command(1)  # Exit if commit handling failed
 
 			# 5c. Handle Push
@@ -744,10 +744,8 @@ async def _pr_command_impl(
 			title_strategy = content_config.title_strategy
 			description_strategy = content_config.description_strategy
 
-			initial_title = await _generate_title(
-				opts, title_strategy, commits, final_branch_name, detected_branch_type
-			)
-			initial_description = await _generate_description(
+			initial_title = _generate_title(opts, title_strategy, commits, final_branch_name, detected_branch_type)
+			initial_description = _generate_description(
 				opts,
 				description_strategy,
 				commits,
@@ -761,7 +759,7 @@ async def _pr_command_impl(
 			# 5f. Interactive Review (if applicable)
 			final_title, final_description = initial_title, initial_description
 			if opts.interactive:
-				final_title, final_description = await _interactive_pr_review(
+				final_title, final_description = _interactive_pr_review(
 					initial_title,
 					initial_description,
 					opts,
@@ -779,7 +777,7 @@ async def _pr_command_impl(
 			console.print(Rule("Creating Pull Request", style="bold blue"))
 			try:
 				with progress_indicator("Creating PR on GitHub/GitLab...", style="spinner"):
-					pr = await pr_workflow.create_pr_workflow(
+					pr = pr_workflow.create_pr_workflow(
 						base_branch=opts.base_branch,
 						head_branch=final_branch_name,
 						title=final_title,
@@ -868,7 +866,7 @@ async def _pr_command_impl(
 				update_head_branch = current_branch  # Head is the current branch
 
 				with progress_indicator(f"Updating PR #{pr_num_to_update} on GitHub/GitLab...", style="spinner"):
-					updated_pr = await pr_workflow.update_pr_workflow(
+					updated_pr = pr_workflow.update_pr_workflow(
 						pr_number=pr_num_to_update,
 						title=opts.title,  # Pass provided title, None to regenerate
 						description=resolved_description,  # Pass resolved description, None to regenerate
