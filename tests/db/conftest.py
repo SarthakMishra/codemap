@@ -1,7 +1,5 @@
 """Fixtures for database tests."""
 
-import asyncio
-
 import pytest
 import pytest_asyncio
 from sqlmodel import Session
@@ -9,13 +7,9 @@ from sqlmodel import Session
 from codemap.db.engine import create_db_and_tables, get_engine
 from codemap.db.models import ChatHistory
 
-
-@pytest.fixture(scope="session")
-def event_loop():
-	"""Create an instance of the default event loop for session scope fixtures."""
-	loop = asyncio.get_event_loop_policy().new_event_loop()
-	yield loop
-	loop.close()
+# Configure pytest-asyncio to use session-scoped event loops by default
+# This replaces the custom event_loop fixture
+pytestmark = pytest.mark.asyncio(scope="session")
 
 
 @pytest_asyncio.fixture(scope="session")
@@ -31,7 +25,10 @@ async def test_engine():
 	engine = await get_engine(echo=True)
 	# Create tables once the engine is ready
 	create_db_and_tables(engine)
-	return engine
+	yield engine
+	# Clean up any resources if needed
+	if hasattr(engine, "dispose"):
+		engine.dispose()
 
 
 @pytest.fixture
