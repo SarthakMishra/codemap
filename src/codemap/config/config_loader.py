@@ -8,18 +8,16 @@ configuration settings.
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 
 import yaml
-from xdg.BaseDirectory import xdg_config_home
 
 from codemap.config.config_schema import AppConfigSchema
+from codemap.git.utils import get_repo_root
 
 # For type checking only
 if TYPE_CHECKING:
 	from pydantic import BaseModel
-
-T = TypeVar("T")
 
 logger = logging.getLogger(__name__)
 
@@ -54,32 +52,24 @@ class ConfigLoader:
 
 	"""
 
-	_instance = None  # For singleton pattern
+	_instance = None
 
 	@classmethod
 	def get_instance(
-		cls, config_file: Path | None = None, reload: bool = False, repo_root: Path | None = None
+		cls,
 	) -> "ConfigLoader":
 		"""
 		Get the singleton instance of ConfigLoader.
-
-		Args:
-			config_file: Path to configuration file (optional)
-			reload: Whether to reload config even if already loaded
-			repo_root: Repository root path (optional)
 
 		Returns:
 			ConfigLoader: Singleton instance
 
 		"""
 		if cls._instance is None:
-			cls._instance = cls(config_file, repo_root=repo_root)
-		elif reload:
-			# Update existing instance if reload is requested
-			cls._instance.reload_config(config_file, repo_root)
+			cls._instance = cls()
 		return cls._instance
 
-	def __init__(self, config_file: Path | None = None, repo_root: Path | None = None) -> None:
+	def __init__(self) -> None:
 		"""
 		Initialize the configuration loader.
 
@@ -88,38 +78,17 @@ class ConfigLoader:
 			repo_root: Repository root path (optional)
 
 		"""
-		self.repo_root = repo_root
-		self._config_file = config_file
-		self._resolved_config_file = self._resolve_config_file(config_file)
 		# Load configuration eagerly during initialization instead of lazy loading
 		self._app_config = self._load_config()
 		logger.debug("ConfigLoader initialized with eager configuration loading")
 
-	def reload_config(self, config_file: Path | None = None, repo_root: Path | None = None) -> None:
-		"""
-		Reload configuration with new settings.
-
-		Args:
-			config_file: New configuration file path
-			repo_root: New repository root path
-		"""
-		if config_file is not None:
-			self._config_file = config_file
-		if repo_root is not None:
-			self.repo_root = repo_root
-		self._resolved_config_file = self._resolve_config_file(self._config_file)
-		# Reload the configuration immediately
-		self._app_config = self._load_config()
-		logger.debug("Configuration reloaded")
-
-	def _resolve_config_file(self, config_file: Path | None = None) -> Path | None:
+	def _get_config_file(self) -> Path | None:
 		"""
 		Resolve the configuration file path.
 
-		If a config file is specified, use that. Otherwise, look in standard locations:
+		look in standard locations:
 		1. ./.codemap.yml in the current directory
-		2. $XDG_CONFIG_HOME/codemap/config.yml
-		3. ~/.config/codemap/config.yml (fallback if XDG_CONFIG_HOME not set)
+		2. ./.codemap.yml in the repository root
 
 		Args:
 			config_file: Explicitly provided config file path (optional)
@@ -128,28 +97,18 @@ class ConfigLoader:
 			Optional[Path]: Resolved config file path or None if no suitable file found
 
 		"""
-		if config_file:
-			path = config_file.expanduser().resolve()
-			if path.exists():
-				return path
-			logger.warning("Specified config file not found: %s", path)
-			return path  # Return it anyway, we'll handle the missing file in load_config
-
 		# Try current directory
 		local_config = Path(".codemap.yml")
 		if local_config.exists():
+			self.repo_root = local_config.parent
 			return local_config
 
-		# Try XDG config path
-		xdg_config_dir = Path(xdg_config_home) / "codemap"
-		xdg_config_file = xdg_config_dir / "config.yml"
-		if xdg_config_file.exists():
-			return xdg_config_file
-
-		# As a last resort, try the legacy ~/.codemap location
-		legacy_config = Path.home() / ".codemap" / "config.yml"
-		if legacy_config.exists():
-			return legacy_config
+		# Try repository root
+		repo_root = get_repo_root()
+		self.repo_root = repo_root
+		repo_config = repo_root / ".codemap.yml"
+		if repo_config.exists():
+			return repo_config
 
 		# If we get here, no config file was found
 		return None
@@ -195,27 +154,29 @@ class ConfigLoader:
 		from codemap.config import AppConfigSchema
 
 		file_config_dict: dict[str, Any] = {}
-		if self._resolved_config_file:
+		config_file = self._get_config_file()
+
+		if config_file:
 			try:
-				if self._resolved_config_file.exists():
+				if config_file.exists():
 					try:
-						file_config_dict = self._parse_yaml_file(self._resolved_config_file)
-						logger.info("Loaded configuration from %s", self._resolved_config_file)
+						file_config_dict = self._parse_yaml_file(config_file)
+						logger.info("Loaded configuration from %s", config_file)
 					except yaml.YAMLError as e:
-						msg = (
-							f"Configuration file {self._resolved_config_file} does not contain a valid YAML dictionary."
-						)
+						msg = f"Configuration file {config_file} does not contain a valid YAML dictionary."
 						logger.exception(msg)
 						raise ConfigParsingError(msg) from e
 				else:
-					msg = f"Configuration file not found: {self._resolved_config_file}."
+					msg = f"Configuration file not found: {config_file}."
 					logger.info("%s Using default configuration.", msg)
 			except OSError as e:
-				error_msg = f"Error accessing configuration file {self._resolved_config_file}: {e}"
+				error_msg = f"Error accessing configuration file {config_file}: {e}"
 				logger.exception(error_msg)
 				raise ConfigParsingError(error_msg) from e
 		else:
 			logger.info("No configuration file specified or found. Using default configuration.")
+
+		file_config_dict["repo_root"] = self.repo_root
 
 		try:
 			# Initialize AppConfigSchema. If file_config_dict is empty, defaults will be used.

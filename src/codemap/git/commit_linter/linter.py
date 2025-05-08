@@ -1,7 +1,6 @@
 """Main linter module for commit messages."""
 
 import re
-from pathlib import Path
 from typing import Any
 
 from codemap.config import ConfigLoader
@@ -19,7 +18,6 @@ class CommitLinter:
 		self,
 		allowed_types: list[str] | None = None,
 		config: CommitLintConfig | None = None,
-		config_path: str | None = None,
 		config_loader: ConfigLoader | None = None,
 	) -> None:
 		"""
@@ -31,9 +29,7 @@ class CommitLinter:
 		    config_path (str, optional): Path to a configuration file (.codemap.yml).
 		    config_loader (ConfigLoader, optional): Config loader instance to use (dependency injection).
 		"""
-		# Get configuration loader following the Chain of Responsibility pattern
-		repo_root = Path(config_path).parent if config_path else None
-		self.config_loader = config_loader or ConfigLoader.get_instance(repo_root=repo_root)
+		self.config_loader = config_loader or ConfigLoader.get_instance()
 
 		# Get default types from central config via config_loader
 		commit_config = self.config_loader.get.commit

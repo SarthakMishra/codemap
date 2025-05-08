@@ -1,12 +1,15 @@
 """Module for generating embeddings from diff chunks."""
 
 import logging
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
 from codemap.processor.utils.embedding_utils import generate_embeddings_batch
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +19,7 @@ class DiffEmbedder:
 
 	def __init__(
 		self,
-		config_loader: ConfigLoader,
+		config_loader: "ConfigLoader",
 	) -> None:
 		"""
 		Initialize the embedder with configuration.
@@ -24,7 +27,7 @@ class DiffEmbedder:
 		Args:
 		    config_loader: ConfigLoader instance for embedding configuration.
 		"""
-		self.config_loader = config_loader or ConfigLoader()
+		self.config_loader = config_loader
 
 	def preprocess_diff(self, diff_text: str) -> str:
 		"""

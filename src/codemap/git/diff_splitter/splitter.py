@@ -1,14 +1,16 @@
 """Diff splitting implementation for CodeMap."""
 
 import logging
-from pathlib import Path
+from typing import TYPE_CHECKING
 
-from codemap.config import ConfigLoader
 from codemap.git.diff_splitter.strategies import FileSplitStrategy, SemanticSplitStrategy
 from codemap.git.diff_splitter.utils import filter_valid_files, is_test_environment
-from codemap.git.utils import GitDiff
+from codemap.git.utils import GitDiff, get_repo_root
 
 from .schemas import DiffChunk
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -24,19 +26,25 @@ class DiffSplitter:
 
 	def __init__(
 		self,
-		repo_root: Path,
-		config_loader: ConfigLoader | None = None,
+		config_loader: "ConfigLoader | None" = None,
 	) -> None:
 		"""
 		Initialize the diff splitter.
 
 		Args:
-		    repo_root: Root directory of the Git repository
 		    config_loader: ConfigLoader object for loading configuration
-
 		"""
-		self.repo_root = repo_root
-		self.config_loader = config_loader or ConfigLoader.get_instance(repo_root=self.repo_root)
+		if config_loader:
+			self.config_loader = config_loader
+		else:
+			from codemap.config import ConfigLoader  # Import locally
+
+			self.config_loader = ConfigLoader.get_instance()
+
+		if self.config_loader.get.repo_root is None:
+			self.repo_root = get_repo_root()
+		else:
+			self.repo_root = self.config_loader.get.repo_root
 
 		# Get config for diff_splitter, fallback to empty dict if not found
 		ds_config = self.config_loader.get.commit.diff_splitter

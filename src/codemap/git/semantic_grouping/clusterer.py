@@ -18,12 +18,14 @@ The module supports multiple clustering methods:
 """
 
 import logging
-from typing import TypedDict, TypeVar
+from typing import TYPE_CHECKING, TypedDict, TypeVar
 
 import numpy as np
 
-from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +79,7 @@ class DiffClusterer:
 
 	"""
 
-	def __init__(self, config_loader: ConfigLoader, **kwargs: object) -> None:
+	def __init__(self, config_loader: "ConfigLoader", **kwargs: object) -> None:
 		"""
 		Initialize the clusterer.
 

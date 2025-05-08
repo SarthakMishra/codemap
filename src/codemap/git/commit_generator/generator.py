@@ -543,9 +543,7 @@ class CommitMessageGenerator:
 			message = clean_message_for_linting(message)
 			logger.debug("Cleaned initial message: %s", message)
 
-			is_valid, error_message = lint_commit_message(
-				message, repo_root=self.repo_root, config_loader=self._config_loader
-			)
+			is_valid, error_message = lint_commit_message(message, config_loader=self._config_loader)
 			initial_lint_messages = [error_message] if error_message is not None else []
 			logger.debug("Initial lint result: valid=%s, messages=%s", is_valid, initial_lint_messages)
 
@@ -592,9 +590,7 @@ class CommitMessageGenerator:
 				cleaned_message = clean_message_for_linting(regenerated_message)
 				logger.debug("Cleaned regenerated message: %s", cleaned_message)
 
-				final_is_valid, error_message = lint_commit_message(
-					cleaned_message, repo_root=self.repo_root, config_loader=self._config_loader
-				)
+				final_is_valid, error_message = lint_commit_message(cleaned_message, config_loader=self._config_loader)
 				final_lint_messages = [error_message] if error_message is not None else []
 				logger.debug("Regenerated lint result: valid=%s, messages=%s", final_is_valid, final_lint_messages)
 

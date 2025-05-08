@@ -6,11 +6,10 @@ import re
 from io import StringIO
 from pathlib import Path
 from re import Pattern
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from unidiff import Hunk, PatchedFile, PatchSet, UnidiffParseError
 
-from codemap.config import ConfigLoader
 from codemap.git.semantic_grouping.embedder import DiffEmbedder
 from codemap.git.utils import GitDiff
 
@@ -25,6 +24,9 @@ from .utils import (
 	determine_commit_type,
 	get_language_specific_patterns,
 )
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +121,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	def __init__(
 		self,
-		config_loader: ConfigLoader,
+		config_loader: "ConfigLoader",
 	) -> None:
 		"""
 		Initialize the SemanticSplitStrategy.

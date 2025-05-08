@@ -2,7 +2,6 @@
 
 import logging
 import re
-from pathlib import Path
 
 from codemap.config import ConfigLoader
 from codemap.git.commit_generator.schemas import CommitMessageSchema
@@ -38,9 +37,7 @@ def clean_message_for_linting(message: str) -> str:
 	return cleaned.strip()
 
 
-def lint_commit_message(
-	message: str, repo_root: Path | None = None, config_loader: ConfigLoader | None = None
-) -> tuple[bool, str | None]:
+def lint_commit_message(message: str, config_loader: ConfigLoader | None = None) -> tuple[bool, str | None]:
 	"""
 	Lint a commit message.
 
@@ -48,7 +45,6 @@ def lint_commit_message(
 
 	Args:
 	        message: The commit message to lint
-	        repo_root: Repository root path
 	        config_loader: Configuration loader instance
 
 	Returns:
@@ -57,7 +53,7 @@ def lint_commit_message(
 	"""
 	# Get config loader if not provided
 	if config_loader is None:
-		config_loader = ConfigLoader.get_instance(repo_root=repo_root)
+		config_loader = ConfigLoader.get_instance()
 
 	try:
 		# Create a CommitLinter instance with the config_loader

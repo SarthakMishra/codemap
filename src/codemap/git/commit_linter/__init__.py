@@ -6,8 +6,6 @@ commit message linting.
 
 """
 
-from pathlib import Path
-
 from codemap.config.config_loader import ConfigLoader
 
 from .config import CommitLintConfig, Rule, RuleLevel
@@ -19,9 +17,7 @@ __all__ = ["CommitLintConfig", "CommitLinter", "Rule", "RuleLevel", "create_lint
 def create_linter(
 	allowed_types: list[str] | None = None,
 	config: CommitLintConfig | None = None,
-	config_path: str | None = None,
 	config_loader: ConfigLoader | None = None,
-	repo_root: Path | None = None,
 ) -> CommitLinter:
 	"""
 	Create a CommitLinter with proper dependency injection for configuration.
@@ -32,22 +28,20 @@ def create_linter(
 	Args:
 	    allowed_types: Override list of allowed commit types
 	    config: Pre-configured CommitLintConfig object
-	    config_path: Path to a configuration file
 	    config_loader: ConfigLoader instance for configuration (recommended)
-	    repo_root: Repository root path
+
 
 	Returns:
 	    CommitLinter: Configured commit linter instance
 
 	"""
 	# Create a ConfigLoader if not provided, but repo_root is
-	if config_loader is None and repo_root is not None:
-		config_loader = ConfigLoader.get_instance(repo_root=repo_root)
+	if config_loader is None:
+		config_loader = ConfigLoader.get_instance()
 
 	# Create and return the linter with proper configuration injection
 	return CommitLinter(
 		allowed_types=allowed_types,
 		config=config,
-		config_path=config_path,
 		config_loader=config_loader,
 	)

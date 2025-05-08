@@ -22,10 +22,10 @@ from typing import TYPE_CHECKING, TypeVar
 
 import numpy as np
 
-from codemap.config import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
 
 if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 	from codemap.git.semantic_grouping import SemanticGroup
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class FileIntegrityResolver:
 	def __init__(
 		self,
 		similarity_threshold: float = 0.6,
-		config_loader: ConfigLoader | None = None,
+		config_loader: "ConfigLoader | None" = None,
 	) -> None:
 		"""
 		Initialize the resolver.
@@ -66,7 +66,13 @@ class FileIntegrityResolver:
 		    similarity_threshold: Threshold for group similarity to trigger merging (0.0-1.0).
 		    config_loader: Optional ConfigLoader instance.
 		"""
-		self.config_loader = config_loader or ConfigLoader()
+		if config_loader:
+			self.config_loader = config_loader
+		else:
+			from codemap.config import ConfigLoader
+
+			self.config_loader = ConfigLoader()
+
 		self.similarity_threshold = similarity_threshold
 
 		# Import here to avoid making sklearn a hard dependency
