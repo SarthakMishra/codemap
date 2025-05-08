@@ -6,6 +6,8 @@ from typing import Annotated
 import asyncer
 import typer
 
+from codemap.utils.cli_utils import progress_indicator
+
 logger = logging.getLogger(__name__)
 
 # --- Command Argument Annotations (Keep these lightweight) ---
@@ -54,9 +56,10 @@ async def _semantic_commit_command_impl(
 	"""Actual implementation of the semantic commit command."""
 	# --- Heavy Imports ---
 
-	from codemap.config import ConfigLoader
-	from codemap.git.commit_generator.command import SemanticCommitCommand
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
+	with progress_indicator("Setting up environment..."):
+		from codemap.config import ConfigLoader
+		from codemap.git.commit_generator.command import SemanticCommitCommand
+		from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
 	# --- Setup & Logic ---
 
@@ -69,9 +72,10 @@ async def _semantic_commit_command_impl(
 		should_bypass_hooks = bypass_hooks or config.get.commit.bypass_hooks
 
 		# Create the semantic commit command
-		semantic_workflow = SemanticCommitCommand(
-			bypass_hooks=should_bypass_hooks,
-		)
+		with progress_indicator("Initializing semantic workflow..."):
+			semantic_workflow = SemanticCommitCommand(
+				bypass_hooks=should_bypass_hooks,
+			)
 
 		# Run the semantic commit process
 		success = await semantic_workflow.run(

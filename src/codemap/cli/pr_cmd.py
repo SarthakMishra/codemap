@@ -8,6 +8,8 @@ from typing import Annotated, cast
 import asyncer
 import typer
 
+from codemap.utils.cli_utils import progress_indicator
+
 
 class PRAction(str, Enum):
 	"""Actions for PR command."""
@@ -130,54 +132,55 @@ async def _pr_command_impl(
 ) -> None:
 	"""Actual implementation of the pr command with heavy imports."""
 	# --- Heavy Imports ---
-	import contextlib
-	from dataclasses import dataclass, field
 
-	import questionary
-	from rich.console import Console
-	from rich.markdown import Markdown
-	from rich.panel import Panel
-	from rich.rule import Rule
-	from rich.text import Text
+	with progress_indicator("Setting up environment..."):
+		import contextlib
+		from dataclasses import dataclass, field
 
-	from codemap.config import ConfigLoader
-	from codemap.config.config_schema import PRGenerateSchema
-	from codemap.git.commit_generator.command import SemanticCommitCommand
-	from codemap.git.pr_generator.command import PRWorkflowCommand
-	from codemap.git.pr_generator.strategies import (
-		WorkflowStrategy,
-		branch_exists,
-		create_strategy,
-	)
-	from codemap.git.pr_generator.utils import (
-		PRCreationError,
-		checkout_branch,
-		create_branch,
-		generate_pr_description_from_commits,
-		generate_pr_description_with_llm,
-		generate_pr_title_from_commits,
-		generate_pr_title_with_llm,
-		get_commit_messages,
-		get_current_branch,
-		get_default_branch,
-		get_existing_pr,
-		push_branch,
-	)
-	from codemap.git.pr_generator.utils import validate_branch_name as validate_branch_name_util  # Avoid name clash
-	from codemap.git.utils import (
-		GitError,
-		get_staged_diff,
-		get_unstaged_diff,
-		get_untracked_files,
-		run_git_command,
-	)
-	from codemap.llm import LLMError  # Import LLMError
-	from codemap.llm.client import LLMClient
-	from codemap.utils.cli_utils import (
-		exit_with_error,
-		handle_keyboard_interrupt,
-		progress_indicator,
-	)
+		import questionary
+		from rich.console import Console
+		from rich.markdown import Markdown
+		from rich.panel import Panel
+		from rich.rule import Rule
+		from rich.text import Text
+
+		from codemap.config import ConfigLoader
+		from codemap.config.config_schema import PRGenerateSchema
+		from codemap.git.commit_generator.command import SemanticCommitCommand
+		from codemap.git.pr_generator.command import PRWorkflowCommand
+		from codemap.git.pr_generator.strategies import (
+			WorkflowStrategy,
+			branch_exists,
+			create_strategy,
+		)
+		from codemap.git.pr_generator.utils import (
+			PRCreationError,
+			checkout_branch,
+			create_branch,
+			generate_pr_description_from_commits,
+			generate_pr_description_with_llm,
+			generate_pr_title_from_commits,
+			generate_pr_title_with_llm,
+			get_commit_messages,
+			get_current_branch,
+			get_default_branch,
+			get_existing_pr,
+			push_branch,
+		)
+		from codemap.git.pr_generator.utils import validate_branch_name as validate_branch_name_util  # Avoid name clash
+		from codemap.git.utils import (
+			GitError,
+			get_staged_diff,
+			get_unstaged_diff,
+			get_untracked_files,
+			run_git_command,
+		)
+		from codemap.llm import LLMError  # Import LLMError
+		from codemap.llm.client import LLMClient
+		from codemap.utils.cli_utils import (
+			exit_with_error,
+			handle_keyboard_interrupt,
+		)
 
 	# --- Setup ---
 	logger = logging.getLogger(__name__)
