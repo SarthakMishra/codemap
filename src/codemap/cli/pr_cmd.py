@@ -191,8 +191,6 @@ async def _pr_command_impl(
 		exit_with_error,
 		handle_keyboard_interrupt,
 		progress_indicator,
-		show_error,
-		show_warning,
 	)
 
 	# --- Setup ---
@@ -262,8 +260,8 @@ async def _pr_command_impl(
 					create_branch(options.branch_name)
 					console.print(f"[green]Created and switched to new branch: {options.branch_name}[/green]")
 					return options.branch_name
-				except GitError as e:
-					show_error(f"Error creating branch: {e}")
+				except GitError:
+					logger.exception("Error creating branch")
 					return None
 			else:
 				# Branch exists, switch to it if not already there
@@ -271,8 +269,8 @@ async def _pr_command_impl(
 					try:
 						checkout_branch(options.branch_name)
 						console.print(f"[green]Switched to existing branch: {options.branch_name}[/green]")
-					except GitError as e:
-						show_error(f"Error switching to branch: {e}")
+					except GitError:
+						logger.exception("Error switching to branch")
 						return None
 				return options.branch_name
 
@@ -315,7 +313,7 @@ async def _pr_command_impl(
 						}
 					)
 			except GitError as e:
-				show_warning(f"Could not retrieve detailed branch list: {e}")
+				logger.warning(f"Could not retrieve detailed branch list: {e}")
 				# Fallback to simple local branches
 				try:
 					local_branches = workflow.get_local_branches()
@@ -324,7 +322,7 @@ async def _pr_command_impl(
 						{"name": branch, "value": branch} for branch in local_branches if branch != default_repo_branch
 					)
 				except GitError:
-					show_error("Failed to list any branches.")
+					logger.exception("Failed to list any branches.")
 					return None
 
 			chosen_branch = questionary.select(
@@ -346,8 +344,8 @@ async def _pr_command_impl(
 					create_branch(new_branch_name)
 					console.print(f"[green]Created and switched to new branch: {new_branch_name}[/green]")
 					return new_branch_name
-				except GitError as e:
-					show_error(f"Error creating branch: {e}")
+				except GitError:
+					logger.exception("Error creating branch")
 					return None
 			elif chosen_branch:
 				# Existing branch selected
@@ -361,8 +359,8 @@ async def _pr_command_impl(
 							run_git_command(["git", "checkout", "-b", chosen_branch, f"origin/{chosen_branch}"])
 							console.print(f"[green]Checked out remote branch locally: {chosen_branch}[/green]")
 					return chosen_branch
-				except GitError as e:
-					show_error(f"Error switching to branch '{chosen_branch}': {e}")
+				except GitError:
+					logger.exception(f"Error switching to branch '{chosen_branch}'")
 					return None
 			else:
 				# User cancelled selection
@@ -371,7 +369,7 @@ async def _pr_command_impl(
 
 		# 3. Non-interactive mode
 		else:
-			show_error("No branch name provided and non-interactive mode enabled.")
+			logger.exception("No branch name provided and non-interactive mode enabled.")
 			return None
 
 	async def _handle_commits(options: PROptions) -> bool:
@@ -386,7 +384,7 @@ async def _pr_command_impl(
 			unstaged = get_unstaged_diff()
 			untracked = get_untracked_files()
 			if not staged.files and not unstaged.files and not untracked:
-				show_warning("No changes detected to commit.")
+				logger.warning("No changes detected to commit.")
 				return True
 
 			num_files = len(set(staged.files + unstaged.files + untracked))
@@ -413,18 +411,18 @@ async def _pr_command_impl(
 			if not success:
 				# CommitCommand.run should raise exceptions or show errors,
 				# but we can check the return value just in case.
-				show_error("Commit process failed.")
+				logger.exception("Commit process failed.")
 				return False
 
 			logger.info("Commit process completed.")
 			return True
 
-		except GitError as e:
-			show_error(f"Git error during commit preparation: {e}")
+		except GitError:
+			logger.exception("Git error during commit preparation")
 			return False
-		except Exception as e:
+		except Exception:
 			logger.exception("Unexpected error during commit handling")
-			show_error(f"Failed to handle commits: {e}")
+			logger.exception("Failed to handle commits")
 			return False
 
 	def _handle_push(options: PROptions, branch_name: str) -> bool:
@@ -434,7 +432,7 @@ async def _pr_command_impl(
 			push_now = questionary.confirm(f"Push branch '{branch_name}' to remote?", default=True).ask()
 
 		if not push_now:
-			show_warning(f"Skipping push for branch '{branch_name}'.")
+			logger.warning(f"Skipping push for branch '{branch_name}'.")
 			return True
 
 		try:
@@ -442,8 +440,8 @@ async def _pr_command_impl(
 				push_branch(branch_name, force=options.force_push)
 			console.print(f"[green]Successfully pushed branch '{branch_name}' to remote.[/green]")
 			return True
-		except GitError as e:
-			show_error(f"Error pushing branch '{branch_name}': {e}")
+		except GitError:
+			logger.exception(f"Error pushing branch '{branch_name}'")
 			return False
 
 	async def _interactive_pr_review(
@@ -513,7 +511,7 @@ async def _pr_command_impl(
 				console.print("[yellow]PR operation cancelled.[/yellow]")
 				return None, None
 			else:
-				show_error("Invalid action selected.")  # Should not happen
+				logger.exception("Invalid action selected.")  # Should not happen
 				return None, None
 
 	# --- Generation Helpers (Adapted from pr_cmd_old, now use options dataclass) ---
@@ -537,8 +535,8 @@ async def _pr_command_impl(
 					config_loader=config_loader,
 				)
 				return await generate_pr_title_with_llm(commits=commits, llm_client=client)
-			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError) as e:
-				show_warning(f"LLM title generation failed: {e}. Falling back to commit-based title.")
+			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError):
+				logger.exception("LLM title generation failed. Falling back to commit-based title.")
 				# Fall through to commit-based
 		# Default to commit-based
 		return generate_pr_title_from_commits(commits)
@@ -580,8 +578,8 @@ async def _pr_command_impl(
 					config_loader=config_loader,
 				)
 				return await generate_pr_description_with_llm(commits, llm_client=client)
-			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError) as e:
-				show_warning(f"LLM description generation failed: {e}. Falling back to commit-based description.")
+			except (LLMError, ConnectionError, TimeoutError, ValueError, RuntimeError):
+				logger.exception("LLM description generation failed. Falling back to commit-based description.")
 				# Fall through to commit-based
 
 		if description_strategy == "template":
@@ -595,8 +593,8 @@ async def _pr_command_impl(
 						testing_instructions="Please test these changes thoroughly.",  # Example placeholder
 						screenshots="",  # Example placeholder
 					)
-				except KeyError as e:
-					show_warning(f"Description template missing key: {e}. Falling back to commit-based.")
+				except KeyError:
+					logger.exception("Description template missing key. Falling back to commit-based.")
 					# Fall through
 
 		# Default to commit-based
@@ -711,9 +709,9 @@ async def _pr_command_impl(
 								f"[yellow]Selection cancelled. Using base branch: '{opts.base_branch}'[/yellow]"
 							)
 					else:
-						show_warning(f"No other remote branches found to select as base. Using '{opts.base_branch}'.")
-				except GitError as e:
-					show_warning(f"Could not list remote branches for selection: {e}")
+						logger.warning(f"No other remote branches found to select as base. Using '{opts.base_branch}'.")
+				except GitError:
+					logger.exception("Could not list remote branches for selection")
 
 			# Ensure opts.base_branch is not None before proceeding
 			if not opts.base_branch:
@@ -724,7 +722,7 @@ async def _pr_command_impl(
 			if final_branch_name:  # Ensure branch name is not None
 				existing_pr = get_existing_pr(final_branch_name)
 				if existing_pr:
-					show_warning(
+					logger.warning(
 						f"PR #{existing_pr.number} already exists for branch "
 						f"'{final_branch_name}'. Update it instead? "
 						f"({existing_pr.url})"

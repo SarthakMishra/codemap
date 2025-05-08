@@ -27,7 +27,7 @@ from codemap.git.utils import (
 	switch_branch,
 )
 from codemap.llm import LLMError
-from codemap.utils.cli_utils import loading_spinner
+from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.file_utils import read_file_content
 
 from . import (
@@ -526,7 +526,7 @@ class CommitCommand:
 
 		"""
 		try:
-			with loading_spinner("Analyzing changes..."):
+			with progress_indicator("Analyzing changes..."):
 				changes = self._get_changes()
 
 			if not changes:
@@ -1104,7 +1104,7 @@ class SemanticCommitCommand(CommitCommand):
 
 		try:
 			# Get target files
-			with loading_spinner("Analyzing repository..."):
+			with progress_indicator("Analyzing repository..."):
 				self.target_files = self._get_target_files(pathspecs)
 				logger.debug(f"SemanticCommitCommand.run: Target files after _get_target_files: {self.target_files}")
 
@@ -1147,7 +1147,7 @@ class SemanticCommitCommand(CommitCommand):
 				logger.info(f"Final chunk count: {len(chunks)}")
 
 			# Create semantic groups
-			with loading_spinner("Creating semantic groups..."):
+			with progress_indicator("Creating semantic groups..."):
 				# Special case for very few files - create a single group
 				if len(chunks) <= 2:  # noqa: PLR2004
 					logger.info("Small number of chunks detected, creating a single semantic group")

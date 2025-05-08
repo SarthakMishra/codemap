@@ -20,7 +20,7 @@ from codemap.git.pr_generator.utils import (
 )
 from codemap.git.utils import GitError, get_repo_root, run_git_command
 from codemap.llm import LLMClient, LLMError
-from codemap.utils.cli_utils import loading_spinner
+from codemap.utils.cli_utils import progress_indicator
 
 from . import PRGenerator
 from .constants import MIN_COMMIT_PARTS
@@ -139,7 +139,7 @@ class PRCommand:
 
 		"""
 		try:
-			with loading_spinner("Generating PR description using LLM..."):
+			with progress_indicator("Generating PR description using LLM..."):
 				# Use the PR generator to create content
 				content = await self.pr_generator.generate_content_from_commits(
 					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=True
@@ -150,7 +150,7 @@ class PRCommand:
 			logger.warning("LLM error: %s", str(e))
 
 			# Generate a simple fallback description without LLM
-			with loading_spinner("Falling back to simple PR description generation..."):
+			with progress_indicator("Falling back to simple PR description generation..."):
 				content = await self.pr_generator.generate_content_from_commits(
 					base_branch=branch_info["target_branch"], head_branch=branch_info["current_branch"], use_llm=False
 				)
@@ -188,11 +188,11 @@ class PRCommand:
 		"""
 		try:
 			# Get branch information
-			with loading_spinner("Getting branch information..."):
+			with progress_indicator("Getting branch information..."):
 				branch_info = self._get_branch_info()
 
 			# Get commit history
-			with loading_spinner("Retrieving commit history..."):
+			with progress_indicator("Retrieving commit history..."):
 				commits = self._get_commit_history(branch_info["target_branch"])
 
 			if not commits:
