@@ -4,16 +4,18 @@ import logging
 import uuid
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from rich.progress import Progress, TaskID
 
-from codemap.config import ConfigLoader
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.utils.embedding_utils import generate_embeddings_batch
 from codemap.processor.utils.git_utils import _should_exclude_path, get_git_tracked_files
 from codemap.processor.vector.chunking import CodeChunk, TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +30,7 @@ class VectorSynchronizer:
 		chunker: TreeSitterChunker,
 		embedding_model_name: str,
 		analyzer: TreeSitterAnalyzer | None = None,
-		config_loader: ConfigLoader | None = None,
+		config_loader: "ConfigLoader | None" = None,
 	) -> None:
 		"""
 		Initialize the vector synchronizer.
@@ -47,7 +49,12 @@ class VectorSynchronizer:
 		self.chunker = chunker
 		self.embedding_model_name = embedding_model_name
 		self.analyzer = analyzer or TreeSitterAnalyzer()
-		self.config_loader = config_loader or ConfigLoader()
+		if config_loader:
+			self.config_loader = config_loader
+		else:
+			from codemap.config import ConfigLoader
+
+			self.config_loader = ConfigLoader()
 
 		# Get configuration values
 		embedding_config = self.config_loader.get.embedding

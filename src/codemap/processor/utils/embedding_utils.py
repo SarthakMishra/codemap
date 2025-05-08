@@ -5,19 +5,19 @@ import logging
 import os
 from typing import TYPE_CHECKING, Literal, cast
 
-from codemap.config import ConfigLoader
-
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
 	from voyageai.client import Client
 	from voyageai.client_async import AsyncClient
 
+	from codemap.config import ConfigLoader
+
 # Create a synchronous client for token counting
 _sync_voyage_client = None
 
 
-def get_retry_settings(config_loader: ConfigLoader) -> tuple[int, int]:
+def get_retry_settings(config_loader: "ConfigLoader") -> tuple[int, int]:
 	"""Get retry settings from config."""
 	embedding_config = config_loader.get.embedding
 	# Use max_retries directly for voyageai.Client
@@ -185,7 +185,7 @@ async def generate_embeddings_batch(
 	truncation: bool = True,
 	output_dimension: Literal[256, 512, 1024, 2048] = 1024,
 	model: str | None = None,
-	config_loader: ConfigLoader | None = None,
+	config_loader: "ConfigLoader | None" = None,
 ) -> list[list[float]] | None:
 	"""
 	Generates embeddings for a batch of texts using the Voyage AI async client.
@@ -210,6 +210,8 @@ async def generate_embeddings_batch(
 
 	# Create ConfigLoader if not provided
 	if config_loader is None:
+		from codemap.config import ConfigLoader
+
 		config_loader = ConfigLoader.get_instance()
 
 	embedding_config = config_loader.get.embedding
@@ -265,30 +267,42 @@ async def generate_embeddings_batch(
 
 
 async def generate_embedding(
-	text: str, model: str | None = None, config_loader: ConfigLoader | None = None
+	text: str, model: str | None = None, config_loader: "ConfigLoader | None" = None
 ) -> list[float] | None:
 	"""
-	Generates an embedding for a single text using the Voyage AI client.
+	Generates an embedding for a single text string.
 
 	Args:
-	    text (str): The text to embed.
-	    model (str): The embedding model to use.
-	    config_loader: Configuration loader instance.
+	    text (str): The text string to embed.
+	    model (str): The embedding model to use (defaults to config value).
+	    config_loader (ConfigLoader, optional): Configuration loader instance. Defaults to None.
 
 	Returns:
 	    Optional[List[float]]: The embedding vector, or None if embedding fails.
 
 	"""
-	if not text:
-		logger.warning("generate_embedding called with empty string.")
-		return None
+	if not text.strip():
+		logger.warning("generate_embedding called with empty or whitespace-only text.")
+		return None  # Return None for empty or whitespace-only strings
 
-	# Await the async batch function (now using voyageai client)
-	embeddings_batch = await generate_embeddings_batch(texts=[text], model=model, config_loader=config_loader)
+	# Create ConfigLoader if not provided
+	if config_loader is None:
+		from codemap.config import ConfigLoader
 
-	if embeddings_batch and len(embeddings_batch) == 1:
-		return embeddings_batch[0]
+		config_loader = ConfigLoader.get_instance()
 
-	# Error logging is now handled within generate_embeddings_batch
-	logger.error("Failed to generate embedding for single text using voyageai client.")
+	embedding_config = config_loader.get.embedding
+	model_name = model or embedding_config.model_name
+
+	# Call generate_embeddings_batch with a single text
+	embeddings_list = await generate_embeddings_batch(
+		texts=[text],
+		model=model_name,
+		config_loader=config_loader,  # Pass the potentially newly created config_loader
+		# output_dimension and truncation will use defaults from generate_embeddings_batch
+	)
+
+	if embeddings_list and embeddings_list[0]:
+		return embeddings_list[0]
+
 	return None

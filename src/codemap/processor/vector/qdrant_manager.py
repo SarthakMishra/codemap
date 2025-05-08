@@ -3,13 +3,14 @@
 import logging
 import uuid
 from types import TracebackType
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import Distance, ExtendedPointId, PointStruct, VectorParams
 
-from codemap.config import ConfigLoader
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class QdrantManager:
 
 	def __init__(
 		self,
-		config_loader: ConfigLoader,
+		config_loader: "ConfigLoader",
 		collection_name: str | None = None,
 		dim: int | None = None,
 		distance: Distance | None = None,
