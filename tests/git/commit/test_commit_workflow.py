@@ -30,11 +30,12 @@ class TestCommitWorkflow(unittest.TestCase):
 		"""Set up mocks for each test method."""
 		self.mock_repo_root = Path("/mock/repo")
 		self.mock_generator = Mock(spec=CommitMessageGenerator)
-		# Configure the mock generator's method to return a 4-tuple
+		# Configure the mock generator's method to return a 5-tuple
 		self.mock_generator.generate_message_with_linting.return_value = (
 			"mock commit message",  # message
 			True,  # used_llm
 			True,  # passed_linting
+			False,  # is_json_error
 			[],  # lint_messages
 		)
 		self.mock_ui = Mock(spec=CommitUI)
@@ -52,8 +53,8 @@ class TestCommitWorkflow(unittest.TestCase):
 			"codemap.git.commit_generator.command.get_current_branch", return_value="main"
 		)
 		self.patch_diff_splitter = patch("codemap.git.commit_generator.command.DiffSplitter")
-		self.patch_config = patch("codemap.utils.config_loader.ConfigLoader")
-		self.patch_llm = patch("codemap.llm.create_client")
+		self.patch_config = patch("codemap.config.ConfigLoader")
+		self.patch_llm = patch("codemap.llm.client.LLMClient")
 		self.patch_generator = patch(
 			"codemap.git.commit_generator.command.CommitMessageGenerator", return_value=self.mock_generator
 		)
@@ -110,7 +111,7 @@ class TestCommitWorkflow(unittest.TestCase):
 		self.mock_ui.get_user_action.return_value = ChunkAction.COMMIT
 		mock_perform_commit.return_value = True  # Simulate successful commit
 		# Ensure generate_message_with_linting returns a valid message
-		self.mock_generator.generate_message_with_linting.return_value = ("Valid Commit Message", True, True, [])
+		self.mock_generator.generate_message_with_linting.return_value = ("Valid Commit Message", True, True, False, [])
 
 		# Act: Call the method
 		result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)
@@ -132,7 +133,7 @@ class TestCommitWorkflow(unittest.TestCase):
 		# Arrange: Mock UI to return SKIP action
 		self.mock_ui.get_user_action.return_value = ChunkAction.SKIP
 		# Ensure generate_message_with_linting returns a valid message first
-		self.mock_generator.generate_message_with_linting.return_value = ("Valid Commit Message", True, True, [])
+		self.mock_generator.generate_message_with_linting.return_value = ("Valid Commit Message", True, True, False, [])
 
 		# Act: Call the method
 		result = self.command._process_chunk(cast("DiffChunk", self.mock_chunk), 0, 1)
@@ -153,6 +154,7 @@ class TestCommitWorkflow(unittest.TestCase):
 			"Valid Commit Message",
 			True,
 			True,
+			False,
 			[],  # Assume generation was fine
 		)
 
@@ -170,7 +172,7 @@ class TestCommitWorkflow(unittest.TestCase):
 
 		# Arrange again for cancel exit
 		self.mock_ui.get_user_action.return_value = ChunkAction.EXIT
-		self.mock_generator.generate_message_with_linting.return_value = ("Valid Commit Message", True, True, [])
+		self.mock_generator.generate_message_with_linting.return_value = ("Valid Commit Message", True, True, False, [])
 
 		# Act & Assert: Cancel exit continues loop (need to break it for test)
 		self.mock_ui.confirm_exit.return_value = False
@@ -204,7 +206,13 @@ class TestCommitWorkflow(unittest.TestCase):
 		# Arrange
 		mock_perform_commit.return_value = True
 		# Mock the return value for generate_message_with_linting on the instance
-		self.mock_generator.generate_message_with_linting.return_value = ("Non-interactive message", True, True, [])
+		self.mock_generator.generate_message_with_linting.return_value = (
+			"Non-interactive message",
+			True,
+			True,
+			False,
+			[],
+		)
 
 		mock_chunk2 = Mock(spec=DiffChunk)
 		mock_chunk2.files = ["file3.py"]
