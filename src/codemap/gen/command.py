@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity
 from codemap.utils.cli_utils import console
+from codemap.utils.file_utils import is_binary_file
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
 from .models import GenConfig
@@ -21,6 +22,16 @@ if TYPE_CHECKING:
 	from rich.progress import Progress, TaskID
 
 logger = logging.getLogger(__name__)
+
+
+def show_error(message: str) -> None:
+	"""
+	Display an error message using the console.
+
+	Args:
+		message: The error message to display
+	"""
+	console.print(f"[red]Error:[/red] {message}")
 
 
 def process_codebase(
@@ -67,10 +78,19 @@ def process_codebase(
 		# Filter paths based on .gitignore patterns found in project_root
 		filtered_paths: Sequence[Path] = filter_paths_by_gitignore(all_paths, project_root)
 
+		# Filter out binary files
+		processable_paths = []
+		for path in filtered_paths:
+			if path.is_file():
+				if not is_binary_file(path):
+					processable_paths.append(path)
+				else:
+					logger.debug(f"Skipping binary file: {path}")
+
 		# Use the new utility function to process files and generate LOD entities
 		# The utility function will handle parallel processing and progress updates
 		entities = process_files_for_lod(
-			paths=filtered_paths,
+			paths=processable_paths,
 			lod_level=config.lod_level,
 			max_workers=max_workers,  # Get from configuration
 			progress=progress,
@@ -89,7 +109,7 @@ def process_codebase(
 	# Generate repository metadata
 	languages = {entity.language for entity in entities if entity.language}
 	# Get total file count accurately from the filtered list *before* processing
-	total_files_scanned = sum(1 for p in filtered_paths if p.is_file())
+	total_files_scanned = len(processable_paths)
 
 	metadata: dict[str, Any] = {
 		"name": target_path.name,
@@ -176,6 +196,7 @@ class GenCommand:
 
 			return True
 
-		except Exception:
+		except Exception as e:
 			logger.exception("Error during gen command execution")
+			show_error(f"Generation failed: {e}")
 			return False
