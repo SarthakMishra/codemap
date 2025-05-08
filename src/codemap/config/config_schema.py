@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path  # noqa: TC003
 from textwrap import dedent
 from typing import Any, Literal
 
@@ -357,6 +358,7 @@ class AppConfigSchema(BaseModel):
 	commit: CommitSchema = CommitSchema()
 	pr: PRSchema = PRSchema()
 	ask: AskSchema = AskSchema()
+	repo_root: Path | None = None
 
 	class Config:
 		"""Configuration for the application config."""

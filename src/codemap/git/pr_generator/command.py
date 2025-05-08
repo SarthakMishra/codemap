@@ -212,7 +212,6 @@ class PRWorkflowCommand:
 
 	def __init__(
 		self,
-		repo_path: Path,
 		config_loader: ConfigLoader,
 		llm_client: LLMClient | None = None,
 	) -> None:
@@ -220,13 +219,17 @@ class PRWorkflowCommand:
 		Initialize the PR workflow command helper.
 
 		Args:
-		        repo_path: Path to the repository.
 		        config_loader: ConfigLoader instance.
 		        llm_client: Optional pre-configured LLMClient.
 
 		"""
-		self.repo_path = repo_path
 		self.config_loader = config_loader
+
+		if self.config_loader.get.repo_root is None:
+			self.repo_root = get_repo_root()
+		else:
+			self.repo_root = self.config_loader.get.repo_root
+
 		self.pr_config = self.config_loader.get.pr
 		self.content_config = self.pr_config.generate
 		self.workflow_strategy_name = self.config_loader.get.pr.strategy
@@ -240,10 +243,10 @@ class PRWorkflowCommand:
 
 			self.llm_client = LLMClient(
 				config_loader=self.config_loader,
-				repo_path=self.repo_path,
+				repo_path=self.repo_root,
 			)
 
-		self.pr_generator = PRGenerator(repo_path=self.repo_path, llm_client=self.llm_client)
+		self.pr_generator = PRGenerator(repo_path=self.repo_root, llm_client=self.llm_client)
 
 	def _generate_release_pr_content(self, base_branch: str, branch_name: str) -> dict[str, str]:
 		"""
