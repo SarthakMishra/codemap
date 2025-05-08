@@ -115,6 +115,7 @@ def _register_all_commands() -> None:
 	"""Register all commands only when needed."""
 	from .ask_cmd import register_command as register_ask_command
 	from .commit_cmd import register_command as register_commit_command
+	from .conf_cmd import register_command as register_conf_command
 	from .gen_cmd import register_command as register_gen_command
 	from .index_cmd import register_command as register_index_command
 	from .pr_cmd import register_command as register_pr_command
@@ -124,6 +125,7 @@ def _register_all_commands() -> None:
 	register_commit_command(app=app)
 	register_index_command(app)
 	register_pr_command(app)
+	register_conf_command(app)
 
 
 # --- Main Entry Point ---
