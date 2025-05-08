@@ -91,7 +91,7 @@ class TreeSitterAnalyzer:
 
 		if failed_languages:
 			failed_names = ", ".join(f"{lang} ({err})" for lang, err in failed_languages)
-			logger.warning("Failed to load parsers for languages: %s", failed_names)
+			logger.debug("Failed to load parsers for languages: %s", failed_names)
 
 	def get_parser(self, language: str) -> Parser | None:
 		"""
@@ -124,13 +124,13 @@ class TreeSitterAnalyzer:
 		if not language:
 			language = get_language_by_extension(file_path)
 			if not language:
-				logger.warning("Could not determine language for file %s", file_path)
+				logger.debug("Could not determine language for file %s", file_path)
 				return None, ""
 
 		# Get the parser for this language
 		parser = self.get_parser(language)
 		if not parser:
-			logger.warning("No parser for language %s", language)
+			logger.debug("No parser for language %s", language)
 			return None, language
 
 		try:
@@ -209,7 +209,7 @@ class TreeSitterAnalyzer:
 			try:
 				dependencies = handler.extract_imports(node, content_bytes)
 			except (AttributeError, UnicodeDecodeError, IndexError, ValueError) as e:
-				logger.warning("Failed to extract dependencies: %s", e)
+				logger.debug("Failed to extract dependencies: %s", e)
 
 		# Build result
 		result = {
@@ -239,7 +239,7 @@ class TreeSitterAnalyzer:
 				try:
 					calls = handler.extract_calls(body_node, content_bytes)
 				except (AttributeError, IndexError, UnicodeDecodeError, ValueError) as e:
-					logger.warning("Failed to extract calls for %s: %s", name or "<anonymous>", e)
+					logger.debug("Failed to extract calls for %s: %s", name or "<anonymous>", e)
 
 		# Add calls only if they exist
 		if calls:
