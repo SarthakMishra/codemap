@@ -1,5 +1,12 @@
 [
   {
+    "version": "0.3.0-rc.2",
+    "title": "0.3.0-rc.2",
+    "aliases": [
+      "pre-release"
+    ]
+  },
+  {
     "version": "0.2.0",
     "title": "0.2.0",
     "aliases": [
@@ -9,9 +16,7 @@
   {
     "version": "0.2.0-rc.2",
     "title": "0.2.0-rc.2",
-    "aliases": [
-      "pre-release"
-    ]
+    "aliases": []
   },
   {
     "version": "0.1.0",
