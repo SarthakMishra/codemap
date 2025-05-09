@@ -1,6 +1,41 @@
 # CHANGELOG
 
 
+## v0.3.0-rc.4 (2025-05-09)
+
+### Bug Fixes
+
+- Update codemap version
+  ([`78a1299`](https://github.com/SarthakMishra/codemap/commit/78a1299cdf5ce95f415c27a807e710bdf91b06d3))
+
+### Chores
+
+- **release**: Remove pull_request trigger from release workflow
+  ([`9259e8d`](https://github.com/SarthakMishra/codemap/commit/9259e8df4a73b69cb494acc38f91b4b5b961c27d))
+
+### Refactoring
+
+- **cli_utils**: Improve progress indicator management
+  ([`1d12615`](https://github.com/SarthakMishra/codemap/commit/1d12615349fd55cf7de599492a9074128a1a1d85))
+
+Enhance SpinnerState to track and display nested spinners and improve progress bar handling
+
+- **codemap**: Remove progress updates
+  ([`fbbaab8`](https://github.com/SarthakMishra/codemap/commit/fbbaab8f6fbb25f65d72bc876da610d1b3102efd))
+
+- **docker_utils**: Update storage paths
+  ([`5b932c7`](https://github.com/SarthakMishra/codemap/commit/5b932c75903494c4c8072bfaa7f395fcef32f039))
+
+Change storage paths for qdrant and postgres
+
+### Testing
+
+- **tests**: Refactor progress indicator and spinner utilities
+  ([`a1e4dc9`](https://github.com/SarthakMishra/codemap/commit/a1e4dc96456090bc0ca46888e41612890b5e194d))
+
+Refactor progress indicator and spinner utilities for better isolation and testing
+
+
 ## v0.3.0-rc.3 (2025-05-09)
 
 ### Chores
