@@ -1,6 +1,53 @@
 # CHANGELOG
 
 
+## v0.3.0-rc.3 (2025-05-09)
+
+### Chores
+
+- Update codemap version
+  ([`10f6e2b`](https://github.com/SarthakMishra/codemap/commit/10f6e2bf865e5b8931aa3fe3607d715b690985ca))
+
+- Update codemap version
+  ([`c5079cb`](https://github.com/SarthakMishra/codemap/commit/c5079cb7696750e9ea34e05d6abd23ae15c6042c))
+
+- Update docs config
+  ([`9ef24bf`](https://github.com/SarthakMishra/codemap/commit/9ef24bfeb702902c997bf622aa4f0d26e74cb6b9))
+
+- Update docs config
+  ([`cfa4e0e`](https://github.com/SarthakMishra/codemap/commit/cfa4e0ea6d194543fc6d5f7f0e854f6701d45bc5))
+
+### Continuous Integration
+
+- **release**: Update workflow to trigger on specific paths for main and dev branches
+  ([`12e6c16`](https://github.com/SarthakMishra/codemap/commit/12e6c160fe1dcf6d2d0a355e5cd5b7bd18062df5))
+
+### Documentation
+
+- **api**: Update config docs
+  ([`11676a3`](https://github.com/SarthakMishra/codemap/commit/11676a3057535f954faff3c78e8ef5ce14a32b76))
+
+- **api**: Update config docs
+  ([`52c8a3f`](https://github.com/SarthakMishra/codemap/commit/52c8a3fd2b865dc35125cabfa79435c74c3d0347))
+
+- **api**: Update index and config docs
+  ([`1188652`](https://github.com/SarthakMishra/codemap/commit/11886529e5e3ed84aa37ad90ddbecf7af5051269))
+
+- **api**: Update index and config docs
+  ([`7d5ea20`](https://github.com/SarthakMishra/codemap/commit/7d5ea20e8606d8677cfd080381b2c970801f8839))
+
+- **llm/rag**: Update documentation
+  ([`dc0a0bc`](https://github.com/SarthakMishra/codemap/commit/dc0a0bc45db7e973f6552b280ba0d6f2aebf2b64))
+
+- **llm/rag**: Update documentation
+  ([`83e4c72`](https://github.com/SarthakMishra/codemap/commit/83e4c72076a5542879c280b7982c4eb8df6f3882))
+
+### Features
+
+- **cli**: Add config command
+  ([`12ef1b4`](https://github.com/SarthakMishra/codemap/commit/12ef1b44ad1b119aca56c025d66f3bc6add6a9f5))
+
+
 ## v0.3.0-rc.2 (2025-05-09)
 
 ### Bug Fixes
