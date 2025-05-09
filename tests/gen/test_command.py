@@ -243,7 +243,7 @@ class TestProcessCodebase(FileSystemTestBase):
 		mock_generate_tree.return_value = ["- main.py", "- utils.py", "- README.md"]
 
 		# Act
-		entities, metadata = process_codebase(self.test_target_path, self.config, self.mock_progress, self.mock_task_id)
+		entities, metadata = process_codebase(self.test_target_path, self.config)
 
 		# Assert
 		mock_filter_paths.assert_called_once()
@@ -274,7 +274,7 @@ class TestProcessCodebase(FileSystemTestBase):
 		mock_process_files_lod.return_value = []
 
 		# Act
-		entities, _ = process_codebase(self.test_target_path, self.config, self.mock_progress, self.mock_task_id)
+		entities, _ = process_codebase(self.test_target_path, self.config)
 
 		# Assert
 		# Ensure process_files_for_lod was still called
