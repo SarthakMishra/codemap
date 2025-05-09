@@ -6,13 +6,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from rich.progress import Progress, TaskID
-
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.utils.embedding_utils import generate_embeddings_batch
 from codemap.processor.utils.git_utils import _should_exclude_path, get_git_tracked_files
 from codemap.processor.vector.chunking import CodeChunk, TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
+from codemap.utils.cli_utils import progress_indicator
 
 if TYPE_CHECKING:
 	from codemap.config import ConfigLoader
@@ -264,95 +263,57 @@ class VectorSynchronizer:
 		logger.warning("No points generated from batch to upsert.")
 		return 0
 
-	async def sync_index(self, progress: Progress | None = None, task_id: TaskID | None = None) -> bool:
+	async def sync_index(self) -> bool:
 		"""
 		Asynchronously synchronize the Qdrant index with the current repository state.
-
-		Args:
-		    progress: Optional rich Progress instance for UI updates.
-		    task_id: Optional rich TaskID for progress tracking.
 
 		Returns:
 		    True if synchronization completed successfully, False otherwise.
 
 		"""
 		sync_success = False
-		final_message = "[red]Error:[/red] Index sync failed (initialization error)."
-		total_steps = 5  # Git state, Qdrant state, Compare, Delete, Process
-		current_step = 0
-		processed_chunk_count = 0
-
-		def update_progress(description: str, step_increment: int = 1, processed_chunks: int = 0) -> None:
-			"""Updates the progress bar with current synchronization status.
-
-			Args:
-				description: Main description text to display in progress bar.
-				step_increment: Number of steps to increment progress by. Defaults to 1.
-				processed_chunks: Number of chunks processed in this update. Defaults to 0.
-					If greater than 0, will be appended to description in parentheses.
-
-			Returns:
-				None
-			"""
-			nonlocal current_step, processed_chunk_count
-			current_step += step_increment
-			processed_chunk_count += processed_chunks
-			if progress and task_id is not None:
-				# Add processed chunk count to description if relevant
-				desc_with_count = description
-				if processed_chunk_count > 0:
-					desc_with_count += f" ({processed_chunk_count} chunks processed)"
-				progress.update(
-					task_id,
-					description=desc_with_count,
-					completed=(current_step / total_steps) * 100,
-				)
 
 		try:
 			await self.qdrant_manager.initialize()
 
 			# 1. Get current Git state (tracked files and hashes)
-			update_progress("[1/5] Reading Git tracked files...", step_increment=0)
-			git_files_raw = get_git_tracked_files(self.repo_path)
-			if git_files_raw is None:
-				logger.error("Failed to retrieve Git tracked files.")
-				# Use the initialized final_message
-				if progress and task_id:
-					progress.update(task_id, description=final_message, completed=100)
-				return False
+			with progress_indicator("Reading Git tracked files..."):
+				git_files_raw = get_git_tracked_files(self.repo_path)
+				if git_files_raw is None:
+					logger.error("Failed to retrieve Git tracked files.")
+					return False
 
 			# Filter out excluded files
 			git_files = {fp: h for fp, h in git_files_raw.items() if not _should_exclude_path(fp)}
 			logger.info(f"Found {len(git_files)} tracked files in Git (after exclusion).")
-			update_progress(f"[1/5] Found {len(git_files)} tracked files.")
 
 			# 2. Get current Qdrant state (file paths -> chunk IDs and hashes)
-			update_progress("[2/5] Retrieving existing vector state...")
-			qdrant_state = await self._get_qdrant_state()
+			with progress_indicator("Retrieving existing vector state..."):
+				qdrant_state = await self._get_qdrant_state()
 
 			# 3. Compare states
-			update_progress("[3/5] Comparing Git state with vector state...")
-			# Use _ for the unused 'files_to_delete_chunks_for' variable
-			files_to_process, _, chunks_to_delete = await self._compare_states(git_files, qdrant_state)
+			with progress_indicator("Comparing Git state with vector state..."):
+				# Use _ for the unused 'files_to_delete_chunks_for' variable
+				files_to_process, _, chunks_to_delete = await self._compare_states(git_files, qdrant_state)
 
 			# 4. Delete outdated chunks
-			update_progress(f"[4/5] Deleting {len(chunks_to_delete)} outdated vectors...")
-			if chunks_to_delete:
-				# Delete in batches
-				delete_ids_list = list(chunks_to_delete)
-				for i in range(0, len(delete_ids_list), self.qdrant_batch_size):
-					batch_ids = delete_ids_list[i : i + self.qdrant_batch_size]
-					# Use cast to handle type checking
-					await self.qdrant_manager.delete_points(cast("list[str | int | uuid.UUID]", batch_ids))
-					logger.info(f"Deleted batch of {len(batch_ids)} vectors.")
-				logger.info(f"Finished deleting {len(chunks_to_delete)} vectors.")
-			else:
-				logger.info("No vectors to delete.")
+			with progress_indicator(f"Deleting {len(chunks_to_delete)} outdated vectors..."):
+				if chunks_to_delete:
+					# Delete in batches
+					delete_ids_list = list(chunks_to_delete)
+					for i in range(0, len(delete_ids_list), self.qdrant_batch_size):
+						batch_ids = delete_ids_list[i : i + self.qdrant_batch_size]
+						# Use cast to handle type checking
+						await self.qdrant_manager.delete_points(cast("list[str | int | uuid.UUID]", batch_ids))
+						logger.info(f"Deleted batch of {len(batch_ids)} vectors.")
+					logger.info(f"Finished deleting {len(chunks_to_delete)} vectors.")
+				else:
+					logger.info("No vectors to delete.")
 
 			# 5. Process new/updated files
-			update_progress(f"[5/5] Processing {len(files_to_process)} new/updated files...")
-			files_processed_count = 0
-			all_chunks: list[CodeChunk] = []
+			with progress_indicator(f"Processing {len(files_to_process)} new/updated files..."):
+				files_processed_count = 0
+				all_chunks: list[CodeChunk] = []
 
 			# First collect all chunks from files
 			for file_path in files_to_process:
@@ -373,30 +334,22 @@ class VectorSynchronizer:
 			# Process chunks in batches
 			if all_chunks:
 				logger.info(f"Collected {len(all_chunks)} chunks from {files_processed_count} files.")
-
+				count = 0
 				# Process in batches of self.batch_size
-				for i in range(0, len(all_chunks), self.batch_size):
-					batch = all_chunks[i : i + self.batch_size]
-					upserted_count = await self._process_and_upsert_batch(batch)
-					update_progress(
-						"[5/5] Processing chunks...",
-						step_increment=0,
-						processed_chunks=upserted_count,
-					)
+				with progress_indicator(
+					"Processing chunks...", style="progress", total=len(all_chunks)
+				) as update_progress:
+					for i in range(0, len(all_chunks), self.batch_size):
+						batch = all_chunks[i : i + self.batch_size]
+						upserted_count = await self._process_and_upsert_batch(batch)
+						count += upserted_count
+						update_progress("Processing chunks...", count, len(all_chunks))
 
 			sync_success = True
-			final_message = (
-				f"[green]✓[/green] Vector index synchronized. {processed_chunk_count} chunks processed/upserted."
-			)
 			logger.info("Vector index synchronization completed successfully.")
 
 		except Exception:
 			logger.exception("An unexpected error occurred during index synchronization")
-			final_message = "[red]Error:[/red] Index sync failed unexpectedly."
 			sync_success = False  # Ensure success is False on exception
-		finally:
-			# Final progress update
-			if progress and task_id is not None:
-				progress.update(task_id, description=final_message, completed=100)
 
 		return sync_success
