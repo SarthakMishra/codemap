@@ -44,10 +44,15 @@ nav:
     - Cli Overview: api/cli/index.md
     - Ask Cmd: api/cli/ask_cmd.md
     - Commit Cmd: api/cli/commit_cmd.md
+    - Conf Cmd: api/cli/conf_cmd.md
     - Gen Cmd: api/cli/gen_cmd.md
     - Index Cmd: api/cli/index_cmd.md
     - Pr Cmd: api/cli/pr_cmd.md
-  - Config: api/config.md
+  - Config:
+    - Config Overview: api/config/index.md
+    - Config Loader: api/config/config_loader.md
+    - Config Schema: api/config/config_schema.md
+    - Default Config Template: api/config/default_config_template.md
   - Db:
     - Db Overview: api/db/index.md
     - Client: api/db/client.md
@@ -106,13 +111,17 @@ nav:
     - Llm Overview: api/llm/index.md
     - Api: api/llm/api.md
     - Client: api/llm/client.md
-    - Config: api/llm/config.md
     - Errors: api/llm/errors.md
     - Rag:
       - Rag Overview: api/llm/rag/index.md
-      - Command: api/llm/rag/command.md
-      - Formatter: api/llm/rag/formatter.md
-      - Prompts: api/llm/rag/prompts.md
+      - Agents Overview: api/llm/rag/agents/index.md
+      - Ask:
+        - Ask Overview: api/llm/rag/ask/index.md
+        - Command: api/llm/rag/ask/command.md
+        - Formatter: api/llm/rag/ask/formatter.md
+        - Prompts: api/llm/rag/ask/prompts.md
+      - Do Overview: api/llm/rag/do/index.md
+      - Tools Overview: api/llm/rag/tools/index.md
     - Utils: api/llm/utils.md
   - Processor:
     - Processor Overview: api/processor/index.md
@@ -141,7 +150,6 @@ nav:
   - Utils:
     - Utils Overview: api/utils/index.md
     - Cli Utils: api/utils/cli_utils.md
-    - Config Loader: api/utils/config_loader.md
     - Docker Utils: api/utils/docker_utils.md
     - File Utils: api/utils/file_utils.md
     - Log Setup: api/utils/log_setup.md
