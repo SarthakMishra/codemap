@@ -2,6 +2,7 @@
 
 RAG (Retrieval-Augmented Generation) functionalities for CodeMap.
 
-- [Command](command.md) - Command for asking questions about the codebase using RAG.
-- [Formatter](formatter.md) - Formatter for the ask command output.
-- [Prompts](prompts.md) - Prompts for the ask command.
+- [Agents](agents/index.md) - Agent Implementations for the RAG Commands.
+- [Ask](ask/index.md) - Ask command for the RAG.
+- [Do](do/index.md) - Do command for the RAG.
+- [Tools](tools/index.md) - Tool Implementations for the RAG-commands.

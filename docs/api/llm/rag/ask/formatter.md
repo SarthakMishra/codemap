@@ -1,6 +1,6 @@
-# Prompts
+# Formatter
 
-::: codemap.llm.rag.prompts
+::: codemap.llm.rag.ask.formatter
     options:
       members_order: source
       show_if_no_docstring: true
