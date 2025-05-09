@@ -8,135 +8,229 @@ import logging
 import os
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from http import HTTPStatus
 from typing import TYPE_CHECKING, Literal, Self
 
 import typer
 from packaging.version import InvalidVersion
-from packaging.version import parse as parse_version  # For version comparison
+from packaging.version import parse as parse_version
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from codemap import __version__
 
 if TYPE_CHECKING:
-	from collections.abc import Callable, Iterator
+	from collections.abc import Iterator
+
+	from rich.status import Status
 
 console = Console()
 logger = logging.getLogger(__name__)
 
+# Type for the progress update function with multiple parameters
+ProgressUpdater = Callable[[str | None, int | None, int | None], None]
 
-# Singleton class to track spinner state
+
+# Singleton class to track spinner state and manage active spinner display
 class SpinnerState:
-	"""Singleton class to track spinner state."""
+	"""Singleton class to manage the stack and display of active spinners."""
 
-	_instance = None
-	is_active = False
+	_instance: Self | None = None
+	spinner_message_stack: list[str]
+	active_rich_status_cm: Status | None
+	tree_display_active: bool = False  # Track if we're using tree display
 
 	def __new__(cls) -> Self:
-		"""
-		Create or return the singleton instance.
+		"""Create or return the singleton instance.
 
 		Returns:
-		    The singleton instance of SpinnerState
-
+		    Self: The singleton instance of SpinnerState
 		"""
 		if cls._instance is None:
 			cls._instance = super().__new__(cls)
+			cls._instance.spinner_message_stack = []
+			cls._instance.active_rich_status_cm = None
+			cls._instance.tree_display_active = False  # Initialize
 		return cls._instance
+
+	def _stop_active_status_cm(self) -> None:
+		"""Safely stops (exits) the currently active Rich Status context manager."""
+		if self.active_rich_status_cm:
+			try:
+				self.active_rich_status_cm.__exit__(None, None, None)
+			except (RuntimeError, TypeError, ValueError) as exc:  # pragma: no cover
+				logger.debug("Error stopping previous status context manager", exc_info=exc)
+			self.active_rich_status_cm = None
+			self.tree_display_active = False
+
+	def _format_tree_display(self) -> str:
+		"""Format the spinner messages as a tree structure.
+
+		Returns:
+		    str: A formatted tree representation of all spinners in the stack
+		"""
+		if not self.spinner_message_stack:
+			return ""
+
+		result = []
+		static_spinner_char = "▸"  # Static indicator for child lines
+
+		for i, message in enumerate(self.spinner_message_stack):
+			line_parts = []
+			if i == 0:  # Root message
+				line_parts.append(message)
+			else:  # Child messages
+				# Add indentation and vertical bars for ancestors
+				line_parts.extend(["   "] * (i - 1))
+
+				# Add connector from direct parent
+				line_parts.append("[green]└─ [/green]")
+				line_parts.append(f"{static_spinner_char} ")
+				line_parts.append(message)
+
+			result.append("".join(line_parts))
+
+		return "\n".join(result)
+
+	def _start_status_cm_for_tree(self) -> None:
+		"""Creates or updates a status display showing all spinners in a tree structure."""
+		if not self.spinner_message_stack:
+			self._stop_active_status_cm()  # Ensure spinner stops if stack is empty
+			return
+
+		tree_display_text = self._format_tree_display()
+
+		if self.active_rich_status_cm and self.tree_display_active:
+			# If a tree display is already active, just update its content
+			try:
+				self.active_rich_status_cm.update(tree_display_text)
+			except (RuntimeError, TypeError, ValueError) as e:  # pragma: no cover
+				logger.debug(f"Error updating tree status: {e}", exc_info=True)
+				# If update fails, fall back to recreating (e.g., if status was manually stopped)
+				self._stop_active_status_cm()  # Clean up before recreating
+				self._create_new_tree_status(tree_display_text)
+		else:
+			# Otherwise, stop any existing (non-tree) status and create a new tree status
+			self._stop_active_status_cm()
+			self._create_new_tree_status(tree_display_text)
+
+	def _create_new_tree_status(self, tree_display_text: str) -> None:
+		"""Helper to create and start a new status cm for the tree display."""
+		new_status_cm = console.status(tree_display_text)  # Using default Rich spinner
+		try:
+			new_status_cm.__enter__()
+			self.active_rich_status_cm = new_status_cm
+			self.tree_display_active = True
+		except (RuntimeError, TypeError, ValueError) as exc:  # pragma: no cover
+			logger.debug("Error starting new tree status context manager", exc_info=exc)
+
+	def start_new_spinner(self, message: str) -> None:
+		"""Handles the start of a new spinner.
+
+		Adds the new spinner message to the stack and updates the tree display.
+		"""
+		self.spinner_message_stack.append(message)
+		self._start_status_cm_for_tree()
+
+	def stop_current_spinner_and_resume_parent(self) -> None:
+		"""Handles the end of the current spinner.
+
+		Pops the top spinner from the stack and updates the tree display.
+		"""
+		if self.spinner_message_stack:
+			self.spinner_message_stack.pop()  # Remove the spinner that just ended
+
+		if self.spinner_message_stack:  # If any spinners remain
+			self._start_status_cm_for_tree()
+		else:  # No spinners left on stack
+			self._stop_active_status_cm()
+
+	def temporarily_halt_visual_spinner(self) -> bool:
+		"""Stops the current visual spinner if one is active.
+
+		Used when a progress bar is about to take over.
+		Returns True if a visual spinner was halted, False otherwise.
+		"""
+		if self.active_rich_status_cm:
+			self._stop_active_status_cm()  # This already sets tree_display_active to False
+			return True
+		return False
+
+	def resume_visual_spinner_if_needed(self) -> None:
+		"""Resumes a visual spinner for the top message on the stack.
+
+		If the stack is not empty and no visual spinner is currently active.
+		Used after a progress bar (that might have halted a spinner) finishes.
+		"""
+		if self.spinner_message_stack and not self.active_rich_status_cm:
+			self._start_status_cm_for_tree()
 
 
 @contextlib.contextmanager
 def progress_indicator(
 	message: str,
-	style: Literal["spinner", "progress", "step"] = "spinner",
+	style: Literal["spinner", "progress"] = "spinner",
 	total: int | None = None,
 	transient: bool = False,
-) -> Iterator[Callable[[int], None]]:
-	"""
-	Standardized progress indicator that supports different styles uniformly.
+) -> Iterator[ProgressUpdater]:
+	"""Standardized progress indicator that supports different styles uniformly.
+
+	Manages nested spinners and interaction between spinners and progress bars
+	to prevent UI flickering and ensure a clear display.
 
 	Args:
-	    message: The message to display with the progress indicator
-	    style: The style of progress indicator - options:
-	           - "spinner": Shows an indeterminate spinner
-	           - "progress": Shows a determinate progress bar
-	           - "step": Shows simple step-by-step progress
-	    total: For determinate progress, the total units of work
-	    transient: Whether the progress indicator should disappear after completion
+	    message: The message to display with the progress indicator.
+	    style: The style of progress indicator ('spinner' or 'progress').
+	    total: For determinate progress, the total units of work.
+	    transient: Whether the progress indicator should disappear after completion.
 
 	Yields:
-	    A callable that accepts an integer amount to advance the progress
-
+	    A callable (ProgressUpdater) for updating the progress/spinner.
+	    For spinners, the callable is a no-op accepting three ignored arguments.
+	    For progress bars, it accepts description, completed, and total (all optional).
 	"""
-	# Skip visual indicators in testing/CI environments
 	if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
-		# Return a no-op advance function
-		yield lambda _: None
+		yield lambda _d=None, _c=None, _t=None: None
 		return
 
-	# Check if a spinner is already active
 	spinner_state = SpinnerState()
-	if spinner_state.is_active and style == "spinner":
-		# If there's already an active spinner, don't create a new one for spinner style
-		yield lambda _: None
-		return
 
-	try:
-		# Mark spinner as active if using spinner style
-		if style == "spinner":
-			spinner_state.is_active = True
-
-		# Handle different progress styles
-		if style == "spinner":
-			# Indeterminate spinner using console.status
-			with console.status(message):
-				# Return a no-op advance function since spinners don't advance
-				yield lambda _: None
-
-		elif style == "progress":
-			# Determinate progress bar using rich.progress.Progress
+	if style == "spinner":
+		spinner_state.start_new_spinner(message)
+		try:
+			yield lambda _d=None, _c=None, _t=None: None  # No-op for spinner
+		finally:
+			spinner_state.stop_current_spinner_and_resume_parent()
+	elif style == "progress":
+		was_spinner_visually_active = spinner_state.temporarily_halt_visual_spinner()
+		try:
 			progress = Progress(
 				SpinnerColumn(),
 				TextColumn("[progress.description]{task.description}"),
+				BarColumn(),
+				TextColumn("{task.completed}/{task.total}"),
+				TimeElapsedColumn(),
 				transient=transient,
+				console=console,  # Ensure it uses the same console
 			)
-			with progress:
-				task_id = progress.add_task(message, total=total or 1)
-				# Return a function that advances the progress
-				yield lambda amount=1: progress.update(task_id, advance=amount)
-
-		elif style == "step":
-			# Simple step progress like typer.progressbar
-			steps_completed = 0
-			total_steps = total or 1
-
-			console.print(f"{message} [0/{total_steps}]")
-
-			# Function to advance and display steps
-			def advance_step(amount: int = 1) -> None:
-				"""Advances the step progress by the specified amount and updates the display.
-
-				Args:
-					amount: The number of steps to advance. Defaults to 1.
-
-				Returns:
-					None
-				"""
-				nonlocal steps_completed
-				steps_completed += amount
-				steps_completed = min(steps_completed, total_steps)
-				console.print(f"{message} [{steps_completed}/{total_steps}]")
-
-			yield advance_step
-
-			# Print completion if not transient
-			if not transient and steps_completed >= total_steps:
-				console.print(f"{message} [green]Complete![/green]")
-	finally:
-		# Reset spinner state if we were using spinner style
-		if style == "spinner":
-			spinner_state.is_active = False
+			with progress:  # Progress context manager handles its own start/stop
+				task_id = progress.add_task(message, total=total)  # total can be None for indeterminate
+				yield lambda description=None, completed=None, new_total=None: progress.update(
+					task_id,
+					description=description,
+					completed=completed,
+					total=new_total if new_total is not None else total,  # Use new_total if provided
+				)
+		finally:
+			# Progress bar's 'with' context has exited.
+			# If a spinner was active before this progress bar, try to resume it.
+			if was_spinner_visually_active:
+				spinner_state.resume_visual_spinner_if_needed()
+	else:
+		# Should not happen due to Literal type hint, but as a fallback
+		logger.warning(f"Unknown progress_indicator style: {style}")
+		yield lambda _d=None, _c=None, _t=None: None
 
 
 def exit_with_error(message: str, exit_code: int = 1, exception: Exception | None = None) -> None:
