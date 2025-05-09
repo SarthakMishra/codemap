@@ -116,14 +116,7 @@ jobs:
           uv pip install --system build twine
 
       - name: Build package
-        run: uv run python -m build
+        run: uv build
 
       - name: Publish package to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with: {}
-          # OIDC (Trusted Publishing) is configured via the job's environment
-          # and permissions settings. No user/password required here.
-          # Ensure PyPI project has a Trusted Publisher configured for:
-          # Workflow: release.yml
-          # Environment: pypi
-          # See: https://docs.pypi.org/trusted-publishers/
+        run: uv publish

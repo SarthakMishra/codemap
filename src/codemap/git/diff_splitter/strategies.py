@@ -3,16 +3,14 @@
 import dataclasses
 import logging
 import re
-from collections.abc import Sequence
 from io import StringIO
 from pathlib import Path
 from re import Pattern
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, cast
 
-import numpy as np
-from unidiff import Hunk, PatchedFile, PatchSet
+from unidiff import Hunk, PatchedFile, PatchSet, UnidiffParseError
 
-from codemap.config import DEFAULT_CONFIG
+from codemap.git.semantic_grouping.embedder import DiffEmbedder
 from codemap.git.utils import GitDiff
 
 from .constants import (
@@ -25,8 +23,10 @@ from .utils import (
 	create_chunk_description,
 	determine_commit_type,
 	get_language_specific_patterns,
-	is_test_environment,
 )
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
@@ -34,25 +34,16 @@ logger = logging.getLogger(__name__)
 EXPECTED_TUPLE_SIZE = 2  # Expected size of extract_code_from_diff result
 
 
-class EmbeddingModel(Protocol):
-	"""Protocol for embedding models."""
-
-	def encode(self, texts: Sequence[str], **kwargs: Any) -> np.ndarray:  # noqa: ANN401
-		"""Encode texts into embeddings."""
-		...
-
-
 class BaseSplitStrategy:
 	"""Base class for diff splitting strategies."""
 
-	def __init__(self, embedding_model: EmbeddingModel | None = None) -> None:
+	def __init__(self) -> None:
 		"""Initialize with optional embedding model."""
-		self._embedding_model = embedding_model
 		# Precompile regex patterns for better performance
 		self._file_pattern = re.compile(r"diff --git a/.*? b/(.*?)\n")
 		self._hunk_pattern = re.compile(r"@@ -\d+,\d+ \+\d+,\d+ @@")
 
-	def split(self, diff: GitDiff) -> list[DiffChunk]:
+	async def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Split the diff into chunks.
 
@@ -70,7 +61,7 @@ class BaseSplitStrategy:
 class FileSplitStrategy(BaseSplitStrategy):
 	"""Strategy to split diffs by file."""
 
-	def split(self, diff: GitDiff) -> list[DiffChunk]:
+	async def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Split a diff into chunks by file.
 
@@ -110,10 +101,10 @@ class FileSplitStrategy(BaseSplitStrategy):
 
 	def _handle_empty_diff_content(self, diff: GitDiff) -> list[DiffChunk]:
 		"""Handle untracked files in empty diff content."""
-		if not diff.is_staged and diff.files:
+		if (not diff.is_staged or diff.is_untracked) and diff.files:
 			# Filter out invalid file names
 			valid_files = [file for file in diff.files if self._is_valid_filename(file)]
-			return [DiffChunk(files=[f], content="") for f in valid_files]
+			return [DiffChunk(files=[f], content="", description=f"New file: {f}") for f in valid_files]
 		return []
 
 	@staticmethod
@@ -130,52 +121,32 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	def __init__(
 		self,
-		embedding_model: EmbeddingModel | None = None,
-		code_extensions: set[str] | None = None,
-		related_file_patterns: list[tuple[Pattern, Pattern]] | None = None,
-		similarity_threshold: float = 0.4,
-		directory_similarity_threshold: float = 0.3,
-		min_chunks_for_consolidation: int = 2,
-		max_chunks_before_consolidation: int = 20,
-		max_file_size_for_llm: int | None = None,
+		config_loader: "ConfigLoader",
 	) -> None:
 		"""
 		Initialize the SemanticSplitStrategy.
 
 		Args:
-		    embedding_model: Optional embedding model instance
-		    code_extensions: Optional set of code file extensions. Defaults to config.
-		    related_file_patterns: Optional list of related file patterns
-		    similarity_threshold: Threshold for grouping by content similarity.
-		    directory_similarity_threshold: Threshold for directory similarity.
-		    min_chunks_for_consolidation: Min chunks to trigger consolidation.
-		    max_chunks_before_consolidation: Max chunks allowed before forced consolidation.
-		    max_file_size_for_llm: Max file size for LLM processing.
-
+		    config_loader: ConfigLoader instance.
 		"""
-		super().__init__(embedding_model)
 		# Store thresholds and settings
-		self.similarity_threshold = similarity_threshold
-		self.directory_similarity_threshold = directory_similarity_threshold
-		self.min_chunks_for_consolidation = min_chunks_for_consolidation
-		self.max_chunks_before_consolidation = max_chunks_before_consolidation
-		# Use default from config if not provided
-		self.max_file_size_for_llm = (
-			max_file_size_for_llm
-			if max_file_size_for_llm is not None
-			else DEFAULT_CONFIG["commit"]["diff_splitter"]["max_file_size_for_llm"]
-		)
+		self.similarity_threshold = config_loader.get.commit.diff_splitter.similarity_threshold
+		self.directory_similarity_threshold = config_loader.get.commit.diff_splitter.directory_similarity_threshold
+		self.min_chunks_for_consolidation = config_loader.get.commit.diff_splitter.min_chunks_for_consolidation
+		self.max_chunks_before_consolidation = config_loader.get.commit.diff_splitter.max_chunks_before_consolidation
+		self.max_file_size_for_llm = config_loader.get.commit.diff_splitter.max_file_size_for_llm
+		self.file_move_similarity_threshold = config_loader.get.commit.diff_splitter.file_move_similarity_threshold
 
 		# Set up file extensions, defaulting to config if None is passed
-		self.code_extensions = (
-			code_extensions
-			if code_extensions is not None
-			else set(DEFAULT_CONFIG["commit"]["diff_splitter"]["default_code_extensions"])
-		)
+		self.code_extensions = config_loader.get.commit.diff_splitter.default_code_extensions
 		# Initialize patterns for related files
-		self.related_file_patterns = related_file_patterns or self._initialize_related_file_patterns()
+		self.related_file_patterns = self._initialize_related_file_patterns()
+		self.config_loader = config_loader
 
-	def split(self, diff: GitDiff) -> list[DiffChunk]:
+		# Create DiffEmbedder instance for embedding operations
+		self.embedder = DiffEmbedder(config_loader=config_loader)
+
+	async def split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
 		Split a diff into chunks based on semantic relationships.
 
@@ -190,8 +161,15 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			logger.debug("No files to process")
 			return []
 
-		# Validate embedding model is available
-		self._validate_embedding_model()
+		# Detect moved files
+		moved_files = await self._detect_moved_files(diff)
+		if moved_files:
+			logger.info("Detected %d moved files", len(moved_files))
+			move_chunks = self._create_move_chunks(moved_files, diff)
+			if move_chunks:
+				return move_chunks
+
+		# If no moved files or couldn't create move chunks, continue with normal processing
 
 		# Handle files in manageable groups
 		if len(diff.files) > MAX_FILES_PER_GROUP:
@@ -218,86 +196,119 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 						content=diff.content,  # Pass the original full diff content
 						is_staged=diff.is_staged,
 					)
-					all_chunks.extend(self._process_group(batch_diff))
+					chunks = await self._process_group(batch_diff)
+					all_chunks.extend(chunks)
 
 			return all_chunks
 
 		# For smaller groups, process normally
-		return self._process_group(diff)
+		return await self._process_group(diff)
 
-	def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
-		"""Process a manageable group of files."""
+	async def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
+		"""
+		Process a GitDiff with one or more files.
+
+		Originally designed for single files, but now supports multiple files.
+
+		"""
 		if not diff.files:
+			logger.warning("_process_group called with empty files list")
 			return []
 
-		# 1. Generate initial chunks for each file
-		initial_file_chunks: list[DiffChunk] = []
-		for file_path in diff.files:
-			single_file_diff_view = GitDiff(
-				files=[file_path],
-				content=diff.content,  # Full content for parsing
-				is_staged=diff.is_staged,
-			)
-			enhanced_chunks = self._enhance_semantic_split(single_file_diff_view)
-			if enhanced_chunks:
-				initial_file_chunks.extend(enhanced_chunks)
-			else:
-				logger.warning("No chunk generated for file: %s", file_path)
+		# If multiple files, this used to log an error, but now we'll handle it properly
+		if len(diff.files) > 1:
+			logger.debug("Processing group with multiple files: %s", diff.files)
 
-		if not initial_file_chunks:
-			return []
+			# Extract content for each file individually if possible
+			chunks = []
+			for file_path in diff.files:
+				# Try to extract just this file's diff from the full content
+				file_diff_content = self._extract_file_diff(diff.content, file_path)
 
-		# 2. Consolidate chunks from the same file first
-		consolidated_chunks = self._consolidate_small_chunks(initial_file_chunks)
+				if file_diff_content:
+					# Create a new diff for just this file
+					file_diff = GitDiff(files=[file_path], content=file_diff_content, is_staged=diff.is_staged)
+					# Process it and add the resulting chunks
+					enhanced_chunks = await self._enhance_semantic_split(file_diff)
+					chunks.extend(enhanced_chunks)
+				else:
+					# If we couldn't extract just this file's diff, create a simple chunk
+					chunks.append(
+						DiffChunk(
+							files=[file_path],
+							content="",  # Empty content as we couldn't extract it
+							description=f"Changes in {file_path}",
+						)
+					)
 
-		# 3. Group remaining chunks
-		processed_indices: set[int] = set()
-		final_chunks: list[DiffChunk] = []
+			# If we couldn't create any valid chunks, fallback to the original behavior
+			if not chunks:
+				return [DiffChunk(files=diff.files, content=diff.content, description="Multiple file changes")]
 
-		# First pass: Group by related file patterns
-		for i, chunk1 in enumerate(consolidated_chunks):
-			if i in processed_indices:
-				continue
-			if not chunk1.files:  # Skip chunks without files
-				processed_indices.add(i)
-				final_chunks.append(chunk1)
-				continue
+			return chunks
 
-			related_group = [chunk1]
-			processed_indices.add(i)
+		# Original behavior for single file
+		file_path = diff.files[0]
 
-			for j in range(i + 1, len(consolidated_chunks)):
-				if j in processed_indices:
-					continue
-				chunk2 = consolidated_chunks[j]
-				if not chunk2.files:  # Skip chunks without files
-					continue
+		# Enhance this single file diff
+		enhanced_chunks = await self._enhance_semantic_split(diff)  # Pass the original diff directly
 
-				# Check relation between first files of each chunk
-				if are_files_related(chunk1.files[0], chunk2.files[0], self.related_file_patterns):
-					related_group.append(chunk2)
-					processed_indices.add(j)
+		if not enhanced_chunks:
+			logger.warning("No chunk generated for file: %s after enhancement.", file_path)
+			# Fallback if enhancement yields nothing
+			enhanced_chunks = [
+				DiffChunk(
+					files=[file_path],
+					content=diff.content,
+					description=f"Changes in {file_path} (enhancement failed)",
+				)
+			]
 
-			self._create_semantic_chunk(related_group, final_chunks)
+		# No further consolidation or grouping needed here as we process file-by-file now
+		return enhanced_chunks
 
-		# Second pass: Group remaining by similarity
-		remaining_chunks = [
-			consolidated_chunks[i] for i in range(len(consolidated_chunks)) if i not in processed_indices
-		]
-		if remaining_chunks:
-			self._group_by_content_similarity(remaining_chunks, final_chunks)
+	def _extract_file_diff(self, full_diff_content: str, file_path: str) -> str:
+		"""
+		Extract the diff content for a specific file from a multi-file diff.
 
-		# 4. Final consolidation check
-		return self._consolidate_if_needed(final_chunks)
+		Args:
+		        full_diff_content: Complete diff content with multiple files
+		        file_path: Path of the file to extract
 
-	def _validate_embedding_model(self) -> None:
-		"""Validate that the embedding model is available."""
-		if self._embedding_model is None and not is_test_environment():
-			msg = (
-				"Semantic analysis unavailable: embedding model not available. "
-				"Make sure the model is properly loaded before calling this method."
-			)
-			raise ValueError(msg)
+		Returns:
+		        The extracted diff for the specific file, or empty string if not found
+
+		"""
+		import re
+
+		# Pattern to match the start of a diff for a file
+		diff_start_pattern = re.compile(r"diff --git a/([^\s]+) b/([^\s]+)")
+
+		# Find all diff start positions
+		diff_positions = []
+		for match in diff_start_pattern.finditer(full_diff_content):
+			_, b_file = match.groups()
+			# For most changes both files are the same; for renames prefer b_file
+			target_file = b_file
+			diff_positions.append((match.start(), target_file))
+
+		# Sort by position
+		diff_positions.sort()
+
+		# Find the diff for our file
+		file_diff = ""
+		for i, (start_pos, diff_file) in enumerate(diff_positions):
+			if diff_file == file_path:
+				# Found our file, now find the end
+				if i < len(diff_positions) - 1:
+					end_pos = diff_positions[i + 1][0]
+					file_diff = full_diff_content[start_pos:end_pos]
+				else:
+					# Last file in the diff
+					file_diff = full_diff_content[start_pos:]
+				break
+
+		return file_diff
 
 	def _group_chunks_by_directory(self, chunks: list[DiffChunk]) -> dict[str, list[DiffChunk]]:
 		"""Group chunks by their containing directory."""
@@ -317,7 +328,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		return dir_groups
 
-	def _process_directory_group(
+	async def _process_directory_group(
 		self, chunks: list[DiffChunk], processed_files: set[str], semantic_chunks: list[DiffChunk]
 	) -> None:
 		"""Process chunks in a single directory group."""
@@ -331,33 +342,95 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			dir_processed: set[str] = set()
 
 			# First try to group by related file patterns
-			self._group_related_files(chunks, dir_processed, semantic_chunks)
+			await self._group_related_files(chunks, dir_processed, semantic_chunks)
 
 			# Then try to group remaining files by content similarity
 			remaining_chunks = [c for c in chunks if not c.files or c.files[0] not in dir_processed]
 
 			if remaining_chunks:
 				# Use default similarity threshold instead
-				self._group_by_content_similarity(remaining_chunks, semantic_chunks)
+				await self._group_by_content_similarity(remaining_chunks, semantic_chunks)
 
 			# Add all processed files to the global processed set
 			processed_files.update(dir_processed)
 
-	def _process_remaining_chunks(
+	async def _process_remaining_chunks(
 		self, all_chunks: list[DiffChunk], processed_files: set[str], semantic_chunks: list[DiffChunk]
 	) -> None:
 		"""Process any remaining chunks that weren't grouped by directory."""
 		remaining_chunks = [c for c in all_chunks if c.files and c.files[0] not in processed_files]
 
 		if remaining_chunks:
-			self._group_by_content_similarity(remaining_chunks, semantic_chunks)
+			await self._group_by_content_similarity(remaining_chunks, semantic_chunks)
 
-	def _consolidate_if_needed(self, semantic_chunks: list[DiffChunk]) -> list[DiffChunk]:
+	async def _consolidate_small_chunks(self, initial_chunks: list[DiffChunk]) -> list[DiffChunk]:
+		"""
+		Merge small or related chunks together.
+
+		First, consolidates chunks originating from the same file.
+		Then, consolidates remaining single-file chunks by directory.
+
+		Args:
+		    initial_chunks: List of diff chunks to consolidate
+
+		Returns:
+		    Consolidated list of chunks
+
+		"""
+		# Use instance variable for threshold
+		if len(initial_chunks) < self.min_chunks_for_consolidation:
+			return initial_chunks
+
+		# Consolidate small chunks for the same file or related files
+		consolidated_chunks = []
+		processed_indices = set()
+
+		for i, chunk1 in enumerate(initial_chunks):
+			if i in processed_indices:
+				continue
+
+			merged_chunk = chunk1
+			processed_indices.add(i)
+
+			# Check subsequent chunks for merging
+			for j in range(i + 1, len(initial_chunks)):
+				if j in processed_indices:
+					continue
+
+				chunk2 = initial_chunks[j]
+
+				# Check if chunks should be merged (same file or related)
+				if self._should_merge_chunks(merged_chunk, chunk2):
+					# Combine files if merging related chunks, not just same file chunks
+					new_files = merged_chunk.files
+					if (
+						len(merged_chunk.files) == 1
+						and len(chunk2.files) == 1
+						and merged_chunk.files[0] != chunk2.files[0]
+					):
+						new_files = sorted(set(merged_chunk.files + chunk2.files))
+
+					# Merge content and potentially other attributes
+					# Ensure a newline between merged content if needed
+					separator = "\n" if merged_chunk.content and chunk2.content else ""
+					merged_chunk = dataclasses.replace(
+						merged_chunk,
+						files=new_files,
+						content=merged_chunk.content + separator + chunk2.content,
+						description=merged_chunk.description,  # Keep first description
+					)
+					processed_indices.add(j)
+
+			consolidated_chunks.append(merged_chunk)
+
+		return consolidated_chunks
+
+	async def _consolidate_if_needed(self, semantic_chunks: list[DiffChunk]) -> list[DiffChunk]:
 		"""Consolidate chunks if we have too many small ones."""
 		has_single_file_chunks = any(len(chunk.files) == 1 for chunk in semantic_chunks)
 
 		if len(semantic_chunks) > self.max_chunks_before_consolidation and has_single_file_chunks:
-			return self._consolidate_small_chunks(semantic_chunks)
+			return await self._consolidate_small_chunks(semantic_chunks)
 
 		return semantic_chunks
 
@@ -374,6 +447,9 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		related_file_patterns = []
 		# Define patterns using standard strings with escaped backreferences
 		default_patterns: list[tuple[str, str]] = [
+			# --- File Moves (same name, different directories) ---
+			# This helps identify potential file moves regardless of directory structure
+			("^(.*/)?(.*?)$", "^(.*/)\\\\2$"),  # Same filename in any directory
 			# --- General Code + Test Files ---
 			# Python
 			("^(.*)\\.py$", "\\\\1_test\\.py$"),
@@ -504,64 +580,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		return related_file_patterns
 
-	def _get_code_embedding(self, content: str) -> list[float] | None:
-		"""
-		Get embedding vector for code content.
-
-		Args:
-		    content: Code content to embed
-
-		Returns:
-		    List of floats representing code embedding or None if unavailable
-
-		"""
-		# Skip empty content
-		if not content or not content.strip():
-			return None
-
-		# Check if embedding model exists
-		if self._embedding_model is None:
-			logger.warning("Embedding model is None, cannot generate embedding")
-			return None
-
-		# Generate embedding with error handling
-		try:
-			embeddings = self._embedding_model.encode([content], show_progress_bar=False)
-			# Check if the result is valid and has the expected structure
-			if embeddings is not None and len(embeddings) > 0 and isinstance(embeddings[0], np.ndarray):
-				return embeddings[0].tolist()
-			logger.warning("Embedding model returned unexpected result type: %s", type(embeddings))
-			return None
-		except (ValueError, TypeError, RuntimeError, IndexError, AttributeError) as e:
-			# Catch a broader range of potential exceptions during encode/toList
-			logger.warning("Failed to generate embedding for content snippet: %s", e)
-			return None
-		except Exception:  # Catch any other unexpected errors
-			logger.exception("Unexpected error during embedding generation")
-			return None
-
-	def _calculate_semantic_similarity(self, content1: str, content2: str) -> float:
-		"""
-		Calculate semantic similarity between two code chunks.
-
-		Args:
-		    content1: First code content
-		    content2: Second code content
-
-		Returns:
-		    Similarity score between 0 and 1
-
-		"""
-		# Get embeddings
-		emb1 = self._get_code_embedding(content1)
-		emb2 = self._get_code_embedding(content2)
-
-		if not emb1 or not emb2:
-			return 0.0
-
-		# Calculate cosine similarity using utility function
-		return calculate_semantic_similarity(emb1, emb2)
-
 	# --- New Helper Methods for Refactoring _enhance_semantic_split ---
 
 	def _parse_file_diff(self, diff_content: str, file_path: str) -> PatchedFile | None:
@@ -569,9 +587,33 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not diff_content:
 			logger.warning("Cannot parse empty diff content for %s", file_path)
 			return None
+
+		filtered_content = ""  # Initialize to handle unbound case
 		try:
+			# Filter out the truncation marker lines before parsing
+			filtered_content_lines = [
+				line for line in diff_content.splitlines() if line.strip() != "... [content truncated] ..."
+			]
+			filtered_content = "\n".join(filtered_content_lines)
+
 			# Use StringIO as PatchSet expects a file-like object or iterable
-			patch_set = PatchSet(StringIO(diff_content))
+			try:
+				patch_set = PatchSet(StringIO(filtered_content))
+			except UnidiffParseError as e:
+				logger.warning("UnidiffParseError for %s: %s", file_path, str(e))
+				# Try to extract just the diff for this specific file to avoid parsing the entire diff
+				file_diff_content_raw = re.search(
+					rf"diff --git a/.*? b/{re.escape(file_path)}\n(.*?)(?=diff --git a/|\Z)",
+					diff_content,
+					re.DOTALL | re.MULTILINE,
+				)
+				content_for_chunk = file_diff_content_raw.group(0) if file_diff_content_raw else ""
+				if content_for_chunk:
+					logger.debug("Extracted raw content for %s after parse error", file_path)
+					# Create a manual PatchedFile since we can't parse it properly
+					return None
+				return None
+
 			matched_file: PatchedFile | None = None
 			for patched_file in patch_set:
 				# unidiff paths usually start with a/ or b/
@@ -582,6 +624,15 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				logger.warning("Could not find matching PatchedFile for: %s in unidiff output", file_path)
 				return None
 			return matched_file
+		except UnidiffParseError:
+			# Log the specific parse error and the content that caused it (first few lines)
+			preview_lines = "\n".join(filtered_content.splitlines()[:10])  # Log first 10 lines
+			logger.exception(
+				"UnidiffParseError for %s\nContent Preview:\n%s",  # Corrected format string
+				file_path,
+				preview_lines,
+			)
+			return None  # Return None on parse error
 		except Exception:
 			logger.exception("Failed to parse diff content using unidiff for %s", file_path)
 			return None
@@ -659,20 +710,34 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	# --- Refactored Orchestrator Method ---
 
-	def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
+	async def _enhance_semantic_split(self, diff: GitDiff) -> list[DiffChunk]:
 		"""
-		Orchestrates the parsing and splitting for a single file's diff view.
-
-		Handles parsing, reconstruction, large file splitting, semantic pattern
-		splitting, and fallback hunk splitting.
+		Enhance the semantic split by using NLP and chunk detection.
 
 		Args:
-		    diff: GitDiff object (expected to contain one file path and full diff content)
+		    diff: The GitDiff object to split
 
 		Returns:
-		    List of DiffChunk objects for the file
+		    List of enhanced DiffChunk objects
 
 		"""
+		if not diff.files:
+			return []
+
+		# Special handling for untracked files - avoid unidiff parsing errors
+		if diff.is_untracked:
+			# Create a basic chunk with only file info for untracked files
+			# Use a list comprehension for performance (PERF401)
+			return [
+				DiffChunk(
+					files=[file_path],
+					content=diff.content if len(diff.files) == 1 else f"New untracked file: {file_path}",
+					description=f"New file: {file_path}",
+				)
+				for file_path in diff.files
+				if self._is_valid_filename(file_path)
+			]
+
 		if not diff.files or len(diff.files) != 1:
 			logger.error("_enhance_semantic_split called with invalid diff object (files=%s)", diff.files)
 			return []
@@ -703,11 +768,11 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			]
 
 		# 2. Reconstruct the full diff content for this file
-		file_header, full_file_diff_content = self._reconstruct_file_diff(matched_file)
+		_, full_file_diff_content = self._reconstruct_file_diff(matched_file)
 
 		# 3. Check if the reconstructed diff is too large
 		if len(full_file_diff_content) > self.max_file_size_for_llm:
-			return self._split_large_file_diff(matched_file, file_header)
+			return self._split_large_file_diff(matched_file, "")
 
 		# 4. Try splitting by semantic patterns (if applicable)
 		patterns = get_language_specific_patterns(extension)
@@ -726,7 +791,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			hunk_chunks.append(
 				DiffChunk(
 					files=[file_path],
-					content=file_header + hunk_content,  # Combine header + hunk
+					content=hunk_content,  # Combine header + hunk
 					description=f"Hunk in {file_path} starting near line {hunk.target_start}",
 				)
 			)
@@ -746,7 +811,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 	# --- Existing Helper Methods (Potentially need review/updates) ---
 
-	def _group_by_content_similarity(
+	async def _group_by_content_similarity(
 		self,
 		chunks: list[DiffChunk],
 		result_chunks: list[DiffChunk],
@@ -764,42 +829,16 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		if not chunks:
 			return
 
-		# Check if model is available
-		if self._embedding_model is None:
-			logger.debug("Embedding model not available, using fallback grouping strategy")
-			# If model is unavailable, try to group by file path patterns
-			grouped_paths: dict[str, list[DiffChunk]] = {}
-
-			# Group by common path prefixes
-			for chunk in chunks:
-				if not chunk.files:
-					result_chunks.append(chunk)
-					continue
-
-				file_path = chunk.files[0]
-				# Get directory or file prefix as the grouping key
-				if "/" in file_path:
-					# Use directory as key
-					key = file_path.rsplit("/", 1)[0]
-				else:
-					# Use file prefix (before extension) as key
-					key = file_path.split(".", 1)[0] if "." in file_path else file_path
-
-				if key not in grouped_paths:
-					grouped_paths[key] = []
-				grouped_paths[key].append(chunk)
-
-			# Create chunks from each group
-			for related_chunks in grouped_paths.values():
-				self._create_semantic_chunk(related_chunks, result_chunks)
-			return
-
 		processed_indices = set()
 		threshold = similarity_threshold if similarity_threshold is not None else self.similarity_threshold
 
+		# Extract content from all chunks and get embeddings in batch
+		chunk_contents = [chunk.content for chunk in chunks]
+		chunk_embeddings = await self.embedder.embed_contents(chunk_contents)
+
 		# For each chunk, find similar chunks and group them
 		for i, chunk in enumerate(chunks):
-			if i in processed_indices:
+			if i in processed_indices or not chunk_embeddings[i]:
 				continue
 
 			related_chunks = [chunk]
@@ -807,11 +846,14 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 			# Find similar chunks
 			for j, other_chunk in enumerate(chunks):
-				if i == j or j in processed_indices:
+				if i == j or j in processed_indices or not chunk_embeddings[j]:
 					continue
 
-				# Calculate similarity between chunks
-				similarity = self._calculate_semantic_similarity(chunk.content, other_chunk.content)
+				# Calculate similarity between chunks using embeddings
+				# Cast to remove None type since we've checked above
+				emb1 = cast("list[float]", chunk_embeddings[i])
+				emb2 = cast("list[float]", chunk_embeddings[j])
+				similarity = calculate_semantic_similarity(emb1, emb2)
 
 				if similarity >= threshold:
 					related_chunks.append(other_chunk)
@@ -821,7 +863,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			if related_chunks:
 				self._create_semantic_chunk(related_chunks, result_chunks)
 
-	def _group_related_files(
+	async def _group_related_files(
 		self,
 		file_chunks: list[DiffChunk],
 		processed_files: set[str],
@@ -878,16 +920,22 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		all_files = []
 		combined_content = []
+		is_move = any(getattr(chunk, "is_move", False) for chunk in related_chunks)
 
 		for rc in related_chunks:
 			all_files.extend(rc.files)
 			combined_content.append(rc.content)
 
-		# Determine the appropriate commit type based on the files
-		commit_type = determine_commit_type(all_files)
-
-		# Create description based on file count
-		description = create_chunk_description(commit_type, all_files)
+		# Determine if this is a move or a normal change
+		if is_move:
+			commit_type = "chore"  # For moves, we always use chore
+			# Description will be handled separately for moves
+			description = related_chunks[0].description if related_chunks else "Move files"
+		else:
+			# For normal changes, use the regular commit type detection
+			commit_type = determine_commit_type(all_files)
+			# Create description based on file count
+			description = create_chunk_description(commit_type, all_files)
 
 		# Join the content from all related chunks
 		content = "\n\n".join(combined_content)
@@ -897,6 +945,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				files=all_files,
 				content=content,
 				description=description,
+				is_move=is_move,
 			)
 		)
 
@@ -914,68 +963,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 		# Return True if either condition is met
 		return same_file or related_files
-
-	def _consolidate_small_chunks(self, initial_chunks: list[DiffChunk]) -> list[DiffChunk]:
-		"""
-		Merge small or related chunks together.
-
-		First, consolidates chunks originating from the same file.
-		Then, consolidates remaining single-file chunks by directory.
-
-		Args:
-		    initial_chunks: List of diff chunks to consolidate
-
-		Returns:
-		    Consolidated list of chunks
-
-		"""
-		# Use instance variable for threshold
-		if len(initial_chunks) < self.min_chunks_for_consolidation:
-			return initial_chunks
-
-		# Consolidate small chunks for the same file or related files
-		consolidated_chunks = []
-		processed_indices = set()
-
-		for i, chunk1 in enumerate(initial_chunks):
-			if i in processed_indices:
-				continue
-
-			merged_chunk = chunk1
-			processed_indices.add(i)
-
-			# Check subsequent chunks for merging
-			for j in range(i + 1, len(initial_chunks)):
-				if j in processed_indices:
-					continue
-
-				chunk2 = initial_chunks[j]
-
-				# Check if chunks should be merged (same file or related)
-				if self._should_merge_chunks(merged_chunk, chunk2):
-					# Combine files if merging related chunks, not just same file chunks
-					new_files = merged_chunk.files
-					if (
-						len(merged_chunk.files) == 1
-						and len(chunk2.files) == 1
-						and merged_chunk.files[0] != chunk2.files[0]
-					):
-						new_files = sorted(set(merged_chunk.files + chunk2.files))
-
-					# Merge content and potentially other attributes
-					# Ensure a newline between merged content if needed
-					separator = "\n" if merged_chunk.content and chunk2.content else ""
-					merged_chunk = dataclasses.replace(
-						merged_chunk,
-						files=new_files,
-						content=merged_chunk.content + separator + chunk2.content,
-						description=merged_chunk.description,  # Keep first description
-					)
-					processed_indices.add(j)
-
-			consolidated_chunks.append(merged_chunk)
-
-		return consolidated_chunks
 
 	def _split_by_semantic_patterns(self, patched_file: PatchedFile, patterns: list[str]) -> list[DiffChunk]:
 		"""
@@ -1001,7 +988,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 		current_semantic_chunk_hunks: list[Hunk] = []
 
 		# Get header info once using the reconstruction helper
-		file_header, _ = self._reconstruct_file_diff(patched_file)
+		_, _ = self._reconstruct_file_diff(patched_file)
 
 		for hunk in patched_file:
 			hunk_has_boundary = False
@@ -1035,10 +1022,224 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			result_chunks.append(
 				DiffChunk(
 					files=[file_path],
-					content=file_header + group_content,  # Combine header + hunks
+					content=group_content,  # Combine header + hunks
 					description=description,
 				)
 			)
 
 		logger.debug("Split %s into %d chunks based on semantic patterns", file_path, len(result_chunks))
 		return result_chunks
+
+	@staticmethod
+	def _is_valid_filename(filename: str) -> bool:
+		"""Check if the filename is valid (not a pattern or template)."""
+		if not filename:
+			return False
+		invalid_chars = ["*", "+", "{", "}", "\\"]
+		return not (any(char in filename for char in invalid_chars) or filename.startswith('"'))
+
+	async def _detect_moved_files(self, diff: GitDiff) -> dict[str, str]:
+		"""
+		Detect files that have been moved (deleted and added elsewhere).
+
+		This analyzes the diff to find files that appear to have been deleted from
+		one location and added to another location with similar content.
+
+		Args:
+		    diff: The git diff to analyze
+
+		Returns:
+		    Dictionary mapping from deleted file paths to their new locations
+		"""
+		# Parse the diff to identify deleted and added files with their content
+		deleted_files: dict[str, str] = {}  # path -> content
+		added_files: dict[str, str] = {}  # path -> content
+
+		try:
+			# Use PatchSet to parse the diff
+			patch_set = PatchSet(StringIO(diff.content))
+
+			# Identify deleted and added files
+			for patched_file in patch_set:
+				if patched_file.is_removed_file:
+					# Extract content from the source (deleted) file
+					file_path = patched_file.source_file.replace("a/", "", 1)
+					file_content = ""
+					for hunk in patched_file:
+						for line in hunk:
+							# Line type ' ' is context, '-' is removed
+							if line.line_type in (" ", "-"):
+								file_content += line.value
+					deleted_files[file_path] = file_content
+				elif patched_file.is_added_file:
+					# Extract content from the target (added) file
+					file_path = patched_file.target_file.replace("b/", "", 1)
+					file_content = ""
+					for hunk in patched_file:
+						for line in hunk:
+							# Line type ' ' is context, '+' is added
+							if line.line_type in (" ", "+"):
+								file_content += line.value
+					added_files[file_path] = file_content
+
+		except (ValueError, UnidiffParseError, Exception) as e:
+			logger.warning(f"Failed to parse diff for move detection: {e}")
+			return {}
+
+		# Match deleted files with added files based on content similarity
+		moved_files = {}
+
+		# Group files with same name to avoid unnecessary embedding comparisons
+		potential_moves = {}
+		for deleted_path, deleted_content in deleted_files.items():
+			if not deleted_content.strip():
+				continue
+
+			deleted_name = Path(deleted_path).name
+			potential_moves.setdefault(deleted_name, {"deleted": [], "added": []})
+			potential_moves[deleted_name]["deleted"].append((deleted_path, deleted_content))
+
+		for added_path, added_content in added_files.items():
+			if not added_content.strip():
+				continue
+
+			added_name = Path(added_path).name
+			if added_name in potential_moves:  # Only add if there's a matching deleted file
+				potential_moves[added_name]["added"].append((added_path, added_content))
+
+		# Process each group of potential moves
+		for group in potential_moves.values():
+			deleted_items = group["deleted"]
+			added_items = group["added"]
+
+			if not deleted_items or not added_items:
+				continue
+
+			# Get embeddings for all deleted and added contents in batch
+			all_contents = [content for _, content in deleted_items + added_items]
+			all_embeddings = await self.embedder.embed_contents(all_contents)
+
+			# Split embeddings back to deleted and added
+			deleted_count = len(deleted_items)
+			deleted_embeddings = all_embeddings[:deleted_count]
+			added_embeddings = all_embeddings[deleted_count:]
+
+			# Match deleted and added files based on embedding similarity
+			for i, (deleted_path, _) in enumerate(deleted_items):
+				if deleted_embeddings[i] is None:
+					continue
+
+				best_match = None
+				best_similarity = 0.0
+
+				for j, (added_path, _) in enumerate(added_items):
+					if added_embeddings[j] is None:
+						continue
+
+					# Cast to remove None type since we've checked above
+					emb1 = cast("list[float]", deleted_embeddings[i])
+					emb2 = cast("list[float]", added_embeddings[j])
+					similarity = calculate_semantic_similarity(emb1, emb2)
+
+					if similarity > best_similarity:
+						best_similarity = similarity
+						best_match = added_path
+
+				# If we found a good match above the threshold, consider it a move
+				if best_match and best_similarity >= self.file_move_similarity_threshold:
+					moved_files[deleted_path] = best_match
+					logger.debug(f"Detected move: {deleted_path} -> {best_match} (similarity: {best_similarity:.2f})")
+
+		return moved_files
+
+	def _create_move_chunks(self, moved_files: dict[str, str], diff: GitDiff) -> list[DiffChunk]:
+		"""
+		Create diff chunks for moved files.
+
+		Args:
+		    moved_files: Dictionary mapping from source (deleted) paths to target (added) paths
+		    diff: Original diff containing the move changes
+
+		Returns:
+		    List of DiffChunk objects representing file moves
+		"""
+		if not moved_files:
+			return []
+
+		# Group moves by common source/target directories
+		# This helps create logical commit groups for moves within the same directories
+		dir_moves: dict[tuple[str, str], list[tuple[str, str]]] = {}
+
+		for source, target in moved_files.items():
+			source_dir = str(Path(source).parent)
+			target_dir = str(Path(target).parent)
+			dir_key = (source_dir, target_dir)
+
+			if dir_key not in dir_moves:
+				dir_moves[dir_key] = []
+
+			dir_moves[dir_key].append((source, target))
+
+		# Create chunks for each move group
+		move_chunks = []
+
+		for (source_dir, target_dir), moves in dir_moves.items():
+			# Combine source and target files
+			all_files = []
+			for source, target in moves:
+				all_files.extend([source, target])
+
+			# Create descriptive move information
+			if source_dir == target_dir:
+				# Rename within same directory
+				if len(moves) == 1:
+					source, target = moves[0]
+					description = f"chore: rename {Path(source).name} to {Path(target).name}"
+				else:
+					description = f"chore: rename {len(moves)} files in {source_dir}"
+			else:
+				# Move between directories
+				source_dir_desc = "root directory" if source_dir in {".", ""} else source_dir
+
+				target_dir_desc = "root directory" if target_dir in {".", ""} else target_dir
+
+				if len(moves) == 1:
+					description = f"chore: move {Path(moves[0][0]).name} from {source_dir_desc} to {target_dir_desc}"
+				else:
+					description = f"chore: move {len(moves)} files from {source_dir_desc} to {target_dir_desc}"
+
+			# Extract all content related to these moves from the original diff
+			chunk_content = ""
+			try:
+				patch_set = PatchSet(StringIO(diff.content))
+				for patched_file in patch_set:
+					source_file = patched_file.source_file.replace("a/", "", 1)
+					target_file = patched_file.target_file.replace("b/", "", 1)
+
+					# Check if this patched file is part of our move group
+					is_move_source = source_file in [source for source, _ in moves]
+					is_move_target = target_file in [target for _, target in moves]
+
+					if is_move_source or is_move_target:
+						# Reconstruct this file's diff content
+						_, file_content = self._reconstruct_file_diff(patched_file)
+						chunk_content += file_content + "\n"
+
+			except Exception:
+				logger.exception("Error extracting content for move chunk")
+				# Use a placeholder if extraction failed
+				chunk_content = f"# File moves between {source_dir} and {target_dir}:\n"
+				for source, target in moves:
+					chunk_content += f"# - {source} -> {target}\n"
+
+			# Create a single chunk for this move group
+			move_chunks.append(
+				DiffChunk(
+					files=all_files,
+					content=chunk_content,
+					description=description,
+					is_move=True,  # Indicate this is a move operation
+				)
+			)
+
+		return move_chunks

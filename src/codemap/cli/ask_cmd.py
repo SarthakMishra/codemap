@@ -1,74 +1,68 @@
 """CLI command for asking questions about the codebase using RAG."""
 
-# Need asyncio for the async command
 import logging
-from pathlib import Path
 from typing import Annotated, Any, cast
 
 import asyncer
 import typer
-from rich.prompt import Prompt
-
-from codemap.llm.rag.command import AskCommand
-from codemap.llm.rag.formatter import print_ask_result
-from codemap.utils.cli_utils import exit_with_error, setup_logging
-from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
 
+# --- Command Argument Annotations (Keep these lightweight) ---
 
-# Make the command function async
-@asyncer.runnify
-async def ask_command(
-	question: Annotated[
-		str | None, typer.Argument(help="Your question about the codebase (omit for interactive mode).")
-	] = None,
-	path: Annotated[
-		Path | None,
-		typer.Option(
-			"--path",
-			"-p",
-			help="Path to the repository root (defaults to current directory).",
-			exists=True,
-			file_okay=False,
-			dir_okay=True,
-			resolve_path=True,
-		),
-	] = None,
-	model: Annotated[
-		str | None, typer.Option("--model", help="LLM model to use (e.g., 'openai/gpt-4o-mini'). Overrides config.")
-	] = None,
-	api_base: Annotated[str | None, typer.Option("--api-base", help="Override the LLM API base URL.")] = None,
-	api_key: Annotated[
-		str | None, typer.Option("--api-key", help="Override the LLM API key (use environment variables for security).")
-	] = None,
-	interactive: Annotated[
-		bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")
-	] = False,
-	is_verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Enable verbose logging.")] = False,
+QuestionArg = Annotated[
+	str | None, typer.Argument(help="Your question about the codebase (omit for interactive mode).")
+]
+
+InteractiveFlag = Annotated[bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")]
+
+
+# --- Registration Function ---
+
+
+def register_command(app: typer.Typer) -> None:
+	"""Register the ask command with the CLI app."""
+
+	@app.command(name="ask")
+	@asyncer.runnify
+	async def ask_command(
+		question: QuestionArg = None,
+		interactive: InteractiveFlag = False,
+	) -> None:
+		"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
+		# Defer heavy imports and logic to the implementation function
+		await _ask_command_impl(
+			question=question,
+			interactive=interactive,
+		)
+
+
+# --- Implementation Function (Heavy imports deferred here) ---
+
+
+async def _ask_command_impl(
+	question: str | None = None,
+	interactive: bool = False,
 ) -> None:
-	"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
-	setup_logging(is_verbose=is_verbose)
-	repo_path = path or Path.cwd()
-	logger.info(f"Received ask command for path: {repo_path}")
+	"""Implementation of the ask command with heavy imports deferred."""
+	# Import heavy dependencies here instead of at the top
+	from rich.prompt import Prompt
+
+	from codemap.config import ConfigLoader
+	from codemap.llm.rag.ask.command import AskCommand
+	from codemap.llm.rag.ask.formatter import print_ask_result
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
 	# Determine if running in interactive mode (flag or config)
-	config_loader = ConfigLoader.get_instance(repo_root=repo_path)
-	config = config_loader.load_config()
-	is_interactive = interactive or config.get("ask", {}).get("interactive_chat", False)
+	config_loader = ConfigLoader.get_instance()
+	is_interactive = interactive or config_loader.get.ask.interactive_chat
 
 	if not is_interactive and question is None:
 		exit_with_error("You must provide a question or use the --interactive flag.")
 
 	try:
 		# Initialize command once for potentially multiple runs (interactive)
-		command = AskCommand(
-			# question=question, # Question is handled by run()
-			repo_path=repo_path,
-			model=model,
-			api_base=api_base,
-			api_key=api_key,
-		)
+		command = AskCommand()
 
 		# Perform async initialization before running any commands
 		await command.initialize()
@@ -95,6 +89,8 @@ async def ask_command(
 			result = await command.run(question=cast("str", question))
 			print_ask_result(cast("dict[str, Any]", result))
 
+	except KeyboardInterrupt:
+		handle_keyboard_interrupt()
 	except Exception as e:
 		logger.exception("An error occurred during the ask command.")
 		exit_with_error(f"Error executing ask command: {e}", exception=e)

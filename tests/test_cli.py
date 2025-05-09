@@ -13,12 +13,18 @@ import yaml
 from typer.testing import CliRunner
 
 import codemap.cli
-from codemap.config import DEFAULT_CONFIG
 from codemap.gen.utils import determine_output_path as _determine_output_path
 from tests.base import FileSystemTestBase
 
 if TYPE_CHECKING:
 	from collections.abc import Generator
+
+# Default configuration for testing
+DEFAULT_CONFIG = {
+	"token_limit": 10000,
+	"use_gitignore": True,
+	"output_dir": "documentation",
+}
 
 app = codemap.cli.app
 
@@ -246,17 +252,18 @@ class TestOutputPath(FileSystemTestBase):
 		"""
 		# Arrange: Set up test data
 		repo_root = self.temp_dir
-		config = {
-			"output_dir": "docs",
-		}
+
+		# Mock ConfigLoader
+		mock_config_loader = Mock()
+		mock_config_loader.get.gen.output_dir = "docs"
 
 		# Act/Assert: Test with custom output path
 		custom_path = self.temp_dir / "custom/path.md"
-		assert _determine_output_path(repo_root, custom_path, config) == custom_path
+		assert _determine_output_path(repo_root, mock_config_loader, custom_path) == custom_path
 
 		# Act/Assert: Test with config-based path - mock mkdir to avoid permission issues
 		with patch("pathlib.Path.mkdir") as mock_mkdir:
-			result = _determine_output_path(repo_root, None, config)
+			result = _determine_output_path(repo_root, mock_config_loader, None)
 			assert result.parent == repo_root / "docs"
 			assert result.suffix == ".md"
 			assert "documentation_" in result.name  # Timestamp format
@@ -272,8 +279,11 @@ class TestOutputPath(FileSystemTestBase):
 		# Arrange: Define custom path
 		custom_path = sample_repo / "custom" / "docs.md"
 
+		# Mock ConfigLoader
+		mock_config_loader = Mock()
+
 		# Act: Generate output path
-		result = _determine_output_path(sample_repo, custom_path, DEFAULT_CONFIG)
+		result = _determine_output_path(sample_repo, mock_config_loader, custom_path)
 
 		# Assert: Verify result matches custom path
 		assert result == custom_path
@@ -285,13 +295,12 @@ class TestOutputPath(FileSystemTestBase):
 		Verifies that parent directories are created when they don't exist.
 
 		"""
-		# Arrange: Set up config with nested directory
-		config = {
-			"output_dir": "nested/docs/dir",
-		}
+		# Arrange: Setup mock ConfigLoader with nested directory
+		mock_config_loader = Mock()
+		mock_config_loader.get.gen.output_dir = "nested/docs/dir"
 
 		# Act: Generate output path
-		result = _determine_output_path(sample_repo, None, config)
+		result = _determine_output_path(sample_repo, mock_config_loader, None)
 
 		# Assert: Verify directories were created
 		assert result.parent.exists()
@@ -307,16 +316,17 @@ class TestOutputPath(FileSystemTestBase):
 		"""
 		# Arrange: Set up test data
 		current_time = datetime.now(tz=UTC)
-		config = {
-			"output_dir": str(sample_repo / "test_docs"),  # Use a path within sample_repo
-		}
+
+		# Mock ConfigLoader
+		mock_config_loader = Mock()
+		mock_config_loader.get.gen.output_dir = str(sample_repo / "test_docs")
 
 		# Act: Generate output path with mocked datetime
 		# Patch the standard library datetime module directly
 		with patch("datetime.datetime") as mock_datetime:
 			mock_datetime.now.return_value = current_time
 			# Ensure the timezone object is accessible for strftime (Removed as unnecessary)
-			result = _determine_output_path(sample_repo, None, config)
+			result = _determine_output_path(sample_repo, mock_config_loader, None)
 
 			# Assert: Verify filename has correct timestamp
 			formatted_time = current_time.strftime("%Y%m%d_%H%M%S")

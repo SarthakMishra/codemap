@@ -1,28 +1,15 @@
-"""
-CLI command for indexing repositories.
+"""CLI command for indexing repositories."""
 
-Contains the logic for the 'codemap index' command, including
-initialization, synchronization, and the optional file watching mode.
-
-"""
-
-import asyncio
 import logging
-import sys
 from pathlib import Path
 from typing import Annotated, cast
 
 import typer
-from rich.console import Console
-
-from codemap.processor.pipeline import ProcessingPipeline
-from codemap.utils.cli_utils import exit_with_error, loading_spinner, setup_logging
-from codemap.utils.config_loader import ConfigLoader
 
 logger = logging.getLogger(__name__)
-console = Console()
 
-# Command line argument annotations
+# --- Command Argument Annotations (Keep these lightweight) ---
+
 PathArg = Annotated[
 	Path,
 	typer.Argument(
@@ -52,140 +39,135 @@ WatchOpt = Annotated[
 	),
 ]
 
-LogLevelOpt = Annotated[
-	str,
-	typer.Option(
-		"--log-level",
-		"-L",
-		help="Set the logging level (e.g., DEBUG, INFO, WARNING).",
-	),
-]
-
-VerboseFlag = Annotated[
-	bool,
-	typer.Option(
-		"--verbose",
-		"-v",
-		help="Enable verbose logging",
-	),
-]
-
-ConfigOpt = Annotated[
-	Path | None,
-	typer.Option(
-		"--config",
-		"-c",
-		help="Path to config file",
-	),
-]
+# --- Registration Function ---
 
 
-# --- Helper async function for the main logic ---
-async def _index_repo_async(
+def register_command(app: typer.Typer) -> None:
+	"""Register the index command with the CLI app."""
+
+	@app.command(name="index")
+	def index_command(
+		path: PathArg = Path(),
+		sync: SyncOpt = True,
+		watch: WatchOpt = False,
+	) -> None:
+		"""
+		Index the repository: Process files, generate embeddings, and store in the vector database.
+
+		Optionally, use --sync (default) to synchronize with the Git state on startup,
+		and --watch (-w) to keep running and sync automatically on file changes.
+		"""
+		# Defer heavy imports and logic to the implementation function
+		_index_command_impl(
+			path=path,
+			sync=sync,
+			watch=watch,
+		)
+
+
+# --- Implementation Function (Heavy imports deferred here) ---
+
+
+def _index_command_impl(
 	path: Path,
 	sync: bool,
 	watch: bool,
-	config_loader: ConfigLoader,
 ) -> None:
-	"""Asynchronous part of the index command logic."""
-	pipeline: ProcessingPipeline | None = None
+	"""Actual implementation of the index command."""
+	# --- Heavy Imports ---
+	import asyncio
 
-	try:
-		# --- Initialize Pipeline --- #
-		with loading_spinner("Initializing indexing pipeline..."):
-			try:
-				pipeline = ProcessingPipeline(repo_path=path, config_loader=config_loader)
-				logger.info(f"Pipeline initialized for {path}")
-			except ValueError:
-				logger.exception("Initialization failed")
-				exit_with_error("Failed to initialize the processing pipeline")
-			except Exception:
-				logger.exception("Unexpected initialization error")
-				exit_with_error("An unexpected error occurred during pipeline initialization")
+	from rich.console import Console
 
-		# --- Run the pipeline operations --- #
-		# Ensure pipeline is not None before using it
-		if not pipeline:
-			exit_with_error("Pipeline initialization failed unexpectedly")
+	from codemap.config import ConfigLoader
+	from codemap.processor.pipeline import ProcessingPipeline
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, progress_indicator
 
-		# async_init handles the initial sync if sync is True
-		with loading_spinner("Initializing vector database..."):
-			# Use type narrowing to ensure pipeline is not None
-			pipeline = cast("ProcessingPipeline", pipeline)
-			await pipeline.async_init(sync_on_init=sync, progress=None, task_id=None)
-			logger.info("Vector database initialized")
+	console = Console()  # Initialize Console here
 
-		# --- Watch Mode --- #
-		if watch:
-			logger.info("Watch mode enabled. Initializing file watcher...")
-			# Get debounce delay from config_loader
-			watcher_config = config_loader.get("watcher", {})
-			debounce_delay = float(watcher_config.get("debounce_delay", 2.0))
+	# --- Helper async function (nested inside implementation) ---
+	async def _index_repo_async(
+		target_path: Path,  # Renamed from path to avoid conflict
+		sync_flag: bool,  # Renamed from sync
+		watch_flag: bool,  # Renamed from watch
+		config_loader: ConfigLoader,
+	) -> None:
+		"""Asynchronous part of the index command logic."""
+		pipeline: ProcessingPipeline | None = None
 
-			with loading_spinner("Starting file watcher..."):
-				pipeline.initialize_watcher(debounce_delay=debounce_delay)
-				await pipeline.start_watcher()
+		try:
+			# --- Initialize Pipeline --- #
+			with progress_indicator("Initializing indexing pipeline..."):
+				try:
+					pipeline = ProcessingPipeline(config_loader=config_loader)
+					logger.info(f"Pipeline initialized for {target_path}")
+				except ValueError:
+					logger.exception("Initialization failed")
+					exit_with_error("Failed to initialize the processing pipeline")
+				except Exception:
+					logger.exception("Unexpected initialization error")
+					exit_with_error("An unexpected error occurred during pipeline initialization")
 
-			console.print(f"[green]✓[/green] File watcher started with {debounce_delay}s debounce delay")
-			console.print("[blue]Monitoring for file changes...[/blue] (Press Ctrl+C to exit)")
+			# --- Run the pipeline operations --- #
+			# Ensure pipeline is not None before using it
+			if not pipeline:
+				exit_with_error("Pipeline initialization failed unexpectedly")
 
-			# Use an Event to wait for cancellation instead of a sleep loop
-			cancel_event = asyncio.Event()
-			try:
-				await cancel_event.wait()  # Wait until cancelled
-			except asyncio.CancelledError:
-				logger.info("Watch mode cancelled.")
-			except KeyboardInterrupt:
-				logger.info("Watch mode interrupted by user (Ctrl+C).")
-		elif sync:
-			console.print("[green]✓[/green] Initial synchronization complete.")
-		else:
-			console.print("[green]✓[/green] Initialization complete (sync skipped).")
+			# async_init handles the initial sync if sync_flag is True
+			with progress_indicator("Initializing vector database..."):
+				pipeline = cast("ProcessingPipeline", pipeline)
+				await pipeline.async_init(sync_on_init=sync_flag, progress=None, task_id=None)
+				logger.info("Vector database initialized")
 
-	except Exception:
-		logger.exception("An error occurred during the index operation")
-		exit_with_error("An error occurred during the indexing operation. Check logs for details.")
-	finally:
-		# --- Cleanup --- #
-		if pipeline and pipeline.is_async_initialized:
-			logger.info("Shutting down pipeline...")
-			await pipeline.stop()
-			logger.info("Pipeline shutdown complete.")
+			# --- Watch Mode --- #
+			if watch_flag:
+				logger.info("Watch mode enabled. Initializing file watcher...")
+				# Get debounce delay from config_loader
+				watcher_config = config_loader.get.processor.watcher
+				debounce_delay = float(watcher_config.debounce_delay)
 
+				with progress_indicator("Starting file watcher..."):
+					pipeline.initialize_watcher(debounce_delay=debounce_delay)
+					await pipeline.start_watcher()
 
-def index_command(
-	path: PathArg = Path(),
-	sync: SyncOpt = True,
-	watch: WatchOpt = False,
-	log_level: LogLevelOpt = "INFO",
-	is_verbose: VerboseFlag = False,
-	config: ConfigOpt = None,
-) -> None:
-	"""
-	Index the repository: Process files, generate embeddings, and store in the vector database.
+				console.print(f"[green]✓[/green] File watcher started with {debounce_delay}s debounce delay")
+				console.print("[blue]Monitoring for file changes...[/blue] (Press Ctrl+C to exit)")
 
-	Optionally, use --sync (default) to synchronize with the Git state on startup,
-	and --watch (-w) to keep running and sync automatically on file changes.
-	"""
-	# Configure logging based on CLI options
-	setup_logging(is_verbose=is_verbose)
+				# Use an Event to wait for cancellation instead of a sleep loop
+				cancel_event = asyncio.Event()
+				try:
+					await cancel_event.wait()  # Wait until cancelled
+				except asyncio.CancelledError:
+					logger.info("Watch mode cancelled.")
+				except KeyboardInterrupt:
+					logger.info("Watch mode interrupted by user (Ctrl+C).")
+			elif sync_flag:
+				console.print("[green]✓[/green] Initial synchronization complete.")
+			else:
+				console.print("[green]✓[/green] Initialization complete (sync skipped).")
 
-	# Override log level if explicitly specified
-	if log_level and log_level != "INFO":
-		logging.getLogger().setLevel(log_level.upper())
-		logger.info(f"Log level set to {log_level.upper()}")
+		except Exception:
+			logger.exception("An error occurred during the index operation")
+			exit_with_error("An error occurred during the indexing operation. Check logs for details.")
+		finally:
+			# --- Cleanup --- #
+			if pipeline and pipeline.is_async_initialized:
+				logger.info("Shutting down pipeline...")
+				await pipeline.stop()
+				logger.info("Pipeline shutdown complete.")
+
+	# --- Main logic of _index_command_impl ---
 
 	try:
 		target_path = path.resolve()
 
 		# Load config directly instead of getting from context
-		config_loader = ConfigLoader(str(config) if config else None)
+		config_loader = ConfigLoader.get_instance()
 
-		# Run the indexing operation
+		# Run the indexing operation using the nested async helper
 		asyncio.run(_index_repo_async(target_path, sync, watch, config_loader))
 	except KeyboardInterrupt:
-		console.print("\n[yellow]Operation cancelled by user.[/yellow]")
-		sys.exit(1)
+		handle_keyboard_interrupt()
 	except RuntimeError as e:
 		# Handle specific runtime errors like event loop issues
 		exit_with_error(f"Runtime error: {e}", exception=e)

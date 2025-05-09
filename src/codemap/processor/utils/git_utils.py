@@ -5,8 +5,6 @@ import re
 import subprocess
 from pathlib import Path
 
-from codemap.utils.config_loader import ConfigLoader
-
 logger = logging.getLogger(__name__)
 
 # Constant for magic number 4 in parsing ls-files output
@@ -53,10 +51,12 @@ def _get_exclude_patterns() -> list[str]:
 	        List of regex patterns for paths to exclude
 
 	"""
+	from codemap.config import ConfigLoader  # Ensure this local import exists
+
 	config_loader = ConfigLoader.get_instance()
 
 	# Get exclude patterns from config, falling back to defaults if not present
-	config_patterns = config_loader.get("sync.exclude_patterns", [])
+	config_patterns = config_loader.get.sync.exclude_patterns
 
 	# Default patterns to exclude
 	default_patterns = [

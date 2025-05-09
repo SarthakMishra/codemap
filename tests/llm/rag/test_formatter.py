@@ -9,7 +9,7 @@ import pytest
 from rich.console import Console
 from rich.markdown import Markdown
 
-from codemap.llm.rag.formatter import format_ask_response, format_content_for_context, print_ask_result
+from codemap.llm.rag.ask.formatter import format_ask_response, format_content_for_context, print_ask_result
 
 
 @pytest.fixture
@@ -50,7 +50,7 @@ def test_print_ask_result_with_context(mock_console):
 		],
 	}
 
-	with patch("codemap.llm.rag.formatter.rich_print") as mock_print:
+	with patch("codemap.llm.rag.ask.formatter.rich_print") as mock_print:
 		print_ask_result(result)
 
 		# Verify print was called at least twice (answer and context)
@@ -62,7 +62,7 @@ def test_print_ask_result_without_context(mock_console):
 	"""Test printing structured result without context."""
 	result = {"answer": "The answer is 42"}
 
-	with patch("codemap.llm.rag.formatter.rich_print") as mock_print:
+	with patch("codemap.llm.rag.ask.formatter.rich_print") as mock_print:
 		print_ask_result(result)
 
 		# Should only print the answer, not context

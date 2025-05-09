@@ -1,12 +1,4 @@
-"""
-Implementation of the gen command for code documentation generation.
-
-This module implements the enhanced 'gen' command, which can generate
-human-readable documentation in Markdown format.
-
-"""
-
-from __future__ import annotations
+"""CLI command for generating code documentation."""
 
 import logging
 from pathlib import Path
@@ -14,14 +6,10 @@ from typing import Annotated
 
 import typer
 
-from codemap.gen import GenCommand, GenConfig
-from codemap.processor.lod import LODLevel
-from codemap.utils.cli_utils import exit_with_error, setup_logging
-from codemap.utils.config_loader import ConfigLoader
-
 logger = logging.getLogger(__name__)
 
-# Command line argument annotations
+# --- Command Argument Annotations (Keep these lightweight) ---
+
 PathArg = Annotated[
 	Path,
 	typer.Argument(
@@ -57,25 +45,16 @@ MaxContentLengthOpt = Annotated[
 	),
 ]
 
-TreeFlag = Annotated[
-	bool,
+TreeOpt = Annotated[
+	bool | None,
 	typer.Option(
-		"--tree",
+		"--tree/--no-tree",
 		"-t",
 		help="Include directory tree in output",
 	),
 ]
 
-VerboseFlag = Annotated[
-	bool,
-	typer.Option(
-		"--verbose",
-		"-v",
-		help="Enable verbose logging",
-	),
-]
-
-EntityGraphFlag = Annotated[
+EntityGraphOpt = Annotated[
 	bool | None,
 	typer.Option(
 		"--entity-graph/--no-entity-graph",
@@ -109,7 +88,7 @@ MermaidRelationshipsOpt = Annotated[
 	),
 ]
 
-MermaidLegendFlag = Annotated[
+MermaidLegendOpt = Annotated[
 	bool | None,
 	typer.Option(
 		"--mermaid-legend/--no-mermaid-legend",
@@ -117,7 +96,7 @@ MermaidLegendFlag = Annotated[
 	),
 ]
 
-MermaidUnconnectedFlag = Annotated[
+MermaidUnconnectedOpt = Annotated[
 	bool | None,
 	typer.Option(
 		"--mermaid-unconnected/--no-mermaid-unconnected",
@@ -125,87 +104,110 @@ MermaidUnconnectedFlag = Annotated[
 	),
 ]
 
+SemanticAnalysisOpt = Annotated[
+	bool,
+	typer.Option(
+		"--semantic/--no-semantic",
+		help="Enable/disable semantic analysis",
+	),
+]
 
-def gen_command(
-	path: PathArg = Path(),
-	output: OutputOpt = None,
-	config: ConfigOpt = None,
-	max_content_length: MaxContentLengthOpt = None,
-	lod_level_str: LODLevelOpt = "docs",
-	semantic_analysis: Annotated[
-		bool,
-		typer.Option(
-			"--semantic/--no-semantic",
-			help="Enable/disable semantic analysis",
-		),
-	] = True,
-	tree: Annotated[
-		bool | None,
-		typer.Option(
-			"--tree/--no-tree",
-			"-t",
-			help="Include directory tree in output",
-		),
-	] = None,
-	is_verbose: Annotated[
-		bool,
-		typer.Option(
-			"--verbose",
-			"-v",
-			help="Enable verbose logging",
-		),
-	] = False,
-	entity_graph: EntityGraphFlag = None,
-	mermaid_entities_str: MermaidEntitiesOpt = None,
-	mermaid_relationships_str: MermaidRelationshipsOpt = None,
-	mermaid_show_legend_flag: MermaidLegendFlag = None,
-	mermaid_remove_unconnected_flag: MermaidUnconnectedFlag = None,
+
+# --- Registration Function ---
+
+
+def register_command(app: typer.Typer) -> None:
+	"""Register the gen command with the CLI app."""
+
+	@app.command(name="gen")
+	def gen_command(
+		path: PathArg = Path(),
+		output: OutputOpt = None,
+		max_content_length: MaxContentLengthOpt = None,
+		lod_level_str: LODLevelOpt = "docs",
+		semantic_analysis: SemanticAnalysisOpt = True,
+		tree: TreeOpt = None,
+		entity_graph: EntityGraphOpt = None,
+		mermaid_entities_str: MermaidEntitiesOpt = None,
+		mermaid_relationships_str: MermaidRelationshipsOpt = None,
+		mermaid_show_legend_flag: MermaidLegendOpt = None,
+		mermaid_remove_unconnected_flag: MermaidUnconnectedOpt = None,
+	) -> None:
+		"""
+		Generate code documentation.
+
+		This command processes a codebase and generates Markdown documentation
+		with configurable level of detail.
+
+		Examples:
+		        codemap gen                      # Generate docs for current directory
+		        codemap gen --lod full           # Generate full implementation docs
+		        codemap gen --lod signatures     # Generate docs with signatures only
+		        codemap gen --no-semantic        # Generate without semantic analysis
+
+		"""
+		# Defer all heavy imports by calling implementation function
+		_gen_command_impl(
+			path=path,
+			output=output,
+			max_content_length=max_content_length,
+			lod_level_str=lod_level_str,
+			semantic_analysis=semantic_analysis,
+			tree=tree,
+			entity_graph=entity_graph,
+			mermaid_entities_str=mermaid_entities_str,
+			mermaid_relationships_str=mermaid_relationships_str,
+			mermaid_show_legend_flag=mermaid_show_legend_flag,
+			mermaid_remove_unconnected_flag=mermaid_remove_unconnected_flag,
+		)
+
+
+# --- Implementation Function (Heavy imports deferred here) ---
+
+
+def _gen_command_impl(
+	path: Path = Path(),
+	output: Path | None = None,
+	max_content_length: int | None = None,
+	lod_level_str: str = "docs",
+	semantic_analysis: bool = True,
+	tree: bool | None = None,
+	entity_graph: bool | None = None,
+	mermaid_entities_str: str | None = None,
+	mermaid_relationships_str: str | None = None,
+	mermaid_show_legend_flag: bool | None = None,
+	mermaid_remove_unconnected_flag: bool | None = None,
 ) -> None:
-	"""
-	Generate code documentation.
-
-	This command processes a codebase and generates Markdown documentation
-	with configurable level of detail.
-
-	Examples:
-	        codemap gen                      # Generate docs for current directory
-	        codemap gen --lod full           # Generate full implementation docs
-	        codemap gen --lod signatures     # Generate docs with signatures only
-	        codemap gen --no-semantic        # Generate without semantic analysis
-
-	"""
-	setup_logging(is_verbose=is_verbose)
+	"""Implementation of the gen command with heavy imports deferred."""
+	# Import heavy dependencies here instead of at the top
+	from codemap.config.config_loader import ConfigLoader
+	from codemap.gen import GenCommand, GenConfig
+	from codemap.processor.lod import LODLevel
+	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
 	try:
 		target_path = path.resolve()
 		project_root = Path.cwd()
 
 		# Load config
-		config_loader = ConfigLoader(str(config) if config else None)
-		config_data = config_loader.config
+		config_loader = ConfigLoader.get_instance()
 
 		# Get gen-specific config with defaults
-		gen_config_data = config_data.get("gen", {})
+		gen_config_data = config_loader.get.gen
 
 		# Command line arguments override config file
-		content_length = (
-			max_content_length if max_content_length is not None else gen_config_data.get("max_content_length", 5000)
-		)
+		content_length = max_content_length if max_content_length is not None else gen_config_data.max_content_length
 
 		# Handle boolean flags - default to config values if not provided
-		include_tree = tree if tree is not None else gen_config_data.get("include_tree", False)
-		enable_semantic = (
-			semantic_analysis if semantic_analysis is not None else gen_config_data.get("semantic_analysis", True)
-		)
-		include_entity_graph = (
-			entity_graph if entity_graph is not None else gen_config_data.get("include_entity_graph", True)
-		)
+		include_tree = tree if tree is not None else gen_config_data.include_tree
+		enable_semantic = semantic_analysis if semantic_analysis is not None else gen_config_data.semantic_analysis
+		include_entity_graph = entity_graph if entity_graph is not None else gen_config_data.include_entity_graph
 
 		# Initialize lod_level to a default before the try block
 		lod_level: LODLevel = LODLevel.DOCS  # Default if conversion fails somehow
 
 		# Get LOD level from config if not specified
-		config_lod_str = str(gen_config_data.get("lod_level", LODLevel.DOCS.name.lower()))  # Default to 'docs'
+		config_lod_str = str(gen_config_data.lod_level)  # Default to 'docs'
 
 		# Determine the final LOD level string (CLI > Config > Default)
 		final_lod_str = lod_level_str if lod_level_str != LODLevel.DOCS.name.lower() else config_lod_str
@@ -223,14 +225,14 @@ def gen_command(
 			)
 
 		# Handle Mermaid config (CLI > Config > Default)
-		default_mermaid_entities = gen_config_data.get("mermaid_entities", [])
+		default_mermaid_entities = gen_config_data.mermaid_entities
 		mermaid_entities = (
 			[e.strip().lower() for e in mermaid_entities_str.split(",")]
 			if mermaid_entities_str
 			else default_mermaid_entities
 		)
 
-		default_mermaid_relationships = gen_config_data.get("mermaid_relationships", [])
+		default_mermaid_relationships = gen_config_data.mermaid_relationships
 		mermaid_relationships = (
 			[r.strip().lower() for r in mermaid_relationships_str.split(",")]
 			if mermaid_relationships_str
@@ -239,16 +241,14 @@ def gen_command(
 
 		# Handle Mermaid legend visibility (CLI > Config > Default)
 		mermaid_show_legend = (
-			mermaid_show_legend_flag
-			if mermaid_show_legend_flag is not None
-			else gen_config_data.get("mermaid_show_legend", True)  # Default to True
+			mermaid_show_legend_flag if mermaid_show_legend_flag is not None else gen_config_data.mermaid_show_legend
 		)
 
 		# Handle Mermaid unconnected node removal (CLI > Config > Default)
 		mermaid_remove_unconnected = (
 			mermaid_remove_unconnected_flag
 			if mermaid_remove_unconnected_flag is not None
-			else gen_config_data.get("mermaid_remove_unconnected", False)  # Default to False
+			else gen_config_data.mermaid_remove_unconnected
 		)
 
 		# Create generation config
@@ -258,8 +258,8 @@ def gen_command(
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
 			include_entity_graph=include_entity_graph,
-			use_gitignore=gen_config_data.get("use_gitignore", True),
-			output_dir=Path(gen_config_data.get("output_dir", "documentation")),
+			use_gitignore=gen_config_data.use_gitignore,
+			output_dir=Path(gen_config_data.output_dir),
 			mermaid_entities=mermaid_entities,
 			mermaid_relationships=mermaid_relationships,
 			mermaid_show_legend=mermaid_show_legend,
@@ -273,7 +273,7 @@ def gen_command(
 		logger.debug("Gen config data being passed to determine_output_path: %s", gen_config_data)
 		# ---------------------- #
 
-		output_path = determine_output_path(project_root, output, gen_config_data)
+		output_path = determine_output_path(project_root, config_loader, output)
 
 		# Create and execute the gen command
 		command = GenCommand(gen_config)
@@ -282,11 +282,9 @@ def gen_command(
 		if not success:
 			exit_with_error("Generation failed")
 
+	except KeyboardInterrupt:
+		handle_keyboard_interrupt()
 	except (FileNotFoundError, PermissionError, OSError) as e:
 		exit_with_error(f"File system error: {e!s}", exception=e)
 	except ValueError as e:
 		exit_with_error(f"Configuration error: {e!s}", exception=e)
-
-
-# Alias for backward compatibility
-generate_command = gen_command

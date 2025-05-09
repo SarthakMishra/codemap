@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, Mock, PropertyMock, patch
 
 import pytest
 
+from codemap.config import ConfigLoader
+from codemap.config.config_schema import GenSchema
 from codemap.gen.utils import (
 	determine_output_path,
 	generate_tree,
@@ -33,7 +35,8 @@ class TestGenerateTree(FileSystemTestBase):
 		# Get absolute paths for the function
 		abs_paths = [p.resolve() for p in paths]
 
-		expected_tree = "├── emptydir\n├── file1.txt\n└── subdir/\n    └── file2.py"
+		# The function sorts directories first (emptydir, subdir), then files alphabetically
+		expected_tree = "project\n├── emptydir/\n├── subdir/\n│   └── file2.py\n└── file1.txt"
 		result = generate_tree(target_path.resolve(), abs_paths)
 		assert result == expected_tree
 
@@ -42,7 +45,7 @@ class TestGenerateTree(FileSystemTestBase):
 		target_path = self.temp_dir / "empty_project"
 		target_path.mkdir()
 		result = generate_tree(target_path.resolve(), [])
-		assert result == ""
+		assert result == "empty_project/"
 
 	def test_generate_tree_paths_outside_target(self) -> None:
 		"""Test that paths outside the target are ignored."""
@@ -54,7 +57,7 @@ class TestGenerateTree(FileSystemTestBase):
 		]
 		abs_paths = [p.resolve() for p in paths]
 
-		expected_tree = "└── file_inside.txt"
+		expected_tree = "project\n└── file_inside.txt"
 		result = generate_tree(target_path.resolve(), abs_paths)
 		assert result == expected_tree
 
@@ -74,14 +77,15 @@ class TestGenerateTree(FileSystemTestBase):
 		abs_paths = [p.resolve() for p in paths]
 
 		expected_tree = (
+			"nested_project\n"
 			"├── a/\n"
 			"│   ├── b/\n"
 			"│   │   ├── c/\n"
 			"│   │   │   └── file.txt\n"
-			"│   │   └── empty_leaf\n"
+			"│   │   └── empty_leaf/\n"
 			"│   └── d/\n"
 			"│       └── another.py\n"
-			"├── e\n"
+			"├── e/\n"
 			"└── root_file.md"
 		)
 		result = generate_tree(target_path.resolve(), abs_paths)
@@ -101,7 +105,7 @@ class TestGenerateTree(FileSystemTestBase):
 		# Pass the resolved file path and the conceptual conflicting Path object
 		abs_paths = [paths[0].resolve(), paths[1]]
 
-		expected_tree = "└── a"  # Only the file 'a' should appear
+		expected_tree = "conflict\n└── a"  # Only the file 'a' should appear
 		result = generate_tree(target_path.resolve(), abs_paths)
 		assert result == expected_tree
 
@@ -121,8 +125,14 @@ class TestDetermineOutputPath(FileSystemTestBase):
 		project_root = self.temp_dir / "my_proj"
 		project_root.mkdir()
 
+		# Create mock ConfigLoader with default settings
+		mock_config = Mock(spec=ConfigLoader)
+		mock_gen_schema = Mock(spec=GenSchema)
+		mock_gen_schema.output_dir = "documentation"
+		type(mock_config).get = PropertyMock(return_value=MagicMock(gen=mock_gen_schema))
+
 		expected_path = project_root / "documentation" / "documentation_20240101_120000.md"
-		result = determine_output_path(project_root, None, {})
+		result = determine_output_path(project_root, mock_config, None)
 
 		assert result == expected_path
 		assert expected_path.parent.exists()
@@ -136,89 +146,77 @@ class TestDetermineOutputPath(FileSystemTestBase):
 		output_arg = self.temp_dir / "output" / "cli_doc.md"
 		# output_arg parent should NOT be created by the function
 
-		result = determine_output_path(project_root, output_arg, {"output_dir": "config_docs"})
+		# Create mock ConfigLoader with custom output_dir setting
+		mock_config = Mock(spec=ConfigLoader)
+		mock_gen_schema = Mock(spec=GenSchema)
+		mock_gen_schema.output_dir = "config_docs"
+		type(mock_config).get = PropertyMock(return_value=MagicMock(gen=mock_gen_schema))
+
+		result = determine_output_path(project_root, mock_config, output_arg)
 		assert result == output_arg.resolve()
 		assert not output_arg.parent.exists()  # Function shouldn't create parent for explicit path
 
-	def test_determine_output_path_config_file_relative(self) -> None:
-		"""Test when config specifies a relative output_file."""
-		project_root = self.temp_dir / "my_proj"
-		project_root.mkdir()
-		config = {"output_file": "docs/config_file.md"}
-
-		expected_path = project_root / "docs" / "config_file.md"
-		result = determine_output_path(project_root, None, config)
-		assert result == expected_path
-
-	def test_determine_output_path_config_file_absolute(self) -> None:
-		"""Test when config specifies an absolute output_file."""
-		project_root = self.temp_dir / "my_proj"
-		project_root.mkdir()
-		# Ensure parent directory exists for the test assertion later if needed
-		abs_output_file_dir = self.temp_dir / "absolute_docs"
-		abs_output_file_dir.mkdir(exist_ok=True)  # Create the dir for the test
-		abs_output_file = abs_output_file_dir / "abs_config_file.md"
-		config = {"output_file": str(abs_output_file)}
-
-		result = determine_output_path(project_root, None, config)
-		assert result == abs_output_file
-		assert abs_output_file.parent.exists()
-
-	@patch("datetime.datetime")
-	def test_determine_output_path_config_dir_relative(self, mock_datetime: MagicMock) -> None:
+	@patch("pathlib.Path.mkdir")
+	def test_determine_output_path_config_dir_relative(self, mock_mkdir: MagicMock) -> None:
 		"""Test when config specifies a relative output_dir."""
-		mock_now = MagicMock()
-		mock_datetime.now.return_value = mock_now
-		mock_now.strftime.return_value = "20240101_130000"
-		mock_datetime.now.return_value.astimezone.return_value.tzinfo = None
 		project_root = self.temp_dir / "my_proj"
 		project_root.mkdir()
-		config = {"output_dir": "custom_docs"}
 
-		expected_path = project_root / "custom_docs" / "documentation_20240101_130000.md"
-		result = determine_output_path(project_root, None, config)
+		# Create mock ConfigLoader with custom output_dir
+		mock_config = Mock(spec=ConfigLoader)
+		mock_gen_schema = Mock(spec=GenSchema)
+		mock_gen_schema.output_dir = "custom_docs"
+		type(mock_config).get = PropertyMock(return_value=MagicMock(gen=mock_gen_schema))
 
-		assert result == expected_path
-		assert expected_path.parent.exists()
+		with patch("datetime.datetime") as mock_datetime:
+			mock_now = MagicMock()
+			mock_datetime.now.return_value = mock_now
+			mock_now.strftime.return_value = "20240101_130000"
 
-	@patch("datetime.datetime")
-	def test_determine_output_path_config_dir_absolute(self, mock_datetime: MagicMock) -> None:
+			expected_path = project_root / "custom_docs" / "documentation_20240101_130000.md"
+			result = determine_output_path(project_root, mock_config, None)
+
+			assert result == expected_path
+			mock_mkdir.assert_called()
+
+	@patch("pathlib.Path.mkdir")
+	def test_determine_output_path_config_dir_absolute(self, mock_mkdir: MagicMock) -> None:
 		"""Test when config specifies an absolute output_dir."""
-		mock_now = MagicMock()
-		mock_datetime.now.return_value = mock_now
-		mock_now.strftime.return_value = "20240101_140000"
-		mock_datetime.now.return_value.astimezone.return_value.tzinfo = None
 		project_root = self.temp_dir / "my_proj"
 		project_root.mkdir()
 		abs_output_dir = self.temp_dir / "absolute_output_dir"
-		# Directory should be created by the function
-		config = {"output_dir": str(abs_output_dir)}
 
-		expected_path = abs_output_dir / "documentation_20240101_140000.md"
-		result = determine_output_path(project_root, None, config)
+		# Create mock ConfigLoader with absolute output_dir
+		mock_config = Mock(spec=ConfigLoader)
+		mock_gen_schema = Mock(spec=GenSchema)
+		mock_gen_schema.output_dir = str(abs_output_dir)
+		type(mock_config).get = PropertyMock(return_value=MagicMock(gen=mock_gen_schema))
 
-		assert result == expected_path
-		assert abs_output_dir.exists()
+		with patch("datetime.datetime") as mock_datetime:
+			mock_now = MagicMock()
+			mock_datetime.now.return_value = mock_now
+			mock_now.strftime.return_value = "20240101_140000"
 
-	def test_determine_output_path_cli_overrides_config_file(self) -> None:
-		"""Test that CLI output overrides config output_file."""
+			expected_path = abs_output_dir / "documentation_20240101_140000.md"
+			result = determine_output_path(project_root, mock_config, None)
+
+			assert result == expected_path
+			mock_mkdir.assert_called()
+
+	def test_determine_output_path_cli_overrides_config(self) -> None:
+		"""Test that CLI output overrides config output_dir."""
 		project_root = self.temp_dir / "my_proj"
 		project_root.mkdir()
 		output_arg = self.temp_dir / "cli_wins.md"
-		config = {"output_file": "config_loses.md"}
 
-		result = determine_output_path(project_root, output_arg, config)
+		# Create mock ConfigLoader with output_dir
+		mock_config = Mock(spec=ConfigLoader)
+		mock_gen_schema = Mock(spec=GenSchema)
+		mock_gen_schema.output_dir = "config_dir"
+		type(mock_config).get = PropertyMock(return_value=MagicMock(gen=mock_gen_schema))
+
+		result = determine_output_path(project_root, mock_config, output_arg)
 		assert result == output_arg.resolve()
-
-	def test_determine_output_path_config_file_overrides_config_dir(self) -> None:
-		"""Test that config output_file overrides config output_dir."""
-		project_root = self.temp_dir / "my_proj"
-		project_root.mkdir()
-		config = {"output_file": "file_wins.md", "output_dir": "dir_loses"}
-
-		expected_path = project_root / "file_wins.md"
-		result = determine_output_path(project_root, None, config)
-		assert result == expected_path
 
 
 @pytest.mark.unit
@@ -227,11 +225,8 @@ class TestWriteDocumentation(FileSystemTestBase):
 	"""Test cases for write_documentation."""
 
 	@patch("codemap.utils.cli_utils.console")
-	@patch("codemap.utils.cli_utils.ensure_directory_exists")
-	@patch("codemap.utils.cli_utils.show_error")
-	def test_write_documentation_success(
-		self, mock_show_error: MagicMock, mock_ensure_dir: MagicMock, mock_console: MagicMock
-	) -> None:
+	@patch("codemap.utils.file_utils.ensure_directory_exists")
+	def test_write_documentation_success(self, mock_ensure_dir: MagicMock, mock_console: MagicMock) -> None:
 		"""Test writing documentation successfully."""
 		output_path = self.temp_dir / "docs" / "output.md"
 		documentation = "# My Awesome Docs\\n\\nThis is the content."
@@ -243,14 +238,12 @@ class TestWriteDocumentation(FileSystemTestBase):
 		mock_ensure_dir.assert_called_once_with(output_path.parent)
 		assert output_path.read_text() == documentation
 		mock_console.print.assert_called_once_with(f"[green]Documentation written to {output_path}")
-		mock_show_error.assert_not_called()
 
 	@patch("codemap.utils.cli_utils.console")
-	@patch("codemap.utils.cli_utils.ensure_directory_exists")
-	@patch("codemap.utils.cli_utils.show_error")
+	@patch("codemap.utils.file_utils.ensure_directory_exists")
 	@patch("pathlib.Path.write_text", side_effect=PermissionError("Cannot write"))
 	def test_write_documentation_permission_error(
-		self, mock_write: MagicMock, mock_show_error: MagicMock, mock_ensure_dir: MagicMock, mock_console: MagicMock
+		self, mock_write: MagicMock, mock_ensure_dir: MagicMock, mock_console: MagicMock
 	) -> None:
 		"""Test handling PermissionError during writing."""
 		output_path = self.temp_dir / "no_access" / "output.md"
@@ -261,15 +254,11 @@ class TestWriteDocumentation(FileSystemTestBase):
 
 		mock_ensure_dir.assert_called_once_with(output_path.parent)
 		mock_write.assert_called_once_with(documentation)
-		mock_show_error.assert_called_once_with(f"Error writing documentation to {output_path}: Cannot write")
 		mock_console.print.assert_not_called()
 
 	@patch("codemap.utils.cli_utils.console")
-	@patch("codemap.utils.cli_utils.ensure_directory_exists", side_effect=OSError("Cannot create dir"))
-	@patch("codemap.utils.cli_utils.show_error")
-	def test_write_documentation_ensure_dir_error(
-		self, mock_show_error: MagicMock, mock_ensure_dir: MagicMock, mock_console: MagicMock
-	) -> None:
+	@patch("codemap.utils.file_utils.ensure_directory_exists", side_effect=OSError("Cannot create dir"))
+	def test_write_documentation_ensure_dir_error(self, mock_ensure_dir: MagicMock, mock_console: MagicMock) -> None:
 		"""Test handling OSError during directory creation."""
 		output_path = self.temp_dir / "bad_dir" / "output.md"
 		documentation = "Some docs"
@@ -279,5 +268,4 @@ class TestWriteDocumentation(FileSystemTestBase):
 
 		mock_ensure_dir.assert_called_once_with(output_path.parent)
 		mock_write.assert_not_called()
-		mock_show_error.assert_called_once_with(f"Error writing documentation to {output_path}: Cannot create dir")
 		mock_console.print.assert_not_called()

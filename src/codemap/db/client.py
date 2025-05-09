@@ -93,6 +93,17 @@ class DatabaseClient:
 
 	# Ensure engine is initialized before DB operations
 	async def _ensure_engine_initialized(self) -> None:
+		"""Ensures the database engine is properly initialized.
+
+		This method checks if the engine is initialized and attempts to initialize it if not.
+		If initialization fails, it logs an error and raises a RuntimeError.
+
+		Raises:
+		    RuntimeError: If database client initialization fails after attempting to initialize.
+
+		Returns:
+		    None: This method doesn't return anything but ensures engine is ready for use.
+		"""
 		if not self.initialized or self.engine is None:
 			await self._initialize_engine_if_needed()
 			if not self.initialized or self.engine is None:

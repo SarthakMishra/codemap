@@ -1,15 +1,23 @@
+# ruff: noqa: E501
 """Prompt templates for commit message generation."""
 
 from __future__ import annotations
 
 from typing import Any
 
-from .schemas import COMMIT_MESSAGE_SCHEMA
+from codemap.config import ConfigLoader
+
+from .schemas import CommitMessageSchema
+
+COMMIT_SYSTEM_PROMPT = """
+You are an AI assistant knowledgeable in Git best practices.
+You are tasked with generating Conventional Commit 1.0.0 messages from Git diffs.
+Follow the user's requirements carefully and to the letter.
+Your response must be a valid JSON object matching the provided schema.
+"""
 
 # Default prompt template for commit message generation
 DEFAULT_PROMPT_TEMPLATE = """
-You are an AI assistant generating Conventional Commit 1.0.0 messages from Git diffs.
-
 **Format:**
 ```
 <type>[optional scope]: <description>
@@ -21,7 +29,7 @@ You are an AI assistant generating Conventional Commit 1.0.0 messages from Git d
 
 **Instructions & Rules:**
 
-1.  **Type:** REQUIRED. Must be lowercase and one of: {convention[types]}.
+1.  **Type:** REQUIRED. Must be lowercase and one of: {convention.types}.
     *   `feat`: New feature (MINOR SemVer).
     *   `fix`: Bug fix (PATCH SemVer).
     *   Other types (`build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`, etc.) are allowed.
@@ -31,7 +39,7 @@ You are an AI assistant generating Conventional Commit 1.0.0 messages from Git d
     *   Must follow the colon and space.
     *   Must be >= 10 characters.
     *   Must NOT end with a period.
-    *   The entire header line (`<type>[scope]: <description>`) must be <= {convention[max_length]} characters.
+    *   The entire header line (`<type>[scope]: <description>`) must be <= {convention.max_length} characters.
 4.  **Body:** OPTIONAL. Explain *why* and *how*. Start one blank line after the description.
 	*	Use the body only if extra context is needed to understand the changes.
 	*	Do not use the body to add unrelated information.
@@ -44,6 +52,10 @@ You are an AI assistant generating Conventional Commit 1.0.0 messages from Git d
     *   OR with a `BREAKING CHANGE: <description>` footer (MUST be uppercase).
     *   Correlates with MAJOR SemVer.
     *   If `!` is used, the description explains the break.
+7.  **Special Case - Binary Files:**
+    *   For binary file changes, use `chore` type with a scope indicating the file type (e.g., `(assets)`, `(images)`, `(builds)`)
+    *   Be specific about what changed (e.g., "update image assets", "add new icon files", "replace binary database")
+    *   If the diff content is empty or shows binary file changes, focus on the filenames to determine the purpose
 
 **Input:**
 
@@ -60,9 +72,18 @@ You are an AI assistant generating Conventional Commit 1.0.0 messages from Git d
 {schema}
 
 ---
-Analyze the following diff and generate the commit message:
+Please return the commit message in a valid json format. Analyze the following diff and generate the commit message:
 
 {diff}
+"""
+
+# Context for move operations
+MOVE_CONTEXT = """
+---
+This diff group contains file moves. Here is the list of files that are relocated:
+{files}
+
+These files are moved from {source_dir} to {target_dir}.
 """
 
 
@@ -75,10 +96,9 @@ def get_lint_prompt_template() -> str:
 
 	"""
 	return """
-You are a helpful assistant that generates conventional commit messages based on code changes.
-Given a Git diff, please generate a concise and descriptive commit message following these conventions:
+You are a helpful assistant that fixes conventional commit messages that have linting errors.
 
-1. Use the format:
+1. The conventional commit format is:
 ```
 <type>[optional scope]: <description>
 
@@ -86,44 +106,32 @@ Given a Git diff, please generate a concise and descriptive commit message follo
 
 [optional footer(s)]
 ```
-2. Types include: {convention[types]}
+2. Types include: {convention.types}
 3. Scope must be short (1-2 words), concise, and represent the specific component affected
-4. The description should be a concise, imperative present tense summary of the *specific code changes*
-   in the diff chunk (e.g., "add feature", "fix bug", "update documentation").
-   Focus on *what* was changed and *why*.
-5. The optional body should be a multi-paragraph summary of the changes, focusing on the *why* and *how* of the changes.
-6. The optional footer(s) should be a list of one or more footers, each with a token and a value.
-7. Your response must ONLY contain the commit message string, formatted as:
-  ```
-  <type>[optional scope]: <description>
+4. The description should be a concise, imperative present tense summary of the code changes,
+   focusing on *what* was changed and *why*.
+5. The optional body should focus on the *why* and *how* of the changes.
 
-  [optional body]
-
-  [optional footer(s)]
-  ```
-   with absolutely no other text, explanation, or surrounding characters (like quotes or markdown).
-
-IMPORTANT: The previous commit message had the following issues:
+IMPORTANT: The provided commit message has the following issues:
 {lint_feedback}
+
+Original commit message:
+{original_message}
+
+Brief file context (without full diff):
+{files_summary}
 
 Please fix these issues and ensure the generated message adheres to the commit convention.
 
----
-Here are some notes about the files changed:
-{files}
----
-Analyze the following diff and respond with ONLY the commit message string:
-
-{diff}
-
----
 IMPORTANT:
 - Strictly follow the format <type>[optional scope]: <description>
-- Do not include any other text, explanation, or surrounding characters (like quotes or markdown).
-- Strictly do not include any `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED` footers.
-- Strictly follow the JSON schema provided while generating output in JSON format:
+- Do not include any other text, explanation, or surrounding characters
+- Do not include any `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED` footers.
+- Respond with a valid JSON object following this schema:
 
 {schema}
+
+Return your answer as json.
 """
 
 
@@ -131,7 +139,7 @@ def prepare_prompt(
 	template: str,
 	diff_content: str,
 	file_info: dict[str, Any],
-	convention: dict[str, Any],
+	config_loader: ConfigLoader,
 	extra_context: dict[str, Any] | None = None,
 ) -> str:
 	"""
@@ -141,7 +149,7 @@ def prepare_prompt(
 	    template: Prompt template to use
 	    diff_content: Diff content to include
 	    file_info: Information about files in the diff
-	    convention: Commit convention settings
+	    config_loader: ConfigLoader instance to use for configuration
 	    extra_context: Optional additional context values for the template
 
 	Returns:
@@ -151,8 +159,8 @@ def prepare_prompt(
 	context = {
 		"diff": diff_content,
 		"files": file_info,
-		"convention": convention,
-		"schema": COMMIT_MESSAGE_SCHEMA,
+		"convention": config_loader.get.commit.convention,
+		"schema": CommitMessageSchema,
 	}
 
 	# Add any extra context values
@@ -168,20 +176,20 @@ def prepare_prompt(
 
 def prepare_lint_prompt(
 	template: str,
-	diff_content: str,
 	file_info: dict[str, Any],
-	convention: dict[str, Any],
+	config_loader: ConfigLoader,
 	lint_messages: list[str],
+	original_message: str | None = None,
 ) -> str:
 	"""
 	Prepare a prompt with lint feedback for regeneration.
 
 	Args:
 	    template: Prompt template to use
-	    diff_content: Diff content to include
 	    file_info: Information about files in the diff
-	    convention: Commit convention settings
+	    config_loader: ConfigLoader instance to use for configuration
 	    lint_messages: List of linting error messages
+	    original_message: The original failed commit message
 
 	Returns:
 	    Enhanced prompt with linting feedback
@@ -190,24 +198,29 @@ def prepare_lint_prompt(
 	# Create specific feedback for linting issues
 	lint_feedback = "\n".join([f"- {msg}" for msg in lint_messages])
 
-	# Extract conventional commits guidelines from the template
-	# Instead of trying to extract from DEFAULT_PROMPT_TEMPLATE, just use the formatted rules directly
-	conventional_commits_spec = """
-1. **Type:** Must be lowercase and one of the allowed types.
-2. **Scope:** Optional, lowercase noun describing the section.
-3. **Description:** Imperative, present tense summary.
-4. **Body:** Optional explanation of why and how.
-5. **Breaking Change:** Indicated with ! or BREAKING CHANGE footer.
-"""
+	# Create a simplified file summary without full diff content
+	files_summary = []
+	for file_path, info in file_info.items():
+		extension = info.get("extension", "")
+		directory = info.get("directory", "")
+		module = info.get("module", "")
+		summary = f"- {file_path} ({extension} file in {directory})"
+		if module:
+			summary += f", part of {module} module"
+		files_summary.append(summary)
+
+	files_summary_text = "\n".join(files_summary) if files_summary else "No file information available"
+
+	# If original_message wasn't provided, use a placeholder
+	message_to_fix = original_message or "No original message provided"
 
 	# Create an enhanced context with linting feedback
 	context = {
-		"diff": diff_content,
-		"files": file_info,
-		"convention": convention,
-		"schema": COMMIT_MESSAGE_SCHEMA,
+		"convention": config_loader.get.commit.convention,
+		"schema": CommitMessageSchema,
 		"lint_feedback": lint_feedback,
-		"conventional_commits_spec": conventional_commits_spec,
+		"original_message": message_to_fix,
+		"files_summary": files_summary_text,
 	}
 
 	try:

@@ -4,9 +4,8 @@ import logging
 import uuid
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
-import voyageai
 from rich.progress import Progress, TaskID
 
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
@@ -14,14 +13,11 @@ from codemap.processor.utils.embedding_utils import generate_embeddings_batch
 from codemap.processor.utils.git_utils import _should_exclude_path, get_git_tracked_files
 from codemap.processor.vector.chunking import CodeChunk, TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
-from codemap.utils.config_loader import ConfigLoader
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
 
 logger = logging.getLogger(__name__)
-
-# Define a default maximum token limit per batch for Voyage AI
-# This can be overridden in config if needed. Add a safety margin.
-# Reduced token limit to attempt to avoid timeouts
-DEFAULT_VOYAGE_TOKEN_LIMIT = 80000  # Max is 120k, reduced from 110k
 
 
 class VectorSynchronizer:
@@ -34,7 +30,7 @@ class VectorSynchronizer:
 		chunker: TreeSitterChunker,
 		embedding_model_name: str,
 		analyzer: TreeSitterAnalyzer | None = None,
-		config_loader: ConfigLoader | None = None,
+		config_loader: "ConfigLoader | None" = None,
 	) -> None:
 		"""
 		Initialize the vector synchronizer.
@@ -53,24 +49,17 @@ class VectorSynchronizer:
 		self.chunker = chunker
 		self.embedding_model_name = embedding_model_name
 		self.analyzer = analyzer or TreeSitterAnalyzer()
-		self.config_loader = config_loader or ConfigLoader()
+		if config_loader:
+			self.config_loader = config_loader
+		else:
+			from codemap.config import ConfigLoader
+
+			self.config_loader = ConfigLoader()
 
 		# Get configuration values
-		embedding_config = self.config_loader.get("embedding", {})
-		self.batch_size = embedding_config.get("batch_size", 32)
-		self.qdrant_batch_size = embedding_config.get("qdrant_batch_size", 100)
-		self.voyage_token_limit = embedding_config.get("voyage_token_limit", DEFAULT_VOYAGE_TOKEN_LIMIT)
-
-		# Instantiate synchronous VoyageAI client for token counting
-		try:
-			# API key is picked up from environment automatically
-			# type: ignore for linter error on Client export
-			self.voyage_client = voyageai.Client()  # type: ignore[arg-type]
-			logger.info("VoyageAI client initialized for token counting.")
-		except Exception:
-			logger.exception("Failed to initialize VoyageAI client for token counting. Ensure VOYAGE_API_KEY is set.")
-			# Depending on requirements, might want to raise here or handle gracefully
-			self.voyage_client = None
+		embedding_config = self.config_loader.get.embedding
+		self.batch_size = embedding_config.batch_size
+		self.qdrant_batch_size = embedding_config.qdrant_batch_size
 
 		logger.info(
 			f"VectorSynchronizer initialized for repo: {repo_path} "
@@ -221,14 +210,27 @@ class VectorSynchronizer:
 		return files_to_process, files_to_delete_chunks_for, chunks_to_delete
 
 	async def _process_and_upsert_batch(self, chunk_batch: list[CodeChunk]) -> int:
-		"""Processes a batch of chunks: gets embeddings and upserts to Qdrant."""
+		"""Process a batch of chunks by generating embeddings and upserting to Qdrant.
+
+		Args:
+		    chunk_batch: List of CodeChunk objects to process. Each chunk contains content
+		        and metadata about a code segment.
+
+		Returns:
+		    int: Number of points successfully upserted to Qdrant. Returns 0 if:
+		        - Input batch is empty
+		        - Embedding generation fails
+		        - No points are generated from the batch
+		"""
 		if not chunk_batch:
 			return 0
 
 		logger.info(f"Processing batch of {len(chunk_batch)} chunks for embedding and upsert.")
 		texts_to_embed = [chunk["content"] for chunk in chunk_batch]
+
+		# Use the enhanced generate_embeddings_batch function
 		embeddings = await generate_embeddings_batch(
-			texts_to_embed, model=self.embedding_model_name, config_loader=self.config_loader
+			texts=texts_to_embed, model=self.embedding_model_name, config_loader=self.config_loader
 		)
 
 		if embeddings is None or len(embeddings) != len(chunk_batch):
@@ -243,12 +245,9 @@ class VectorSynchronizer:
 			return 0
 
 		points_to_upsert = []
-		for chunk, embedding in zip(chunk_batch, embeddings, strict=True):  # Use strict=True
+		for chunk, embedding in zip(chunk_batch, embeddings, strict=True):
 			# Get the original file path from metadata (likely absolute)
 			original_file_path_str = chunk["metadata"].get("file_path", "unknown")
-
-			# No longer converting to relative path here. Let the original path be stored.
-			# relative_path_str = original_file_path_str ...
 
 			chunk_id = str(uuid.uuid4())
 			chunk["metadata"]["chunk_id"] = chunk_id
@@ -284,6 +283,17 @@ class VectorSynchronizer:
 		processed_chunk_count = 0
 
 		def update_progress(description: str, step_increment: int = 1, processed_chunks: int = 0) -> None:
+			"""Updates the progress bar with current synchronization status.
+
+			Args:
+				description: Main description text to display in progress bar.
+				step_increment: Number of steps to increment progress by. Defaults to 1.
+				processed_chunks: Number of chunks processed in this update. Defaults to 0.
+					If greater than 0, will be appended to description in parentheses.
+
+			Returns:
+				None
+			"""
 			nonlocal current_step, processed_chunk_count
 			current_step += step_increment
 			processed_chunk_count += processed_chunks
@@ -300,14 +310,6 @@ class VectorSynchronizer:
 
 		try:
 			await self.qdrant_manager.initialize()
-
-			# Ensure VoyageAI client for token counting is ready
-			if not self.voyage_client:
-				logger.error("VoyageAI client for token counting is not initialized. Cannot proceed.")
-				final_message = "[red]Error:[/red] VoyageAI client init failed."
-				if progress and task_id:
-					progress.update(task_id, description=final_message, completed=100)
-				return False
 
 			# 1. Get current Git state (tracked files and hashes)
 			update_progress("[1/5] Reading Git tracked files...", step_increment=0)
@@ -347,86 +349,40 @@ class VectorSynchronizer:
 			else:
 				logger.info("No vectors to delete.")
 
-			# 5. Process new/updated files - **REFACTORED BATCHING LOGIC**
+			# 5. Process new/updated files
 			update_progress(f"[5/5] Processing {len(files_to_process)} new/updated files...")
 			files_processed_count = 0
+			all_chunks: list[CodeChunk] = []
 
-			# Batching variables
-			current_chunk_batch: list[CodeChunk] = []
-			current_batch_token_count = 0
-
+			# First collect all chunks from files
 			for file_path in files_to_process:
 				git_hash = git_files.get(file_path)
 				if git_hash:
 					absolute_path = self.repo_path / file_path
 					try:
-						logger.debug(f"Chunking file: {file_path}")
-						# Use iter_chunk_file if available, otherwise list()
 						file_chunks = list(self.chunker.chunk_file(absolute_path, git_hash))
-
-						if not file_chunks:
+						if file_chunks:
+							all_chunks.extend(file_chunks)
+							files_processed_count += 1
+						else:
 							logger.debug(f"No chunks generated for file: {file_path}")
-							continue  # Skip to next file
-
-						for chunk in file_chunks:
-							# Estimate token count for the chunk content
-							chunk_text = chunk["content"]
-							try:
-								# Note: count_tokens expects a list
-								chunk_token_count = self.voyage_client.count_tokens(
-									[chunk_text], model=self.embedding_model_name
-								)
-							except Exception:
-								logger.exception(f"Failed to count tokens for chunk in {file_path}. Skipping chunk.")
-								continue  # Skip this chunk
-
-							# Check if adding this chunk exceeds the limit
-							if (
-								current_batch_token_count + chunk_token_count > self.voyage_token_limit
-								and current_chunk_batch
-							):
-								# Process the current batch before adding the new chunk
-								logger.info(
-									f"Token limit ({self.voyage_token_limit}) reached. "
-									f"Processing batch ({len(current_chunk_batch)} chunks)."
-								)
-								upserted_count = await self._process_and_upsert_batch(current_chunk_batch)
-								update_progress(
-									f"[5/5] Processing {len(files_to_process)} files...",
-									step_increment=0,
-									processed_chunks=upserted_count,
-								)
-
-								# Reset batch
-								current_chunk_batch = []
-								current_batch_token_count = 0
-
-							# Add the current chunk to the (potentially new) batch
-							# Ensure chunk_token_count itself isn't over the limit (handle large chunks)
-							if chunk_token_count > self.voyage_token_limit:
-								logger.warning(
-									f"Chunk in {file_path} ({chunk['metadata'].get('start_line', '?')}-...) "
-									f"exceeds token limit ({chunk_token_count} > {self.voyage_token_limit}). Skipping."
-								)
-								continue  # Skip this large chunk
-
-							current_chunk_batch.append(chunk)
-							current_batch_token_count += chunk_token_count
-
 					except Exception:
 						logger.exception(f"Error processing file {file_path} during sync")
-						# Decide if we should continue with other files or stop
-						continue  # Continue processing other files
+						continue
 
-				files_processed_count += 1
+			# Process chunks in batches
+			if all_chunks:
+				logger.info(f"Collected {len(all_chunks)} chunks from {files_processed_count} files.")
 
-			# Process any remaining chunks in the last batch
-			if current_chunk_batch:
-				logger.info(
-					f"Processing final batch of {len(current_chunk_batch)} chunks ({current_batch_token_count} tokens)."
-				)
-				upserted_count = await self._process_and_upsert_batch(current_chunk_batch)
-				update_progress("[5/5] Final batch processed...", step_increment=0, processed_chunks=upserted_count)
+				# Process in batches of self.batch_size
+				for i in range(0, len(all_chunks), self.batch_size):
+					batch = all_chunks[i : i + self.batch_size]
+					upserted_count = await self._process_and_upsert_batch(batch)
+					update_progress(
+						"[5/5] Processing chunks...",
+						step_increment=0,
+						processed_chunks=upserted_count,
+					)
 
 			sync_success = True
 			final_message = (

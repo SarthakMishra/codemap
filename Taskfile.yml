@@ -14,6 +14,13 @@ tasks:
     cmds:
       - task -l
 
+  gen-keys:
+    desc: Generate config keys
+    cmds:
+      - uv run scripts/generate_config_keys.py
+      - uv run ruff format src/codemap/config/config_keys.py
+      - uv run ruff check --fix --unsafe-fixes src/codemap/config/config_keys.py
+
   lint:
     desc: Run all linting checks
     cmds:
@@ -39,7 +46,7 @@ tasks:
   lint:pylint:
     desc: Run pylint
     cmds:
-      - uv run pylint {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
+      - uv run pylint --load-plugins pylint_pydantic {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   lint:pyright:
     desc: Run pyright type checker

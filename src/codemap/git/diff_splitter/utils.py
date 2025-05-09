@@ -219,12 +219,53 @@ def get_deleted_tracked_files() -> tuple[set, set]:
 	return deleted_unstaged_files, deleted_staged_files
 
 
-def filter_valid_files(files: list[str], is_test_environment: bool = False) -> tuple[list[str], list[str]]:
+def get_absolute_path(file: str, repo_root: Path) -> str:
+	"""
+	Get the canonical absolute path string for a file.
+
+	If 'file' is already an absolute path, it's resolved to its canonical form.
+	If 'file' is a relative path, it's considered relative to 'repo_root',
+	made absolute, and then resolved.
+
+	Args:
+	    file: File path string (can be relative or absolute).
+	    repo_root: Path to the repository root, used as a base for relative 'file' paths.
+
+	Returns:
+	    The canonical absolute path string.
+	    Returns the original 'file' string if path resolution fails.
+	"""
+	try:
+		file_path_obj = Path(file)
+		if file_path_obj.is_absolute():
+			# It's already an absolute path string, resolve it to a canonical form
+			# (e.g., remove '..', '.', and resolve symbolic links)
+			return str(file_path_obj.resolve())
+
+		# It's a relative path string; assume it's relative to repo_root.
+		# Combine with repo_root to make it absolute, then resolve.
+		absolute_path = repo_root / file_path_obj
+		return str(absolute_path.resolve())
+	except (ValueError, OSError, RuntimeError) as e:
+		# Log the error and fallback to returning the original file string
+		# if any path operation fails.
+		logger.warning(
+			f"Could not resolve absolute path for '{file}' with repo_root '{repo_root}'."
+			f" Error: {e}. Returning original.",
+			exc_info=True,
+		)
+		return file
+
+
+def filter_valid_files(
+	files: list[str], repo_root: Path, is_test_environment: bool = False
+) -> tuple[list[str], list[str]]:
 	"""
 	Filter invalid filenames and files based on existence and Git tracking.
 
 	Args:
 	    files: List of file paths to filter
+	    repo_root: Path to the repository root
 	    is_test_environment: Whether running in a test environment
 
 	Returns:
@@ -260,7 +301,7 @@ def filter_valid_files(files: list[str], is_test_environment: bool = False) -> t
 		# Check if files exist in the repository (tracked by git) or filesystem
 		original_count = len(valid_files_intermediate)
 		try:
-			tracked_files_output = run_git_command(["git", "ls-files"])
+			tracked_files_output = run_git_command(["git", "ls-files"], cwd=repo_root)
 			tracked_files = set(tracked_files_output.splitlines())
 
 			# Keep files that either:
@@ -271,7 +312,7 @@ def filter_valid_files(files: list[str], is_test_environment: bool = False) -> t
 			filtered_files = []
 			for file in valid_files_intermediate:
 				try:
-					path_exists = Path(file).exists()
+					path_exists = Path(get_absolute_path(file, repo_root)).exists()
 				except OSError as e:
 					logger.warning("OS error checking existence for %s: %s. Skipping file.", file, e)
 					continue

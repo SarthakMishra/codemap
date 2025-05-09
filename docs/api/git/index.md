@@ -7,4 +7,5 @@ Git utilities for CodeMap.
 - [Diff Splitter](diff_splitter/index.md) - Diff splitting package for CodeMap.
 - [Interactive](interactive.md) - Interactive commit interface for CodeMap.
 - [Pr Generator](pr_generator/index.md) - PR generation package for CodeMap.
+- [Semantic Grouping](semantic_grouping/index.md) - Semantic grouping implementation for the CodeMap project.
 - [Utils](utils.md) - Git utilities for CodeMap.

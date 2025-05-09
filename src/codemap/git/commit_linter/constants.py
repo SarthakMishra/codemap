@@ -2,13 +2,6 @@
 
 import re
 
-from codemap.config import DEFAULT_CONFIG
-
-# Get default values from the central config
-DEFAULT_TYPES = DEFAULT_CONFIG["commit"]["convention"]["types"]
-HEADER_MAX_LENGTH = DEFAULT_CONFIG["commit"]["convention"]["max_length"]
-BODY_MAX_LENGTH = DEFAULT_CONFIG["commit"]["lint"]["body_max_line_length"]["value"]
-
 # Parsing constants
 FOOTER_DETECTION_MIN_LINES = 2  # Minimum number of lines needed for footer detection
 FOOTER_MIN_LINE_INDEX = 2  # Minimum line index for footers (after header and blank line)

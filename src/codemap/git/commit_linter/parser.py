@@ -26,7 +26,11 @@ class MatchLike(Protocol):
 
 
 class CommitParser:
-	"""Parser for conventional commit messages."""
+	"""Parser for conventional commit messages.
+
+	This parser handles parsing and validation of commit messages following the Conventional Commits
+	specification. It supports extracting commit type, scope, description, body, and footers.
+	"""
 
 	def __init__(self) -> None:
 		"""Initialize the commit parser."""
@@ -35,7 +39,21 @@ class CommitParser:
 		self._potential_footer_token_regex = POTENTIAL_FOOTER_TOKEN_REGEX
 
 	def parse_commit(self, message: str) -> MatchLike | None:
-		"""Parse the commit message using the main regex."""
+		"""Parse a commit message using the main regex pattern.
+
+		This method parses the commit message according to the Conventional Commits specification,
+		extracting the header, body, and footers. It handles cases where footers might not be
+		immediately detected by the main regex pattern.
+
+		Args:
+		    message: The raw commit message string to parse.
+
+		Returns:
+		    A MatchLike object containing the parsed commit components (type, scope, description,
+		    body, footers) if successful, or None if the message doesn't match the expected format.
+		    The returned object provides access to match groups via group() and groupdict() methods,
+		    with the addition of a 'footers' group that may be detected beyond the main regex match.
+		"""
 		match = self._commit_regex.match(message.strip())
 		if match:
 			# Shim for tests accessing match.group("footers") directly
@@ -56,16 +74,45 @@ class CommitParser:
 						break
 
 			class MatchWithFooters:
+				"""Wrapper for regex match that adds footer text support.
+
+				This class extends a regex match object to include footer text that may have been
+				detected beyond the original regex match boundaries.
+
+				Args:
+				    original_match: The original regex match object.
+				    footers_text: The detected footer text, if any.
+				"""
+
 				def __init__(self, original_match: re.Match[str], footers_text: str | None) -> None:
+					"""Initialize the match wrapper with original match and footer text."""
 					self._original_match = original_match
 					self._footers_text = footers_text
 
 				def groupdict(self) -> dict[str, Any]:
+					"""Return a dictionary of all named subgroups of the match.
+
+					The dictionary includes both the original match groups and the additional
+					'footers' group if footer text was detected.
+
+					Returns:
+					    A dictionary containing all named match groups plus the 'footers' group.
+					"""
 					d = self._original_match.groupdict()
 					d["footers"] = self._footers_text
 					return d
 
 				def group(self, group_id: int | str = 0) -> str | None:
+					"""Return subgroup(s) of the match by group identifier.
+
+					Args:
+					    group_id: Either a group number (0 returns entire match) or group name.
+					             Special case: 'footers' returns the detected footer text.
+
+					Returns:
+					    The matched subgroup or None if the group wasn't matched. Returns footer
+					    text when group_id is 'footers'.
+					"""
 					if group_id == "footers":
 						return self._footers_text
 					return self._original_match.group(group_id)
@@ -74,7 +121,25 @@ class CommitParser:
 		return None
 
 	def parse_footers(self, footers_str: str | None) -> list[dict[str, Any]]:
-		"""Parse commit footers from a string, handling multi-line values."""
+		"""Parses commit footers from a string, handling multi-line values.
+
+		Parses footer lines according to Conventional Commits specification, where each footer consists
+		of a token, separator, and value. Handles both strict uppercase tokens and potential invalid
+		footers for error reporting. Preserves multi-line values and blank lines within footer values.
+
+		Args:
+		    footers_str: The string containing footer lines to parse. May be None if no footers exist.
+
+		Returns:
+		    A list of dictionaries, where each dictionary represents a parsed footer with keys:
+		    - 'token': The footer token (e.g., 'Signed-off-by')
+		    - 'separator': The separator used (': ' or ' #')
+		    - 'value': The footer value, which may span multiple lines
+
+		Note:
+		    For invalid footers (those not matching strict regex but looking like footers), the
+		    dictionary will still be created but marked as invalid during validation.
+		"""
 		if not footers_str:
 			return []
 
@@ -84,6 +149,16 @@ class CommitParser:
 		current_value_lines: list[str] = []
 
 		def finalize_footer() -> None:
+			"""Finalizes the current footer by joining its value lines and adding to footers list.
+
+			This helper function:
+			1. Joins all accumulated value lines for the current footer with newlines
+			2. Strips whitespace from the resulting value
+			3. Adds the completed footer to the footers list
+			4. Resets the current_footer and current_value_lines for the next footer
+
+			Only executes if there is a current_footer being processed.
+			"""
 			nonlocal current_footer, current_value_lines
 			if current_footer:
 				current_footer["value"] = "\n".join(current_value_lines).strip()
@@ -174,7 +249,16 @@ class CommitParser:
 		return footers
 
 	def split_body_footers(self, body_and_footers_str: str | None) -> tuple[str | None, str | None]:
-		"""Splits the text after the header into body and footers."""
+		"""Splits the text after the header into body and footers.
+
+		Args:
+		    body_and_footers_str: The string containing both body and footers text, or None.
+
+		Returns:
+		    A tuple containing:
+		        - First element: The body text as a string, or None if empty/not present
+		        - Second element: The footers text as a string, or None if empty/not present
+		"""
 		if not body_and_footers_str:
 			return None, None
 
@@ -236,6 +320,14 @@ class CommitParser:
 		return body_str, footers_str
 
 	def _append_to_footer_value(self, footer: dict[str, str], text: str) -> dict[str, str]:
-		"""Helper method to safely append text to a footer's value."""
+		"""Helper method to safely append text to a footer's value.
+
+		Args:
+		    footer: The footer dictionary to modify.
+		    text: The text to append to the footer's value.
+
+		Returns:
+		    The modified footer dictionary with updated value.
+		"""
 		footer["value"] = footer.get("value", "") + text
 		return footer

@@ -15,9 +15,9 @@ except ImportError:
 	pathspec = None
 
 
+from codemap.git.utils import GitError, get_repo_root
 from codemap.utils.path_utils import (
 	filter_paths_by_gitignore,
-	find_project_root,
 	get_relative_path,
 	normalize_path,
 )
@@ -59,42 +59,52 @@ class TestPathUtils(FileSystemTestBase):
 		result = get_relative_path(target_path, base_path)
 		assert result == expected
 
-	def test_get_git_root_found(self) -> None:
-		"""Test get_git_root when .git directory exists."""
+	def test_get_repo_root_found(self) -> None:
+		"""Test get_repo_root when .git directory exists."""
 		git_root = self.temp_dir / "my_repo"
 		git_dir = git_root / ".git"
 		git_dir.mkdir(parents=True)
 		start_path = git_root / "src" / "module"
 		start_path.mkdir(parents=True)
 
-		result = find_project_root(start_path)
-		assert result == git_root.resolve()
+		with patch("codemap.git.utils.run_git_command") as mock_run_git:
+			mock_run_git.return_value = str(git_root.resolve())
+			result = get_repo_root(start_path)
+			assert result == git_root.resolve()
 
-	def test_get_git_root_found_in_parent(self) -> None:
-		"""Test get_git_root when .git is in a parent directory."""
+	def test_get_repo_root_found_in_parent(self) -> None:
+		"""Test get_repo_root when .git is in a parent directory."""
 		git_root = self.temp_dir
 		git_dir = git_root / ".git"
 		git_dir.mkdir(parents=True)
 		start_path = git_root / "deeply" / "nested" / "folder"
 		start_path.mkdir(parents=True)
 
-		result = find_project_root(start_path)
-		assert result == git_root.resolve()
+		with patch("codemap.git.utils.run_git_command") as mock_run_git:
+			mock_run_git.return_value = str(git_root.resolve())
+			result = get_repo_root(start_path)
+			assert result == git_root.resolve()
 
-	def test_get_git_root_not_found(self) -> None:
-		"""Test get_git_root when no .git directory is found."""
+	def test_get_repo_root_not_found(self) -> None:
+		"""Test get_repo_root when no .git directory is found."""
 		start_path = self.temp_dir / "not_a_repo"
 		start_path.mkdir(parents=True)
-		with pytest.raises(FileNotFoundError):
-			find_project_root(start_path)
 
-	def test_get_git_root_at_root(self) -> None:
-		"""Test get_git_root starting from the filesystem root."""
+		with patch("codemap.git.utils.run_git_command") as mock_run_git:
+			mock_run_git.side_effect = GitError("Not a git repository")
+			with pytest.raises(GitError, match="Not in a Git repository"):
+				get_repo_root(start_path)
+
+	def test_get_repo_root_at_root(self) -> None:
+		"""Test get_repo_root starting from the filesystem root."""
 		# This test might behave differently depending on the OS and permissions
 		# It primarily tests the loop termination condition
 		root_path = Path("/")
-		with pytest.raises(FileNotFoundError):
-			find_project_root(root_path)
+
+		with patch("codemap.git.utils.run_git_command") as mock_run_git:
+			mock_run_git.side_effect = GitError("Not a git repository")
+			with pytest.raises(GitError, match="Not in a Git repository"):
+				get_repo_root(root_path)
 
 
 @pytest.mark.skipif(pathspec is None, reason="pathspec package not installed")

@@ -10,7 +10,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
 from codemap.git.pr_generator.constants import MAX_COMMIT_PREVIEW
-from codemap.git.pr_generator.prompts import PR_DESCRIPTION_PROMPT, PR_TITLE_PROMPT, format_commits_for_prompt
+from codemap.git.pr_generator.prompts import (
+	PR_DESCRIPTION_PROMPT,
+	PR_SYSTEM_PROMPT,
+	PR_TITLE_PROMPT,
+	format_commits_for_prompt,
+)
 from codemap.git.pr_generator.schemas import PRContent, PullRequest
 from codemap.git.pr_generator.strategies import branch_exists, create_strategy, get_default_branch
 from codemap.git.utils import GitError, run_git_command
@@ -118,6 +123,10 @@ def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
 	"""
 	try:
 		# Get commit messages between base and head
+		# Add check for None branches
+		if not base_branch or not head_branch:
+			logger.warning("Base or head branch is None, cannot get commit messages.")
+			return []
 		log_output = run_git_command(["git", "log", f"{base_branch}..{head_branch}", "--pretty=format:%s"])
 		return log_output.splitlines() if log_output.strip() else []
 	except GitError as e:
@@ -162,27 +171,19 @@ def generate_pr_title_from_commits(commits: list[str]) -> str:
 
 def generate_pr_title_with_llm(
 	commits: list[str],
-	llm_client: LLMClient | None = None,
-	model: str | None = "gpt-4o-mini",
-	api_key: str | None = None,
-	api_base: str | None = None,
+	llm_client: LLMClient,
 ) -> str:
 	"""
 	Generate a PR title using an LLM.
 
 	Args:
 	    commits: List of commit messages
-	    llm_client: LLMClient instance to use (if provided)
-	    model: LLM model to use (used only if llm_client is None)
-	    api_key: API key for LLM provider (used only if llm_client is None)
-	    api_base: Custom API base URL (used only if llm_client is None)
+	    llm_client: LLMClient instance
 
 	Returns:
 	    Generated PR title
 
 	"""
-	from codemap.llm import create_client
-
 	if not commits:
 		return "Update branch"
 
@@ -191,13 +192,12 @@ def generate_pr_title_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_TITLE_PROMPT.format(commit_list=commit_list)
 
-		# Use provided client or create a new one
-		client = llm_client
-		if client is None:
-			actual_model = model or "gpt-4o-mini"
-			client = create_client(model=actual_model, api_key=api_key, api_base=api_base)
-
-		title = client.generate_text(prompt=prompt)
+		title = llm_client.completion(
+			messages=[
+				{"role": "system", "content": PR_SYSTEM_PROMPT},
+				{"role": "user", "content": prompt},
+			],
+		)
 
 		# Clean up the title
 		title = title.strip()
@@ -323,27 +323,19 @@ def generate_pr_description_from_commits(commits: list[str]) -> str:
 
 def generate_pr_description_with_llm(
 	commits: list[str],
-	llm_client: LLMClient | None = None,
-	model: str | None = "gpt-4o-mini",
-	api_key: str | None = None,
-	api_base: str | None = None,
+	llm_client: LLMClient,
 ) -> str:
 	"""
 	Generate a PR description using an LLM.
 
 	Args:
 	    commits: List of commit messages
-	    llm_client: LLMClient instance to use (if provided)
-	    model: LLM model to use (used only if llm_client is None)
-	    api_key: API key for LLM provider (used only if llm_client is None)
-	    api_base: Custom API base URL (used only if llm_client is None)
+	    llm_client: LLMClient instance
 
 	Returns:
 	    Generated PR description
 
 	"""
-	from codemap.llm import create_client
-
 	if not commits:
 		return "No changes"
 
@@ -352,13 +344,12 @@ def generate_pr_description_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_DESCRIPTION_PROMPT.format(commit_list=commit_list)
 
-		# Use provided client or create a new one
-		client = llm_client
-		if client is None:
-			actual_model = model or "gpt-4o-mini"
-			client = create_client(model=actual_model, api_key=api_key, api_base=api_base)
-
-		return client.generate_text(prompt=prompt)
+		return llm_client.completion(
+			messages=[
+				{"role": "system", "content": PR_SYSTEM_PROMPT},
+				{"role": "user", "content": prompt},
+			],
+		)
 
 	except (ValueError, RuntimeError, ConnectionError) as e:
 		logger.warning("Failed to generate PR description with LLM: %s", str(e))
@@ -526,6 +517,10 @@ def get_existing_pr(branch_name: str) -> PullRequest | None:
 
 	"""
 	try:
+		# Add check for None branch_name
+		if not branch_name:
+			logger.debug("Branch name is None, cannot get existing PR.")
+			return None
 		# Check if gh CLI is installed
 		try:
 			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
@@ -708,20 +703,19 @@ def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
 			target_ref = f"origin/{target_branch}"
 
 		# Check if branch is an ancestor of target_branch
-		# Use check=False to prevent raising an exception if the command fails
 		cmd = ["git", "merge-base", "--is-ancestor", branch_ref, target_ref]
 		try:
-			run_git_command(cmd, check=False)
+			run_git_command(cmd)
 			is_ancestor = True
 		except GitError:
-			# This should not happen now with check=False
+			# If command fails, branch is not an ancestor
 			is_ancestor = False
 			logger.debug("Branch %s is not an ancestor of %s", branch_ref, target_ref)
 
 		# Try the reverse check as well to determine relationship
 		try:
 			reverse_cmd = ["git", "merge-base", "--is-ancestor", target_ref, branch_ref]
-			run_git_command(reverse_cmd, check=False)
+			run_git_command(reverse_cmd)
 			# If we get here, target is an ancestor of branch (target is older)
 			if not is_ancestor:
 				logger.debug("Branch %s is newer than %s", branch_ref, target_ref)
@@ -788,6 +782,9 @@ def detect_branch_type(branch_name: str, strategy_name: str = "github-flow") -> 
 
 	"""
 	strategy = create_strategy(strategy_name)
+	# Handle None branch_name
+	if not branch_name:
+		return "feature"  # Default if branch name is None
 	branch_type = strategy.detect_branch_type(branch_name)
 
 	return branch_type or "feature"  # Default to feature if not detected
@@ -830,3 +827,24 @@ def list_branches() -> list[str]:
 	except GitError:
 		logger.debug("Error listing branches")
 		return []
+
+
+def validate_branch_name(branch_name: str | None) -> bool:
+	"""
+	Validate a branch name.
+
+	Args:
+	    branch_name: Branch name to validate
+
+	Returns:
+	    True if valid, False otherwise
+
+	"""
+	# Check if branch name is valid
+	if not branch_name or not re.match(r"^[a-zA-Z0-9_.-]+$", branch_name):
+		# Log error instead of showing directly, as this is now a util function
+		logger.error(
+			"Invalid branch name '%s'. Use only letters, numbers, underscores, dots, and hyphens.", branch_name
+		)
+		return False
+	return True

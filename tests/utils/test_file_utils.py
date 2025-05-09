@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from codemap.gen.utils import determine_output_path
-from codemap.utils.file_utils import count_tokens
+from codemap.utils.file_utils import count_tokens, ensure_directory_exists
 from tests.base import FileSystemTestBase
 
 
@@ -37,67 +36,32 @@ class TestFileUtils(FileSystemTestBase):
 
 		assert token_count == 0
 
-	@patch("pathlib.Path.mkdir")
-	@patch("datetime.datetime")
-	def test_get_output_path_with_explicit_path(self, mock_datetime: MagicMock, mock_mkdir: MagicMock) -> None:
-		"""Test get_output_path with an explicit output path."""
-		# Set up test data
-		repo_root = Path("/repo")
-		output_path = Path("/output/doc.md")
-		config = {}
+	def test_ensure_directory_exists_success(self, tmp_path: Path) -> None:
+		"""Test ensuring a directory exists with success."""
+		# Directory that doesn't exist yet
+		test_dir = tmp_path / "new_dir"
+		ensure_directory_exists(test_dir)
+		assert test_dir.exists()
+		assert test_dir.is_dir()
 
-		# Call function
-		result = determine_output_path(repo_root, output_path, config)
+		# Directory that already exists
+		ensure_directory_exists(test_dir)  # Should not raise an exception
+		assert test_dir.exists()
 
-		# Verify result
-		assert result == output_path
-		# mkdir should not be called for explicit paths
-		mock_mkdir.assert_not_called()
-		# datetime should not be used for explicit paths
-		assert not mock_datetime.called
+	def test_ensure_directory_exists_permission_error(self) -> None:
+		"""Test ensuring a directory exists with permission error."""
+		with patch("pathlib.Path.mkdir") as mock_mkdir:
+			mock_mkdir.side_effect = PermissionError("Permission denied")
 
+			with pytest.raises(PermissionError, match="Permission denied"):
+				ensure_directory_exists(Path("/invalid/path"))
 
-@pytest.mark.unit
-@pytest.mark.fs
-class TestOutputPath(FileSystemTestBase):
-	"""Test cases for output path generation."""
+	def test_ensure_directory_exists_not_a_directory(self, tmp_path: Path) -> None:
+		"""Test ensuring a directory exists when path exists but is not a directory."""
+		# Create a file
+		test_file = tmp_path / "file.txt"
+		test_file.touch()
 
-	@patch("datetime.datetime")
-	def test_get_output_path_with_config(self, mock_datetime: MagicMock) -> None:
-		"""Test get_output_path using config and no explicit path."""
-		# Set up mock datetime
-		mock_now = mock_datetime.now.return_value
-		mock_now.strftime.return_value = "20240601_123456"
-
-		# Set up test data
-		config = {"output_dir": "docs"}
-
-		# Call function
-		result = determine_output_path(self.temp_dir, None, config)
-
-		# Verify result
-		expected_path = self.temp_dir / "docs" / "documentation_20240601_123456.md"
-		assert result == expected_path
-		# datetime.now should be called
-		mock_datetime.now.assert_called_once()
-		mock_now.strftime.assert_called_once_with("%Y%m%d_%H%M%S")
-
-	def test_get_output_path_absolute_dir(self) -> None:
-		"""Test get_output_path with absolute directory in config."""
-		# Set up test data
-		repo_root = Path("/repo")
-		output_path = None
-		docs_dir = self.temp_dir / "my_docs"
-		docs_dir.mkdir(exist_ok=True)
-		config = {"output_dir": str(docs_dir)}
-
-		# Call function
-		with patch("datetime.datetime") as mock_datetime:
-			mock_now = mock_datetime.now.return_value
-			mock_now.strftime.return_value = "20240601_123456"
-
-			result = determine_output_path(repo_root, output_path, config)
-
-		# Verify result
-		expected_path = docs_dir / "documentation_20240601_123456.md"
-		assert result == expected_path
+		# Try to ensure directory exists for a file path
+		with pytest.raises(NotADirectoryError):
+			ensure_directory_exists(test_file)

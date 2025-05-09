@@ -94,6 +94,13 @@ nav:
       - Strategies: api/git/pr_generator/strategies.md
       - Templates: api/git/pr_generator/templates.md
       - Utils: api/git/pr_generator/utils.md
+    - Semantic Grouping:
+      - Semantic Grouping Overview: api/git/semantic_grouping/index.md
+      - Clusterer: api/git/semantic_grouping/clusterer.md
+      - Context Processor: api/git/semantic_grouping/context_processor.md
+      - Embedder: api/git/semantic_grouping/embedder.md
+      - Group: api/git/semantic_grouping/group.md
+      - Resolver: api/git/semantic_grouping/resolver.md
     - Utils: api/git/utils.md
   - Llm:
     - Llm Overview: api/llm/index.md
