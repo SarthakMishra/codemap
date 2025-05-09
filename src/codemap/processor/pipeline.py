@@ -14,7 +14,6 @@ import logging
 from typing import TYPE_CHECKING, Any, Self
 
 from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
-from rich.progress import Progress, TaskID
 
 from codemap.db.client import DatabaseClient
 from codemap.git.utils import get_repo_root
@@ -29,13 +28,12 @@ from codemap.processor.utils.embedding_utils import (
 from codemap.processor.vector.chunking import TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager
 from codemap.processor.vector.synchronizer import VectorSynchronizer
+from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.docker_utils import ensure_qdrant_running
 from codemap.watcher.file_watcher import Watcher
 
 if TYPE_CHECKING:
 	from types import TracebackType
-
-	from rich.progress import Progress, TaskID
 
 	from codemap.config import ConfigLoader
 
@@ -65,7 +63,6 @@ class ProcessingPipeline:
 
 		Args:
 		    config_loader: Application configuration loader. If None, a default one is created.
-
 		"""
 		if config_loader:
 			self.config_loader = config_loader
@@ -166,16 +163,13 @@ class ProcessingPipeline:
 		self._watcher_task: asyncio.Task | None = None
 		self._sync_lock = asyncio.Lock()
 
-	async def async_init(
-		self, sync_on_init: bool = True, progress: Progress | None = None, task_id: TaskID | None = None
-	) -> None:
+	async def async_init(self, sync_on_init: bool = True) -> None:
 		"""
 		Perform asynchronous initialization steps, including Qdrant connection and initial sync.
 
 		Args:
 		    sync_on_init: If True, run database synchronization during initialization.
-		    progress: Optional rich Progress instance for unified status display.
-		    task_id: Optional rich TaskID for the main initialization/sync task.
+		    update_progress: Optional ProgressUpdater instance for progress updates.
 
 		"""
 		if self.is_async_initialized:
@@ -183,106 +177,72 @@ class ProcessingPipeline:
 			return
 
 		init_description = "Initializing pipeline components..."
-		if progress and task_id:
-			progress.update(task_id, description=init_description, completed=0, total=100)
 
-		try:
-			# Get embedding configuration for Qdrant URL
-			embedding_config = self.config_loader.get.embedding
-			qdrant_url = embedding_config.url
-
-			# Check for Docker containers
-			if qdrant_url:
-				if progress and task_id:
-					progress.update(task_id, description="Checking Docker containers...", completed=5)
-
-				# Only check Docker if we're using a URL that looks like localhost/127.0.0.1
-				if "localhost" in qdrant_url or "127.0.0.1" in qdrant_url:
-					logger.info("Ensuring Qdrant container is running")
-					success, message = await ensure_qdrant_running(wait_for_health=True, qdrant_url=qdrant_url)
-
-					if not success:
-						logger.warning(f"Docker check failed: {message}")
-						if progress and task_id:
-							progress.update(
-								task_id,
-								description=f"[yellow]Warning:[/yellow] {message}. Continuing anyway...",
-								completed=8,
-							)
-					else:
-						logger.info(f"Docker container check: {message}")
-						if progress and task_id:
-							progress.update(task_id, description="Docker containers ready.", completed=10)
-
-			# Initialize the database client asynchronously
-			if progress and task_id:
-				progress.update(task_id, description="Initializing database client...", completed=15)
-
+		with progress_indicator(init_description):
 			try:
-				await self.db_client.initialize()
-				logger.info("Database client initialized successfully.")
-				if progress and task_id:
-					progress.update(task_id, description="Database initialized.", completed=18)
-			except RuntimeError as e:
-				logger.warning(
-					f"Database initialization failed (RuntimeError): {e}. Some features may not work properly."
-				)
-				if progress and task_id:
-					progress.update(
-						task_id,
-						description="[yellow]Warning:[/yellow] Database initialization failed. Continuing anyway...",
-						completed=18,
-					)
-			except (ConnectionError, OSError) as e:
-				logger.warning(f"Database connection failed: {e}. Some features may not work properly.")
-				if progress and task_id:
-					progress.update(
-						task_id,
-						description="[yellow]Warning:[/yellow] Database connection failed. Continuing anyway...",
-						completed=18,
-					)
+				# Get embedding configuration for Qdrant URL
+				embedding_config = self.config_loader.get.embedding
+				qdrant_url = embedding_config.url
 
-			# Initialize Qdrant client (connects, creates collection if needed)
-			if self.qdrant_manager:
-				await self.qdrant_manager.initialize()
-				logger.info("Qdrant manager initialized asynchronously.")
-				if progress and task_id:
-					progress.update(task_id, description="Qdrant connected.", completed=20)
-			else:
-				# This case should theoretically not happen if __init__ succeeded
-				msg = "QdrantManager was not initialized in __init__."
-				logger.error(msg)
-				raise RuntimeError(msg)
+				# Check for Docker containers
+				if qdrant_url:
+					with progress_indicator("Checking Docker containers..."):
+						# Only check Docker if we're using a URL that looks like localhost/127.0.0.1
+						if "localhost" in qdrant_url or "127.0.0.1" in qdrant_url:
+							logger.info("Ensuring Qdrant container is running")
+							success, message = await ensure_qdrant_running(wait_for_health=True, qdrant_url=qdrant_url)
 
-			needs_sync = False
-			if sync_on_init:
-				needs_sync = True
-				logger.info("`sync_on_init` is True. Performing index synchronization...")
-			else:
-				# Optional: Could add a check here if Qdrant collection is empty
-				# requires another call to qdrant_manager, e.g., get_count()
-				logger.info("Skipping sync on init as requested.")
+							if not success:
+								logger.warning(f"Docker check failed: {message}")
+
+							else:
+								logger.info(f"Docker container check: {message}")
+
+				# Initialize the database client asynchronously
+				with progress_indicator("Initializing database client..."):
+					try:
+						await self.db_client.initialize()
+						logger.info("Database client initialized successfully.")
+
+					except RuntimeError as e:
+						logger.warning(
+							f"Database initialization failed (RuntimeError): {e}. Some features may not work properly."
+						)
+					except (ConnectionError, OSError) as e:
+						logger.warning(f"Database connection failed: {e}. Some features may not work properly.")
+
+				# Initialize Qdrant client (connects, creates collection if needed)
+				if self.qdrant_manager:
+					with progress_indicator("Initializing Qdrant manager..."):
+						await self.qdrant_manager.initialize()
+						logger.info("Qdrant manager initialized asynchronously.")
+				else:
+					# This case should theoretically not happen if __init__ succeeded
+					msg = "QdrantManager was not initialized in __init__."
+					logger.error(msg)
+					raise RuntimeError(msg)
+
 				needs_sync = False
+				if sync_on_init:
+					needs_sync = True
+					logger.info("`sync_on_init` is True. Performing index synchronization...")
+				else:
+					# Optional: Could add a check here if Qdrant collection is empty
+					# requires another call to qdrant_manager, e.g., get_count()
+					logger.info("Skipping sync on init as requested.")
+					needs_sync = False
 
-			# Set initialized flag *before* potentially long sync operation
-			self.is_async_initialized = True
-			logger.info("ProcessingPipeline async core components initialized.")
+				# Set initialized flag *before* potentially long sync operation
+				self.is_async_initialized = True
+				logger.info("ProcessingPipeline async core components initialized.")
 
-			if needs_sync:
-				await self.sync_databases(progress=progress, task_id=task_id)
-				# sync_databases handles final progress update on success/failure
-			elif progress and task_id:
-				# Update progress if sync was skipped
-				progress.update(
-					task_id, description="[green]✓[/green] Pipeline initialized (sync skipped).", completed=100
-				)
+				if needs_sync:
+					await self.sync_databases()
 
-		except Exception:
-			logger.exception("Failed during async initialization")
-			if progress and task_id:
-				progress.update(task_id, description="[red]Error:[/red] Init failed", completed=100)
-			# Optionally re-raise or handle specific exceptions
-			raise
+			except Exception:
+				logger.exception("Failed during async initialization")
+				# Optionally re-raise or handle specific exceptions
+				raise
 
 	async def stop(self) -> None:
 		"""Stops the pipeline and releases resources, including closing Qdrant connection."""
@@ -332,22 +292,19 @@ class ProcessingPipeline:
 		async with self._sync_lock:
 			logger.info("Watcher triggered sync starting...")
 			# Run sync without progress bars from watcher
-			await self.sync_databases(progress=None, task_id=None)
+			await self.sync_databases()
 			logger.info("Watcher triggered sync finished.")
 
-	async def sync_databases(self, progress: Progress | None = None, task_id: TaskID | None = None) -> None:
+	async def sync_databases(self) -> None:
 		"""
 		Asynchronously synchronize the Qdrant index with the Git repository state.
 
 		Args:
-		    progress: Optional rich Progress instance for status updates.
-		    task_id: Optional rich TaskID for the main sync task.
+		    update_progress: Optional ProgressUpdater instance for progress updates.
 
 		"""
 		if not self.is_async_initialized:
 			logger.error("Cannot sync databases, async initialization not complete.")
-			if progress and task_id:
-				progress.update(task_id, description="[red]Error:[/red] Not initialized", completed=100)
 			return
 
 		# Acquire lock only if not already held (for watcher calls)
@@ -355,12 +312,12 @@ class ProcessingPipeline:
 			async with self._sync_lock:
 				logger.info("Starting vector index synchronization using VectorSynchronizer...")
 				# VectorSynchronizer handles its own progress updates internally now
-				await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+				await self.vector_synchronizer.sync_index()
 				# Final status message/logging is handled by sync_index
 		else:
 			# If lock is already held (likely by watcher call), just run it
 			logger.info("Starting vector index synchronization (lock already held)...")
-			await self.vector_synchronizer.sync_index(progress=progress, task_id=task_id)
+			await self.vector_synchronizer.sync_index()
 
 	# --- Watcher Methods --- #
 

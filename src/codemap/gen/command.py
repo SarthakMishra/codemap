@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity
-from codemap.utils.cli_utils import console
+from codemap.utils.cli_utils import console, progress_indicator
 from codemap.utils.file_utils import is_binary_file
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
@@ -18,8 +18,6 @@ from .utils import generate_tree, process_files_for_lod
 
 if TYPE_CHECKING:
 	from collections.abc import Sequence
-
-	from rich.progress import Progress, TaskID
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +35,6 @@ def show_error(message: str) -> None:
 def process_codebase(
 	target_path: Path,
 	config: GenConfig,
-	progress: Progress,
-	task_id: TaskID,
 	config_loader: ConfigLoader | None = None,
 ) -> tuple[list[LODEntity], dict]:
 	"""
@@ -47,8 +43,6 @@ def process_codebase(
 	Args:
 	    target_path: Path to the target codebase
 	    config: Generation configuration
-	    progress: Progress indicator
-	    task_id: Task ID for progress reporting
 	    config_loader: Optional ConfigLoader instance to use
 
 	Returns:
@@ -59,7 +53,6 @@ def process_codebase(
 
 	"""
 	logger.info("Starting codebase processing for: %s", target_path)
-	progress.update(task_id, description="Scanning files...")
 
 	# Get processor configuration from ConfigLoader
 	if config_loader is None:
@@ -93,8 +86,6 @@ def process_codebase(
 			paths=processable_paths,
 			lod_level=config.lod_level,
 			max_workers=max_workers,  # Get from configuration
-			progress=progress,
-			task_id=task_id,
 		)
 	except Exception as e:
 		logger.exception("Error during LOD file processing")
@@ -158,8 +149,6 @@ class GenCommand:
 		    True if successful, False otherwise
 
 		"""
-		from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
-
 		from .generator import CodeMapGenerator
 		from .utils import write_documentation
 
@@ -170,18 +159,9 @@ class GenCommand:
 			generator = CodeMapGenerator(self.config, output_path)
 
 			# Process codebase with progress tracking
-			with Progress(
-				TextColumn("[progress.description]{task.description}"),
-				BarColumn(),
-				TextColumn("{task.completed}/{task.total}"),
-				TimeElapsedColumn(),
-			) as progress:
-				task_id = progress.add_task("Processing codebase...", total=None)
-
+			with progress_indicator("Processing codebase..."):
 				# Process the codebase
-				entities, metadata = process_codebase(
-					target_path, self.config, progress, task_id, config_loader=self.config_loader
-				)
+				entities, metadata = process_codebase(target_path, self.config, config_loader=self.config_loader)
 
 			# Generate documentation
 			console.print("[green]Processing complete. Generating documentation...")

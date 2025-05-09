@@ -15,6 +15,17 @@ from codemap.utils.cli_utils import (
 from tests.base import CLITestBase
 
 
+# Helper to reset SpinnerState singleton for isolated tests
+@pytest.fixture(autouse=True)
+def reset_spinner_state_singleton():
+	"""Reset the SpinnerState singleton for isolated tests."""
+	SpinnerState._instance = None
+	# Yield control to the test
+	yield
+	# Clean up after the test by resetting again
+	SpinnerState._instance = None
+
+
 @pytest.mark.unit
 @pytest.mark.cli
 class TestCliUtils(CLITestBase):
@@ -22,101 +33,149 @@ class TestCliUtils(CLITestBase):
 
 	def test_spinner_state_singleton(self) -> None:
 		"""Test that SpinnerState behaves as a singleton."""
-		# Create first instance
 		spinner1 = SpinnerState()
-		spinner1.is_active = True
-
-		# Create second instance - should be same object
 		spinner2 = SpinnerState()
-
-		# Both should be the same instance
 		assert spinner1 is spinner2
-		assert spinner2.is_active is True
 
-		# Change value on second instance
-		spinner2.is_active = False
-
-		# First instance should reflect the change
-		assert spinner1.is_active is False
+		# Test stack behavior through the singleton instance
+		assert not spinner1.spinner_message_stack
+		spinner1.start_new_spinner("Test Message")
+		assert len(spinner1.spinner_message_stack) == 1
+		assert spinner2.spinner_message_stack[0] == "Test Message"
+		spinner2.stop_current_spinner_and_resume_parent()
+		assert not spinner1.spinner_message_stack
 
 	def test_progress_indicator_in_test_environment(self) -> None:
 		"""Test progress indicator behavior in test environment."""
-		# PYTEST_CURRENT_TEST is set in pytest environment
 		with patch.dict(os.environ, {"PYTEST_CURRENT_TEST": "test_name"}):
 			with progress_indicator("Testing...") as advance:
-				# Call the advance function to ensure it doesn't raise errors
-				advance(1)
-			# Verify spinner state is not changed
-			assert not SpinnerState().is_active
+				advance(None, 1, None)  # (description, completed, total)
+			spinner_state = SpinnerState()
+			assert not spinner_state.spinner_message_stack
+			assert spinner_state.active_rich_status_cm is None
 
 	def test_progress_indicator_in_ci_environment(self) -> None:
 		"""Test progress indicator behavior in CI environment."""
-		# CI environment variable is set
 		with patch.dict(os.environ, {"CI": "true"}):
 			with progress_indicator("Testing...") as advance:
-				# Call the advance function to ensure it doesn't raise errors
-				advance(1)
-			# Verify spinner state is not changed
-			assert not SpinnerState().is_active
+				advance(None, 1, None)
+			spinner_state = SpinnerState()
+			assert not spinner_state.spinner_message_stack
+			assert spinner_state.active_rich_status_cm is None
 
-	def test_progress_indicator_active_spinner(self) -> None:
-		"""Test progress indicator behavior when spinner is already active."""
-		# Set spinner as active
+	@patch.object(console, "status")
+	def test_progress_indicator_spinner_style_single(self, mock_console_status: MagicMock) -> None:
+		"""Test progress indicator with a single spinner."""
+		mock_status_instance = MagicMock()
+		mock_console_status.return_value = mock_status_instance
+
+		with patch.dict(os.environ, {}, clear=True), progress_indicator("Working...", style="spinner") as advance:
+			advance(None, None, None)  # No-op for spinner
+			spinner_state = SpinnerState()
+			assert spinner_state.spinner_message_stack == ["Working..."]
+			assert spinner_state.active_rich_status_cm is mock_status_instance
+			mock_console_status.assert_called_once_with("Working...")
+			mock_status_instance.__enter__.assert_called_once()
+
+		# After context exit
 		spinner_state = SpinnerState()
-		spinner_state.is_active = True
+		assert not spinner_state.spinner_message_stack
+		assert spinner_state.active_rich_status_cm is None
+		mock_status_instance.__exit__.assert_called_once()
 
-		# Should not create new spinner when style is spinner
-		with patch.object(console, "status") as mock_status:
-			with progress_indicator("Testing...", style="spinner") as advance:
-				advance(1)
-			# Verify console.status was not called
-			mock_status.assert_not_called()
+	@patch.object(console, "status")
+	def test_progress_indicator_nested_spinners_tree_display(self, mock_console_status: MagicMock) -> None:
+		"""Test nested spinners display as a tree and update correctly."""
+		mock_status_instance = MagicMock()
+		mock_console_status.return_value = mock_status_instance
 
-		# Restore state
-		spinner_state.is_active = False
+		with patch.dict(os.environ, {}, clear=True), progress_indicator("Parent Task", style="spinner"):
+			# Initial call for parent
+			mock_console_status.assert_called_with("Parent Task")
+			mock_status_instance.update.assert_not_called()  # No updates yet for single spinner
+			mock_status_instance.reset_mock()  # Reset for update calls
 
-	def test_progress_indicator_spinner_style(self) -> None:
-		"""Test progress indicator with spinner style."""
-		# Create clean environment (no PYTEST_CURRENT_TEST, no CI)
-		with (
-			patch.dict(os.environ, {}, clear=True),
-			patch.object(console, "status", return_value=MagicMock()) as mock_status,
-		):
-			with progress_indicator("Working...", style="spinner") as advance:
-				# Verify spinner is active
-				assert SpinnerState().is_active
-				advance(1)  # Should do nothing for spinner style
+			with progress_indicator("Child Task 1", style="spinner"):
+				# Child 1 starts, status should be updated with tree
+				# Expected tree: Parent Task
+				#                └─ ▸ Child Task 1
+				expected_tree_child1 = "Parent Task\n[green]└─ [/green]▸ Child Task 1"
+				mock_status_instance.update.assert_called_with(expected_tree_child1)
+				mock_status_instance.update.reset_mock()
 
-			# Verify console.status was called
-			mock_status.assert_called_once_with("Working...")
-			# Verify spinner is inactive after context exit
-			assert not SpinnerState().is_active
+				with progress_indicator("Grandchild Task", style="spinner"):
+					# Grandchild starts
+					# Expected tree: Parent Task
+					#                └─ ▸ Child Task 1
+					#                   └─ ▸ Grandchild Task
+					expected_tree_grandchild = (
+						"Parent Task\n[green]└─ [/green]▸ Child Task 1\n   [green]└─ [/green]▸ Grandchild Task"
+					)
+					mock_status_instance.update.assert_called_with(expected_tree_grandchild)
+					mock_status_instance.update.reset_mock()
+
+				# Grandchild ends, should revert to Child 1 tree
+				mock_status_instance.update.assert_called_with(expected_tree_child1)
+				mock_status_instance.update.reset_mock()
+
+			# Child 1 ends, should revert to Parent Task only
+			mock_status_instance.update.assert_called_with("Parent Task")
+
+		# All spinners exited
+		spinner_state = SpinnerState()
+		assert not spinner_state.spinner_message_stack
+		assert spinner_state.active_rich_status_cm is None
+
+	@patch("codemap.utils.cli_utils.Progress")
+	@patch.object(SpinnerState, "temporarily_halt_visual_spinner")
+	@patch.object(SpinnerState, "resume_visual_spinner_if_needed")
+	@patch.object(console, "status")  # To control spinner creation
+	def test_progress_bar_halts_and_resumes_spinner(
+		self,
+		mock_console_status: MagicMock,
+		mock_resume_spinner: MagicMock,
+		mock_halt_spinner: MagicMock,
+		_mock_progress_cls: MagicMock,
+	) -> None:
+		"""Test that a progress bar halts an active spinner and resumes it after."""
+		mock_status_instance = MagicMock()
+		mock_console_status.return_value = mock_status_instance
+
+		with patch.dict(os.environ, {}, clear=True):
+			# Start a spinner first
+			with progress_indicator("Outer Spinner", style="spinner"):
+				assert SpinnerState().spinner_message_stack == ["Outer Spinner"]
+				mock_console_status.assert_called_with("Outer Spinner")  # Initial creation
+				mock_halt_spinner.assert_not_called()
+				mock_resume_spinner.assert_not_called()
+
+				# Now start a progress bar within the spinner's context
+				with progress_indicator("Progressing...", style="progress", total=10) as advance:
+					advance(None, 5, 10)  # Update progress bar
+					# Check spinner was halted
+					mock_halt_spinner.assert_called_once()
+					# Spinner stack should still exist, but visual spinner (active_rich_status_cm) should be None during halt
+					assert SpinnerState().spinner_message_stack == ["Outer Spinner"]
+					# active_rich_status_cm is made None by _stop_active_status_cm called by halt
+					# This is an internal detail, difficult to assert directly without more mocks or checks
+
+				# After progress bar finishes, spinner should be resumed
+				mock_resume_spinner.assert_called_once()
+				# We don't need to check console.status call count, as resume_visual_spinner_if_needed is mocked
+				# and we've verified it was called, which is sufficient
+
+			# After all contexts exit, spinner stack should be empty
+			assert not SpinnerState().spinner_message_stack
 
 	@patch.dict(os.environ, {}, clear=True)
 	@patch("codemap.utils.cli_utils.Progress")
-	def test_progress_indicator_progress_style(self, mock_progress_cls: MagicMock) -> None:
-		"""Test progress indicator with progress style."""
-		# We'll just verify the progress indicator is created with the right style
-		# and that our advance function works without error
+	def test_progress_indicator_progress_style_no_spinner_active(self, mock_progress_cls: MagicMock) -> None:
+		"""Test progress indicator with progress style when no spinner is active."""
 		with progress_indicator("Processing...", style="progress", total=10) as advance:
-			advance(2)  # Advance by 2 units
+			advance(None, 2, 10)  # (description, completed, total)
 
-		# Just verify Progress class was instantiated
 		mock_progress_cls.assert_called_once()
-
-	def test_progress_indicator_step_style(self) -> None:
-		"""Test progress indicator with step style."""
-		with patch.dict(os.environ, {}, clear=True), patch.object(console, "print") as mock_print:
-			with progress_indicator("Stepping...", style="step", total=5) as advance:
-				advance(2)  # Advance by 2 steps
-				advance(1)  # Advance by 1 more step
-				# Complete the steps
-				advance(2)  # This brings the total to 5/5
-
-			# Verify initial, progress, and completion prints
-			assert mock_print.call_count >= 4
-			mock_print.assert_any_call("Stepping... [0/5]")
-			mock_print.assert_any_call("Stepping... [2/5]")
-			mock_print.assert_any_call("Stepping... [3/5]")
-			mock_print.assert_any_call("Stepping... [5/5]")
-			mock_print.assert_any_call("Stepping... [green]Complete![/green]")
+		# Ensure no spinner interactions happened
+		spinner_state = SpinnerState()
+		assert not spinner_state.spinner_message_stack
+		assert spinner_state.active_rich_status_cm is None

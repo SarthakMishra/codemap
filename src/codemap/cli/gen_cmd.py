@@ -6,6 +6,8 @@ from typing import Annotated
 
 import typer
 
+from codemap.utils.cli_utils import progress_indicator
+
 logger = logging.getLogger(__name__)
 
 # --- Command Argument Annotations (Keep these lightweight) ---
@@ -180,10 +182,12 @@ def _gen_command_impl(
 ) -> None:
 	"""Implementation of the gen command with heavy imports deferred."""
 	# Import heavy dependencies here instead of at the top
-	from codemap.config.config_loader import ConfigLoader
-	from codemap.gen import GenCommand, GenConfig
-	from codemap.processor.lod import LODLevel
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
+
+	with progress_indicator("Setting up environment..."):
+		from codemap.config.config_loader import ConfigLoader
+		from codemap.gen import GenCommand, GenConfig
+		from codemap.processor.lod import LODLevel
+		from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
 	try:
 		target_path = path.resolve()

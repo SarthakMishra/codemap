@@ -6,6 +6,8 @@ from typing import Annotated, cast
 
 import typer
 
+from codemap.utils.cli_utils import progress_indicator
+
 logger = logging.getLogger(__name__)
 
 # --- Command Argument Annotations (Keep these lightweight) ---
@@ -75,13 +77,14 @@ def _index_command_impl(
 ) -> None:
 	"""Actual implementation of the index command."""
 	# --- Heavy Imports ---
-	import asyncio
+	with progress_indicator("Initializing index command..."):
+		import asyncio
 
-	from rich.console import Console
+		from rich.console import Console
 
-	from codemap.config import ConfigLoader
-	from codemap.processor.pipeline import ProcessingPipeline
-	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt, progress_indicator
+		from codemap.config import ConfigLoader
+		from codemap.processor.pipeline import ProcessingPipeline
+		from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
 	console = Console()  # Initialize Console here
 
@@ -116,7 +119,7 @@ def _index_command_impl(
 			# async_init handles the initial sync if sync_flag is True
 			with progress_indicator("Initializing vector database..."):
 				pipeline = cast("ProcessingPipeline", pipeline)
-				await pipeline.async_init(sync_on_init=sync_flag, progress=None, task_id=None)
+				await pipeline.async_init(sync_on_init=sync_flag)
 				logger.info("Vector database initialized")
 
 			# --- Watch Mode --- #
