@@ -117,3 +117,13 @@ jobs:
 
       - name: Publish package to PyPI
         run: uv publish
+
+  sync-branch: 
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:  
+      - name: Sync main to dev
+        uses: remarkablemark/sync-branch@v1
+        with:
+          base: dev
+          head: main
