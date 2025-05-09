@@ -20,13 +20,13 @@ QDRANT_CONTAINER_NAME = "codemap-qdrant"
 QDRANT_HOST_PORT = 6333
 QDRANT_HTTP_PORT = 6333
 QDRANT_GRPC_PORT = 6334
-QDRANT_STORAGE_PATH = "./codemap_cache/qdrant_storage"
+QDRANT_STORAGE_PATH = ".codemap_cache/qdrant_storage"
 
 POSTGRES_IMAGE = "postgres:latest"
 POSTGRES_CONTAINER_NAME = "codemap-postgres"
 POSTGRES_HOST_PORT = 5432
 POSTGRES_ENV = {"POSTGRES_PASSWORD": "postgres", "POSTGRES_USER": "postgres", "POSTGRES_DB": "codemap"}
-POSTGRES_STORAGE_PATH = "./codemap_cache/postgres_data"
+POSTGRES_STORAGE_PATH = ".codemap_cache/postgres_data"
 
 
 async def is_docker_running() -> bool:
