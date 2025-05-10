@@ -404,6 +404,7 @@ dependencies = [
     { name = "psycopg2-binary" },
     { name = "pydantic" },
     { name = "pydantic-ai" },
+    { name = "pygit2" },
     { name = "pygments" },
     { name = "pytest-mock" },
     { name = "python-dotenv" },
@@ -471,6 +472,7 @@ requires-dist = [
     { name = "psycopg2-binary", specifier = ">=2.9.10" },
     { name = "pydantic", specifier = ">=2.7.0" },
     { name = "pydantic-ai", specifier = ">=0.1.10" },
+    { name = "pygit2", specifier = ">=1.18.0" },
     { name = "pygments", specifier = ">=2.19.1" },
     { name = "pytest-mock", specifier = ">=3.14.0" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
@@ -2299,6 +2301,31 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/67/1d/42628a2c33e93f8e9acbde0d5d735fa0850f3e6a2f8cb1eb6c40b9a732ac/pydantic_settings-2.9.1.tar.gz", hash = "sha256:c509bf79d27563add44e8446233359004ed85066cd096d8b510f715e6ef5d268", size = 163234 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b6/5f/d6d641b490fd3ec2c4c13b4244d68deea3a1b970a97be64f34fb5504ff72/pydantic_settings-2.9.1-py3-none-any.whl", hash = "sha256:59b4f431b1defb26fe620c71a7d3968a710d719f5f4cdbbdb7926edeb770f6ef", size = 44356 },
+]
+
+[[package]]
+name = "pygit2"
+version = "1.18.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cffi" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/c1/4a/72a5f3572912d93d8096f8447a20fe3aff5b5dc65aca08a2083eae54d148/pygit2-1.18.0.tar.gz", hash = "sha256:fbd01d04a4d2ce289aaa02cf858043679bf0dd1f9855c6b88ed95382c1f5011a", size = 773270 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/2a/e62f4a52f44a41f9e325d36c00abb16d28b39b9c905c5825b010c4abdfe2/pygit2-1.18.0-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:bba669496d8ba10de8418ba39357a31ae9e2542aa4ecaa26c5c93ee65eee800a", size = 5468163 },
+    { url = "https://files.pythonhosted.org/packages/85/d2/01669d6fd909c59448131ae761e1912ab04730e1af775e6d4ee2f9e2b113/pygit2-1.18.0-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:82a120b2ca7276ffcca971e7c4377235ba393f0a37eeda7fec50195d8381ea6b", size = 5706038 },
+    { url = "https://files.pythonhosted.org/packages/e6/6b/04422e8e9341d71b2d01b7f57a71ed86aed45c40050c8cf549377fd21ce2/pygit2-1.18.0-cp312-cp312-manylinux_2_28_ppc64le.whl", hash = "sha256:8f9fd97dbf30f2e102f50887aec95ab361ebf9193d5e5ae1fda50eb4f4aa80fe", size = 4587465 },
+    { url = "https://files.pythonhosted.org/packages/34/99/feb31da1ea52864598d57b84c419a1cddd77b46250015b553d31bc5615f7/pygit2-1.18.0-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:d05f5b25758699ccd773723e85ded77c5ffed7f7756d200b0ba26e83b13c58e8", size = 5447363 },
+    { url = "https://files.pythonhosted.org/packages/32/3f/17a6078975e5ec76514736486528ab4a40c0f3ae1da8142fff8e81d436b3/pygit2-1.18.0-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:a3f1a951ccfa9f7d55b3be315a8cce982f61a5df0a4874da3ea0988e1e2afad6", size = 5414398 },
+    { url = "https://files.pythonhosted.org/packages/39/0f/dbaf8cdbadaf161fe0bb9d3d9a7821cc5fc8e1b32281c240412725c55280/pygit2-1.18.0-cp312-cp312-win32.whl", hash = "sha256:547cdec865827f593097d4fda25c46512ad2a933230c23c9c188e9f9e633849f", size = 1221708 },
+    { url = "https://files.pythonhosted.org/packages/85/83/2d46e10d2297d414d03f16e0734eec813c6b5a3f97ea5b70eb1be01b687b/pygit2-1.18.0-cp312-cp312-win_amd64.whl", hash = "sha256:b5ef2813f9856d0c8d24e2c414481d29296598fa3e02494174a2d7df16ac276a", size = 1306950 },
+    { url = "https://files.pythonhosted.org/packages/08/9a/0d1c31847fbbb5da2e1d32a215582e063f12f65f727c48f5be554a0693fc/pygit2-1.18.0-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:42d7d1bccba61d2c3c4539c7f84a8754d287d2fdd55c247e700b582320b9daff", size = 5468137 },
+    { url = "https://files.pythonhosted.org/packages/42/7d/f0d98d31943bc551341972a4e91a3272c1503e2a9d744f88f2478197182e/pygit2-1.18.0-cp313-cp313-manylinux_2_28_aarch64.whl", hash = "sha256:a8af8725a22f85bb580a500f60bd898e1cc6c58576db9400b63507a4ed4526e4", size = 5707866 },
+    { url = "https://files.pythonhosted.org/packages/c8/85/60b20462d829a61a5ea0822977e94ca433baa5af08a600496477377e6ce3/pygit2-1.18.0-cp313-cp313-manylinux_2_28_ppc64le.whl", hash = "sha256:ec71b158f5a4262e01bbcbfb32b0c6f2cb7bce19df84e5a4fb33f54fccb95900", size = 4589400 },
+    { url = "https://files.pythonhosted.org/packages/f6/b4/8256588c2866fd90dc7f210dca04509f21e6cea17f3b9be1f09d7120ddd0/pygit2-1.18.0-cp313-cp313-manylinux_2_28_x86_64.whl", hash = "sha256:202f6e3e5dadb40c4355b87051bd47e1c18b64bee1b55bd90287115d4cd0eef4", size = 5449088 },
+    { url = "https://files.pythonhosted.org/packages/39/27/0e062308c183d2875658c7e079b6e054578fac4543849ba4fa878b7227bc/pygit2-1.18.0-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:0c59ca7545a6fe38a75ca333ba6b4c6eb32c489d6b2228cd7edab312b0fd7f6d", size = 5416468 },
+    { url = "https://files.pythonhosted.org/packages/fb/b5/55c1082bae1f42db68045ed4a81f48734846c7d075536028a9c82dec698a/pygit2-1.18.0-cp313-cp313-win32.whl", hash = "sha256:b92d94807f8c08bede11fa04fbced424b8073cc71603273f1a124b1748c3da40", size = 1221700 },
+    { url = "https://files.pythonhosted.org/packages/5d/bf/377a37899a46b16492fb6c1136221bf024b488af9656725de1d6344861d3/pygit2-1.18.0-cp313-cp313-win_amd64.whl", hash = "sha256:43285c57dcdad03114b88a1bc86a0ff7ee216185912c1a0d69aa20c78584fb44", size = 1306953 },
 ]
 
 [[package]]
