@@ -15,10 +15,6 @@ from .prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-# Default values for configuration
-DEFAULT_MAX_CONTEXT_LENGTH = 8000
-DEFAULT_MAX_CONTEXT_RESULTS = 10
-
 
 class AskResult(TypedDict):
 	"""Structured result for the ask command."""
@@ -87,7 +83,6 @@ class AskCommand:
 				return value
 		except (AttributeError, TypeError) as e:
 			logger.debug("Error reading max_context_length from config: %s", e)
-		self._max_context_length = DEFAULT_MAX_CONTEXT_LENGTH
 		return self._max_context_length
 
 	@property
@@ -104,7 +99,6 @@ class AskCommand:
 				return value
 		except (AttributeError, TypeError) as e:
 			logger.debug("Error reading max_context_results from config: %s", e)
-		self._max_context_results = DEFAULT_MAX_CONTEXT_RESULTS
 		return self._max_context_results
 
 	async def initialize(self) -> None:
