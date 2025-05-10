@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import questionary
 import typer
 
-from codemap.config import ConfigLoader
 from codemap.git.commit_generator.utils import (
 	clean_message_for_linting,
 	lint_commit_message,
 )
-from codemap.git.diff_splitter import DiffChunk, DiffSplitter
+from codemap.git.diff_splitter import DiffChunk
 from codemap.git.interactive import ChunkAction, CommitUI
 from codemap.git.semantic_grouping import SemanticGroup
 from codemap.git.utils import (
@@ -29,13 +29,16 @@ from codemap.llm import LLMError
 from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.file_utils import read_file_content
 
-from . import (
-	CommitMessageGenerator,
-)
-from .prompts import DEFAULT_PROMPT_TEMPLATE
 from .utils import (
 	CommitFormattingError,
 )
+
+if TYPE_CHECKING:
+	from codemap.config import ConfigLoader
+	from codemap.git.diff_splitter import DiffSplitter
+	from codemap.llm import LLMClient
+
+	from . import CommitMessageGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -81,30 +84,61 @@ class CommitCommand:
 			except (ImportError, GitError):
 				self.original_branch = None
 
-			# Create LLM client and configs
-			from codemap.config import ConfigLoader
-			from codemap.llm import LLMClient
-
-			self.config_loader = ConfigLoader.get_instance()
-			self.llm_client = LLMClient(config_loader=self.config_loader)
+			# Remove eager initialization of config_loader, llm_client, splitter, message_generator
+			self._config_loader = None
+			self._llm_client = None
+			self._splitter = None
+			self._message_generator = None
 
 			if self.config_loader.get.repo_root is None:
 				self.repo_root = get_repo_root()
 			else:
 				self.repo_root = self.config_loader.get.repo_root
 
-			self.splitter = DiffSplitter()
+		except GitError as e:
+			raise RuntimeError(str(e)) from e
 
-			# Create the commit message generator with required parameters
-			self.message_generator = CommitMessageGenerator(
+	@property
+	def config_loader(self) -> ConfigLoader:
+		"""Lazily initialize and return the ConfigLoader instance."""
+		if self._config_loader is None:
+			from codemap.config import ConfigLoader
+
+			self._config_loader = ConfigLoader.get_instance()
+		return self._config_loader
+
+	@property
+	def llm_client(self) -> LLMClient:
+		"""Lazily initialize and return the LLMClient instance."""
+		if self._llm_client is None:
+			from codemap.llm import LLMClient
+
+			self._llm_client = LLMClient(config_loader=self.config_loader)
+		return self._llm_client
+
+	@property
+	def splitter(self) -> DiffSplitter:
+		"""Lazily initialize and return the DiffSplitter instance."""
+		if self._splitter is None:
+			from codemap.git.diff_splitter import DiffSplitter
+
+			self._splitter = DiffSplitter()
+		return self._splitter
+
+	@property
+	def message_generator(self) -> CommitMessageGenerator:
+		"""Lazily initialize and return the CommitMessageGenerator instance."""
+		if self._message_generator is None:
+			from . import CommitMessageGenerator
+			from .prompts import DEFAULT_PROMPT_TEMPLATE
+
+			self._message_generator = CommitMessageGenerator(
 				repo_root=self.repo_root,
 				llm_client=self.llm_client,
 				prompt_template=DEFAULT_PROMPT_TEMPLATE,
 				config_loader=self.config_loader,
 			)
-
-		except GitError as e:
-			raise RuntimeError(str(e)) from e
+		return self._message_generator
 
 	def _get_changes(self) -> list[GitDiff]:
 		"""
@@ -660,9 +694,8 @@ class SemanticCommitCommand(CommitCommand):
 		# Call parent class initializer first
 		super().__init__(bypass_hooks=bypass_hooks)
 
-		config_loader = ConfigLoader.get_instance()
+		config_loader = self.config_loader
 
-		self.config_loader = config_loader
 		self.clustering_method = config_loader.get.embedding.clustering.method
 		self.similarity_threshold = config_loader.get.commit.diff_splitter.similarity_threshold
 

@@ -2,6 +2,7 @@
 
 import logging
 import uuid
+from pathlib import Path
 from typing import Any, TypedDict
 
 from codemap.config import ConfigLoader
@@ -38,47 +39,82 @@ class AskCommand:
 
 	"""
 
-	def __init__(
-		self,
-	) -> None:
+	def __init__(self) -> None:
 		"""Initializes the AskCommand, setting up clients and pipeline."""
 		self.session_id = str(uuid.uuid4())  # Unique session ID for DB logging
-
 		self.config_loader = ConfigLoader.get_instance()
-
-		if self.config_loader.get.repo_root is None:
-			self.repo_root = get_repo_root()
-		else:
-			self.repo_root = self.config_loader.get.repo_root
-
 		self.ui = RagUI()
+		self._db_client = None
+		self._llm_client = None
+		self._pipeline = None
 
-		# Get RAG configuration
-		rag_config = self.config_loader.get.rag
-		self.max_context_length = rag_config.max_context_length
-		self.max_context_results = rag_config.max_context_results
-		logger.debug(
-			f"Using max_context_length: {self.max_context_length}, max_context_results: {self.max_context_results}"
-		)
+	@property
+	def db_client(self) -> DatabaseClient:
+		"""Lazily initialize and return a DatabaseClient instance."""
+		if self._db_client is None:
+			self._db_client = DatabaseClient()
+		return self._db_client
 
-		self.db_client = DatabaseClient()  # Uses config path by default
-		self.llm_client = LLMClient(config_loader=self.config_loader)
-		# Initialize ProcessingPipeline correctly
+	@property
+	def llm_client(self) -> LLMClient:
+		"""Lazily initialize and return an LLMClient instance."""
+		if self._llm_client is None:
+			self._llm_client = LLMClient(config_loader=self.config_loader)
+		return self._llm_client
+
+	@property
+	def pipeline(self) -> ProcessingPipeline | None:
+		"""Lazily initialize and return a ProcessingPipeline instance, or None if initialization fails."""
+		if self._pipeline is None:
+			try:
+				with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
+					self._pipeline = ProcessingPipeline(config_loader=self.config_loader)
+				logger.info("ProcessingPipeline initialization complete.")
+			except Exception:
+				logger.exception("Failed to initialize ProcessingPipeline")
+				self._pipeline = None
+		return self._pipeline
+
+	@property
+	def repo_root(self) -> Path:
+		"""Return the repository root path from config or by detection."""
+		if self.config_loader.get.repo_root is None:
+			return get_repo_root()
+		return self.config_loader.get.repo_root
+
+	@property
+	def max_context_length(self) -> int:
+		"""Return the maximum context length for RAG, using config or default."""
+		cached = getattr(self, "_max_context_length", None)
+		if cached is not None:
+			return cached
 		try:
-			# Show a spinner while initializing the pipeline
-			with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
-				# Use the provided ConfigLoader instance
-				self.pipeline = ProcessingPipeline(
-					config_loader=self.config_loader,
-				)
+			rag_config = self.config_loader.get.rag
+			value = getattr(rag_config, "max_context_length", None)
+			if value is not None:
+				self._max_context_length = value
+				return value
+		except (AttributeError, TypeError) as e:
+			logger.debug("Error reading max_context_length from config: %s", e)
+		self._max_context_length = DEFAULT_MAX_CONTEXT_LENGTH
+		return self._max_context_length
 
-			# Progress context manager handles completion message
-			logger.info("ProcessingPipeline initialization complete.")
-		except Exception:
-			logger.exception("Failed to initialize ProcessingPipeline")
-			self.pipeline = None
-
-		logger.info(f"AskCommand initialized for session {self.session_id}")
+	@property
+	def max_context_results(self) -> int:
+		"""Return the maximum number of context results for RAG, using config or default."""
+		cached = getattr(self, "_max_context_results", None)
+		if cached is not None:
+			return cached
+		try:
+			rag_config = self.config_loader.get.rag
+			value = getattr(rag_config, "max_context_results", None)
+			if value is not None:
+				self._max_context_results = value
+				return value
+		except (AttributeError, TypeError) as e:
+			logger.debug("Error reading max_context_results from config: %s", e)
+		self._max_context_results = DEFAULT_MAX_CONTEXT_RESULTS
+		return self._max_context_results
 
 	async def initialize(self) -> None:
 		"""Perform asynchronous initialization for the command, especially the pipeline."""
@@ -93,7 +129,7 @@ class AskCommand:
 			except Exception:
 				logger.exception("Failed during async initialization of ProcessingPipeline")
 				# Optionally set pipeline to None or handle the error appropriately
-				self.pipeline = None
+				self._pipeline = None
 		elif not self.pipeline:
 			logger.error("Cannot perform async initialization: ProcessingPipeline failed to initialize earlier.")
 		else:

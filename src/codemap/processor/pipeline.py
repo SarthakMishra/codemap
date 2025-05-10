@@ -15,9 +15,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
 
-from codemap.db.client import DatabaseClient
 from codemap.git.utils import get_repo_root
-from codemap.processor.tree_sitter import TreeSitterAnalyzer
 
 # Use async embedding utils
 from codemap.processor.utils.embedding_utils import (
@@ -25,9 +23,7 @@ from codemap.processor.utils.embedding_utils import (
 )
 
 # Import Qdrant specific classes
-from codemap.processor.vector.chunking import TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager
-from codemap.processor.vector.synchronizer import VectorSynchronizer
 from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.docker_utils import ensure_qdrant_running
 from codemap.watcher.file_watcher import Watcher
@@ -36,6 +32,10 @@ if TYPE_CHECKING:
 	from types import TracebackType
 
 	from codemap.config import ConfigLoader
+	from codemap.db.client import DatabaseClient
+	from codemap.processor.tree_sitter import TreeSitterAnalyzer
+	from codemap.processor.vector.chunking import TreeSitterChunker
+	from codemap.processor.vector.synchronizer import VectorSynchronizer
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +51,6 @@ class ProcessingPipeline:
 
 	"""
 
-	# Note: __init__ cannot be async directly. Initialization happens in an async method.
 	def __init__(
 		self,
 		config_loader: ConfigLoader | None = None,
@@ -72,7 +71,6 @@ class ProcessingPipeline:
 			self.config_loader = ConfigLoader.get_instance()
 
 		self.repo_path = self.config_loader.get.repo_root
-
 		if not self.repo_path:
 			self.repo_path = get_repo_root()
 
@@ -89,19 +87,17 @@ class ProcessingPipeline:
 			msg = "Failed to load a valid Config object."
 			raise ConfigError(msg)
 
-		# --- Initialize Shared Components (Synchronous) --- #
-		self.analyzer = TreeSitterAnalyzer()
-		self.chunker = TreeSitterChunker(config_loader=self.config_loader)
-		self.db_client = DatabaseClient()
+		# --- Defer Shared Components Initialization --- #
+		self._analyzer = None
+		self._chunker = None
+		self._db_client = None
 
 		# --- Load Configuration --- #
-		# Get embedding configuration
 		embedding_config = self.config_loader.get.embedding
 		embedding_model = embedding_config.model_name
 		qdrant_dimension = embedding_config.dimension
 		distance_metric = embedding_config.dimension_metric
 
-		# Make sure embedding_model_name is always a string
 		self.embedding_model_name: str = "voyage-3-lite"  # Default
 		if embedding_model and isinstance(embedding_model, str):
 			self.embedding_model_name = embedding_model
@@ -130,9 +126,8 @@ class ProcessingPipeline:
 
 		collection_name = "codemap_" + hashlib.sha256(str(self.repo_path).encode()).hexdigest()
 
-		# Use URL if provided, otherwise use location (defaults to :memory: in QdrantManager)
 		qdrant_init_args = {
-			"config_loader": self.config_loader,  # Pass ConfigLoader to QdrantManager
+			"config_loader": self.config_loader,
 			"collection_name": collection_name,
 			"dim": qdrant_dimension,
 			"distance": distance_enum,
@@ -142,24 +137,88 @@ class ProcessingPipeline:
 
 		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
 
-		# --- Initialize Managers (Synchronous) --- #
 		self.qdrant_manager = QdrantManager(**qdrant_init_args)
 
-		# Initialize VectorSynchronizer with the embedding model name and config_loader
-		self.vector_synchronizer = VectorSynchronizer(
-			self.repo_path,
-			self.qdrant_manager,
-			self.chunker,
-			self.embedding_model_name,
-			self.analyzer,
-			config_loader=self.config_loader,  # Pass ConfigLoader to VectorSynchronizer
-		)
+		# VectorSynchronizer will be initialized lazily as well
+		self._vector_synchronizer = None
 
 		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
 		self.is_async_initialized = False
 		self.watcher: Watcher | None = None
 		self._watcher_task: asyncio.Task | None = None
 		self._sync_lock = asyncio.Lock()
+
+	@property
+	def analyzer(self) -> TreeSitterAnalyzer:
+		"""
+		Lazily initialize and return a shared TreeSitterAnalyzer instance.
+
+		Returns:
+			TreeSitterAnalyzer: The shared analyzer instance.
+		"""
+		if self._analyzer is None:
+			from codemap.processor.tree_sitter import TreeSitterAnalyzer
+
+			self._analyzer = TreeSitterAnalyzer()
+		return self._analyzer
+
+	@property
+	def chunker(self) -> TreeSitterChunker:
+		"""
+		Lazily initialize and return a TreeSitterChunker using the shared analyzer.
+
+		Returns:
+			TreeSitterChunker: The chunker instance.
+		"""
+		if self._chunker is None:
+			from codemap.processor.lod import LODGenerator
+			from codemap.processor.vector.chunking import TreeSitterChunker
+
+			# Pass the shared analyzer to LODGenerator
+			lod_generator = LODGenerator(analyzer=self.analyzer)
+			self._chunker = TreeSitterChunker(lod_generator=lod_generator, config_loader=self.config_loader)
+		return self._chunker
+
+	@property
+	def db_client(self) -> DatabaseClient:
+		"""
+		Lazily initialize and return a DatabaseClient instance.
+
+		Returns:
+			DatabaseClient: The database client instance.
+		"""
+		if self._db_client is None:
+			from codemap.db.client import DatabaseClient
+
+			self._db_client = DatabaseClient()
+		return self._db_client
+
+	@property
+	def vector_synchronizer(self) -> VectorSynchronizer:
+		"""
+		Lazily initialize and return a VectorSynchronizer using shared components.
+
+		Returns:
+			VectorSynchronizer: The synchronizer instance.
+		"""
+		if self._vector_synchronizer is None:
+			from codemap.processor.vector.synchronizer import VectorSynchronizer
+
+			if self.repo_path is None:
+				msg = "repo_path must not be None"
+				raise RuntimeError(msg)
+			if self.qdrant_manager is None:
+				msg = "qdrant_manager must not be None"
+				raise RuntimeError(msg)
+			self._vector_synchronizer = VectorSynchronizer(
+				self.repo_path,
+				self.qdrant_manager,
+				self.chunker,
+				self.embedding_model_name,
+				self.analyzer,
+				config_loader=self.config_loader,
+			)
+		return self._vector_synchronizer
 
 	async def async_init(self, sync_on_init: bool = True) -> None:
 		"""
@@ -195,19 +254,6 @@ class ProcessingPipeline:
 
 							else:
 								logger.info(f"Docker container check: {message}")
-
-				# Initialize the database client asynchronously
-				with progress_indicator("Initializing database client..."):
-					try:
-						await self.db_client.initialize()
-						logger.info("Database client initialized successfully.")
-
-					except RuntimeError as e:
-						logger.warning(
-							f"Database initialization failed (RuntimeError): {e}. Some features may not work properly."
-						)
-					except (ConnectionError, OSError) as e:
-						logger.warning(f"Database connection failed: {e}. Some features may not work properly.")
 
 				# Initialize Qdrant client (connects, creates collection if needed)
 				if self.qdrant_manager:
@@ -264,16 +310,6 @@ class ProcessingPipeline:
 				logger.info("File watcher stopped.")
 			self.watcher = None
 			self._watcher_task = None
-
-		# Cleanup database client
-		if hasattr(self, "db_client") and self.db_client:
-			try:
-				await self.db_client.cleanup()
-				logger.info("Database client cleaned up.")
-			except RuntimeError:
-				logger.exception("Error during database client cleanup")
-			except (ConnectionError, OSError):
-				logger.exception("Connection error during database client cleanup")
 
 		# Other cleanup if needed
 		self.is_async_initialized = False
