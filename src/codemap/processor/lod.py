@@ -77,9 +77,14 @@ class LODEntity:
 class LODGenerator:
 	"""Generates different levels of detail from source code."""
 
-	def __init__(self) -> None:
-		"""Initialize the LOD generator."""
-		self.analyzer = TreeSitterAnalyzer()
+	def __init__(self, analyzer: TreeSitterAnalyzer | None = None) -> None:
+		"""
+		Initialize the LOD generator.
+
+		Args:
+			analyzer: Optional shared TreeSitterAnalyzer instance. If None, a new one is created.
+		"""
+		self.analyzer = analyzer or TreeSitterAnalyzer()
 
 	def generate_lod(self, file_path: Path, level: LODLevel = LODLevel.STRUCTURE) -> LODEntity | None:
 		"""
