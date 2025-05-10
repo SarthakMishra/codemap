@@ -1,5 +1,6 @@
 """Module for synchronizing HNSW index with Git state."""
 
+import asyncio
 import logging
 import uuid
 from collections import defaultdict
@@ -73,6 +74,21 @@ class VectorSynchronizer:
 			f"using Qdrant collection: '{qdrant_manager.collection_name}' "
 			f"and embedding model: {embedding_model_name}"
 		)
+
+	async def _generate_chunks_for_file(self, file_path_str: str, git_hash: str) -> list[dict[str, Any]]:
+		"""Helper coroutine to generate chunks for a single file."""
+		chunks_for_file = []
+		absolute_path = self.repo_path / file_path_str
+		try:
+			file_chunks_generator = self.chunker.chunk_file(absolute_path, git_hash)
+			if file_chunks_generator:
+				chunks_for_file.extend([chunk.model_dump() for chunk in file_chunks_generator])
+				logger.debug(f"Generated {len(chunks_for_file)} chunks for {file_path_str}")
+			else:
+				logger.debug(f"No chunks generated for file: {file_path_str}")
+		except Exception:
+			logger.exception(f"Error processing file {file_path_str} during chunk generation")
+		return chunks_for_file
 
 	async def _get_qdrant_state(self) -> dict[str, set[tuple[str, str]]]:
 		"""
@@ -320,21 +336,21 @@ class VectorSynchronizer:
 				all_chunks: list[dict[str, Any]] = []
 
 			# First collect all chunks from files
-			for file_path in files_to_process:
-				git_hash = git_files.get(file_path)
-				if git_hash:
-					absolute_path = self.repo_path / file_path
-					try:
-						file_chunks = list(self.chunker.chunk_file(absolute_path, git_hash))
-						if file_chunks:
-							# Convert ChunkSchema (Pydantic) objects to dicts for upsert
-							all_chunks.extend([chunk.model_dump() for chunk in file_chunks])
-							files_processed_count += 1
-						else:
-							logger.debug(f"No chunks generated for file: {file_path}")
-					except Exception:
-						logger.exception(f"Error processing file {file_path} during sync")
-						continue
+			tasks = [
+				self._generate_chunks_for_file(file_path, git_files[file_path])
+				for file_path in files_to_process
+				if file_path in git_files  # Ensure git_hash exists
+			]
+			if tasks:
+				logger.info(f"Concurrently generating chunks for {len(tasks)} files...")
+				list_of_chunk_lists = await asyncio.gather(*tasks)
+				all_chunks = [chunk for sublist in list_of_chunk_lists for chunk in sublist]
+				files_processed_count = sum(
+					1 for sublist in list_of_chunk_lists if sublist
+				)  # Count files that produced chunks
+				logger.info(f"Total chunks generated: {len(all_chunks)} from {files_processed_count} files.")
+			else:
+				logger.info("No files eligible for concurrent chunk generation.")
 
 			# Process chunks
 			with progress_indicator("Processing chunks..."):
