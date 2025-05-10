@@ -169,10 +169,8 @@ async def _pr_command_impl(
 		)
 		from codemap.git.pr_generator.utils import validate_branch_name as validate_branch_name_util  # Avoid name clash
 		from codemap.git.utils import (
+			ExtendedGitRepoContext,
 			GitError,
-			get_staged_diff,
-			get_unstaged_diff,
-			get_untracked_files,
 			run_git_command,
 		)
 		from codemap.llm import LLMError  # Import LLMError
@@ -368,9 +366,10 @@ async def _pr_command_impl(
 
 		try:
 			# Check for changes (staged, unstaged, untracked)
-			staged = get_staged_diff()
-			unstaged = get_unstaged_diff()
-			untracked = get_untracked_files()
+			git_context = ExtendedGitRepoContext().get_instance()
+			staged = git_context.get_staged_diff()
+			unstaged = git_context.get_unstaged_diff()
+			untracked = git_context.get_untracked_files()
 			if not staged.files and not unstaged.files and not untracked:
 				logger.warning("No changes detected to commit.")
 				return True
