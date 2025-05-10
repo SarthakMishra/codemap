@@ -56,55 +56,33 @@ class TreeSitterAnalyzer:
 	def __init__(self) -> None:
 		"""Initialize the tree-sitter analyzer."""
 		self.parsers: dict[str, Parser] = {}
-		self._load_parsers()
-
-	def _load_parsers(self) -> None:
-		"""
-		Load tree-sitter parsers for supported languages.
-
-		This method attempts to load parsers for all configured languages
-		using tree-sitter-language-pack. If a language fails to load, it will
-		be logged but won't prevent other languages from loading.
-
-		"""
-		self.parsers: dict[str, Parser] = {}
-		failed_languages: list[tuple[str, str]] = []
-
-		for lang in LANGUAGE_CONFIGS:
-			try:
-				# Get the language name for tree-sitter-language-pack
-				ts_lang_name = LANGUAGE_NAMES.get(lang)
-				if not ts_lang_name:
-					continue
-
-				# Get the language from tree-sitter-language-pack
-				language: Language = get_language(ts_lang_name)
-
-				# Create a new parser and set its language
-				parser: Parser = Parser()
-				parser.language = language
-
-				self.parsers[lang] = parser
-			except (ValueError, RuntimeError, ImportError) as e:
-				failed_languages.append((lang, str(e)))
-				logger.debug("Failed to load language %s: %s", lang, str(e))
-
-		if failed_languages:
-			failed_names = ", ".join(f"{lang} ({err})" for lang, err in failed_languages)
-			logger.debug("Failed to load parsers for languages: %s", failed_names)
 
 	def get_parser(self, language: str) -> Parser | None:
 		"""
-		Get the parser for a language.
+		Get the parser for a language, loading it if necessary.
 
 		Args:
 		    language: The language to get a parser for
 
 		Returns:
 		    A tree-sitter parser or None if not supported
-
 		"""
-		return self.parsers.get(language)
+		if language in self.parsers:
+			return self.parsers[language]
+
+		# Lazy load the parser
+		ts_lang_name = LANGUAGE_NAMES.get(language)
+		if not ts_lang_name:
+			return None
+		try:
+			lang_obj: Language = get_language(ts_lang_name)
+			parser: Parser = Parser()
+			parser.language = lang_obj
+			self.parsers[language] = parser
+			return parser
+		except (ValueError, RuntimeError, ImportError) as e:
+			logger.debug("Failed to load language %s: %s", language, str(e))
+			return None
 
 	def parse_file(self, file_path: Path, content: str, language: str | None = None) -> tuple[Node | None, str]:
 		"""
