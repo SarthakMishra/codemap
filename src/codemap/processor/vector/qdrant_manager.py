@@ -67,7 +67,7 @@ class QdrantManager:
 		)
 
 		# Load values from parameters or fall back to config
-		self.collection_name = collection_name or embedding_config.qdrant_collection_name
+		self.collection_name = collection_name or "codemap_vectors"
 		self.dim = dim or embedding_config.dimension
 		self.distance = distance or default_distance
 

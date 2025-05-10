@@ -102,7 +102,7 @@ class ProcessingPipeline:
 		distance_metric = embedding_config.dimension_metric
 
 		# Make sure embedding_model_name is always a string
-		self.embedding_model_name: str = "voyage-code-3"  # Default
+		self.embedding_model_name: str = "voyage-3-lite"  # Default
 		if embedding_model and isinstance(embedding_model, str):
 			self.embedding_model_name = embedding_model
 
@@ -114,8 +114,11 @@ class ProcessingPipeline:
 
 		# Get Qdrant configuration
 		vector_config = self.config_loader.get.embedding
-		qdrant_location = vector_config.qdrant_location
-		qdrant_collection = vector_config.qdrant_collection_name
+
+		qdrant_location = self.repo_path / ".codemap_cache" / "qdrant"
+		qdrant_location.mkdir(parents=True, exist_ok=True)
+
+		qdrant_collection = "codemap_vectors"
 		qdrant_url = vector_config.url
 		qdrant_api_key = vector_config.api_key
 
@@ -130,19 +133,11 @@ class ProcessingPipeline:
 			"collection_name": qdrant_collection,
 			"dim": qdrant_dimension,
 			"distance": distance_enum,
+			"url": qdrant_url,
+			"api_key": qdrant_api_key,
 		}
 
-		if qdrant_url:
-			qdrant_init_args["url"] = qdrant_url
-			if qdrant_api_key:
-				qdrant_init_args["api_key"] = qdrant_api_key
-			logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
-		elif qdrant_location:
-			qdrant_init_args["location"] = qdrant_location
-			logger.info(f"Configuring Qdrant client for local path/memory: {qdrant_location}")
-		else:
-			# Let QdrantManager use its default (:memory:)
-			logger.info("Configuring Qdrant client for default location (:memory:)")
+		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
 
 		# --- Initialize Managers (Synchronous) --- #
 		self.qdrant_manager = QdrantManager(**qdrant_init_args)
