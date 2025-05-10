@@ -64,10 +64,16 @@ sync:
     - "^dist/"
     - "^build/"
     - "^\\.git/"
-    - "\\\\.pyc$"
-    - "\\\\.pyo$"
-    - "\\\\.so$"
-    - "\\\\.dll$"
+    - "^typings/"
+    - "^\\.pyc$"
+    - "^\\.pyo$"
+    - "^\\.so$"
+    - "^\\.dll$"
+    - "^\\.lib$"
+    - "^\\.a$"
+    - "^\\.o$"
+    - "^\\.class$"
+    - "^\\.jar$"
 
 # Generation Configuration - Controls documentation generation
 gen:
@@ -75,7 +81,7 @@ gen:
   use_gitignore: true  # Use .gitignore patterns to exclude files
   output_dir: "documentation"  # Directory to store generated documentation
   include_tree: true  # Include directory tree in output
-  include_entity_graph: true  # Include entity relationship graph
+  include_entity_graph: false  # Include entity relationship graph
   semantic_analysis: true  # Enable semantic analysis
   lod_level: "docs"  # Level of detail: "signatures", "structure", "docs", "full"
 
