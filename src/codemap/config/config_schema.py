@@ -55,19 +55,17 @@ class EmbeddingSchema(BaseModel):
 	"""Configuration for the embedding."""
 
 	model_name: str = "voyage-code-3"
-	token_limit: int = 80000
-	dimension: int = 1024
+	per_call_token_limit: int = 80000
+	per_call_batch_size: int = 50
+	dimension: int = 512
 	dimension_metric: str = "cosine"
 	max_retries: int = 3
 	retry_delay: int = 5
 	max_content_length: int = 5000
-	qdrant_location: str = ":memory:"
-	qdrant_collection_name: str = "codemap_vectors"
-	batch_size: int = 32
-	qdrant_batch_size: int = 100
+	qdrant_batch_size: int = 50
 	url: str = "http://localhost:6333"
 	api_key: str | None = None
-	timeout: int = 30
+	timeout: int = 120
 	prefer_grpc: bool = True
 	chunking: EmbeddingChunkingSchema = EmbeddingChunkingSchema()
 	clustering: EmbeddingClusteringSchema = EmbeddingClusteringSchema()

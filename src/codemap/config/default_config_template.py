@@ -15,8 +15,8 @@ llm:
 
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
-  # Recommended models: "voyage-code-3" (best for code), "openai-3-small", "openai-3-large"
-  model_name: "voyage-code-3"
+  # Recommended models: "voyage-code-3" (best for code), "voyage-3-lite" (best for non-code), "openai-3-small", "openai-3-large"
+  model_name: "voyage-3-lite"
   token_limit: 80000  # Maximum tokens to process in a single request
   # dimension: 1024 # Embedding dimension size
   # dimension_metric: "cosine" # Metric for dimension calculation (e.g., "cosine", "euclidean")
