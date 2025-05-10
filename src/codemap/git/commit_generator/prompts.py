@@ -18,15 +18,6 @@ Your response must be a valid JSON object matching the provided schema.
 
 # Default prompt template for commit message generation
 DEFAULT_PROMPT_TEMPLATE = """
-**Format:**
-```
-<type>[optional scope]: <description>
-
-[optional body]
-
-[optional footer(s)]
-```
-
 **Instructions & Rules:**
 
 1.  **Type:** REQUIRED. Must be lowercase and one of: {convention.types}.
@@ -57,24 +48,31 @@ DEFAULT_PROMPT_TEMPLATE = """
     *   Be specific about what changed (e.g., "update image assets", "add new icon files", "replace binary database")
     *   If the diff content is empty or shows binary file changes, focus on the filenames to determine the purpose
 
-**Input:**
+**Commit Message Format:**
+```
+<type>[optional scope]: <description>
 
-*   File notes: {files}
-*   Git diff: {diff}
+[optional body]
+
+[optional footer(s)]
+```
+
+**File Summary:**
+{files_summary}
+
+**Git diff:**
+{diff}
 
 **Output Requirements:**
 
-*   Respond with ONLY the raw commit message string.
-*   NO extra text, explanations, or markdown formatting (like ```).
-*   STRICTLY OMIT footers: `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED`.
+**(IMPORTANT) STRICTLY OMIT footers: `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED`.
 
 **(IMPORTANT) Following JSON Schema must be followed for Output:**
 {schema}
 
 ---
-Please return the commit message in a valid json format. Analyze the following diff and generate the commit message:
-
-{diff}
+Please analyze the `Git diff` and `File Summary` and create a valid commit message.
+Return your answer as json.
 """
 
 # Context for move operations
@@ -135,6 +133,28 @@ Return your answer as json.
 """
 
 
+def file_info_to_human_summary(file_info: dict[str, Any]) -> str:
+	"""
+	Convert file_info dict to a human-readable summary (used in both initial and regeneration prompts).
+
+	Args:
+	    file_info: Dictionary with information about files
+
+	Returns:
+	    Human-readable summary string
+	"""
+	files_summary = []
+	for file_path, info in file_info.items():
+		extension = info.get("extension", "")
+		directory = info.get("directory", "")
+		module = info.get("module", "")
+		summary = f"- {file_path} ({extension} file in {directory})"
+		if module:
+			summary += f", part of {module} module"
+		files_summary.append(summary)
+	return "\n".join(files_summary) if files_summary else "No file information available"
+
+
 def prepare_prompt(
 	template: str,
 	diff_content: str,
@@ -158,7 +178,8 @@ def prepare_prompt(
 	"""
 	context = {
 		"diff": diff_content,
-		"files": file_info,
+		# Use human-readable summary for files
+		"files_summary": file_info_to_human_summary(file_info),
 		"convention": config_loader.get.commit.convention,
 		"schema": CommitMessageSchema,
 	}
@@ -198,18 +219,8 @@ def prepare_lint_prompt(
 	# Create specific feedback for linting issues
 	lint_feedback = "\n".join([f"- {msg}" for msg in lint_messages])
 
-	# Create a simplified file summary without full diff content
-	files_summary = []
-	for file_path, info in file_info.items():
-		extension = info.get("extension", "")
-		directory = info.get("directory", "")
-		module = info.get("module", "")
-		summary = f"- {file_path} ({extension} file in {directory})"
-		if module:
-			summary += f", part of {module} module"
-		files_summary.append(summary)
-
-	files_summary_text = "\n".join(files_summary) if files_summary else "No file information available"
+	# Use the shared summary function
+	files_summary_text = file_info_to_human_summary(file_info)
 
 	# If original_message wasn't provided, use a placeholder
 	message_to_fix = original_message or "No original message provided"
