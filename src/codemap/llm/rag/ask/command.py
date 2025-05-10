@@ -8,10 +8,10 @@ from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
 from codemap.git.utils import get_repo_root
 from codemap.llm.client import LLMClient
+from codemap.llm.rag import RagUI
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
 
-from .formatter import format_content_for_context
 from .prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,8 @@ class AskCommand:
 			self.repo_root = get_repo_root()
 		else:
 			self.repo_root = self.config_loader.get.repo_root
+
+		self.ui = RagUI()
 
 		# Get RAG configuration
 		rag_config = self.config_loader.get.rag
@@ -187,7 +189,7 @@ class AskCommand:
 		context = await self._retrieve_context(question)
 
 		# Format context for inclusion in prompt
-		context_text = format_content_for_context(context)
+		context_text = self.ui.format_content_for_context(context)
 		if len(context_text) > self.max_context_length:
 			logger.warning(f"Context too long ({len(context_text)} chars), truncating.")
 			context_text = context_text[: self.max_context_length] + "... [truncated]"

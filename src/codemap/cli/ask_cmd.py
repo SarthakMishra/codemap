@@ -49,8 +49,8 @@ async def _ask_command_impl(
 	from rich.prompt import Prompt
 
 	from codemap.config import ConfigLoader
+	from codemap.llm.rag import RagUI
 	from codemap.llm.rag.ask.command import AskCommand
-	from codemap.llm.rag.ask.formatter import print_ask_result
 	from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
 	# Determine if running in interactive mode (flag or config)
@@ -67,6 +67,8 @@ async def _ask_command_impl(
 		# Perform async initialization before running any commands
 		await command.initialize()
 
+		ui = RagUI()
+
 		if is_interactive:
 			typer.echo("Starting interactive chat session. Type 'exit' or 'quit' to end.")
 			while True:
@@ -80,14 +82,14 @@ async def _ask_command_impl(
 
 				# Use await for the async run method
 				result = await command.run(question=user_input)
-				print_ask_result(cast("dict[str, Any]", result))
+				ui.print_ask_result(cast("dict[str, Any]", result))
 		else:
 			# Single question mode
 			if question is None:
 				exit_with_error("Internal error: Question is unexpectedly None in single-question mode.")
 			# Use await for the async run method
 			result = await command.run(question=cast("str", question))
-			print_ask_result(cast("dict[str, Any]", result))
+			ui.print_ask_result(cast("dict[str, Any]", result))
 
 	except KeyboardInterrupt:
 		handle_keyboard_interrupt()
