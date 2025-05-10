@@ -5,9 +5,12 @@ import uuid
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import BaseModel, ValidationError
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import Distance, ExtendedPointId, PointStruct, VectorParams
+
+from codemap.processor.vector.schema import ChunkMetadataSchema
 
 if TYPE_CHECKING:
 	from codemap.config import ConfigLoader
@@ -124,36 +127,41 @@ class QdrantManager:
 			raise  # Re-raise the exception to signal failure
 
 	async def _create_payload_indexes(self) -> None:
-		"""Create payload indexes for commonly used filter fields."""
+		"""Create payload indexes for all fields in ChunkMetadataSchema and GitMetadataSchema."""
 		if self.client is None:
 			msg = "Client should be initialized before creating indexes"
 			raise RuntimeError(msg)
 
 		try:
-			# Create keyword indexes for string fields commonly used in filters
+			# Index fields for ChunkMetadataSchema
 			index_fields = [
+				("chunk_id", models.PayloadSchemaType.KEYWORD),
 				("file_path", models.PayloadSchemaType.KEYWORD),
-				("entity_type", models.PayloadSchemaType.KEYWORD),
-				("language", models.PayloadSchemaType.KEYWORD),
-				("git_hash", models.PayloadSchemaType.KEYWORD),
-				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
 				("start_line", models.PayloadSchemaType.INTEGER),
 				("end_line", models.PayloadSchemaType.INTEGER),
+				("entity_type", models.PayloadSchemaType.KEYWORD),
+				("entity_name", models.PayloadSchemaType.KEYWORD),
+				("language", models.PayloadSchemaType.KEYWORD),
+				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				# GitMetadataSchema subfields (nested under git_metadata)
+				("git_metadata.git_hash", models.PayloadSchemaType.KEYWORD),
+				("git_metadata.tracked", models.PayloadSchemaType.BOOL),
+				("git_metadata.branch", models.PayloadSchemaType.KEYWORD),
+				# ("git_metadata.blame", models.PayloadSchemaType.KEYWORD),  # Blame is a list of objects, not indexed
 			]
-
+			# Add indexes for all fields
 			for field_name, field_type in index_fields:
 				logger.info(f"Creating index for field: {field_name} ({field_type})")
 				await self.client.create_payload_index(
 					collection_name=self.collection_name, field_name=field_name, field_schema=field_type
 				)
-
 			logger.info(f"Created {len(index_fields)} payload indexes successfully")
 		except Exception as e:  # noqa: BLE001
 			logger.warning(f"Error creating payload indexes: {e}")
 			# Continue even if index creation fails - collection will still work
 
 	async def _ensure_payload_indexes(self) -> None:
-		"""Check if payload indexes exist and create any missing ones."""
+		"""Check if payload indexes exist and create any missing ones to match the schema."""
 		if self.client is None:
 			msg = "Client should be initialized before checking indexes"
 			raise RuntimeError(msg)
@@ -163,17 +171,21 @@ class QdrantManager:
 			collection_info = await self.client.get_collection(collection_name=self.collection_name)
 			existing_schema = collection_info.payload_schema
 
-			# List of fields that should be indexed
+			# List of fields that should be indexed (same as in _create_payload_indexes)
 			index_fields = [
+				("chunk_id", models.PayloadSchemaType.KEYWORD),
 				("file_path", models.PayloadSchemaType.KEYWORD),
-				("entity_type", models.PayloadSchemaType.KEYWORD),
-				("language", models.PayloadSchemaType.KEYWORD),
-				("git_hash", models.PayloadSchemaType.KEYWORD),
-				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
 				("start_line", models.PayloadSchemaType.INTEGER),
 				("end_line", models.PayloadSchemaType.INTEGER),
+				("entity_type", models.PayloadSchemaType.KEYWORD),
+				("entity_name", models.PayloadSchemaType.KEYWORD),
+				("language", models.PayloadSchemaType.KEYWORD),
+				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				("git_metadata.git_hash", models.PayloadSchemaType.KEYWORD),
+				("git_metadata.tracked", models.PayloadSchemaType.BOOL),
+				("git_metadata.branch", models.PayloadSchemaType.KEYWORD),
+				# ("git_metadata.blame", models.PayloadSchemaType.KEYWORD),  # Not indexed
 			]
-
 			# Create any missing indexes
 			for field_name, field_type in index_fields:
 				if field_name not in existing_schema:
@@ -181,7 +193,6 @@ class QdrantManager:
 					await self.client.create_payload_index(
 						collection_name=self.collection_name, field_name=field_name, field_schema=field_type
 					)
-
 		except Exception as e:  # noqa: BLE001
 			logger.warning(f"Error checking or creating payload indexes: {e}")
 			# Continue even if index check fails
@@ -200,7 +211,7 @@ class QdrantManager:
 		Add or update points (vectors and payloads) in the collection.
 
 		Args:
-		    points: A list of Qdrant PointStruct objects.
+		    points: A list of Qdrant PointStruct objects. Each payload should be a dict matching ChunkMetadataSchema.
 
 		"""
 		await self._ensure_initialized()
@@ -210,7 +221,10 @@ class QdrantManager:
 		if not points:
 			logger.warning("upsert_points called with an empty list.")
 			return
-
+		# Ensure all payloads are dicts (convert from Pydantic BaseModel if needed)
+		for point in points:
+			if hasattr(point, "payload") and isinstance(point.payload, BaseModel):
+				point.payload = point.payload.model_dump()
 		try:
 			logger.info(f"Upserting {len(points)} points into '{self.collection_name}'")
 			await self.client.upsert(
@@ -371,7 +385,7 @@ class QdrantManager:
 		    point_ids: List of point IDs to fetch payloads for.
 
 		Returns:
-		    A dictionary mapping point IDs (as strings) to their payloads.
+		    A dictionary mapping point IDs (as strings) to their payloads (as dicts matching ChunkMetadataSchema).
 
 		"""
 		await self._ensure_initialized()
@@ -390,7 +404,14 @@ class QdrantManager:
 				with_payload=True,
 				with_vectors=False,
 			)
-			payloads = {str(point.id): point.payload for point in points_data if point.payload}
+			payloads = {}
+			for point in points_data:
+				if point.payload:
+					# Try to parse as ChunkMetadataSchema, fallback to dict
+					try:
+						payloads[str(point.id)] = ChunkMetadataSchema.model_validate(point.payload).model_dump()
+					except (ValidationError, TypeError, ValueError):
+						payloads[str(point.id)] = point.payload
 			logger.debug(f"Retrieved payloads for {len(payloads)} points.")
 			return payloads
 		except Exception:
