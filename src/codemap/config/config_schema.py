@@ -57,8 +57,6 @@ class EmbeddingSchema(BaseModel):
 	model_name: str = "minishlab/potion-base-8M"
 	dimension: int = 256
 	dimension_metric: str = "cosine"
-	max_retries: int = 3
-	retry_delay: int = 5
 	max_content_length: int = 5000
 	qdrant_batch_size: int = 1000
 	url: str = "http://localhost:6333"

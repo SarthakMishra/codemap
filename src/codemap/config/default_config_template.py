@@ -15,21 +15,15 @@ llm:
 
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
-  # Recommended models: "voyage-code-3" (best for code), "voyage-3-lite" (best for non-code), "openai-3-small", "openai-3-large"
-  model_name: "voyage-3-lite"
-  token_limit: 80000  # Maximum tokens to process in a single request
-  # dimension: 1024 # Embedding dimension size
+  # Recommended models: "minishlab/potion-base-8M3", Only Model2Vec static models are supported
+  model_name: "minishlab/potion-base-8M"
   # dimension_metric: "cosine" # Metric for dimension calculation (e.g., "cosine", "euclidean")
   # max_retries: 3 # Maximum retries for embedding requests
   # retry_delay: 5 # Delay in seconds between retries
-  max_content_length: 5000  # Maximum characters per file chunk
-  # batch_size: 32 # Batch size for processing embeddings
+  # max_content_length: 5000  # Maximum characters per file chunk
   # Qdrant (Vector DB) settings
-  qdrant_location: ":memory:" # Use ":memory:" for in-memory DB or a path for persistence (e.g., "./qdrant_db")
-  qdrant_collection_name: "codemap_vectors"  # Collection name in Qdrant
   # qdrant_batch_size: 100 # Batch size for Qdrant uploads
   # url: "http://localhost:6333" # Qdrant server URL
-  # api_key: null # Qdrant API key, if required (leave commented or set if needed)
   # timeout: 30 # Qdrant client timeout in seconds
   # prefer_grpc: true # Prefer gRPC for Qdrant communication
 
