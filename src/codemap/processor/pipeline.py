@@ -118,7 +118,6 @@ class ProcessingPipeline:
 		qdrant_location = self.repo_path / ".codemap_cache" / "qdrant"
 		qdrant_location.mkdir(parents=True, exist_ok=True)
 
-		qdrant_collection = "codemap_vectors"
 		qdrant_url = vector_config.url
 		qdrant_api_key = vector_config.api_key
 
@@ -127,10 +126,14 @@ class ProcessingPipeline:
 		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT"]:
 			distance_enum = getattr(qdrant_models.Distance, distance_metric.upper())
 
+		import hashlib
+
+		collection_name = "codemap_" + hashlib.sha256(str(self.repo_path).encode()).hexdigest()
+
 		# Use URL if provided, otherwise use location (defaults to :memory: in QdrantManager)
 		qdrant_init_args = {
 			"config_loader": self.config_loader,  # Pass ConfigLoader to QdrantManager
-			"collection_name": qdrant_collection,
+			"collection_name": collection_name,
 			"dim": qdrant_dimension,
 			"distance": distance_enum,
 			"url": qdrant_url,
