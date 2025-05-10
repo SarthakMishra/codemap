@@ -10,12 +10,11 @@ synchronization with the Git repository, and provides semantic search capabiliti
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from typing import TYPE_CHECKING, Any, Self
 
-from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
-
-from codemap.git.utils import get_repo_root
+from qdrant_client import models as qdrant_models
 
 # Use async embedding utils
 from codemap.processor.utils.embedding_utils import (
@@ -23,6 +22,7 @@ from codemap.processor.utils.embedding_utils import (
 )
 
 # Import Qdrant specific classes
+from codemap.processor.utils.git_utils import GitRepoContext
 from codemap.processor.vector.qdrant_manager import QdrantManager
 from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.docker_utils import ensure_qdrant_running
@@ -70,9 +70,11 @@ class ProcessingPipeline:
 
 			self.config_loader = ConfigLoader.get_instance()
 
+		self.git_context = GitRepoContext()
+
 		self.repo_path = self.config_loader.get.repo_root
 		if not self.repo_path:
-			self.repo_path = get_repo_root()
+			self.repo_path = self.git_context.get_repo_root()
 
 		_config_loader = self.config_loader.__class__
 		if not config_loader:
@@ -98,13 +100,13 @@ class ProcessingPipeline:
 		qdrant_dimension = embedding_config.dimension
 		distance_metric = embedding_config.dimension_metric
 
-		self.embedding_model_name: str = "voyage-3-lite"  # Default
+		self.embedding_model_name: str = "minishlab/potion-base-8M3"  # Default
 		if embedding_model and isinstance(embedding_model, str):
 			self.embedding_model_name = embedding_model
 
 		if not qdrant_dimension:
-			logger.warning("Missing qdrant dimension in configuration, using default 1024")
-			qdrant_dimension = 1024
+			logger.warning("Missing qdrant dimension in configuration, using default 256")
+			qdrant_dimension = 256
 
 		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {qdrant_dimension}")
 
@@ -122,9 +124,12 @@ class ProcessingPipeline:
 		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT"]:
 			distance_enum = getattr(qdrant_models.Distance, distance_metric.upper())
 
-		import hashlib
+		# Use GitRepoContext for branch and git info
+		path_str = str(self.repo_path)
+		branch_str = self.git_context.branch or "no_branch"
+		collection_id = hashlib.sha256(f"{path_str}_{branch_str}".encode()).hexdigest()
 
-		collection_name = "codemap_" + hashlib.sha256(str(self.repo_path).encode()).hexdigest()
+		collection_name = f"codemap_{collection_id}"
 
 		qdrant_init_args = {
 			"config_loader": self.config_loader,
@@ -165,7 +170,7 @@ class ProcessingPipeline:
 	@property
 	def chunker(self) -> TreeSitterChunker:
 		"""
-		Lazily initialize and return a TreeSitterChunker using the shared analyzer.
+		Lazily initialize and return a TreeSitterChunker using the shared analyzer and git context.
 
 		Returns:
 			TreeSitterChunker: The chunker instance.
@@ -176,7 +181,11 @@ class ProcessingPipeline:
 
 			# Pass the shared analyzer to LODGenerator
 			lod_generator = LODGenerator(analyzer=self.analyzer)
-			self._chunker = TreeSitterChunker(lod_generator=lod_generator, config_loader=self.config_loader)
+			self._chunker = TreeSitterChunker(
+				lod_generator=lod_generator,
+				config_loader=self.config_loader,
+				git_context=self.git_context,
+			)
 		return self._chunker
 
 	@property
@@ -196,7 +205,7 @@ class ProcessingPipeline:
 	@property
 	def vector_synchronizer(self) -> VectorSynchronizer:
 		"""
-		Lazily initialize and return a VectorSynchronizer using shared components.
+		Lazily initialize and return a VectorSynchronizer using shared components and git context.
 
 		Returns:
 			VectorSynchronizer: The synchronizer instance.

@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.utils.embedding_utils import generate_embedding
-from codemap.processor.utils.git_utils import _should_exclude_path, get_git_tracked_files
-from codemap.processor.vector.chunking import CodeChunk, TreeSitterChunker
+from codemap.processor.utils.git_utils import GitRepoContext
+from codemap.processor.vector.chunking import TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
 from codemap.utils.cli_utils import progress_indicator
 
@@ -26,7 +26,7 @@ class VectorSynchronizer:
 		self,
 		repo_path: Path,
 		qdrant_manager: QdrantManager,
-		chunker: TreeSitterChunker,
+		chunker: TreeSitterChunker | None,
 		embedding_model_name: str,
 		analyzer: TreeSitterAnalyzer | None = None,
 		config_loader: "ConfigLoader | None" = None,
@@ -45,7 +45,7 @@ class VectorSynchronizer:
 		"""
 		self.repo_path = repo_path
 		self.qdrant_manager = qdrant_manager
-		self.chunker = chunker
+		self.git_context = GitRepoContext()
 		self.embedding_model_name = embedding_model_name
 		self.analyzer = analyzer or TreeSitterAnalyzer()
 		if config_loader:
@@ -58,6 +58,15 @@ class VectorSynchronizer:
 		# Get configuration values
 		embedding_config = self.config_loader.get.embedding
 		self.qdrant_batch_size = embedding_config.qdrant_batch_size
+
+		# If chunker is not provided, create one with git_context
+		if chunker is None:
+			self.chunker = TreeSitterChunker(git_context=self.git_context, config_loader=self.config_loader)
+		else:
+			# If chunker exists but has no git_context, set it
+			if getattr(chunker, "git_context", None) is None:
+				chunker.git_context = self.git_context
+			self.chunker = chunker
 
 		logger.info(
 			f"VectorSynchronizer initialized for repo: {repo_path} "
@@ -207,12 +216,12 @@ class VectorSynchronizer:
 		# Return relative paths for processing, and chunk IDs to delete
 		return files_to_process, files_to_delete_chunks_for, chunks_to_delete
 
-	async def _process_and_upsert_batch(self, chunk_batch: list[CodeChunk]) -> int:
+	async def _process_and_upsert_batch(self, chunk_batch: list[dict[str, Any]]) -> int:
 		"""Process a batch of chunks by generating embeddings and upserting to Qdrant.
 
 		Args:
-		    chunk_batch: List of CodeChunk objects to process. Each chunk contains content
-		        and metadata about a code segment.
+		    chunk_batch: List of dictionaries representing code chunks. Each dictionary contains
+		        'content' (str), 'metadata' (dict), and optionally 'file_path' (str).
 
 		Returns:
 		    int: Number of points successfully upserted to Qdrant. Returns 0 if:
@@ -274,13 +283,11 @@ class VectorSynchronizer:
 
 			# 1. Get current Git state (tracked files and hashes)
 			with progress_indicator("Reading Git tracked files..."):
-				git_files_raw = get_git_tracked_files(self.repo_path)
-				if git_files_raw is None:
+				git_files = self.git_context.tracked_files
+				if git_files is None:
 					logger.error("Failed to retrieve Git tracked files.")
 					return False
 
-			# Filter out excluded files
-			git_files = {fp: h for fp, h in git_files_raw.items() if not _should_exclude_path(fp)}
 			logger.info(f"Found {len(git_files)} tracked files in Git (after exclusion).")
 
 			# 2. Get current Qdrant state (file paths -> chunk IDs and hashes)
@@ -299,8 +306,9 @@ class VectorSynchronizer:
 					delete_ids_list = list(chunks_to_delete)
 					for i in range(0, len(delete_ids_list), self.qdrant_batch_size):
 						batch_ids = delete_ids_list[i : i + self.qdrant_batch_size]
-						# Use cast to handle type checking
-						await self.qdrant_manager.delete_points(cast("list[str | int | uuid.UUID]", batch_ids))
+						await self.qdrant_manager.delete_points(
+							batch_ids  # type: ignore[arg-type]
+						)
 						logger.info(f"Deleted batch of {len(batch_ids)} vectors.")
 					logger.info(f"Finished deleting {len(chunks_to_delete)} vectors.")
 				else:
@@ -309,7 +317,7 @@ class VectorSynchronizer:
 			# 5. Process new/updated files
 			with progress_indicator(f"Processing {len(files_to_process)} new/updated files..."):
 				files_processed_count = 0
-				all_chunks: list[CodeChunk] = []
+				all_chunks: list[dict[str, Any]] = []
 
 			# First collect all chunks from files
 			for file_path in files_to_process:
@@ -319,7 +327,8 @@ class VectorSynchronizer:
 					try:
 						file_chunks = list(self.chunker.chunk_file(absolute_path, git_hash))
 						if file_chunks:
-							all_chunks.extend(file_chunks)
+							# Convert ChunkSchema (Pydantic) objects to dicts for upsert
+							all_chunks.extend([chunk.model_dump() for chunk in file_chunks])
 							files_processed_count += 1
 						else:
 							logger.debug(f"No chunks generated for file: {file_path}")

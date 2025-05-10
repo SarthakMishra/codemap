@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING
 
 import questionary
 import typer
+from pygit2 import Commit, Diff, Patch
+from pygit2.enums import FileStatus
 
 from codemap.git.commit_generator.utils import (
 	clean_message_for_linting,
@@ -16,14 +18,9 @@ from codemap.git.diff_splitter import DiffChunk
 from codemap.git.interactive import ChunkAction, CommitUI
 from codemap.git.semantic_grouping import SemanticGroup
 from codemap.git.utils import (
+	ExtendedGitRepoContext,
 	GitDiff,
 	GitError,
-	commit_only_files,
-	get_current_branch,
-	get_repo_root,
-	get_untracked_files,
-	run_git_command,
-	switch_branch,
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import progress_indicator
@@ -78,9 +75,11 @@ class CommitCommand:
 			self.error_state: str | None = None  # Tracks reason for failure
 			self.bypass_hooks: bool = bypass_hooks  # Whether to bypass git hooks with --no-verify
 
+			self.git_context = ExtendedGitRepoContext()
+
 			# Store the current branch at initialization to ensure we don't switch branches unexpectedly
 			try:
-				self.original_branch = get_current_branch()
+				self.original_branch = self.git_context.branch
 			except (ImportError, GitError):
 				self.original_branch = None
 
@@ -91,7 +90,7 @@ class CommitCommand:
 			self._message_generator = None
 
 			if self.config_loader.get.repo_root is None:
-				self.repo_root = get_repo_root()
+				self.repo_root = self.git_context.get_repo_root()
 			else:
 				self.repo_root = self.config_loader.get.repo_root
 
@@ -156,35 +155,47 @@ class CommitCommand:
 
 		try:
 			# 1. Get Staged Changes (Per File)
-			staged_files = run_git_command(["git", "diff", "--cached", "--name-only"]).splitlines()
-			if staged_files:
-				logger.debug("Found %d staged files. Fetching diffs individually...", len(staged_files))
-				for file_path in staged_files:
+			commit = self.git_context.repo.head.peel(Commit)
+			staged_files = self.git_context.repo.diff(commit.tree, self.git_context.repo.index)
+			staged_file_paths = []
+			if isinstance(staged_files, Diff):
+				if len(staged_files) > 0:
+					staged_file_paths = [delta.delta.new_file.path for delta in staged_files]
+			elif isinstance(staged_files, Patch):
+				staged_file_paths.append(staged_files.delta.new_file.path)
+			if staged_file_paths:
+				logger.debug("Found %d staged files. Fetching diffs individually...", len(staged_file_paths))
+				for file_path in staged_file_paths:
 					if file_path in processed_files:
 						continue  # Avoid duplicates if somehow listed again
 					try:
-						file_diff_content = run_git_command(["git", "diff", "--cached", "--", file_path])
-						changes.append(GitDiff(files=[file_path], content=file_diff_content, is_staged=True))
+						file_diff = self.git_context.get_per_file_diff(file_path, staged=True)
+						changes.append(file_diff)
 						processed_files.add(file_path)
 					except GitError as e:
 						logger.warning("Could not get staged diff for %s: %s", file_path, e)
 
 			# 2. Get Unstaged Changes (Per File for files not already staged)
-			unstaged_files = run_git_command(["git", "diff", "--name-only"]).splitlines()
-			if unstaged_files:
-				logger.debug("Found %d unstaged files. Fetching diffs individually...", len(unstaged_files))
-				for file_path in unstaged_files:
-					# Only process unstaged if not already captured as staged
+			unstaged_files = self.git_context.repo.diff(self.git_context.repo.index, None)
+			unstaged_file_paths = []
+			if isinstance(unstaged_files, Diff):
+				if len(unstaged_files) > 0:
+					unstaged_file_paths = [delta.delta.new_file.path for delta in unstaged_files]
+			elif isinstance(unstaged_files, Patch):
+				unstaged_file_paths.append(unstaged_files.delta.new_file.path)
+			if unstaged_file_paths:
+				logger.debug("Found %d unstaged files. Fetching diffs individually...", len(unstaged_file_paths))
+				for file_path in unstaged_file_paths:
 					if file_path not in processed_files:
 						try:
-							file_diff_content = run_git_command(["git", "diff", "--", file_path])
-							changes.append(GitDiff(files=[file_path], content=file_diff_content, is_staged=False))
+							file_diff = self.git_context.get_per_file_diff(file_path, staged=False)
+							changes.append(file_diff)
 							processed_files.add(file_path)
 						except GitError as e:
 							logger.warning("Could not get unstaged diff for %s: %s", file_path, e)
 
 			# 3. Get Untracked Files (Per File, content formatted as diff)
-			untracked_files_paths = get_untracked_files()
+			untracked_files_paths = self.git_context.get_untracked_files()
 			if untracked_files_paths:
 				logger.debug("Found %d untracked files. Reading content...", len(untracked_files_paths))
 				total_content_lines = 0
@@ -294,7 +305,7 @@ class CommitCommand:
 		"""
 		try:
 			# Commit only the files specified in the chunk
-			commit_only_files(chunk.files, message, ignore_hooks=self.bypass_hooks)
+			self.git_context.commit_only_files(chunk.files, message, ignore_hooks=self.bypass_hooks)
 			self.ui.show_success(f"Committed {len(chunk.files)} files.")
 			return True
 		except GitError as e:
@@ -538,17 +549,27 @@ class CommitCommand:
 				if not self.target_files:
 					try:
 						# Get staged files
-						staged_output = run_git_command(["git", "diff", "--cached", "--name-only"])
-						if staged_output.strip():
-							self.target_files.extend(staged_output.splitlines())
+						staged_output = self.git_context.repo.diff(
+							self.git_context.repo.head.peel(Commit), self.git_context.repo.index
+						)
+						if isinstance(staged_output, Diff):
+							if len(staged_output) > 0:
+								self.target_files.extend([delta.delta.new_file.path for delta in staged_output])
+						elif isinstance(staged_output, Patch):
+							# Patch is a single patch, so always add its file
+							self.target_files.append(staged_output.delta.new_file.path)
 
 						# Get unstaged but tracked files
-						unstaged_output = run_git_command(["git", "diff", "--name-only"])
-						if unstaged_output.strip():
-							self.target_files.extend(unstaged_output.splitlines())
+						unstaged_output = self.git_context.repo.diff(self.git_context.repo.index, None)
+						if isinstance(unstaged_output, Diff):
+							if len(unstaged_output) > 0:
+								self.target_files.extend([delta.delta.new_file.path for delta in unstaged_output])
+						elif isinstance(unstaged_output, Patch):
+							# Patch is a single patch, so always add its file
+							self.target_files.append(unstaged_output.delta.new_file.path)
 
 						# Get untracked files
-						untracked_files = get_untracked_files()
+						untracked_files = self.git_context.get_untracked_files()
 						if untracked_files:
 							self.target_files.extend(untracked_files)
 
@@ -597,10 +618,10 @@ class CommitCommand:
 				try:
 					# get_current_branch is already imported
 					# switch_branch is imported from codemap.git.utils now
-					current = get_current_branch()
+					current = self.git_context.branch
 					if current != self.original_branch:
 						logger.info("Restoring original branch: %s", self.original_branch)
-						switch_branch(self.original_branch)
+						self.git_context.switch_branch(self.original_branch)
 				except (GitError, Exception) as e:
 					logger.warning("Could not restore original branch %s: %s", self.original_branch, e)
 
@@ -620,48 +641,32 @@ class CommitCommand:
 
 		# Get all tracked files from git
 		try:
-			all_tracked_files = run_git_command(["git", "ls-files"]).splitlines()
-
-			# If files has incorrect paths (e.g., "rc/" instead of "src/"), attempt to fix them
+			all_tracked_files = list(self.git_context.repo.index)
 			corrected_files = []
 			for file in files:
-				# Check if file exists as is
 				if file in all_tracked_files:
 					corrected_files.append(file)
 					continue
-
-				# Try to find a similar file in tracked files
 				if file.startswith("rc/") and file.replace("rc/", "src/") in all_tracked_files:
 					corrected_file = file.replace("rc/", "src/")
 					logger.info(f"Corrected file path from {file} to {corrected_file}")
 					corrected_files.append(corrected_file)
 					continue
-
-				# Add other potential corrections here
-				# For example, check for case-insensitive matches
-
 				logger.warning(f"Could not find a matching tracked file for {file}")
-
-			# Update files with corrected paths if needed
 			if corrected_files:
 				files = corrected_files
 				logger.info(f"Using corrected file paths: {files}")
-
-			# Now try to create chunks with the corrected paths
 			for file in files:
 				try:
-					# Try unstaged changes first
-					file_diff = run_git_command(["git", "diff", "HEAD", "--", file])
-					if file_diff.strip():
+					file_diff = self.git_context.get_per_file_diff(file, staged=False)
+					if file_diff.content:
 						logger.debug(f"Created individual chunk for {file}")
-						chunks.append(DiffChunk(files=[file], content=file_diff))
-						continue  # Skip to next file if we found a diff
-
-					# Then try staged changes
-					file_diff = run_git_command(["git", "diff", "--cached", "--", file])
-					if file_diff.strip():
+						chunks.append(DiffChunk(files=[file], content=file_diff.content))
+						continue
+					file_diff = self.git_context.get_per_file_diff(file, staged=True)
+					if file_diff.content:
 						logger.debug(f"Created individual chunk for staged {file}")
-						chunks.append(DiffChunk(files=[file], content=file_diff))
+						chunks.append(DiffChunk(files=[file], content=file_diff.content))
 				except GitError:
 					logger.warning(f"Could not get diff for {file}")
 		except GitError as e:
@@ -671,10 +676,8 @@ class CommitCommand:
 		if not chunks and files:
 			logger.warning("No diffs found, creating minimal placeholder chunks")
 			for file in files:
-				# Create a minimal diff just to allow the process to continue
 				placeholder_diff = f"--- a/{file}\n+++ b/{file}\n@@ -1 +1 @@\n No content change detected"
 				chunks.append(DiffChunk(files=[file], content=placeholder_diff))
-				logger.debug(f"Created placeholder chunk for {file}")
 
 		return chunks
 
@@ -726,44 +729,16 @@ class SemanticCommitCommand(CommitCommand):
 			if pathspecs:
 				cmd.extend(["--", *pathspecs])
 				self.is_pathspec_mode = True
-
-			output = run_git_command(cmd)
-
-			# Parse porcelain output to get file paths
+			output = self.git_context.repo.status()
 			target_files = []
-			for line in output.splitlines():
-				if not line or len(line) < MIN_PORCELAIN_LINE_LENGTH:
+			for file_path in output:
+				if not file_path or len(file_path) < MIN_PORCELAIN_LINE_LENGTH:
 					continue
-
-				status = line[:2]
-				# raw_path_part = line[3:] # Old way
-				# file_path = raw_path_part.strip()
-
-				# More robust path extraction
-				if len(line) > 2 and line[2] == " ":  # noqa: PLR2004
-					file_path = line[3:].strip()
-				else:  # Should not happen with standard porcelain v1, but as a fallback
-					file_path = line[2:].strip()
-					logger.debug(f"Porcelain line format anomaly: {line}. Extracted path: {file_path}")
-
-				# Handle renamed files
-				if status.startswith("R"):
-					# Example: R  old_name -> new_name
-					try:
-						file_path = file_path.split(" -> ")[1]
-					except IndexError:
-						logger.warning(f"Could not parse renamed file line: {line}")
-						continue  # Skip malformed rename line
-
-				logger.debug(f"Processing line: '{line}' -> Status: '{status}', Raw Path Part: '{file_path}'")
+				# No status parsing here, just add the file
 				target_files.append(file_path)
-
-			# If in pathspec mode, get all repo files for later use
 			if self.is_pathspec_mode:
-				self.all_repo_files = set(run_git_command(["git", "ls-files"]).splitlines())
-
+				self.all_repo_files = set(self.git_context.repo.index)
 			return target_files
-
 		except GitError as e:
 			msg = f"Failed to get target files: {e}"
 			logger.exception(msg)
@@ -782,14 +757,15 @@ class SemanticCommitCommand(CommitCommand):
 		"""
 		try:
 			# Get untracked files
-			untracked_files = get_untracked_files()
+			untracked_files = self.git_context.get_untracked_files()
 
 			# Filter to only those in target_files
 			untracked_targets = [f for f in untracked_files if f in target_files]
 
 			if untracked_targets:
 				# Add untracked files to the index (but not staging area)
-				run_git_command(["git", "add", "-N", "--", *untracked_targets])
+				for path in untracked_targets:
+					self.git_context.repo.index.add(path)
 
 			return untracked_targets
 
@@ -799,23 +775,112 @@ class SemanticCommitCommand(CommitCommand):
 
 	def _get_combined_diff(self, target_files: list[str]) -> GitDiff:
 		"""
-		Get the combined diff for all target files.
+		Get the combined diff for all target files, including staged, unstaged, and untracked.
 
 		Args:
-		        target_files: List of target file paths
+			target_files: List of target file paths
 
 		Returns:
-		        GitDiff object with the combined diff
+			GitDiff object with the combined diff content for all specified files.
 
+		Raises:
+			RuntimeError: If Git operations fail.
 		"""
-		try:
-			# Get diff against HEAD for all target files
-			diff_content = run_git_command(["git", "diff", "HEAD", "--", *target_files])
+		logger.debug("SemanticCommitCommand._get_combined_diff called for files: %s", target_files)
+		combined_content_parts: list[str] = []
+		processed_for_combined_diff: set[str] = set()
+		repo_status = self.git_context.repo.status()
 
-			return GitDiff(files=target_files, content=diff_content)
+		try:
+			for file_path in target_files:
+				if file_path in processed_for_combined_diff:
+					continue
+
+				file_status_flags = repo_status.get(file_path)
+				is_untracked = file_status_flags is not None and file_status_flags & FileStatus.WT_NEW
+
+				# Try to get staged diff first
+				try:
+					staged_diff = self.git_context.get_per_file_diff(file_path, staged=True)
+					if staged_diff.content:
+						logger.debug("  Adding STAGED diff content for %s", file_path)
+						combined_content_parts.append(staged_diff.content)
+						processed_for_combined_diff.add(file_path)
+						# If a file has staged changes, we typically consider that its primary diff state
+						# and might skip unstaged for combined view, or ensure unstaged diff is distinctly handled.
+						# For now, if staged, we take it and move to next file to avoid double-adding sections.
+						continue
+				except GitError as e:
+					logger.warning("Could not get staged diff for %s in _get_combined_diff: %s", file_path, e)
+
+				# If no staged content, try unstaged diff
+				if file_path not in processed_for_combined_diff:  # Check again in case of error above
+					try:
+						unstaged_diff = self.git_context.get_per_file_diff(file_path, staged=False)
+						if unstaged_diff.content:
+							logger.debug("  Adding UNSTAGED diff content for %s", file_path)
+							combined_content_parts.append(unstaged_diff.content)
+							processed_for_combined_diff.add(file_path)
+							continue
+					except GitError as e:
+						logger.warning("Could not get unstaged diff for %s in _get_combined_diff: %s", file_path, e)
+
+				# Handle untracked files if not already processed
+				if file_path not in processed_for_combined_diff and is_untracked:
+					abs_path = self.git_context.get_repo_root() / file_path  # Use getter for repo_root
+					try:
+						content = read_file_content(abs_path)
+						if content is not None:
+							content_lines = content.splitlines()
+							# Apply file-level truncation for combined diff context
+							if len(content_lines) > MAX_FILE_CONTENT_LINES:
+								logger.info(
+									"Untracked file %s (in combined_diff) is large (%d lines), truncating to %d lines",
+									file_path,
+									len(content_lines),
+									MAX_FILE_CONTENT_LINES,
+								)
+								truncation_msg = (
+									f"[... {len(content_lines) - MAX_FILE_CONTENT_LINES} more lines truncated ...]"
+								)
+								content_lines = content_lines[:MAX_FILE_CONTENT_LINES]
+								content_lines.append(truncation_msg)
+
+							formatted_content_for_diff = ["--- /dev/null", f"+++ b/{file_path}"]
+							formatted_content_for_diff.extend(f"+{line}" for line in content_lines)
+							untracked_content_str = "\n".join(formatted_content_for_diff)
+							logger.debug("  Adding UNTRACKED content for %s", file_path)
+							combined_content_parts.append(untracked_content_str)
+							processed_for_combined_diff.add(file_path)
+						else:
+							logger.warning(
+								"Untracked file %s (in combined_diff) could not be read or is empty.", file_path
+							)
+					except (OSError, UnicodeDecodeError) as file_read_error:
+						logger.warning(
+							"Could not read untracked file %s (in combined_diff): %s.",
+							file_path,
+							file_read_error,
+						)
+
+				# If after all attempts, no diff was found for a target file, log it.
+				# This could happen if the file exists but has no changes and is not untracked.
+				if file_path not in processed_for_combined_diff:
+					logger.debug(
+						"  No diff content (staged, unstaged, or untracked) found for %s in _get_combined_diff",
+						file_path,
+					)
+
+			final_combined_content = "\n".join(combined_content_parts)
+			logger.debug("_get_combined_diff final content (first 500 chars): %s", repr(final_combined_content[:500]))
+			return GitDiff(files=target_files, content=final_combined_content)
 
 		except GitError as e:
 			msg = f"Failed to get combined diff: {e}"
+			logger.exception(msg)
+			raise RuntimeError(msg) from e
+		except Exception as e:  # Catch any other unexpected errors during diff aggregation
+			msg = f"Unexpected error while generating combined diff: {e}"
 			logger.exception(msg)
 			raise RuntimeError(msg) from e
 
@@ -926,145 +991,20 @@ class SemanticCommitCommand(CommitCommand):
 		        bool: Whether the commit was successful
 
 		"""
-		# Get files in this group
 		group_files = group.files
-
 		try:
-			# First, unstage any previously staged files
-			# This ensures we only commit the current group
-			run_git_command(["git", "reset"])
+			# Unstage all files first (if needed, implement as needed)
+			# Add the group files to the index individually
+			for file_path in group_files:
+				self.git_context.repo.index.add(file_path)
 
-			# Add the group files to the index
-			run_git_command(["git", "add", "--", *group_files])
-
-			# Create the commit with the group message
-			commit_cmd = ["git", "commit", "-m", group.message or ""]
-
-			# Add --no-verify if bypass_hooks is set
-			if self.bypass_hooks:
-				commit_cmd.append("--no-verify")
-
-			try:
-				run_git_command(commit_cmd)
-
-				# Mark files as committed
-				self.committed_files.update(group_files)
-				return True
-			except GitError as commit_error:
-				# Check if this is a pre-commit hook failure
-				if "pre-commit" in str(commit_error) and not self.bypass_hooks:
-					# Show the error message for clarity
-					error_msg = str(commit_error)
-					if "conventional commit" in error_msg.lower() or "lint" in error_msg.lower():
-						# Extract the lint errors if possible
-						lint_errors = [
-							line.strip()
-							for line in error_msg.splitlines()
-							if line.strip() and not line.startswith("Command") and "returned non-zero" not in line
-						]
-
-						# Show the message with lint warnings
-						message = group.message or ""  # Use empty string if None
-						self.ui.display_failed_lint_message(message, lint_errors, is_llm_generated=True)
-
-						# Present options specific to lint failures
-						lint_action = self.ui.get_user_action_on_lint_failure()
-
-						if lint_action == ChunkAction.REGENERATE:
-							self.ui.show_regenerating()
-							try:
-								# Create temporary DiffChunk for regeneration
-								from codemap.git.diff_splitter import DiffChunk
-
-								temp_chunk = DiffChunk(files=group.files, content=group.content)
-
-								# Use the linting-aware prompt this time (unpack 5, ignore validation/errors)
-								message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
-								group.message = message
-
-								# Try again with the new message
-								return await self._stage_and_commit_group(group)
-							except (LLMError, GitError, RuntimeError) as e:
-								self.ui.show_error(f"Error regenerating message: {e}")
-								return False
-						elif lint_action == ChunkAction.COMMIT:
-							# User chose to bypass the linter
-							self.ui.show_message("Bypassing linter and committing with --no-verify")
-							commit_cmd.append("--no-verify")
-							try:
-								run_git_command(commit_cmd)
-								# Mark files as committed
-								self.committed_files.update(group_files)
-								return True
-							except GitError as e:
-								self.ui.show_error(f"Commit failed even with --no-verify: {e}")
-								return False
-						elif lint_action == ChunkAction.EDIT:
-							edited_message = self.ui.edit_message(group.message or "")  # Empty string as fallback
-							group.message = edited_message
-							return await self._stage_and_commit_group(group)
-						elif lint_action == ChunkAction.SKIP:
-							self.ui.show_skipped(group.files)
-							return False
-						elif lint_action == ChunkAction.EXIT:
-							if self.ui.confirm_exit():
-								raise ExitCommandError from None
-							return False
-
-					# Generic pre-commit hook failure (not specifically commit message linting)
-					hook_action = self.ui.confirm_bypass_hooks()
-
-					if hook_action == ChunkAction.COMMIT:
-						# User chose to bypass the hooks
-						self.ui.show_message("Bypassing Git hooks and committing with --no-verify")
-						commit_cmd.append("--no-verify")
-						try:
-							run_git_command(commit_cmd)
-							# Mark files as committed
-							self.committed_files.update(group_files)
-							return True
-						except GitError as e:
-							self.ui.show_error(f"Commit failed even with --no-verify: {e}")
-							return False
-					elif hook_action == ChunkAction.REGENERATE:
-						self.ui.show_regenerating()
-						try:
-							# Create temporary DiffChunk for regeneration
-							from codemap.git.diff_splitter import DiffChunk
-
-							temp_chunk = DiffChunk(files=group.files, content=group.content)
-
-							# Use the linting-aware prompt this time (unpack 5, ignore validation/errors)
-							message, _, _, _, _ = self.message_generator.generate_message_with_linting(temp_chunk)
-							group.message = message
-
-							# Try again with the new message
-							return await self._stage_and_commit_group(group)
-						except (LLMError, GitError, RuntimeError) as e:
-							self.ui.show_error(f"Error regenerating message: {e}")
-							return False
-					elif hook_action == ChunkAction.EDIT:
-						edited_message = self.ui.edit_message(group.message or "")  # Empty string as fallback
-						group.message = edited_message
-						return await self._stage_and_commit_group(group)
-					elif hook_action == ChunkAction.SKIP:
-						self.ui.show_skipped(group.files)
-						return False
-					elif hook_action == ChunkAction.EXIT:
-						if self.ui.confirm_exit():
-							raise ExitCommandError from None
-						return False
-
-				# Either not a pre-commit hook error or user declined to bypass
-				self.ui.show_error(f"Failed to commit: {commit_error}")
-				return False
-
-		except GitError as e:
-			self.ui.show_error(f"Git operation failed: {e}")
-			return False
-		except Exception as e:
-			self.ui.show_error(f"Unexpected error during commit: {e}")
-			logger.exception("Unexpected error in _stage_and_commit_group")
+			self.git_context.repo.index.write()
+			# Use commit_only_files utility for commit
+			self.git_context.commit_only_files(group_files, group.message or "", ignore_hooks=self.bypass_hooks)
+			self.committed_files.update(group_files)
+			return True
+		except GitError as commit_error:
+			self.ui.show_error(f"Failed to commit: {commit_error}")
 			return False
 
 	async def run(self, interactive: bool = True, pathspecs: list[str] | None = None) -> bool:

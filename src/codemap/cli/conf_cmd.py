@@ -47,11 +47,11 @@ def _conf_command_impl(
 	from rich.console import Console
 
 	from codemap.config.default_config_template import DEFAULT_CONFIG_TEMPLATE
-	from codemap.git.utils import get_repo_root
+	from codemap.git.utils import GitRepoContext
 
 	console = Console()
 
-	project_root = get_repo_root()
+	project_root = GitRepoContext().get_repo_root()
 	config_file_path = project_root / ".codemap.yml"
 
 	if config_file_path.exists() and not force:

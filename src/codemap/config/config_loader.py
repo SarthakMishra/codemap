@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from codemap.config.config_schema import AppConfigSchema
-from codemap.git.utils import get_repo_root
+from codemap.git.utils import GitRepoContext
 
 # For type checking only
 if TYPE_CHECKING:
@@ -104,7 +104,7 @@ class ConfigLoader:
 			return local_config
 
 		# Try repository root
-		repo_root = get_repo_root()
+		repo_root = GitRepoContext().get_repo_root()
 		self.repo_root = repo_root
 		repo_config = repo_root / ".codemap.yml"
 		if repo_config.exists():

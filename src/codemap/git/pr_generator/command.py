@@ -18,7 +18,7 @@ from codemap.git.pr_generator.utils import (
 	get_commit_messages,
 	get_existing_pr,
 )
-from codemap.git.utils import GitError, get_repo_root, run_git_command
+from codemap.git.utils import ExtendedGitRepoContext, GitError, run_git_command
 from codemap.llm import LLMClient, LLMError
 from codemap.utils.cli_utils import progress_indicator
 
@@ -44,7 +44,7 @@ class PRCommand:
 
 		"""
 		try:
-			self.repo_root = get_repo_root(path)
+			self.repo_root = ExtendedGitRepoContext.get_repo_root(path)
 
 			# Create LLM client and configs
 			from codemap.llm import LLMClient
@@ -226,7 +226,7 @@ class PRWorkflowCommand:
 		self.config_loader = config_loader
 
 		if self.config_loader.get.repo_root is None:
-			self.repo_root = get_repo_root()
+			self.repo_root = ExtendedGitRepoContext.get_repo_root()
 		else:
 			self.repo_root = self.config_loader.get.repo_root
 

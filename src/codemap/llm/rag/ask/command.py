@@ -2,12 +2,10 @@
 
 import logging
 import uuid
-from pathlib import Path
 from typing import Any, TypedDict
 
 from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
-from codemap.git.utils import get_repo_root
 from codemap.llm.client import LLMClient
 from codemap.llm.rag.interactive import RagUI
 from codemap.processor.pipeline import ProcessingPipeline
@@ -72,15 +70,8 @@ class AskCommand:
 				logger.info("ProcessingPipeline initialization complete.")
 			except Exception:
 				logger.exception("Failed to initialize ProcessingPipeline")
-				self._pipeline = None
-		return self._pipeline
 
-	@property
-	def repo_root(self) -> Path:
-		"""Return the repository root path from config or by detection."""
-		if self.config_loader.get.repo_root is None:
-			return get_repo_root()
-		return self.config_loader.get.repo_root
+		return self._pipeline
 
 	@property
 	def max_context_length(self) -> int:
@@ -178,8 +169,8 @@ class AskCommand:
 
 					# Get the file content from the repo
 					try:
-						if self.repo_root and file_path and start_line > 0 and end_line > 0:
-							repo_file_path = self.repo_root / file_path
+						if self.config_loader.get.repo_root and file_path and start_line > 0 and end_line > 0:
+							repo_file_path = self.config_loader.get.repo_root / file_path
 							if repo_file_path.exists():
 								with repo_file_path.open(encoding="utf-8") as f:
 									file_content = f.read()

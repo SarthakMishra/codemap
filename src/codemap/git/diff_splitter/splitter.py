@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 
 from codemap.git.diff_splitter.strategies import FileSplitStrategy, SemanticSplitStrategy
 from codemap.git.diff_splitter.utils import filter_valid_files, is_test_environment
-from codemap.git.utils import GitDiff, get_repo_root
+from codemap.git.utils import ExtendedGitRepoContext, GitDiff
 
 from .schemas import DiffChunk
 
@@ -42,7 +42,7 @@ class DiffSplitter:
 			self.config_loader = ConfigLoader.get_instance()
 
 		if self.config_loader.get.repo_root is None:
-			self.repo_root = get_repo_root()
+			self.repo_root = ExtendedGitRepoContext.get_repo_root()
 		else:
 			self.repo_root = self.config_loader.get.repo_root
 
