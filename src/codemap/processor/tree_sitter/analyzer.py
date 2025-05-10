@@ -56,6 +56,7 @@ class TreeSitterAnalyzer:
 	def __init__(self) -> None:
 		"""Initialize the tree-sitter analyzer."""
 		self.parsers: dict[str, Parser] = {}
+		self.ast_cache: dict[Path, tuple[float, Node, Parser]] = {}
 
 	def get_parser(self, language: str) -> Parser | None:
 		"""
@@ -84,41 +85,77 @@ class TreeSitterAnalyzer:
 			logger.debug("Failed to load language %s: %s", language, str(e))
 			return None
 
-	def parse_file(self, file_path: Path, content: str, language: str | None = None) -> tuple[Node | None, str]:
+	def parse_file(
+		self, file_path: Path, language: str | None = None
+	) -> tuple[Node | None, str, Parser | None, bytes | None]:
 		"""
-		Parse a file and return its root node and determined language.
+		Parse a file and return its root node, determined language, the parser used, and content_bytes.
+
+		Utilizes a cache to avoid re-parsing unchanged files.
 
 		Args:
 		    file_path: Path to the file to parse
-		    content: Content of the file
 		    language: Optional language override
 
 		Returns:
-		    A tuple containing the parse tree root node (or None if parsing failed)
-		    and the determined language
-
+		    A tuple containing the parse tree root node (or None if parsing failed),
+		    the determined language string, the parser instance, and the file content as bytes (if read).
 		"""
 		# Determine language if not provided
-		if not language:
-			language = get_language_by_extension(file_path)
-			if not language:
+		determined_language = language
+		if not determined_language:
+			determined_language = get_language_by_extension(file_path)
+			if not determined_language:
 				logger.debug("Could not determine language for file %s", file_path)
-				return None, ""
-
-		# Get the parser for this language
-		parser = self.get_parser(language)
-		if not parser:
-			logger.debug("No parser for language %s", language)
-			return None, language
+				return None, "", None, None
 
 		try:
-			# Parse the content using tree-sitter
-			content_bytes = content.encode("utf-8")
+			current_mtime = file_path.stat().st_mtime
+			if file_path in self.ast_cache:
+				# Assuming cache stores (mtime, ast_root, parser, content_bytes)
+				# For now, let's simplify and not cache content_bytes directly with AST to avoid large cache items
+				# We will re-read if cache hit for AST, but this is still better than re-parsing.
+				# A more advanced cache could handle content_bytes.
+				cached_mtime, cached_tree_root, cached_parser = self.ast_cache[file_path]
+				if current_mtime == cached_mtime:
+					logger.debug("AST cache hit for: %s. Content will be re-read by caller if needed.", file_path)
+					# To return content_bytes here, we would need to have cached it or re-read it.
+					# For simplicity of this step, parse_file will return None for content_bytes
+					# on a pure AST cache hit.
+					# The caller (analyze_file) will then read it. The main win (no re-parse) is achieved.
+					return cached_tree_root, determined_language, cached_parser, None
+		except FileNotFoundError:
+			logger.warning("File not found during mtime check: %s", file_path)
+			if file_path in self.ast_cache:
+				del self.ast_cache[file_path]
+			return None, determined_language, None, None
+
+		parser = self.get_parser(determined_language)
+		if not parser:
+			logger.debug("No parser for language %s", determined_language)
+			return None, determined_language, None, None
+
+		try:
+			with file_path.open("rb") as f:
+				content_bytes = f.read()
 			tree = parser.parse(content_bytes)
-			return tree.root_node, language
+			root_node = tree.root_node
+			current_mtime_after_read = file_path.stat().st_mtime
+			self.ast_cache[file_path] = (
+				current_mtime_after_read,
+				root_node,
+				parser,
+			)  # Not caching content_bytes in AST cache for now
+			logger.debug("Parsed and cached AST for: %s", file_path)
+			return root_node, determined_language, parser, content_bytes  # Return read content_bytes
+		except FileNotFoundError:
+			logger.warning("File not found during parsing: %s", file_path)
+			if file_path in self.ast_cache:
+				del self.ast_cache[file_path]
+			return None, determined_language, parser, None
 		except Exception:
 			logger.exception("Failed to parse file %s", file_path)
-			return None, language
+			return None, determined_language, parser, None
 
 	def get_syntax_handler(self, language: str) -> LanguageSyntaxHandler | None:
 		"""
@@ -241,78 +278,56 @@ class TreeSitterAnalyzer:
 	def analyze_file(
 		self,
 		file_path: Path,
-		content: str,
 		language: str | None = None,
 	) -> dict:
 		"""
 		Analyze a file and return its structural information.
 
+		Uses cached ASTs.
+		The returned dictionary will include a 'full_content_str' key
+		if the file content was successfully read.
+
 		Args:
-		    file_path: Path to the file to analyze
-		    content: Content of the file
+		    file_path: Path to the file
 		    language: Optional language override
-		    git_metadata: Optional Git metadata
 
 		Returns:
-		    Dict with file analysis information
-
+		    Structured analysis of the file or an empty dict on failure.
+		    Includes 'full_content_str' with the file's decoded content if read.
 		"""
-		# Parse the file
-		root_node, determined_language = self.parse_file(file_path, content, language)
-		if not root_node or not determined_language:
-			return {
-				"file": str(file_path),
-				"language": determined_language or "unknown",
-				"success": False,
-				"error": "Failed to parse file",
-			}
+		root_node, resolved_language, _, read_content_bytes = self.parse_file(file_path, language)
 
-		# Get handler for the language
-		handler = self.get_syntax_handler(determined_language)
+		if not root_node or not resolved_language:
+			return {}
+
+		handler = self.get_syntax_handler(resolved_language)
 		if not handler:
-			return {
-				"file": str(file_path),
-				"language": determined_language,
-				"success": False,
-				"error": f"No handler for language {determined_language}",
-			}
+			logger.debug("No syntax handler for language %s", resolved_language)
+			return {}
 
-		# Analyze the root node
-		content_bytes = content.encode("utf-8")
-		entity_type = handler.get_entity_type(root_node, None, content_bytes)
-		if entity_type == EntityType.UNKNOWN:
-			entity_type = EntityType.MODULE  # Default to MODULE type
+		content_bytes_for_analysis = read_content_bytes
+		decoded_full_content_str = None
 
-		# Extract module-level docstring
-		module_description, module_docstring_node = handler.find_docstring(root_node, content_bytes)
+		if content_bytes_for_analysis is None:
+			try:
+				with file_path.open("rb") as f:
+					content_bytes_for_analysis = f.read()
+			except Exception:
+				logger.exception("Failed to re-read file content for analysis %s", file_path)
+				return {}
 
-		# Create result
-		result = {
-			"file": str(file_path),
-			"language": determined_language,
-			"success": True,
-			"type": entity_type.name,
-			"name": file_path.stem,
-			"location": {
-				"start_line": root_node.start_point[0] + 1,
-				"end_line": root_node.end_point[0] + 1,
-				"start_col": root_node.start_point[1],
-				"end_col": root_node.end_point[1],
-			},
-			"docstring": module_description,
-			"children": [],
-		}
+		if content_bytes_for_analysis is not None:
+			try:
+				decoded_full_content_str = content_bytes_for_analysis.decode("utf-8", errors="ignore")
+			except Exception:
+				logger.exception("Failed to decode file content for %s", file_path)
+				# Continue without decoded_full_content_str if decoding fails
 
-		# Process children of the root node
-		children_to_process = handler.get_children_to_process(root_node, None)
-		for child in children_to_process:
-			# Skip the module docstring node if found
-			if module_docstring_node and child == module_docstring_node:
-				continue
+		# Perform node-level analysis (recursive)
+		analysis_data = self.analyze_node(root_node, content_bytes_for_analysis, file_path, resolved_language, handler)
 
-			child_result = self.analyze_node(child, content_bytes, file_path, determined_language, handler)
+		# Add the full decoded content to the top-level result if available
+		if decoded_full_content_str is not None:
+			analysis_data["full_content_str"] = decoded_full_content_str
 
-			if child_result:  # Only add non-empty results
-				result["children"].append(child_result)
-
-		return result
+		return analysis_data

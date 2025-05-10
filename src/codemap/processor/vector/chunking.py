@@ -313,18 +313,26 @@ class TreeSitterChunker:
 		    CodeChunk dictionaries, each representing a semantically rich code chunk.
 
 		"""
-		try:
-			content = read_file_content(file_path)
-			if content is None:
-				logger.debug("Skipping file %s - file does not exist or cannot be read", file_path)
-				return
+		content: str | None = None
+		file_lines: list[str] = []
 
+		try:
 			# Generate the LODEntity tree for the file using the specified level of detail
 			root_entity = self.lod_generator.generate_lod(file_path, lod_level)
 
 			if not root_entity:
 				logger.debug("LODGenerator returned no entity for %s, skipping chunking", file_path)
 				return
+
+			# Try to get full_content_str from root_entity metadata (set by LODGenerator)
+			content = root_entity.metadata.get("full_content_str")
+
+			if content is None:  # Fallback if not provided by LODGenerator
+				logger.debug("full_content_str not in root_entity metadata for %s. Reading file directly.", file_path)
+				content = read_file_content(file_path)
+				if content is None:
+					logger.debug("Skipping file %s - could not obtain content via LOD or direct read", file_path)
+					return
 
 			# Language should be available in the root entity metadata now
 			resolved_language = root_entity.metadata.get("language", "unknown")
@@ -389,9 +397,10 @@ class TreeSitterChunker:
 			logger.debug("Failed to chunk file %s: %s", file_path, str(e))
 			return
 
-	def _make_git_metadata(self, file_path: str, start_line: int, end_line: int) -> GitMetadataSchema:
+	def _make_git_metadata(self, file_path_for_git: str, start_line: int, end_line: int) -> GitMetadataSchema:
 		if self.git_context:
-			return self.git_context.get_metadata_schema(file_path, start_line, end_line)
+			# file_path_for_git is now expected to be relative by GitRepoContext
+			return self.git_context.get_metadata_schema(file_path_for_git, start_line, end_line)
 		# fallback: return empty/default metadata
 		return GitMetadataSchema(
 			git_hash="",
@@ -427,14 +436,44 @@ class TreeSitterChunker:
 		Returns:
 			ChunkMetadataSchema: The chunk metadata.
 		"""
+		git_path_for_context = file_path  # Default to original path
+
+		current_repo_root: Path | None = None
+		if self.git_context:
+			current_repo_root = self.git_context.repo_root  # Access the initialized repo_root
+
+		if current_repo_root:  # Check if git_context was available and its repo_root is set
+			try:
+				abs_file_path = Path(file_path)
+				if not abs_file_path.is_absolute():
+					logger.warning(
+						f"File path {file_path} provided to _make_chunk_metadata was not absolute. "
+						"Ensure chunk_file receives absolute paths for correct relative path calculation."
+					)
+
+				# current_repo_root is already a Path object if not None
+				relative_path = abs_file_path.relative_to(current_repo_root)
+				git_path_for_context = str(relative_path)
+			except ValueError:
+				logger.warning(
+					f"File path {file_path} could not be made relative to "
+					f"git repo root {current_repo_root}. Using original path "
+					"for Git metadata. This might lead to issues if the "
+					"path is not understood by Git operations."
+				)
+			except Exception:  # General catch-all, ensure logger.exception is used
+				logger.exception(
+					f"Unexpected error when trying to make path relative {file_path} to {current_repo_root}"
+				)
+
 		return ChunkMetadataSchema(
 			chunk_id=chunk_id,
-			file_path=file_path,
+			file_path=file_path,  # Original file_path for general metadata
 			start_line=start_line,
 			end_line=end_line,
 			entity_type=entity_type,
 			entity_name=entity_name or "",
 			language=language,
 			hierarchy_path=hierarchy_path,
-			git_metadata=self._make_git_metadata(file_path, start_line, end_line),
+			git_metadata=self._make_git_metadata(git_path_for_context, start_line, end_line),
 		)
