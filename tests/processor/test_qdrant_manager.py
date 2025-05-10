@@ -24,7 +24,6 @@ def mock_config_loader() -> MagicMock:
 
 	# Create a mock embedding schema
 	embedding_config = EmbeddingSchema(
-		qdrant_collection_name="test_collection",
 		dimension=768,
 		dimension_metric="cosine",
 		api_key="test_api_key",
