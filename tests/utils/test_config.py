@@ -70,7 +70,7 @@ class TestConfigLoader(FileSystemTestBase):
 			assert isinstance(config_loader._app_config, AppConfigSchema)
 			# Verify default values from schema are present
 			assert config_loader._app_config.llm.model == "openai:gpt-4o-mini"
-			assert config_loader._app_config.embedding.model_name == "voyage-code-3"
+			assert config_loader._app_config.embedding.model_name == "voyage-3-lite"
 
 	def test_custom_config_loading(self) -> None:
 		"""Test loading custom configuration from file."""
