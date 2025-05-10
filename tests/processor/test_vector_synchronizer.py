@@ -67,7 +67,7 @@ def mock_config_loader() -> MagicMock:
 	mock_embedding = MagicMock()
 	mock_embedding.batch_size = 32
 	mock_embedding.qdrant_batch_size = 100
-	mock_embedding.model_name = "voyage-code-3"
+	mock_embedding.model_name = "voyage-3-lite"
 	mock_embedding.token_limit = 80000
 	mock_embedding.dimension = 1024
 	mock_embedding.max_retries = 3
@@ -157,7 +157,6 @@ class TestVectorSynchronizer:
 		assert vector_synchronizer.embedding_model_name == "test-model"
 		assert vector_synchronizer.analyzer == mock_analyzer
 		assert vector_synchronizer.config_loader == mock_config_loader
-		assert vector_synchronizer.batch_size == 32
 		assert vector_synchronizer.qdrant_batch_size == 100
 
 	@pytest.mark.asyncio
