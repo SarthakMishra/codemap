@@ -8,7 +8,7 @@ from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
 from codemap.git.utils import get_repo_root
 from codemap.llm.client import LLMClient
-from codemap.llm.rag import RagUI
+from codemap.llm.rag.interactive import RagUI
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
 
@@ -213,16 +213,11 @@ class AskCommand:
 		except Exception:
 			logger.exception("Failed to store current query turn in DB")
 
-		# Get LLM config from the injected ConfigLoader
-		# At this point self.config_loader is guaranteed to be a valid instance
-		llm_config = self.config_loader.get.llm.model_dump()
-
 		# Call LLM with context
 		try:
 			with progress_indicator("Waiting for LLM response..."):
 				answer = self.llm_client.completion(
 					messages=[{"role": "user", "content": prompt}],
-					**llm_config,
 				)
 			logger.debug(f"LLM response: {answer}")
 

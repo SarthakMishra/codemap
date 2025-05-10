@@ -12,18 +12,6 @@ if TYPE_CHECKING:
 	from codemap.config import ConfigLoader
 
 
-def get_retry_settings(config_loader: "ConfigLoader") -> tuple[int, int]:
-	"""Get retry settings from config."""
-	embedding_config = config_loader.get.embedding
-	# Use max_retries directly for voyageai.Client
-	max_retries = embedding_config.max_retries
-	# retry_delay is handled internally by voyageai client's exponential backoff
-	# We can still keep the config value if needed elsewhere, but timeout is more relevant here.
-	# Increased default timeout
-	timeout = embedding_config.timeout
-	return max_retries, timeout
-
-
 def generate_embedding(texts: list[str], config_loader: "ConfigLoader") -> list[list[float]]:
 	"""
 	Generate embeddings for a list of texts using model2vec.
