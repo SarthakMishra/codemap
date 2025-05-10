@@ -14,7 +14,6 @@ from pygit2 import (
 	Patch,
 )
 from pygit2.enums import FileStatus
-from pygit2.repository import Repository
 
 from codemap.processor.utils.git_utils import GitRepoContext
 
@@ -68,11 +67,7 @@ class ExtendedGitRepoContext(GitRepoContext):
 
 	def __init__(self) -> None:
 		"""Initialize the ExtendedGitRepoContext with the given repository path."""
-		if self._repo_root is None:
-			self._repo_root = self.get_repo_root()
-		self.repo = Repository(str(self._repo_root))
-		self.branch = self._get_branch()
-		self.tracked_files = self._get_tracked_files()
+		super().__init__()
 
 	@classmethod
 	def validate_repo_path(cls, path: Path | None = None) -> Path | None:

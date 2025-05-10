@@ -89,10 +89,15 @@ class CommitCommand:
 			self._splitter = None
 			self._message_generator = None
 
-			if self.config_loader.get.repo_root is None:
-				self.repo_root = self.git_context.get_repo_root()
-			else:
-				self.repo_root = self.config_loader.get.repo_root
+			current_repo_root = self.config_loader.get.repo_root
+
+			if not current_repo_root:
+				current_repo_root = self.git_context.repo_root
+
+			if not current_repo_root:
+				current_repo_root = self.git_context.get_repo_root()
+
+			self.repo_root = current_repo_root
 
 		except GitError as e:
 			raise RuntimeError(str(e)) from e
@@ -827,7 +832,13 @@ class SemanticCommitCommand(CommitCommand):
 
 				# Handle untracked files if not already processed
 				if file_path not in processed_for_combined_diff and is_untracked:
-					abs_path = self.git_context.get_repo_root() / file_path  # Use getter for repo_root
+					repo_root = self.git_context.repo_root
+
+					if repo_root is None:
+						repo_root = self.git_context.get_repo_root()
+
+					abs_path = repo_root / file_path
+
 					try:
 						content = read_file_content(abs_path)
 						if content is not None:

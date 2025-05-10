@@ -73,6 +73,10 @@ class ProcessingPipeline:
 		self.git_context = GitRepoContext()
 
 		self.repo_path = self.config_loader.get.repo_root
+
+		if not self.repo_path:
+			self.repo_path = self.git_context.repo_root
+
 		if not self.repo_path:
 			self.repo_path = self.git_context.get_repo_root()
 
@@ -242,9 +246,7 @@ class ProcessingPipeline:
 			logger.info("Pipeline already async initialized.")
 			return
 
-		init_description = "Initializing pipeline components..."
-
-		with progress_indicator(init_description):
+		with progress_indicator("Initializing pipeline components..."):
 			try:
 				# Get embedding configuration for Qdrant URL
 				embedding_config = self.config_loader.get.embedding

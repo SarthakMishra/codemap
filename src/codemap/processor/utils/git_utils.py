@@ -3,11 +3,15 @@
 import logging
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pygit2 import Commit, discover_repository
 from pygit2.repository import Repository
 
 from codemap.processor.vector.schema import GitBlameSchema, GitMetadataSchema
+
+if TYPE_CHECKING:
+	from pygit2.blame import Blame
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +23,7 @@ class GitRepoContext:
 
 	logger = logging.getLogger(__name__)
 
-	_repo_root: Path | None = None
+	repo_root: Path | None = None
 	_instance: "GitRepoContext | None" = None
 
 	@classmethod
@@ -41,11 +45,13 @@ class GitRepoContext:
 
 	def __init__(self) -> None:
 		"""Initialize the GitRepoContext with the given repository path."""
-		if self._repo_root is None:
-			self._repo_root = self.get_repo_root()
-		self.repo = Repository(str(self._repo_root))
+		if self.repo_root is None:
+			self.repo_root = self.get_repo_root()
+		self.repo = Repository(str(self.repo_root))
 		self.branch = self._get_branch()
+		self.exclude_patterns = self._get_exclude_patterns()
 		self.tracked_files = self._get_tracked_files()
+		self._blame_cache: dict[str, Blame] = {}  # Cache for blame objects
 
 	@staticmethod
 	def _get_exclude_patterns() -> list[str]:
@@ -71,6 +77,7 @@ class GitRepoContext:
 			r"^dist/",
 			r"^build/",
 			r"^\.git/",
+			r"^typings/",
 			r"\.pyc$",
 			r"\.pyo$",
 			r"\.so$",
@@ -87,8 +94,7 @@ class GitRepoContext:
 				patterns.append(pattern)
 		return patterns
 
-	@classmethod
-	def _should_exclude_path(cls, file_path: str) -> bool:
+	def _should_exclude_path(self, file_path: str) -> bool:
 		"""
 		Check if a file path should be excluded from processing based on patterns.
 
@@ -98,10 +104,9 @@ class GitRepoContext:
 		Returns:
 			True if the path should be excluded, False otherwise
 		"""
-		exclude_patterns = cls._get_exclude_patterns()
-		for pattern in exclude_patterns:
+		for pattern in self.exclude_patterns:
 			if re.search(pattern, file_path):
-				cls.logger.debug(f"Excluding file from processing due to pattern '{pattern}': {file_path}")
+				self.logger.debug(f"Excluding file from processing due to pattern '{pattern}': {file_path}")
 				return True
 		return False
 
@@ -147,7 +152,7 @@ class GitRepoContext:
 				return ""
 			tree = commit.tree
 			entry = tree[file_path]
-			return entry.hex
+			return str(entry.id)
 		except KeyError:
 			self.logger.warning(f"File {file_path} not found in HEAD tree of repo {self.repo.path}")
 			return ""
@@ -168,23 +173,76 @@ class GitRepoContext:
 			list[GitBlameSchema]: A list of Git blame results.
 		"""
 		try:
-			blame = self.repo.blame(file_path)
-			results = []
-			for hunk in blame:
-				line_nums = range(hunk.final_start_line_number, hunk.final_start_line_number + hunk.lines_in_hunk)
-				results.extend(
-					GitBlameSchema(
-						commit_id=hunk.final_commit_id.hex,
-						date=str(hunk.final_commit_time),
-						author_name=hunk.final_signature.name,
-						start_line=line_num,
-						end_line=line_num,
+			blame_obj: Blame
+			if file_path not in self._blame_cache:
+				# Ensure file_path is relative to repo root for pygit2.blame
+				self._blame_cache[file_path] = self.repo.blame(file_path)
+			blame_obj = self._blame_cache[file_path]
+
+			# Using a dictionary to collect unique commit information for the given line range
+			# Key: commit_id_str, Value: GitBlameSchema
+			processed_commits: dict[str, GitBlameSchema] = {}
+
+			for line_num_1_indexed in range(start_line, end_line + 1):
+				if line_num_1_indexed <= 0:
+					continue  # Line numbers are 1-indexed
+				try:
+					# pygit2.Blame.__getitem__ expects 0-indexed line number
+					hunk = blame_obj[line_num_1_indexed - 1]
+				except IndexError:
+					# This can happen if start_line/end_line are outside the file's actual line count
+					self.logger.warning(
+						f"Line {line_num_1_indexed} is out of range for "
+						f"blame in file {file_path}. Total lines in "
+						f"blame: {len(blame_obj)}."
 					)
-					for line_num in line_nums
-					if start_line <= line_num <= end_line
+					continue
+
+				commit_id_str = str(hunk.final_commit_id) if hunk.final_commit_id else "Unknown"
+
+				# If this commit_id is already in processed_commits, it means we've started
+				# processing this commit's hunk. We update its end_line.
+				if commit_id_str in processed_commits:
+					current = processed_commits[commit_id_str]
+					current.end_line = max(current.end_line, line_num_1_indexed)
+					# Continue to the next line, as we only need one entry per commit within the chunk,
+					# but covering the full range of lines it affected in this chunk.
+					continue
+
+				# New commit_id encountered for this chunk, gather its details
+				author_name = "Unknown"
+				commit_date_str = "Unknown"
+
+				if hunk.final_commit_id:
+					commit_details_obj = None
+					try:
+						git_object = self.repo.get(hunk.final_commit_id)
+						if isinstance(git_object, Commit):
+							commit_details_obj = git_object
+							if commit_details_obj.author:
+								author_name = commit_details_obj.author.name
+								commit_date_str = str(commit_details_obj.author.time)
+							elif commit_details_obj.committer:
+								author_name = commit_details_obj.committer.name
+								commit_date_str = str(commit_details_obj.committer.time)
+							else:
+								self.logger.warning(f"Commit {hunk.final_commit_id} has no author or committer.")
+						elif git_object is not None:
+							self.logger.warning(f"Object {hunk.final_commit_id} is not a Commit: {type(git_object)}")
+					except (KeyError, TypeError, GitError) as e:
+						self.logger.warning(f"Error retrieving details for commit {hunk.final_commit_id}: {e}")
+
+				processed_commits[commit_id_str] = GitBlameSchema(
+					commit_id=commit_id_str,
+					date=commit_date_str,
+					author_name=author_name,
+					start_line=line_num_1_indexed,  # First line this commit is seen for in the current range
+					end_line=line_num_1_indexed,  # Last line this commit is seen for (so far)
 				)
-			return results
-		except Exception:
+
+			return list(processed_commits.values())
+
+		except Exception:  # Catch broader exceptions like repo.blame() failing or other issues
 			self.logger.exception(f"Failed to get git blame for {file_path}")
 			return []
 
