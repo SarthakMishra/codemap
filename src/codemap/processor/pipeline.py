@@ -401,18 +401,14 @@ class ProcessingPipeline:
 
 		try:
 			# 1. Generate query embedding (must be async)
-			query_embedding = await generate_embedding(
-				query,
-				model=self.embedding_model_name,
-				config_loader=self.config_loader,  # Pass ConfigLoader to generate_embedding
-			)
+			query_embedding = generate_embedding([query], self.config_loader)
 			if query_embedding is None:
 				logger.error("Failed to generate embedding for query.")
 				return None
 
 			# Convert to numpy array if needed by Qdrant client, though list is often fine
 			# query_vector = np.array(query_embedding, dtype=np.float32)
-			query_vector = query_embedding  # Qdrant client typically accepts list[float]
+			query_vector = query_embedding[0]  # Qdrant client typically accepts list[float]
 
 			# 2. Process filter parameters to Qdrant filter format
 			query_filter = None

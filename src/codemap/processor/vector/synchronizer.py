@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
-from codemap.processor.utils.embedding_utils import generate_embeddings_batch
+from codemap.processor.utils.embedding_utils import generate_embedding
 from codemap.processor.utils.git_utils import _should_exclude_path, get_git_tracked_files
 from codemap.processor.vector.chunking import CodeChunk, TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
@@ -226,10 +226,7 @@ class VectorSynchronizer:
 		logger.info(f"Processing batch of {len(chunk_batch)} chunks for embedding and upsert.")
 		texts_to_embed = [chunk["content"] for chunk in chunk_batch]
 
-		# Use the enhanced generate_embeddings_batch function
-		embeddings: list[list[float]] | None = await generate_embeddings_batch(
-			texts=texts_to_embed, model=self.embedding_model_name, config_loader=self.config_loader
-		)
+		embeddings = generate_embedding(texts_to_embed, self.config_loader)
 
 		if embeddings is None or len(embeddings) != len(chunk_batch):
 			logger.error(
