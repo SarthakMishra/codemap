@@ -673,5 +673,4 @@ def create_qdrant_point(chunk_id: str, vector: list[float], payload: dict[str, A
 	except ValueError:
 		point_id = chunk_id
 
-	# Keep type ignore for ExtendedPointId union issue
-	return PointStruct(id=point_id, vector=vector, payload=payload)  # type: ignore[arg-type]
+	return PointStruct(id=point_id, vector=vector, payload=payload)
