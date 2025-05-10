@@ -57,7 +57,6 @@ class VectorSynchronizer:
 
 		# Get configuration values
 		embedding_config = self.config_loader.get.embedding
-		self.batch_size = embedding_config.batch_size
 		self.qdrant_batch_size = embedding_config.qdrant_batch_size
 
 		logger.info(
@@ -228,7 +227,7 @@ class VectorSynchronizer:
 		texts_to_embed = [chunk["content"] for chunk in chunk_batch]
 
 		# Use the enhanced generate_embeddings_batch function
-		embeddings = await generate_embeddings_batch(
+		embeddings: list[list[float]] | None = await generate_embeddings_batch(
 			texts=texts_to_embed, model=self.embedding_model_name, config_loader=self.config_loader
 		)
 
@@ -331,19 +330,9 @@ class VectorSynchronizer:
 						logger.exception(f"Error processing file {file_path} during sync")
 						continue
 
-			# Process chunks in batches
-			if all_chunks:
-				logger.info(f"Collected {len(all_chunks)} chunks from {files_processed_count} files.")
-				count = 0
-				# Process in batches of self.batch_size
-				with progress_indicator(
-					"Processing chunks...", style="progress", total=len(all_chunks)
-				) as update_progress:
-					for i in range(0, len(all_chunks), self.batch_size):
-						batch = all_chunks[i : i + self.batch_size]
-						upserted_count = await self._process_and_upsert_batch(batch)
-						count += upserted_count
-						update_progress("Processing chunks...", count, len(all_chunks))
+			# Process chunks
+			with progress_indicator("Processing chunks..."):
+				await self._process_and_upsert_batch(all_chunks)
 
 			sync_success = True
 			logger.info("Vector index synchronization completed successfully.")
