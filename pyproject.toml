@@ -93,6 +93,9 @@ docs = [
     "mkdocs-mermaid2-plugin>=1.2.1",
     "mkdocstrings-python>=1.16.10",
 ]
+model2vec = [
+    "model2vec>=0.5.0",
+]
 
 [tool.pyright]
 # Define included and excluded directories
