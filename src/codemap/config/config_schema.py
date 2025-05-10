@@ -54,15 +54,13 @@ class EmbeddingClusteringSchema(BaseModel):
 class EmbeddingSchema(BaseModel):
 	"""Configuration for the embedding."""
 
-	model_name: str = "voyage-code-3"
-	per_call_token_limit: int = 80000
-	per_call_batch_size: int = 50
-	dimension: int = 512
+	model_name: str = "minishlab/potion-base-8M"
+	dimension: int = 256
 	dimension_metric: str = "cosine"
 	max_retries: int = 3
 	retry_delay: int = 5
 	max_content_length: int = 5000
-	qdrant_batch_size: int = 50
+	qdrant_batch_size: int = 1000
 	url: str = "http://localhost:6333"
 	api_key: str | None = None
 	timeout: int = 120
