@@ -14,6 +14,7 @@ class LLMSchema(BaseModel):
 	"""Configuration for the LLM."""
 
 	model: str = "openai:gpt-4o-mini"
+	base_url: str | None = None
 	temperature: float = 0.5
 	max_output_tokens: int = 1024
 
