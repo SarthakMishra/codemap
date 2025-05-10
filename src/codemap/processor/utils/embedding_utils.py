@@ -8,7 +8,6 @@ from codemap.utils.cli_utils import progress_indicator
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-
 	from codemap.config import ConfigLoader
 
 
