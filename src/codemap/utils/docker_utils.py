@@ -31,16 +31,20 @@ POSTGRES_STORAGE_PATH = ".codemap_cache/postgres_data"
 
 async def is_docker_running() -> bool:
 	"""Check if the Docker daemon is running."""
-	client = None
-	try:
-		client = docker.from_env()
-		client.ping()
-		return True
-	except DockerException:
-		return False
-	finally:
-		if client is not None:
-			client.close()
+
+	def _check_docker_sync() -> bool:
+		client = None
+		try:
+			client = docker.from_env()
+			client.ping()
+			return True
+		except DockerException:
+			return False
+		finally:
+			if client is not None:
+				client.close()
+
+	return await asyncio.to_thread(_check_docker_sync)
 
 
 async def is_container_running(container_name: str) -> bool:
@@ -54,20 +58,24 @@ async def is_container_running(container_name: str) -> bool:
 	    True if the container is running, False otherwise
 
 	"""
-	client = None
-	try:
-		client = docker.from_env()
+
+	def _check_container_sync(name: str) -> bool:
+		client = None
 		try:
-			container = client.containers.get(container_name)
-			return container.status == "running"
-		except NotFound:
+			client = docker.from_env()
+			try:
+				container = client.containers.get(name)
+				return container.status == "running"
+			except NotFound:
+				return False
+		except DockerException:
+			logger.exception("Docker error while checking container status for %s", name)
 			return False
-	except DockerException:
-		logger.exception("Docker error while checking container status")
-		return False
-	finally:
-		if client is not None:
-			client.close()
+		finally:
+			if client is not None:
+				client.close()
+
+	return await asyncio.to_thread(_check_container_sync, container_name)
 
 
 async def pull_image_if_needed(image_name: str) -> bool:
@@ -81,28 +89,32 @@ async def pull_image_if_needed(image_name: str) -> bool:
 	    True if successful, False otherwise
 
 	"""
-	client = None
-	try:
-		client = docker.from_env()
+
+	def _pull_image_sync(name: str) -> bool:
+		client = None
 		try:
-			client.images.get(image_name)
-			logger.info(f"Image {image_name} already exists locally")
-			return True
-		except ImageNotFound:
-			logger.info(f"Pulling image {image_name}...")
+			client = docker.from_env()
 			try:
-				client.images.pull(image_name)
-				logger.info(f"Successfully pulled image {image_name}")
+				client.images.get(name)
+				logger.info(f"Image {name} already exists locally")
 				return True
-			except APIError:
-				logger.exception(f"Failed to pull image {image_name}")
-				return False
-	except DockerException:
-		logger.exception("Docker error")
-		return False
-	finally:
-		if client is not None:
-			client.close()
+			except ImageNotFound:
+				logger.info(f"Pulling image {name}...")
+				try:
+					client.images.pull(name)
+					logger.info(f"Successfully pulled image {name}")
+					return True
+				except APIError:
+					logger.exception(f"Failed to pull image {name}")
+					return False
+		except DockerException:  # Catch potential errors from images.get()
+			logger.exception(f"Docker error while checking image {name}")
+			return False
+		finally:
+			if client is not None:
+				client.close()
+
+	return await asyncio.to_thread(_pull_image_sync, image_name)
 
 
 async def ensure_volume_path_exists(path: str) -> None:
@@ -113,7 +125,11 @@ async def ensure_volume_path_exists(path: str) -> None:
 	    path: Path to ensure exists
 
 	"""
-	Path(path).mkdir(parents=True, exist_ok=True)
+
+	def _ensure_path_sync(p: str) -> None:
+		Path(p).mkdir(parents=True, exist_ok=True)
+
+	await asyncio.to_thread(_ensure_path_sync, path)
 
 
 async def start_qdrant_container() -> bool:
@@ -124,64 +140,75 @@ async def start_qdrant_container() -> bool:
 	    True if successful, False otherwise
 
 	"""
-	client = None
-	try:
-		client = docker.from_env()
 
-		# Ensure image is available
-		if not await pull_image_if_needed(QDRANT_IMAGE):
-			return False
-
-		# Ensure storage directory exists
-		await ensure_volume_path_exists(QDRANT_STORAGE_PATH)
-
-		# Check if container already exists
+	def _start_qdrant_sync() -> bool:
+		client = None
 		try:
-			container = client.containers.get(QDRANT_CONTAINER_NAME)
-			if container.status == "running":
-				logger.info(f"Container {QDRANT_CONTAINER_NAME} is already running")
+			client = docker.from_env()
+
+			# Ensure image is available (This function is already async, called separately)
+			# if not await pull_image_if_needed(QDRANT_IMAGE):
+			# 	return False
+
+			# Ensure storage directory exists (This function is already async, called separately)
+			# await ensure_volume_path_exists(QDRANT_STORAGE_PATH)
+
+			# Check if container already exists
+			try:
+				container = client.containers.get(QDRANT_CONTAINER_NAME)
+				if container.status == "running":
+					logger.info(f"Container {QDRANT_CONTAINER_NAME} is already running")
+					return True
+
+				# If container exists but is not running, start it
+				logger.info(f"Starting existing container {QDRANT_CONTAINER_NAME}")
+				container.start()
+				logger.info(f"Started container {QDRANT_CONTAINER_NAME}")
 				return True
 
-			# If container exists but is not running, start it
-			logger.info(f"Starting existing container {QDRANT_CONTAINER_NAME}")
-			container.start()
-			logger.info(f"Started container {QDRANT_CONTAINER_NAME}")
-			return True
+			except NotFound:
+				# Container doesn't exist, create and start it
+				abs_storage_path = str(Path(QDRANT_STORAGE_PATH).absolute())
 
-		except NotFound:
-			# Container doesn't exist, create and start it
-			abs_storage_path = str(Path(QDRANT_STORAGE_PATH).absolute())
+				logger.info(f"Creating and starting container {QDRANT_CONTAINER_NAME}")
 
-			logger.info(f"Creating and starting container {QDRANT_CONTAINER_NAME}")
+				# Define volume binding in Docker SDK format
+				volumes: list[str] = [f"{abs_storage_path}:/qdrant/storage:rw"]
 
-			# Define volume binding in Docker SDK format
-			volumes: list[str] = [f"{abs_storage_path}:/qdrant/storage:rw"]
+				# Define port mapping
+				ports: dict[str, int | list[int] | tuple[str, int] | None] = {
+					f"{QDRANT_HTTP_PORT}/tcp": QDRANT_HOST_PORT,
+					f"{QDRANT_GRPC_PORT}/tcp": QDRANT_GRPC_PORT,
+				}
 
-			# Define port mapping
-			ports: dict[str, int | list[int] | tuple[str, int] | None] = {
-				f"{QDRANT_HTTP_PORT}/tcp": QDRANT_HOST_PORT,
-				f"{QDRANT_GRPC_PORT}/tcp": QDRANT_GRPC_PORT,
-			}
+				restart_policy = {"Name": "always"}
 
-			restart_policy = {"Name": "always"}
+				client.containers.run(
+					image=QDRANT_IMAGE,
+					name=QDRANT_CONTAINER_NAME,
+					ports=ports,
+					volumes=volumes,
+					detach=True,
+					restart_policy=restart_policy,  # type: ignore[arg-type]
+				)
+				logger.info(f"Created and started container {QDRANT_CONTAINER_NAME}")
+				return True
 
-			client.containers.run(
-				image=QDRANT_IMAGE,
-				name=QDRANT_CONTAINER_NAME,
-				ports=ports,
-				volumes=volumes,
-				detach=True,
-				restart_policy=restart_policy,  # type: ignore[arg-type]
-			)
-			logger.info(f"Created and started container {QDRANT_CONTAINER_NAME}")
-			return True
+		except DockerException:
+			logger.exception("Docker error while starting Qdrant container")
+			return False
+		finally:
+			if client is not None:
+				client.close()
 
-	except DockerException:
-		logger.exception("Docker error while starting Qdrant container")
+	# Ensure image is available
+	if not await pull_image_if_needed(QDRANT_IMAGE):
 		return False
-	finally:
-		if client is not None:
-			client.close()
+
+	# Ensure storage directory exists
+	await ensure_volume_path_exists(QDRANT_STORAGE_PATH)
+
+	return await asyncio.to_thread(_start_qdrant_sync)
 
 
 async def start_postgres_container() -> bool:
@@ -192,62 +219,73 @@ async def start_postgres_container() -> bool:
 	    True if successful, False otherwise
 
 	"""
-	client = None
-	try:
-		client = docker.from_env()
 
-		# Ensure image is available
-		if not await pull_image_if_needed(POSTGRES_IMAGE):
-			return False
-
-		# Ensure storage directory exists
-		await ensure_volume_path_exists(POSTGRES_STORAGE_PATH)
-
-		# Check if container already exists
+	def _start_postgres_sync() -> bool:
+		client = None
 		try:
-			container = client.containers.get(POSTGRES_CONTAINER_NAME)
-			if container.status == "running":
-				logger.info(f"Container {POSTGRES_CONTAINER_NAME} is already running")
+			client = docker.from_env()
+
+			# Ensure image is available (This function is already async, called separately)
+			# if not await pull_image_if_needed(POSTGRES_IMAGE):
+			# 	return False
+
+			# Ensure storage directory exists (This function is already async, called separately)
+			# await ensure_volume_path_exists(POSTGRES_STORAGE_PATH)
+
+			# Check if container already exists
+			try:
+				container = client.containers.get(POSTGRES_CONTAINER_NAME)
+				if container.status == "running":
+					logger.info(f"Container {POSTGRES_CONTAINER_NAME} is already running")
+					return True
+
+				# If container exists but is not running, start it
+				logger.info(f"Starting existing container {POSTGRES_CONTAINER_NAME}")
+				container.start()
+				logger.info(f"Started container {POSTGRES_CONTAINER_NAME}")
 				return True
 
-			# If container exists but is not running, start it
-			logger.info(f"Starting existing container {POSTGRES_CONTAINER_NAME}")
-			container.start()
-			logger.info(f"Started container {POSTGRES_CONTAINER_NAME}")
-			return True
+			except NotFound:
+				# Container doesn't exist, create and start it
+				abs_storage_path = str(Path(POSTGRES_STORAGE_PATH).absolute())
 
-		except NotFound:
-			# Container doesn't exist, create and start it
-			abs_storage_path = str(Path(POSTGRES_STORAGE_PATH).absolute())
+				logger.info(f"Creating and starting container {POSTGRES_CONTAINER_NAME}")
 
-			logger.info(f"Creating and starting container {POSTGRES_CONTAINER_NAME}")
+				# Define volume binding in Docker SDK format
+				volumes: list[str] = [f"{abs_storage_path}:/var/lib/postgresql/data:rw"]
 
-			# Define volume binding in Docker SDK format
-			volumes: list[str] = [f"{abs_storage_path}:/var/lib/postgresql/data:rw"]
+				# Define port mapping
+				ports: dict[str, int | list[int] | tuple[str, int] | None] = {"5432/tcp": POSTGRES_HOST_PORT}
 
-			# Define port mapping
-			ports: dict[str, int | list[int] | tuple[str, int] | None] = {"5432/tcp": POSTGRES_HOST_PORT}
+				restart_policy = {"Name": "always"}
 
-			restart_policy = {"Name": "always"}
+				client.containers.run(
+					image=POSTGRES_IMAGE,
+					name=POSTGRES_CONTAINER_NAME,
+					ports=ports,
+					volumes=volumes,
+					environment=POSTGRES_ENV,
+					detach=True,
+					restart_policy=restart_policy,  # type: ignore[arg-type]
+				)
+				logger.info(f"Created and started container {POSTGRES_CONTAINER_NAME}")
+				return True
 
-			client.containers.run(
-				image=POSTGRES_IMAGE,
-				name=POSTGRES_CONTAINER_NAME,
-				ports=ports,
-				volumes=volumes,
-				environment=POSTGRES_ENV,
-				detach=True,
-				restart_policy=restart_policy,  # type: ignore[arg-type]
-			)
-			logger.info(f"Created and started container {POSTGRES_CONTAINER_NAME}")
-			return True
+		except DockerException:
+			logger.exception("Docker error while starting PostgreSQL container")
+			return False
+		finally:
+			if client is not None:
+				client.close()
 
-	except DockerException:
-		logger.exception("Docker error while starting PostgreSQL container")
+	# Ensure image is available
+	if not await pull_image_if_needed(POSTGRES_IMAGE):
 		return False
-	finally:
-		if client is not None:
-			client.close()
+
+	# Ensure storage directory exists
+	await ensure_volume_path_exists(POSTGRES_STORAGE_PATH)
+
+	return await asyncio.to_thread(_start_postgres_sync)
 
 
 async def check_qdrant_health(url: str = f"http://localhost:{QDRANT_HOST_PORT}") -> bool:
@@ -374,25 +412,29 @@ async def stop_container(container_name: str) -> bool:
 	    True if successful, False otherwise
 
 	"""
-	client = None
-	try:
-		client = docker.from_env()
+
+	def _stop_sync(name: str) -> bool:
+		client = None
 		try:
-			container = client.containers.get(container_name)
-			if container.status == "running":
-				logger.info(f"Stopping container {container_name}")
-				container.stop(timeout=10)  # Wait up to 10 seconds for clean shutdown
-				logger.info(f"Stopped container {container_name}")
-			return True
-		except NotFound:
-			logger.info(f"Container {container_name} does not exist")
-			return True
-	except DockerException:
-		logger.exception("Docker error while stopping container")
-		return False
-	finally:
-		if client is not None:
-			client.close()
+			client = docker.from_env()
+			try:
+				container = client.containers.get(name)
+				if container.status == "running":
+					logger.info(f"Stopping container {name}")
+					container.stop(timeout=10)  # Wait up to 10 seconds for clean shutdown
+					logger.info(f"Stopped container {name}")
+				return True
+			except NotFound:
+				logger.info(f"Container {name} does not exist")
+				return True
+		except DockerException:  # Catch DockerException from client.containers.get or container.stop
+			logger.exception(f"Docker error while stopping container {name}")
+			return False
+		finally:
+			if client is not None:
+				client.close()
+
+	return await asyncio.to_thread(_stop_sync, container_name)
 
 
 async def stop_all_codemap_containers() -> tuple[bool, str]:
