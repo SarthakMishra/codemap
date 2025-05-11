@@ -22,18 +22,27 @@ class GitMetadataSchema(BaseModel):
 	blame: list[GitBlameSchema]
 
 
+class FileMetadataSchema(BaseModel):
+	"""Metadata for a file."""
+
+	file_path: str
+	language: str
+	last_modified_time: float
+	file_content_hash: str
+
+
 class ChunkMetadataSchema(BaseModel):
 	"""Metadata for a chunk of code."""
 
 	chunk_id: str
-	file_path: str
+	content_hash: str
 	start_line: int
 	end_line: int
 	entity_type: str
 	entity_name: str
-	language: str
 	hierarchy_path: str
 	git_metadata: GitMetadataSchema
+	file_metadata: FileMetadataSchema
 
 
 class ChunkSchema(BaseModel):
