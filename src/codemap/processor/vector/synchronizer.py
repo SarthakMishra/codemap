@@ -7,6 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from codemap.processor.hash_calculation import RepoChecksumCalculator
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.utils.embedding_utils import generate_embedding
 from codemap.processor.utils.git_utils import GitRepoContext
@@ -31,6 +32,7 @@ class VectorSynchronizer:
 		embedding_model_name: str,
 		analyzer: TreeSitterAnalyzer | None = None,
 		config_loader: "ConfigLoader | None" = None,
+		repo_checksum_calculator: RepoChecksumCalculator | None = None,
 	) -> None:
 		"""
 		Initialize the vector synchronizer.
@@ -42,31 +44,51 @@ class VectorSynchronizer:
 		    embedding_model_name: Name of the embedding model to use.
 		    analyzer: Optional TreeSitterAnalyzer instance.
 		    config_loader: Configuration loader instance.
+		    repo_checksum_calculator: Optional RepoChecksumCalculator instance.
 
 		"""
 		self.repo_path = repo_path
 		self.qdrant_manager = qdrant_manager
-		self.git_context = GitRepoContext()
+		self.git_context = GitRepoContext.get_instance()
 		self.embedding_model_name = embedding_model_name
 		self.analyzer = analyzer or TreeSitterAnalyzer()
+
+		# Ensure RepoChecksumCalculator is instantiated with git_context
+		if repo_checksum_calculator is None:
+			self.repo_checksum_calculator = RepoChecksumCalculator.get_instance(
+				repo_path=self.repo_path, git_context=self.git_context, config_loader=config_loader
+			)
+		else:
+			self.repo_checksum_calculator = repo_checksum_calculator
+			# Ensure existing calculator also has git_context, as it might be crucial for branch logic
+			if self.repo_checksum_calculator.git_context is None and self.git_context:
+				self.repo_checksum_calculator.git_context = self.git_context
+
 		if config_loader:
 			self.config_loader = config_loader
 		else:
 			from codemap.config import ConfigLoader
 
-			self.config_loader = ConfigLoader()
+			self.config_loader = ConfigLoader.get_instance()
 
-		# Get configuration values
 		embedding_config = self.config_loader.get.embedding
 		self.qdrant_batch_size = embedding_config.qdrant_batch_size
 
-		# If chunker is not provided, create one with git_context
 		if chunker is None:
-			self.chunker = TreeSitterChunker(git_context=self.git_context, config_loader=self.config_loader)
+			self.chunker = TreeSitterChunker(
+				git_context=self.git_context,
+				config_loader=self.config_loader,
+				repo_checksum_calculator=self.repo_checksum_calculator,
+			)
 		else:
-			# If chunker exists but has no git_context, set it
 			if getattr(chunker, "git_context", None) is None:
 				chunker.git_context = self.git_context
+			if (
+				hasattr(chunker, "repo_checksum_calculator")
+				and getattr(chunker, "repo_checksum_calculator", None) is None
+				and self.repo_checksum_calculator
+			):
+				chunker.repo_checksum_calculator = self.repo_checksum_calculator
 			self.chunker = chunker
 
 		logger.info(
@@ -74,13 +96,45 @@ class VectorSynchronizer:
 			f"using Qdrant collection: '{qdrant_manager.collection_name}' "
 			f"and embedding model: {embedding_model_name}"
 		)
+		if not self.repo_checksum_calculator:
+			logger.warning("RepoChecksumCalculator could not be initialized. Checksum-based sync will be skipped.")
 
-	async def _generate_chunks_for_file(self, file_path_str: str, git_hash: str) -> list[dict[str, Any]]:
-		"""Helper coroutine to generate chunks for a single file."""
+	def _get_checksum_cache_path(self) -> Path:
+		"""Gets the path to the checksum cache file within .codemap_cache."""
+		# Ensure .codemap_cache directory is at the root of the repo_path passed to VectorSynchronizer
+		cache_dir = self.repo_path / ".codemap_cache"
+		return cache_dir / "last_sync_checksum.txt"
+
+	def _read_last_sync_checksum(self) -> str | None:
+		"""Reads the last successful sync checksum from the cache file."""
+		cache_file = self._get_checksum_cache_path()
+		try:
+			if cache_file.exists():
+				return cache_file.read_text().strip()
+		except OSError as e:
+			logger.warning(f"Error reading checksum cache file {cache_file}: {e}")
+		return None
+
+	def _write_last_sync_checksum(self, checksum: str) -> None:
+		"""Writes the given checksum to the cache file."""
+		cache_file = self._get_checksum_cache_path()
+		try:
+			cache_file.parent.mkdir(parents=True, exist_ok=True)  # Ensure .codemap_cache exists
+			cache_file.write_text(checksum)
+			logger.info(f"Updated checksum cache file {cache_file} with checksum {checksum[:8]}...")
+		except OSError:
+			logger.exception(f"Error writing checksum cache file {cache_file}")
+
+	async def _generate_chunks_for_file(self, file_path_str: str, file_hash: str) -> list[dict[str, Any]]:
+		"""Helper coroutine to generate chunks for a single file.
+
+		File hash is passed for context (e.g. git hash or content hash).
+		"""
 		chunks_for_file = []
 		absolute_path = self.repo_path / file_path_str
 		try:
-			file_chunks_generator = self.chunker.chunk_file(absolute_path, git_hash)
+			# Pass the file_hash (which could be git_hash for tracked or content_hash for untracked) to chunker
+			file_chunks_generator = self.chunker.chunk_file(absolute_path, git_hash=file_hash)
 			if file_chunks_generator:
 				chunks_for_file.extend([chunk.model_dump() for chunk in file_chunks_generator])
 				logger.debug(f"Generated {len(chunks_for_file)} chunks for {file_path_str}")
@@ -91,14 +145,12 @@ class VectorSynchronizer:
 		return chunks_for_file
 
 	async def _get_qdrant_state(self) -> dict[str, set[tuple[str, str]]]:
-		"""
-		Retrieves the current state from Qdrant, mapping file paths to sets of (chunk_id, git_hash).
+		r"""
+		Retrieves the current state from Qdrant.
 
-		Returns:
-		    A dictionary where keys are file paths relative to the repo root,
-		    and values are sets containing tuples of (chunk_id, git_hash)
-		    for each chunk associated with that file path.
-
+		Maps file paths to sets of (chunk_id, git_or_content_hash).
+		The hash stored in Qdrant should be the file\'s content hash for
+		untracked or git_hash for tracked files.
 		"""
 		await self.qdrant_manager.initialize()
 		logger.info("Retrieving current state from Qdrant collection...")
@@ -106,7 +158,6 @@ class VectorSynchronizer:
 		all_ids = await self.qdrant_manager.get_all_point_ids_with_filter()
 		logger.info(f"[State Check] Retrieved {len(all_ids)} point IDs from Qdrant.")
 
-		# Fetch payloads in batches to avoid overloading retrieve
 		payloads = {}
 		if all_ids:
 			for i in range(0, len(all_ids), self.qdrant_batch_size):
@@ -116,162 +167,170 @@ class VectorSynchronizer:
 		logger.info(f"[State Check] Retrieved {len(payloads)} payloads from Qdrant.")
 
 		processed_count = 0
-		for point_id, payload in payloads.items():
-			if payload and "file_path" in payload and "git_hash" in payload:
-				file_path = payload["file_path"]
-				git_hash = payload["git_hash"]
-				# Store chunk_id as string, as Qdrant might return UUID objects
-				qdrant_state[file_path].add((str(point_id), git_hash))
-				processed_count += 1
+		for point_id, payload_dict in payloads.items():
+			if payload_dict:
+				file_metadata = payload_dict.get("file_metadata")
+				file_path_val: str | None = None
+				comparison_hash_for_state: str | None = None
+
+				if isinstance(file_metadata, dict):
+					file_path_val = file_metadata.get("file_path")
+					file_content_hash_from_meta = file_metadata.get("file_content_hash")
+
+					git_metadata = payload_dict.get("git_metadata")
+					if isinstance(git_metadata, dict) and git_metadata.get("tracked") is True:
+						git_hash_from_meta = git_metadata.get("git_hash")
+						if isinstance(git_hash_from_meta, str):
+							comparison_hash_for_state = git_hash_from_meta
+					elif isinstance(file_content_hash_from_meta, str):
+						comparison_hash_for_state = file_content_hash_from_meta
+
+				if (
+					isinstance(file_path_val, str)
+					and file_path_val.strip()
+					and isinstance(comparison_hash_for_state, str)
+				):
+					qdrant_state[file_path_val].add((str(point_id), comparison_hash_for_state))
+					processed_count += 1
+				else:
+					logger.warning(
+						f"Point {point_id} in Qdrant is missing file_path or comparison_hash. "
+						f"Payload components: file_path_val={file_path_val}, "
+						f"comparison_hash_for_state={comparison_hash_for_state}"
+					)
+					continue
 			else:
-				logger.warning(f"Point ID {point_id} is missing file_path or git_hash in payload.")
+				logger.warning(f"Point ID {point_id} has an empty or None payload. Skipping.")
 
 		logger.info(f"Retrieved state for {len(qdrant_state)} files ({processed_count} chunks) from Qdrant.")
 		return qdrant_state
 
 	async def _compare_states(
 		self,
-		current_git_files: dict[str, str],
-		qdrant_state: dict[str, set[tuple[str, str]]],
-	) -> tuple[set[str], set[str], set[str]]:
+		current_file_hashes: dict[str, str],  # relative_path -> content_hash (from all_repo_files)
+		previous_nodes_map: dict[str, dict[str, str]] | None,  # path -> {"type": "file"|"dir", "hash": hash_val}
+		qdrant_state: dict[str, set[tuple[str, str]]],  # file_path -> set of (chunk_id, git_or_content_hash_in_db)
+	) -> tuple[set[str], set[str]]:
 		"""
-		Compare current Git state with Qdrant state to find differences.
+		Compare current file hashes with previous checksum map and Qdrant state.
 
 		Args:
-		    current_git_files: Dictionary mapping file paths to their current Git hash.
-		    qdrant_state: Dictionary mapping file paths to sets of (chunk_id, git_hash).
+		    current_file_hashes: Current state of files in repo (path -> content/git hash).
+		    previous_nodes_map: Previously stored checksum map (path -> {type, hash}).
+		    qdrant_state: Current state of chunks in Qdrant.
 
 		Returns:
-		    tuple[set[str], set[str], set[str]]: A tuple containing:
-		        - files_to_process: Files that are new or have changed hash.
-		        - files_to_delete_chunks_for: Files that no longer exist in Git.
-		        - chunks_to_delete: Specific chunk IDs to delete (e.g., from updated files).
-
+		    tuple[set[str], set[str]]:
+		        - files_to_process: Relative paths of files that are new or changed.
+		        - chunks_to_delete_from_qdrant: Specific Qdrant chunk_ids to delete.
 		"""
-		# current_git_files uses RELATIVE paths
-		# qdrant_state uses ABSOLUTE paths as keys (based on stored metadata)
-		logger.info(
-			f"[Compare Check] Comparing {len(current_git_files)} Git files with "
-			f"{len(qdrant_state)} files in Qdrant state."
-		)
+		files_to_process: set[str] = set()
+		chunks_to_delete_from_qdrant: set[str] = set()
+		processed_qdrant_paths_this_cycle: set[str] = set()
 
-		git_relative_paths = set(current_git_files.keys())
-		# qdrant_absolute_paths = set(qdrant_state.keys()) # Removed unused variable F841
+		# 1. Determine files to process based on current vs. previous checksums
+		for file_path, current_hash in current_file_hashes.items():
+			previous_file_hash: str | None = None
+			if previous_nodes_map and file_path in previous_nodes_map:
+				node_info = previous_nodes_map[file_path]
+				if node_info.get("type") == "file":
+					previous_file_hash = node_info.get("hash")
 
-		files_to_process: set[str] = set()  # Store RELATIVE paths
-		chunks_to_delete: set[str] = set()
-		processed_relative_paths: set[str] = set()  # Keep track of relative paths found in Qdrant
-
-		# Iterate through Qdrant state (absolute paths)
-		for abs_path_str, qdrant_chunks_set in qdrant_state.items():
-			relative_path_str = abs_path_str  # Default if conversion fails
-			try:
-				abs_path = Path(abs_path_str)
-				if abs_path.is_absolute():
-					relative_path = abs_path.relative_to(self.repo_path)
-					relative_path_str = str(relative_path)
-				else:
-					# If it's somehow already relative, log a warning but use it
-					logger.warning(
-						f"[Compare Check] Could not make Qdrant path {abs_path_str} "
-						f"relative to {self.repo_path}. Skipping comparison for this path."
-					)
-					continue  # Skip to next item in qdrant_state
-
-			except (ValueError, TypeError):
-				logger.warning(
-					f"[Compare Check] Could not make Qdrant path {abs_path_str} "
-					f"relative to {self.repo_path}. Skipping comparison for this path."
+			if previous_file_hash is None or previous_file_hash != current_hash:
+				logger.info(
+					f"[Compare] File '{file_path}' is new or changed. "
+					f"Old hash: {previous_file_hash}, New hash: {current_hash}"
 				)
-				continue  # Skip to next item in qdrant_state
-
-			processed_relative_paths.add(relative_path_str)
-
-			# Check if this RELATIVE path exists in the current Git state
-			if relative_path_str in git_relative_paths:
-				# File exists in both: Compare Hashes
-				current_hash = current_git_files[relative_path_str]
-				db_hashes = {git_hash for _, git_hash in qdrant_chunks_set}
-				db_chunk_ids = {chunk_id for chunk_id, _ in qdrant_chunks_set}
-
-				if current_hash not in db_hashes:
-					# File content changed
+				files_to_process.add(file_path)
+				# If the file was present and its hash matches, it can be skipped
+				if file_path in qdrant_state:
 					logger.info(
-						f"[Compare Hash] Mismatch for {relative_path_str}. "
-						f"Current: {current_hash}, DB: {db_hashes}. Marking for reprocessing and deletion."
+						f"[Compare] Marking existing Qdrant chunks for changed file '{file_path}' for deletion."
 					)
-					files_to_process.add(relative_path_str)
-					chunks_to_delete.update(db_chunk_ids)
-				elif len(db_hashes) > 1:
-					# File hash matches, but stale entries exist
-					logger.warning(
-						f"[Compare Hash] File '{relative_path_str}' has matching hash '{current_hash}' "
-						f"but also stale entries in Qdrant. Cleaning up."
+					chunks_to_delete_from_qdrant.update(cid for cid, _ in qdrant_state[file_path])
+			processed_qdrant_paths_this_cycle.add(file_path)  # Mark as seen from current repo state
+
+		# 2. Determine files/chunks to delete based on previous checksums vs. current
+		if previous_nodes_map:
+			for old_path, node_info in previous_nodes_map.items():
+				if node_info.get("type") == "file" and old_path not in current_file_hashes:
+					logger.info(
+						f"[Compare] File '{old_path}' was in previous checksum but not current. Deleting from Qdrant."
 					)
-					stale_chunk_ids = {chunk_id for chunk_id, git_hash in qdrant_chunks_set if git_hash != current_hash}
-					chunks_to_delete.update(stale_chunk_ids)
-				# Else: Hash matches and no stale entries -> Do nothing for this file
-			else:
-				# File exists in Git but not in Qdrant state (handled below)
-				logger.info(f"[Compare Check] File deleted from Git: {relative_path_str}. Marking chunks for deletion.")
-				chunks_to_delete.update(chunk_id for chunk_id, _ in qdrant_chunks_set)
+					if old_path in qdrant_state:
+						for chunk_id, _ in qdrant_state[old_path]:
+							chunks_to_delete_from_qdrant.add(chunk_id)
+					processed_qdrant_paths_this_cycle.add(old_path)  # Mark as seen from previous repo state
 
-		# Now find files that are ONLY in Git (new files)
-		new_git_files = git_relative_paths - processed_relative_paths
-		files_to_process.update(new_git_files)
-		logger.info(f"[Compare Check] Found {len(new_git_files)} new files in Git to process.")
+		# 3. Clean up any orphaned Qdrant entries not covered by current or previous valid states
+		# These might be from very old states or errors.
+		all_known_valid_paths = set(current_file_hashes.keys())
+		if previous_nodes_map:
+			all_known_valid_paths.update(p for p, info in previous_nodes_map.items() if info.get("type") == "file")
 
-		# We don't use files_to_delete_chunks_for currently, assign to _
-		files_to_delete_chunks_for = {rp for rp in processed_relative_paths if rp not in git_relative_paths}
+		for qdrant_file_path, qdrant_chunks_set in qdrant_state.items():
+			if qdrant_file_path not in all_known_valid_paths:
+				logger.warning(
+					f"Orphaned file_path '{qdrant_file_path}' in Qdrant not found in current "
+					"or previous valid checksums. Deleting its chunks."
+				)
+				for chunk_id, _ in qdrant_chunks_set:
+					chunks_to_delete_from_qdrant.add(chunk_id)
 
 		logger.info(
-			f"[Compare Check] Result: {len(files_to_process)} relative files to process, "
-			# f"{len(files_to_delete_chunks_for)} files with all chunks to delete, "
-			f"{len(chunks_to_delete)} specific chunks to delete."
+			f"[Compare States] Result: {len(files_to_process)} files to process/reprocess, "  # noqa: S608
+			f"{len(chunks_to_delete_from_qdrant)} specific chunks to delete from Qdrant."
 		)
-		# Return relative paths for processing, and chunk IDs to delete
-		return files_to_process, files_to_delete_chunks_for, chunks_to_delete
+		# The second element of the tuple (files_whose_chunks_are_all_deleted) is no longer
+		# explicitly needed with this logic.
+		return files_to_process, chunks_to_delete_from_qdrant
 
 	async def _process_and_upsert_batch(self, chunk_batch: list[dict[str, Any]]) -> int:
-		"""Process a batch of chunks by generating embeddings and upserting to Qdrant.
-
-		Args:
-		    chunk_batch: List of dictionaries representing code chunks. Each dictionary contains
-		        'content' (str), 'metadata' (dict), and optionally 'file_path' (str).
-
-		Returns:
-		    int: Number of points successfully upserted to Qdrant. Returns 0 if:
-		        - Input batch is empty
-		        - Embedding generation fails
-		        - No points are generated from the batch
-		"""
+		"""Process a batch of chunks by generating embeddings and upserting to Qdrant."""
 		if not chunk_batch:
 			return 0
 
-		logger.info(f"Processing batch of {len(chunk_batch)} chunks for embedding and upsert.")
-		texts_to_embed = [chunk["content"] for chunk in chunk_batch]
+		deduplicated_batch = []
+		seen_content_hashes = set()
+		for chunk in chunk_batch:
+			content_hash = chunk["metadata"].get("content_hash", "")
+			file_metadata_dict = chunk["metadata"].get("file_metadata", {})
+			file_content_hash = (
+				file_metadata_dict.get("file_content_hash", "") if isinstance(file_metadata_dict, dict) else ""
+			)
+			dedup_key = f"{content_hash}:{file_content_hash}"
+			if dedup_key not in seen_content_hashes:
+				seen_content_hashes.add(dedup_key)
+				deduplicated_batch.append(chunk)
 
+		if len(deduplicated_batch) < len(chunk_batch):
+			logger.info(
+				f"Removed {len(chunk_batch) - len(deduplicated_batch)} "
+				f"duplicate chunks, processing {len(deduplicated_batch)} unique chunks"
+			)
+
+		if not deduplicated_batch:  # If all chunks were duplicates
+			logger.info("All chunks in the batch were duplicates. Nothing to process.")
+			return 0
+
+		logger.info(f"Processing batch of {len(deduplicated_batch)} unique chunks for embedding and upsert.")
+		texts_to_embed = [chunk["content"] for chunk in deduplicated_batch]
 		embeddings = generate_embedding(texts_to_embed, self.config_loader)
 
-		if embeddings is None or len(embeddings) != len(chunk_batch):
+		if embeddings is None or len(embeddings) != len(deduplicated_batch):
 			logger.error(
 				"Embed batch failed: "
-				f"got {len(embeddings) if embeddings else 0}, "
-				f"expected {len(chunk_batch)}. Skipping."
+				f"got {len(embeddings) if embeddings else 0}, expected {len(deduplicated_batch)}. Skipping."
 			)
-			# Log details of the failed batch chunks if possible
-			failed_files = {chunk["metadata"].get("file_path", "unknown") for chunk in chunk_batch}
+			failed_files = {chunk["metadata"].get("file_path", "unknown") for chunk in deduplicated_batch}
 			logger.error(f"Failed batch involved files: {failed_files}")
 			return 0
 
 		points_to_upsert = []
-		for chunk, embedding in zip(chunk_batch, embeddings, strict=True):
-			# Get the original file path from metadata (likely absolute)
+		for chunk, embedding in zip(deduplicated_batch, embeddings, strict=True):
 			original_file_path_str = chunk["metadata"].get("file_path", "unknown")
-
 			chunk_id = str(uuid.uuid4())
 			chunk["metadata"]["chunk_id"] = chunk_id
-			# Ensure the file_path in metadata remains as it came from the chunker
 			chunk["metadata"]["file_path"] = original_file_path_str
 			payload: dict[str, Any] = cast("dict[str, Any]", chunk["metadata"])
 			point = create_qdrant_point(chunk_id, embedding, payload)
@@ -288,79 +347,168 @@ class VectorSynchronizer:
 		"""
 		Asynchronously synchronize the Qdrant index with the current repository state.
 
-		Returns:
-		    True if synchronization completed successfully, False otherwise.
-
+		Returns True if synchronization completed successfully, False otherwise.
 		"""
 		sync_success = False
+		current_repo_root_checksum: str | None = None
+		# This local variable will hold the map for the current sync operation.
+		current_nodes_map: dict[str, dict[str, str]] = {}  # Initialize as empty
 
-		try:
-			await self.qdrant_manager.initialize()
+		previous_root_hash: str | None = None
+		previous_nodes_map: dict[str, dict[str, str]] | None = None
 
-			# 1. Get current Git state (tracked files and hashes)
-			with progress_indicator("Reading Git tracked files..."):
-				git_files = self.git_context.tracked_files
-				if git_files is None:
-					logger.error("Failed to retrieve Git tracked files.")
-					return False
+		if self.repo_checksum_calculator:
+			# Attempt to read the checksum from the last successful sync for the current branch
+			logger.info("Attempting to read latest checksum data for current branch...")
+			prev_hash, prev_map = self.repo_checksum_calculator.read_latest_checksum_data_for_current_branch()
+			if prev_hash:
+				previous_root_hash = prev_hash
+			if prev_map:
+				previous_nodes_map = prev_map
 
-			logger.info(f"Found {len(git_files)} tracked files in Git (after exclusion).")
+			try:
+				# calculate_repo_checksum returns: tuple[str, dict[str, dict[str, str]]]
+				# Renamed local var to avoid confusion if self.all_nodes_map_from_checksum is used elsewhere
+				(
+					calculated_root_hash,
+					calculated_nodes_map,
+				) = await self.repo_checksum_calculator.calculate_repo_checksum()
+				current_repo_root_checksum = calculated_root_hash
+				self.all_nodes_map_from_checksum = calculated_nodes_map  # Store the fresh map on self
+				current_nodes_map = self.all_nodes_map_from_checksum  # Use this fresh map for the current sync
 
-			# 2. Get current Qdrant state (file paths -> chunk IDs and hashes)
-			with progress_indicator("Retrieving existing vector state..."):
-				qdrant_state = await self._get_qdrant_state()
+				# Quick sync: If root checksums match, assume no changes and skip detailed comparison.
+				if previous_root_hash and current_repo_root_checksum == previous_root_hash:
+					branch_name = (
+						self.repo_checksum_calculator.git_context.get_current_branch()
+						if self.repo_checksum_calculator.git_context
+						else "unknown"
+					)
+					logger.info(
+						f"Root checksum ({current_repo_root_checksum}) matches "
+						f"previous state for branch '{branch_name}'. "
+						"Quick sync indicates no changes needed."
+					)
+					# Consider updating a 'last_synced_timestamp' or similar marker here if needed.
+					return True  # Successfully synced (no changes)
+				logger.info(
+					"Root checksum mismatch or no previous checksum. Proceeding with detailed comparison and sync."
+				)
+			except Exception:  # pylint: disable=broad-except
+				logger.exception(
+					"Error calculating repository checksum. "
+					"Proceeding with full comparison using potentially stale or no current checksum data."
+				)
+				# current_nodes_map remains {}, signifying we couldn't get a fresh current state.
+				# This will be handled by the check below.
+		else:
+			logger.warning(
+				"RepoChecksumCalculator not available. Cannot perform checksum-based "
+				"quick sync, read previous checksum, or get fresh current state. "
+				"Proceeding with comparison based on Qdrant state only if necessary, "
+				"but sync will likely be incomplete."
+			)
+			# previous_root_hash and previous_nodes_map remain None.
+			# current_nodes_map remains {}, signifying we couldn't get a fresh current state.
+			# This will be handled by the check below.
 
-			# 3. Compare states
-			with progress_indicator("Comparing Git state with vector state..."):
-				# Use _ for the unused 'files_to_delete_chunks_for' variable
-				files_to_process, _, chunks_to_delete = await self._compare_states(git_files, qdrant_state)
+		# Populate current_file_hashes from the local current_nodes_map.
+		# current_nodes_map will be populated if checksum calculation succeeded, otherwise it's {}.
+		current_file_hashes: dict[str, str] = {}
+		if not current_nodes_map:  # Checks if the map is empty
+			# This means checksum calculation failed or RepoChecksumCalculator was not available.
+			# We cannot reliably determine the current state of files.
+			logger.error(
+				"Current repository file map is empty (failed to calculate checksums "
+				"or RepoChecksumCalculator missing). Cannot proceed with accurate sync "
+				"as current file states are unknown."
+			)
+			return False  # Cannot sync without knowing current file states.
 
-			# 4. Delete outdated chunks
-			with progress_indicator(f"Deleting {len(chunks_to_delete)} outdated vectors..."):
-				if chunks_to_delete:
-					# Delete in batches
-					delete_ids_list = list(chunks_to_delete)
-					for i in range(0, len(delete_ids_list), self.qdrant_batch_size):
-						batch_ids = delete_ids_list[i : i + self.qdrant_batch_size]
-						await self.qdrant_manager.delete_points(
-							batch_ids  # type: ignore[arg-type]
-						)
-						logger.info(f"Deleted batch of {len(batch_ids)} vectors.")
-					logger.info(f"Finished deleting {len(chunks_to_delete)} vectors.")
-				else:
-					logger.info("No vectors to delete.")
+		# If current_nodes_map is not empty, proceed to populate current_file_hashes
+		for path, node_info in current_nodes_map.items():
+			if node_info.get("type") == "file" and "hash" in node_info:  # Ensure hash key exists
+				current_file_hashes[path] = node_info["hash"]
 
-			# 5. Process new/updated files
-			with progress_indicator(f"Processing {len(files_to_process)} new/updated files..."):
-				files_processed_count = 0
-				all_chunks: list[dict[str, Any]] = []
+		# If current_nodes_map was valid (not empty) but contained no files (e.g. empty repo),
+		# current_file_hashes will be empty. This is a valid state for _compare_states.
 
-			# First collect all chunks from files
-			tasks = [
-				self._generate_chunks_for_file(file_path, git_files[file_path])
-				for file_path in files_to_process
-				if file_path in git_files  # Ensure git_hash exists
-			]
-			if tasks:
-				logger.info(f"Concurrently generating chunks for {len(tasks)} files...")
-				list_of_chunk_lists = await asyncio.gather(*tasks)
-				all_chunks = [chunk for sublist in list_of_chunk_lists for chunk in sublist]
-				files_processed_count = sum(
-					1 for sublist in list_of_chunk_lists if sublist
-				)  # Count files that produced chunks
-				logger.info(f"Total chunks generated: {len(all_chunks)} from {files_processed_count} files.")
+		# Get the current state from Qdrant
+		qdrant_state = await self._get_qdrant_state()
+
+		with progress_indicator("Comparing repository state with vector state..."):
+			files_to_process, chunks_to_delete = await self._compare_states(
+				current_file_hashes, previous_nodes_map, qdrant_state
+			)
+
+		with progress_indicator(f"Deleting {len(chunks_to_delete)} outdated vectors..."):
+			if chunks_to_delete:
+				delete_ids_list = list(chunks_to_delete)
+				for i in range(0, len(delete_ids_list), self.qdrant_batch_size):
+					batch_ids_to_delete = delete_ids_list[i : i + self.qdrant_batch_size]
+					await self.qdrant_manager.delete_points(batch_ids_to_delete)
+					logger.info(f"Deleted batch of {len(batch_ids_to_delete)} vectors.")
+				logger.info(f"Finished deleting {len(chunks_to_delete)} vectors.")
 			else:
-				logger.info("No files eligible for concurrent chunk generation.")
+				logger.info("No vectors to delete.")
 
-			# Process chunks
-			with progress_indicator("Processing chunks..."):
-				await self._process_and_upsert_batch(all_chunks)
+		num_files_to_process = len(files_to_process)
+		all_chunks: list[dict[str, Any]] = []  # Ensure all_chunks is initialized
+		processed_files_count = 0
+		msg = "Processing new/updated files..."
 
-			sync_success = True
-			logger.info("Vector index synchronization completed successfully.")
+		with progress_indicator(
+			msg,
+			style="progress",
+			total=num_files_to_process if num_files_to_process > 0 else 1,  # total must be > 0
+			transient=True,
+		) as update_file_progress:
+			if num_files_to_process > 0:
+				processed_files_count = 0
 
-		except Exception:
-			logger.exception("An unexpected error occurred during index synchronization")
-			sync_success = False  # Ensure success is False on exception
+				# Wrapper coroutine to update progress as tasks complete
+				async def wrapped_generate_chunks(file_path: str, f_hash: str) -> list[dict[str, Any]]:
+					nonlocal processed_files_count  # Allow modification of the outer scope variable
+					try:
+						return await self._generate_chunks_for_file(file_path, f_hash)
+					finally:
+						processed_files_count += 1
+						update_file_progress(None, processed_files_count, None)
+
+				tasks_to_gather = []
+				for file_path_to_proc in files_to_process:
+					file_current_hash = current_file_hashes.get(file_path_to_proc)
+					if file_current_hash:
+						tasks_to_gather.append(wrapped_generate_chunks(file_path_to_proc, file_current_hash))
+					else:
+						logger.warning(
+							f"File '{file_path_to_proc}' marked to process but its current hash not found. Skipping."
+						)
+						# If a file is skipped, increment progress here as it won't be wrapped
+						processed_files_count += 1
+						update_file_progress(None, processed_files_count, None)
+
+				if tasks_to_gather:
+					logger.info(f"Concurrently generating chunks for {len(tasks_to_gather)} files...")
+					list_of_chunk_lists = await asyncio.gather(*tasks_to_gather)
+					all_chunks = [chunk for sublist in list_of_chunk_lists for chunk in sublist]
+					logger.info(f"Total chunks generated: {len(all_chunks)}.")
+				else:
+					logger.info("No files eligible for concurrent chunk generation.")
+
+				# Final update to ensure the progress bar completes to 100% if some files were skipped
+				# and caused processed_files_count to not reach num_files_to_process via the finally blocks alone.
+				if processed_files_count < num_files_to_process:
+					update_file_progress(None, num_files_to_process, None)
+
+			else:  # num_files_to_process == 0
+				logger.info("No new/updated files to process.")
+				update_file_progress(None, 1, None)  # Complete the dummy task if total was 1
+
+		with progress_indicator("Processing chunks..."):
+			await self._process_and_upsert_batch(all_chunks)
+
+		sync_success = True
+		logger.info("Vector index synchronization completed successfully.")
 
 		return sync_success

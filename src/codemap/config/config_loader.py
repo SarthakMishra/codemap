@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING, Any
 import yaml
 
 from codemap.config.config_schema import AppConfigSchema
-from codemap.git.utils import GitRepoContext
 
 # For type checking only
 if TYPE_CHECKING:
 	from pydantic import BaseModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,9 @@ class ConfigLoader:
 			Optional[Path]: Resolved config file path or None if no suitable file found
 
 		"""
+		# Import GitRepoContext here to avoid circular imports
+		from codemap.git.utils import GitRepoContext
+
 		# Try current directory
 		local_config = Path(".codemap.yml")
 		if local_config.exists():

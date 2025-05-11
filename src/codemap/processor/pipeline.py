@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any, Self
 
 from qdrant_client import models as qdrant_models
 
+from codemap.processor.hash_calculation import RepoChecksumCalculator
+
 # Use async embedding utils
 from codemap.processor.utils.embedding_utils import (
 	generate_embedding,
@@ -70,7 +72,7 @@ class ProcessingPipeline:
 
 			self.config_loader = ConfigLoader.get_instance()
 
-		self.git_context = GitRepoContext()
+		self.git_context = GitRepoContext.get_instance()
 
 		self.repo_path = self.config_loader.get.repo_root
 
@@ -80,23 +82,46 @@ class ProcessingPipeline:
 		if not self.repo_path:
 			self.repo_path = self.git_context.get_repo_root()
 
-		_config_loader = self.config_loader.__class__
+		if not self.repo_path:
+			msg = "Repository path could not be determined. Please ensure it's a git repository or set in config."
+			logger.critical(msg)
+
+		if self.repo_path:
+			from pathlib import Path
+
+			self.repo_path = Path(self.repo_path)
+		else:
+			logger.error("Critical: repo_path is None, RepoChecksumCalculator cannot be initialized.")
+
+		_config_loader_type_check = self.config_loader.__class__
 		if not config_loader:
 			from codemap.config import ConfigLoader as _ActualConfigLoader
 
-			_config_loader = _ActualConfigLoader
+			_config_loader_type_check = _ActualConfigLoader
 
-		if not isinstance(self.config_loader, _config_loader):
+		if not isinstance(self.config_loader, _config_loader_type_check):
 			from codemap.config import ConfigError
 
 			logger.error(f"Config loading failed or returned unexpected type: {type(self.config_loader)}")
 			msg = "Failed to load a valid Config object."
 			raise ConfigError(msg)
 
+		self.repo_checksum_calculator: RepoChecksumCalculator | None = None
+		if self.repo_path and self.repo_path.is_dir():
+			self.repo_checksum_calculator = RepoChecksumCalculator.get_instance(
+				repo_path=self.repo_path, git_context=self.git_context, config_loader=self.config_loader
+			)
+			logger.info(f"RepoChecksumCalculator initialized for {self.repo_path}")
+		else:
+			logger.warning(
+				"RepoChecksumCalculator could not be initialized because repo_path is invalid or not set. "
+				"Checksum-based quick sync will be skipped."
+			)
+
 		# --- Defer Shared Components Initialization --- #
-		self._analyzer = None
-		self._chunker = None
-		self._db_client = None
+		self._analyzer: TreeSitterAnalyzer | None = None
+		self._chunker: TreeSitterChunker | None = None
+		self._db_client: DatabaseClient | None = None
 
 		# --- Load Configuration --- #
 		embedding_config = self.config_loader.get.embedding
@@ -104,7 +129,7 @@ class ProcessingPipeline:
 		qdrant_dimension = embedding_config.dimension
 		distance_metric = embedding_config.dimension_metric
 
-		self.embedding_model_name: str = "minishlab/potion-base-8M3"  # Default
+		self.embedding_model_name: str = "minishlab/potion-base-8M"
 		if embedding_model and isinstance(embedding_model, str):
 			self.embedding_model_name = embedding_model
 
@@ -114,26 +139,30 @@ class ProcessingPipeline:
 
 		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {qdrant_dimension}")
 
-		# Get Qdrant configuration
 		vector_config = self.config_loader.get.embedding
 
-		qdrant_location = self.repo_path / ".codemap_cache" / "qdrant"
-		qdrant_location.mkdir(parents=True, exist_ok=True)
+		if self.repo_path:
+			qdrant_location = self.repo_path / ".codemap_cache" / "qdrant"
+			qdrant_location.mkdir(parents=True, exist_ok=True)
 
 		qdrant_url = vector_config.url
 		qdrant_api_key = vector_config.api_key
 
-		# Convert distance metric string to enum
 		distance_enum = qdrant_models.Distance.COSINE
-		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT"]:
+		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT", "MANHATTAN"]:
 			distance_enum = getattr(qdrant_models.Distance, distance_metric.upper())
 
-		# Use GitRepoContext for branch and git info
-		path_str = str(self.repo_path)
+		str(self.repo_path) if self.repo_path else "no_repo_path"
 		branch_str = self.git_context.branch or "no_branch"
-		collection_id = hashlib.sha256(f"{path_str}_{branch_str}".encode()).hexdigest()
 
-		collection_name = f"codemap_{collection_id}"
+		stable_repo_id = str(self.repo_path.resolve()) if self.repo_path else "unknown_repo"
+		collection_base_name = hashlib.sha256(stable_repo_id.encode()).hexdigest()[:16]
+		collection_name = f"codemap_{collection_base_name}_{branch_str}"
+
+		import re
+
+		safe_branch_str = re.sub(r"[^a-zA-Z0-9_-]", "_", branch_str)
+		collection_name = f"codemap_{collection_base_name}_{safe_branch_str}"
 
 		qdrant_init_args = {
 			"config_loader": self.config_loader,
@@ -144,12 +173,10 @@ class ProcessingPipeline:
 			"api_key": qdrant_api_key,
 		}
 
-		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
+		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}, Collection: {collection_name}")
 
 		self.qdrant_manager = QdrantManager(**qdrant_init_args)
-
-		# VectorSynchronizer will be initialized lazily as well
-		self._vector_synchronizer = None
+		self._vector_synchronizer: VectorSynchronizer | None = None
 
 		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
 		self.is_async_initialized = False
@@ -174,7 +201,7 @@ class ProcessingPipeline:
 	@property
 	def chunker(self) -> TreeSitterChunker:
 		"""
-		Lazily initialize and return a TreeSitterChunker using the shared analyzer and git context.
+		Lazily initialize and return a TreeSitterChunker.
 
 		Returns:
 			TreeSitterChunker: The chunker instance.
@@ -183,12 +210,12 @@ class ProcessingPipeline:
 			from codemap.processor.lod import LODGenerator
 			from codemap.processor.vector.chunking import TreeSitterChunker
 
-			# Pass the shared analyzer to LODGenerator
 			lod_generator = LODGenerator(analyzer=self.analyzer)
 			self._chunker = TreeSitterChunker(
 				lod_generator=lod_generator,
 				config_loader=self.config_loader,
 				git_context=self.git_context,
+				repo_checksum_calculator=self.repo_checksum_calculator,
 			)
 		return self._chunker
 
@@ -199,17 +226,42 @@ class ProcessingPipeline:
 
 		Returns:
 			DatabaseClient: The database client instance.
-		"""
-		if self._db_client is None:
-			from codemap.db.client import DatabaseClient
 
-			self._db_client = DatabaseClient()
+		Raises:
+			RuntimeError: If the DatabaseClient cannot be initialized.
+		"""
+		if self._db_client is None:  # Only attempt initialization if not already done
+			try:
+				from codemap.db.client import DatabaseClient
+
+				self._db_client = DatabaseClient()  # Add necessary args if any
+			except ImportError:
+				logger.exception(
+					"DatabaseClient could not be imported. DB features will be unavailable. "
+					"Ensure database dependencies are installed if needed."
+				)
+				# We will raise a RuntimeError below if _db_client is still None.
+				# Allow to proceed to the check below
+			except Exception:
+				# Catch other potential errors during DatabaseClient instantiation
+				logger.exception("Error initializing DatabaseClient")
+				# We will raise a RuntimeError below if _db_client is still None.
+
+		# After attempting initialization, check if it was successful.
+		if self._db_client is None:
+			msg = (
+				"Failed to initialize DatabaseClient. It remains None after attempting import and instantiation. "
+				"Check logs for import errors or instantiation issues."
+			)
+			logger.critical(msg)  # Use critical for such a failure
+			raise RuntimeError(msg)
+
 		return self._db_client
 
 	@property
 	def vector_synchronizer(self) -> VectorSynchronizer:
 		"""
-		Lazily initialize and return a VectorSynchronizer using shared components and git context.
+		Lazily initialize and return a VectorSynchronizer.
 
 		Returns:
 			VectorSynchronizer: The synchronizer instance.
@@ -218,18 +270,22 @@ class ProcessingPipeline:
 			from codemap.processor.vector.synchronizer import VectorSynchronizer
 
 			if self.repo_path is None:
-				msg = "repo_path must not be None"
+				msg = "repo_path must not be None for VectorSynchronizer"
+				logger.error(msg)
 				raise RuntimeError(msg)
 			if self.qdrant_manager is None:
-				msg = "qdrant_manager must not be None"
+				msg = "qdrant_manager must not be None for VectorSynchronizer"
+				logger.error(msg)
 				raise RuntimeError(msg)
+
 			self._vector_synchronizer = VectorSynchronizer(
-				self.repo_path,
-				self.qdrant_manager,
-				self.chunker,
-				self.embedding_model_name,
-				self.analyzer,
+				repo_path=self.repo_path,
+				qdrant_manager=self.qdrant_manager,
+				chunker=self.chunker,
+				embedding_model_name=self.embedding_model_name,
+				analyzer=self.analyzer,
 				config_loader=self.config_loader,
+				repo_checksum_calculator=self.repo_checksum_calculator,
 			)
 		return self._vector_synchronizer
 
