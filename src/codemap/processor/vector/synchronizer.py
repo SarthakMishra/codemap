@@ -7,10 +7,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from qdrant_client import models
+
+from codemap.git.utils import ExtendedGitRepoContext
 from codemap.processor.hash_calculation import RepoChecksumCalculator
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.utils.embedding_utils import generate_embedding
-from codemap.processor.utils.git_utils import GitRepoContext
 from codemap.processor.vector.chunking import TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
 from codemap.utils.cli_utils import progress_indicator
@@ -49,7 +51,7 @@ class VectorSynchronizer:
 		"""
 		self.repo_path = repo_path
 		self.qdrant_manager = qdrant_manager
-		self.git_context = GitRepoContext.get_instance()
+		self.git_context = ExtendedGitRepoContext.get_instance()
 		self.embedding_model_name = embedding_model_name
 		self.analyzer = analyzer or TreeSitterAnalyzer()
 
@@ -451,6 +453,157 @@ class VectorSynchronizer:
 				logger.info(f"Finished deleting {len(chunks_to_delete)} vectors.")
 			else:
 				logger.info("No vectors to delete.")
+
+		# Step: Update git_metadata for files whose content hasn't changed but Git status might have
+		logger.info("Checking for Git metadata updates for unchanged files...")
+
+		# Candidate files: in current repo, content hash same as previous, so not in files_to_process
+		files_to_check_for_git_metadata_update = set(current_file_hashes.keys()) - files_to_process
+
+		chunk_ids_to_fetch_payloads_for_meta_check: list[str] = []
+		# Maps file_path_str to list of its chunk_ids that are candidates for metadata update
+		candidate_file_to_chunks_map: dict[str, list[str]] = defaultdict(list)
+
+		for file_path_str in files_to_check_for_git_metadata_update:
+			if file_path_str not in qdrant_state:  # No existing chunks for this file in Qdrant
+				continue
+
+			# Consider only chunks that are not already marked for deletion
+			chunks_for_this_file = [cid for cid, _ in qdrant_state[file_path_str] if cid not in chunks_to_delete]
+			if chunks_for_this_file:
+				# qdrant_state stores chunk_ids as strings (derived from ExtendedPointId)
+				chunk_ids_to_fetch_payloads_for_meta_check.extend(chunks_for_this_file)
+				candidate_file_to_chunks_map[file_path_str] = chunks_for_this_file
+
+		# Batch fetch payloads for all potentially affected chunks
+		fetched_payloads_for_meta_check: dict[str, dict[str, Any]] = {}
+		if chunk_ids_to_fetch_payloads_for_meta_check:
+			logger.info(
+				f"Fetching payloads for {len(chunk_ids_to_fetch_payloads_for_meta_check)} chunks to check Git metadata."
+			)
+			for i in range(0, len(chunk_ids_to_fetch_payloads_for_meta_check), self.qdrant_batch_size):
+				batch_ids = chunk_ids_to_fetch_payloads_for_meta_check[i : i + self.qdrant_batch_size]
+				# Cast to satisfy linter for QdrantManager's expected type
+				typed_batch_ids = cast("list[str | int | uuid.UUID]", batch_ids)
+				batch_payloads = await self.qdrant_manager.get_payloads_by_ids(typed_batch_ids)
+				fetched_payloads_for_meta_check.update(batch_payloads)
+
+		# Dictionary to group chunk_ids by the required new git_metadata
+		# Key: frozenset of new_git_metadata.items() to make it hashable
+		# Value: list of chunk_ids (strings)
+		git_metadata_update_groups: dict[frozenset, list[str]] = defaultdict(list)
+
+		for file_path_str, chunk_ids_in_file in candidate_file_to_chunks_map.items():
+			current_is_tracked = self.git_context.is_file_tracked(file_path_str)
+			current_branch = self.git_context.get_current_branch()
+			current_git_hash_for_file: str | None = None
+			if current_is_tracked:
+				try:
+					# This should be the blob OID for the file
+					current_git_hash_for_file = self.git_context.get_file_git_hash(file_path_str)
+				except Exception:  # noqa: BLE001
+					logger.warning(
+						f"Could not get git hash for tracked file {file_path_str} during metadata update check.",
+						exc_info=True,
+					)
+
+			required_new_git_metadata = {
+				"tracked": current_is_tracked,
+				"branch": current_branch,
+				"git_hash": current_git_hash_for_file,  # Will be None if untracked or error getting hash
+			}
+
+			for chunk_id in chunk_ids_in_file:  # chunk_id is already a string
+				chunk_payload = fetched_payloads_for_meta_check.get(chunk_id)
+				if not chunk_payload:
+					logger.warning(
+						f"Payload not found for chunk {chunk_id} of file {file_path_str} "
+						"during metadata check. Skipping this chunk."
+					)
+					continue
+
+				old_git_metadata = chunk_payload.get("git_metadata")
+				update_needed = False
+				if not isinstance(old_git_metadata, dict):
+					update_needed = True  # If no proper old metadata, or it's missing, update to current
+				elif (
+					old_git_metadata.get("tracked") != required_new_git_metadata["tracked"]
+					or old_git_metadata.get("branch") != required_new_git_metadata["branch"]
+					or old_git_metadata.get("git_hash") != required_new_git_metadata["git_hash"]
+				):
+					update_needed = True
+
+				if update_needed:
+					key = frozenset(required_new_git_metadata.items())
+					git_metadata_update_groups[key].append(chunk_id)
+
+		if git_metadata_update_groups:
+			num_chunks_to_update = sum(len(ids) for ids in git_metadata_update_groups.values())
+			logger.info(
+				f"Found {num_chunks_to_update} chunks requiring Git metadata updates, "
+				f"grouped into {len(git_metadata_update_groups)} unique metadata sets."
+			)
+
+			total_update_batches = sum(
+				(len(chunk_ids_group) + self.qdrant_batch_size - 1) // self.qdrant_batch_size
+				for chunk_ids_group in git_metadata_update_groups.values()
+			)
+			# Ensure total is at least 1 if there are groups, for progress bar logic
+			progress_total = (
+				total_update_batches if total_update_batches > 0 else (1 if git_metadata_update_groups else 0)
+			)
+
+			if progress_total > 0:  # Only show progress if there's something to do
+				with progress_indicator(
+					"Applying Git metadata updates to chunks...",
+					total=progress_total,
+					style="progress",
+					transient=True,
+				) as update_meta_progress_bar:
+					applied_batches_count = 0
+					for new_meta_fset, chunk_ids_to_update_with_this_meta in git_metadata_update_groups.items():
+						new_meta_dict = dict(new_meta_fset)
+						payload_to_set = {"git_metadata": new_meta_dict}
+
+						for i in range(0, len(chunk_ids_to_update_with_this_meta), self.qdrant_batch_size):
+							batch_chunk_ids = chunk_ids_to_update_with_this_meta[i : i + self.qdrant_batch_size]
+							if batch_chunk_ids:  # Ensure batch is not empty
+								# Cast to satisfy linter for QdrantManager's expected type
+								typed_point_ids = cast("list[str | int | uuid.UUID]", batch_chunk_ids)
+								await self.qdrant_manager.set_payload(
+									payload=payload_to_set, point_ids=typed_point_ids, filter_condition=models.Filter()
+								)
+								logger.info(
+									f"Updated git_metadata for {len(batch_chunk_ids)} chunks with: {new_meta_dict}"
+								)
+							applied_batches_count += 1
+							update_meta_progress_bar(None, applied_batches_count, None)  # Update progress
+
+					# Ensure progress bar completes if all batches were empty but groups existed
+					if applied_batches_count == 0 and git_metadata_update_groups:
+						update_meta_progress_bar(None, progress_total, None)  # Force completion
+			elif num_chunks_to_update > 0:  # Log if groups existed but somehow total_progress was 0
+				logger.info(f"Updating {num_chunks_to_update} chunks' Git metadata without progress bar (zero batches)")
+				for new_meta_fset, chunk_ids_to_update_with_this_meta in git_metadata_update_groups.items():
+					new_meta_dict = dict(new_meta_fset)
+					payload_to_set = {"git_metadata": new_meta_dict}
+					if chunk_ids_to_update_with_this_meta:  # Check if list is not empty
+						# Cast to satisfy linter for QdrantManager's expected type
+						typed_point_ids_single_batch = cast(
+							"list[str | int | uuid.UUID]", chunk_ids_to_update_with_this_meta
+						)
+						await self.qdrant_manager.set_payload(
+							payload=payload_to_set,
+							point_ids=typed_point_ids_single_batch,
+							filter_condition=models.Filter(),
+						)
+						logger.info(
+							f"Updated git_metadata for {len(chunk_ids_to_update_with_this_meta)} "
+							f"chunks (in a single batch) with: {new_meta_dict}"
+						)
+
+		else:
+			logger.info("No Git metadata updates required for existing chunks of unchanged files.")
 
 		num_files_to_process = len(files_to_process)
 		all_chunks: list[dict[str, Any]] = []  # Ensure all_chunks is initialized
