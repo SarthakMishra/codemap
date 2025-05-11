@@ -6,7 +6,6 @@ import time
 from pathlib import Path
 
 import docker
-import httpx
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
 
 logger = logging.getLogger(__name__)
@@ -299,10 +298,12 @@ async def check_qdrant_health(url: str = f"http://localhost:{QDRANT_HOST_PORT}")
 	    True if Qdrant is healthy, False otherwise
 
 	"""
+	from httpx import AsyncClient, RequestError
+
 	health_url = f"{url}/healthz"
 	start_time = time.time()
 
-	async with httpx.AsyncClient() as client:
+	async with AsyncClient() as client:
 		try:
 			async with asyncio.timeout(DEFAULT_TIMEOUT):
 				while True:
@@ -311,7 +312,7 @@ async def check_qdrant_health(url: str = f"http://localhost:{QDRANT_HOST_PORT}")
 						if response.status_code == HTTP_OK:
 							logger.info("Qdrant service is healthy (responded 200 OK)")
 							return True
-					except httpx.RequestError:
+					except RequestError:
 						pass
 
 					if time.time() - start_time >= DEFAULT_TIMEOUT:
@@ -346,18 +347,20 @@ async def ensure_qdrant_running(
 	# Check if Qdrant service is already running
 	qdrant_running = False
 
+	from httpx import AsyncClient, HTTPError, RequestError
+
 	try:
 		# Try a direct HTTP request first to see if Qdrant is up
-		async with httpx.AsyncClient(timeout=3.0) as client:
+		async with AsyncClient(timeout=3.0) as client:
 			try:
 				response = await client.get(f"{qdrant_url}/health")
 				if response.status_code == HTTP_OK:
 					logger.info("Qdrant is already available via HTTP")
 					qdrant_running = True
-			except httpx.RequestError:
+			except RequestError:
 				# HTTP request failed, now check if it's running in Docker
 				qdrant_running = await is_container_running(QDRANT_CONTAINER_NAME)
-	except (httpx.RequestError, httpx.HTTPError, ConnectionError, OSError) as e:
+	except (HTTPError, ConnectionError, OSError) as e:
 		logger.warning(f"Error checking Qdrant service: {e}")
 
 	# Start services if needed
