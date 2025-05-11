@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pygit2 import Commit, discover_repository
+from pygit2.enums import FileStatus
 from pygit2.repository import Repository
 
 from codemap.processor.vector.schema import GitBlameSchema, GitMetadataSchema
@@ -15,8 +16,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
 class GitError(Exception):
 	"""Custom exception for Git-related errors."""
+
 
 class GitRepoContext:
 	"""Context manager for efficient Git operations using pygit2."""
@@ -48,7 +51,7 @@ class GitRepoContext:
 		if self.repo_root is None:
 			self.repo_root = self.get_repo_root()
 		self.repo = Repository(str(self.repo_root))
-		self.branch = self._get_branch()
+		self.branch = self.get_current_branch()
 		self.exclude_patterns = self._get_exclude_patterns()
 		self.tracked_files = self._get_tracked_files()
 		self._blame_cache: dict[str, Blame] = {}  # Cache for blame objects
@@ -124,7 +127,7 @@ class GitRepoContext:
 		self.logger.info(f"Found {len(tracked_files)} tracked files in Git repository: {self.repo.path}")
 		return tracked_files
 
-	def _get_branch(self) -> str:
+	def get_current_branch(self) -> str:
 		"""
 		Get the current branch name of the Git repository.
 
@@ -173,11 +176,49 @@ class GitRepoContext:
 			list[GitBlameSchema]: A list of Git blame results.
 		"""
 		try:
-			blame_obj: Blame
-			if file_path not in self._blame_cache:
-				# Ensure file_path is relative to repo root for pygit2.blame
-				self._blame_cache[file_path] = self.repo.blame(file_path)
-			blame_obj = self._blame_cache[file_path]
+			# Check if the file is actually tracked by git
+			file_is_tracked = file_path in self.tracked_files
+			if not file_is_tracked:
+				# Skip blame lookup for untracked files
+				logger.debug(f"File '{file_path}' is not tracked in git - skipping blame lookup")
+				return []
+
+			# Handle ambiguous file paths without full directory path
+			# Only attempt path resolution if we have:
+			# 1. A valid repo_root
+			# 2. A simple filename without path separators
+			if self.repo_root is not None and "/" not in file_path and "\\" not in file_path and self.tracked_files:
+				# We have just a filename - try to find it in tracked files
+				matching_paths = [
+					tracked_path
+					for tracked_path in self.tracked_files
+					if tracked_path.endswith(f"/{file_path}") or tracked_path == file_path
+				]
+
+				if len(matching_paths) == 1:
+					# Found exactly one match, use it
+					file_path = matching_paths[0]
+					self.logger.debug(f"Found unique match for '{file_path}': {matching_paths[0]}")
+				elif len(matching_paths) > 1:
+					# Multiple matches, use the most specific one or log warning
+					self.logger.warning(f"Ambiguous file '{file_path}' has multiple matches: {matching_paths}")
+					# For now, pick the first candidate but this could be improved
+					file_path = matching_paths[0]
+					self.logger.debug(f"Using first match: {file_path}")
+				else:
+					self.logger.warning(f"No matching file found for '{file_path}' in tracked files")
+					return []  # Return empty blame list if no match found
+
+			try:
+				blame_obj: Blame
+				if file_path not in self._blame_cache:
+					# Ensure file_path is relative to repo root for pygit2.blame
+					self._blame_cache[file_path] = self.repo.blame(file_path)
+				blame_obj = self._blame_cache[file_path]
+			except KeyError:
+				# File not found in git repository
+				logger.debug(f"File '{file_path}' not found in git repository - skipping blame lookup")
+				return []
 
 			# Using a dictionary to collect unique commit information for the given line range
 			# Key: commit_id_str, Value: GitBlameSchema
@@ -267,3 +308,8 @@ class GitRepoContext:
 			branch=self.branch,
 			blame=blame,
 		)
+
+	def get_untracked_files(self) -> list[str]:
+		"""Get a list of untracked files in the repository."""
+		status = self.repo.status()
+		return [path for path, flags in status.items() if flags & FileStatus.WT_NEW]

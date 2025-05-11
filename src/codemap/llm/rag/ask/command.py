@@ -1,8 +1,11 @@
 """Command for asking questions about the codebase using RAG."""
 
+import asyncio
 import logging
 import uuid
 from typing import Any, TypedDict
+
+import aiofiles
 
 from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
@@ -163,20 +166,39 @@ class AskCommand:
 
 					# Get the file content from the repo
 					try:
-						if self.config_loader.get.repo_root and file_path and start_line > 0 and end_line > 0:
+						if (
+							self.config_loader.get.repo_root
+							and file_path
+							and file_path != "N/A"
+							and start_line > 0
+							and end_line > 0
+						):
 							repo_file_path = self.config_loader.get.repo_root / file_path
-							if repo_file_path.exists():
-								with repo_file_path.open(encoding="utf-8") as f:
-									file_content = f.read()
+							if await asyncio.to_thread(repo_file_path.exists):
+								async with aiofiles.open(repo_file_path, encoding="utf-8") as f:
+									file_content = await f.read()
 								lines = file_content.splitlines()
-								if start_line <= len(lines) and end_line <= len(lines):
+								if start_line <= len(lines) and end_line <= len(lines) and start_line <= end_line:
 									code_content = "\n".join(lines[start_line - 1 : end_line])
 									if language:
 										content_parts.append(f"```{language}\n{code_content}\n```")
 									else:
 										content_parts.append(f"```\n{code_content}\n```")
+								else:
+									logger.warning(
+										f"Invalid line numbers for file {file_path}: "
+										f"start={start_line}, end={end_line}, total_lines={len(lines)}. "
+										"Skipping code content for this chunk."
+									)
+							else:
+								logger.warning(f"File path does not exist for chunk context: {repo_file_path}")
+						elif file_path == "N/A":
+							logger.warning("File path is 'N/A' for a chunk, cannot retrieve content.")
+							# Add other conditions leading to this path if necessary for logging
 					except Exception:
-						logger.exception(f"Error reading file content for {file_path}")
+						logger.exception(f"Error reading or processing file content for {file_path}")
+						# Optionally, append a placeholder or error message to content_parts
+						# content_parts.append("[Error retrieving code content]")
 
 					content = "\n\n".join(content_parts)
 

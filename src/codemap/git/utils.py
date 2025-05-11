@@ -7,13 +7,11 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import BaseModel
 from pygit2 import (
 	Commit,
 	Diff,
 	Patch,
 )
-from pygit2.enums import FileStatus
 
 from codemap.processor.utils.git_utils import GitRepoContext
 
@@ -32,25 +30,6 @@ class GitDiff:
 
 class GitError(Exception):
 	"""Custom exception for Git-related errors."""
-
-
-class GitBlameSchema(BaseModel):
-	"""Metadata for a git blame."""
-
-	commit_id: str
-	date: str
-	author_name: str
-	start_line: int
-	end_line: int
-
-
-class GitMetadataSchema(BaseModel):
-	"""Metadata for a git repository."""
-
-	git_hash: str
-	tracked: bool
-	branch: str
-	blame: list[GitBlameSchema]
 
 
 class ExtendedGitRepoContext(GitRepoContext):
@@ -184,11 +163,6 @@ class ExtendedGitRepoContext(GitRepoContext):
 			logger.exception(error_msg)
 			raise GitError(error_msg) from e
 
-	def get_untracked_files(self) -> list[str]:
-		"""Get a list of untracked files in the repository."""
-		status = self.repo.status()
-		return [path for path, flags in status.items() if flags & FileStatus.WT_NEW]
-
 	def unstage_files(self, files: list[str]) -> None:
 		"""Unstage the specified files."""
 		for file in files:
@@ -199,10 +173,6 @@ class ExtendedGitRepoContext(GitRepoContext):
 		"""Switch the current Git branch to the specified branch name."""
 		ref = f"refs/heads/{branch_name}"
 		self.repo.checkout(ref)
-
-	def get_current_branch(self) -> str:
-		"""Get the name of the current branch."""
-		return self.repo.head.shorthand
 
 	def is_git_ignored(self, file_path: str) -> bool:
 		"""Check if a file is ignored by Git."""
