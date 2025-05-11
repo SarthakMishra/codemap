@@ -135,10 +135,11 @@ class TreeSitterAnalyzer:
 			logger.debug("No parser for language %s", determined_language)
 			return None, determined_language, None, None
 
+		content_bytes_read: bytes | None = None  # Initialize here
 		try:
 			with file_path.open("rb") as f:
-				content_bytes = f.read()
-			tree = parser.parse(content_bytes)
+				content_bytes_read = f.read()
+			tree = parser.parse(content_bytes_read)
 			root_node = tree.root_node
 			current_mtime_after_read = file_path.stat().st_mtime
 			self.ast_cache[file_path] = (
@@ -147,15 +148,17 @@ class TreeSitterAnalyzer:
 				parser,
 			)  # Not caching content_bytes in AST cache for now
 			logger.debug("Parsed and cached AST for: %s", file_path)
-			return root_node, determined_language, parser, content_bytes  # Return read content_bytes
+			return root_node, determined_language, parser, content_bytes_read  # Return read content_bytes
 		except FileNotFoundError:
 			logger.warning("File not found during parsing: %s", file_path)
 			if file_path in self.ast_cache:
 				del self.ast_cache[file_path]
+			# If file not found, content_bytes_read would not have been assigned (or remains None)
 			return None, determined_language, parser, None
 		except Exception:
 			logger.exception("Failed to parse file %s", file_path)
-			return None, determined_language, parser, None
+			# content_bytes_read will be None if open failed, or the read bytes if parse failed
+			return None, determined_language, parser, content_bytes_read
 
 	def get_syntax_handler(self, language: str) -> LanguageSyntaxHandler | None:
 		"""
