@@ -43,7 +43,7 @@ class GitTestBase:
 		    path: Mock path to use
 
 		"""
-		patcher = patch("codemap.git.commit_generator.command.get_repo_root")
+		patcher = patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root")
 		self.mock_get_repo_root = patcher.start()
 		self.mock_get_repo_root.return_value = path
 		self._patchers.append(patcher)

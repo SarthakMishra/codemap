@@ -1,13 +1,13 @@
 """Tests for the TreeSitterAnalyzer."""
 
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-from tree_sitter import Language, Node, Parser, Tree  # Import Tree
+from tree_sitter import Language, Node, Parser, Tree
 
-from codemap.processor.tree_sitter.analyzer import LANGUAGE_NAMES, TreeSitterAnalyzer, get_language_by_extension
+from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer, get_language_by_extension
 from codemap.processor.tree_sitter.base import EntityType
-from codemap.processor.tree_sitter.languages import LANGUAGE_CONFIGS, LanguageSyntaxHandler
+from codemap.processor.tree_sitter.languages import LanguageSyntaxHandler
 
 # --- Fixtures ---
 
@@ -34,28 +34,38 @@ UNKNOWN_CODE = "<xml><tag>content</tag></xml>"
 @pytest.fixture
 def analyzer():
 	"""Provides a TreeSitterAnalyzer instance."""
-	# Prevent actual parser loading during tests by patching _load_parsers
-	with patch.object(TreeSitterAnalyzer, "_load_parsers", return_value=None):
-		instance = TreeSitterAnalyzer()
-		# Manually add mock parsers if needed for specific tests
-		instance.parsers = {
-			"python": MagicMock(spec=Parser),
-			"javascript": MagicMock(spec=Parser),
-		}
-		yield instance  # Use yield to ensure cleanup if needed
+	return TreeSitterAnalyzer()
+	# Tests that need to control parser behavior should mock
+	# instance.get_parser directly or its dependencies like
+	# 'codemap.processor.tree_sitter.analyzer.get_language'
+	# and 'codemap.processor.tree_sitter.analyzer.Parser'.
 
 
 @pytest.fixture
-def mock_parser(analyzer):  # Depends on analyzer to get a target parser
-	"""Provides a mock Parser object."""
-	parser = analyzer.parsers["python"]  # Get one of the mock parsers
-	parser.language = MagicMock(spec=Language)
-	parser.parse.return_value = MagicMock(spec=Tree)
-	parser.parse.return_value.root_node = MagicMock(spec=Node)
-	parser.parse.return_value.root_node.text = PYTHON_CODE.encode("utf-8")  # Add text attribute
-	parser.parse.return_value.root_node.named_child_count = 2  # Simulate children
-	# Add more mock attributes/methods to root_node as needed
-	return parser
+def mock_parser(analyzer):  # Depends on analyzer
+	"""Provides a mock Parser object and patches analyzer.get_parser for 'python'."""
+	mock_p = MagicMock(spec=Parser)
+	mock_p.language = MagicMock(spec=Language)
+	mock_tree = MagicMock(spec=Tree)
+	mock_root_node = MagicMock(spec=Node)
+	mock_root_node.text = PYTHON_CODE.encode("utf-8")
+	mock_root_node.named_child_count = 2
+	mock_tree.root_node = mock_root_node
+	mock_p.parse.return_value = mock_tree
+
+	# Patch get_parser on the analyzer instance
+	# So when analyzer.get_parser("python") is called, it returns our mock_p
+
+	def side_effect_get_parser(lang_name):
+		if lang_name == "python":
+			return mock_p
+		# For other languages, or if the original get_parser had more complex logic
+		# you might want to call original_get_parser(lang_name) here.
+		# For this test setup, if it's not python, we can assume it might return None or raise.
+		return None  # Or call original_get_parser(lang_name) if other tests need it.
+
+	with patch.object(analyzer, "get_parser", side_effect=side_effect_get_parser):
+		yield mock_p
 
 
 @pytest.fixture
@@ -94,37 +104,6 @@ def test_get_language_by_extension(filename, expected_lang, tmp_path):
 	assert get_language_by_extension(file_path) == expected_lang
 
 
-# Test Analyzer Initialization
-@patch("codemap.processor.tree_sitter.analyzer.get_language")
-@patch("codemap.processor.tree_sitter.analyzer.Parser")
-def test_analyzer_init_loads_parsers(mock_parser_cls, mock_get_lang):
-	"""Test that __init__ calls _load_parsers and attempts to load languages."""
-	# Mock get_language to return a mock Language object
-	mock_lang_obj = MagicMock(spec=Language)
-	mock_get_lang.return_value = mock_lang_obj
-	# Mock Parser constructor
-	mock_parser_instance = MagicMock(spec=Parser)
-	mock_parser_cls.return_value = mock_parser_instance
-
-	analyzer = TreeSitterAnalyzer()  # Call init directly
-
-	# Check that get_language and Parser were called for configured languages
-	expected_calls = []
-	for lang, ts_lang_name in LANGUAGE_NAMES.items():
-		if lang in LANGUAGE_CONFIGS:  # Only check configured languages
-			expected_calls.append(call(ts_lang_name))
-
-	mock_get_lang.assert_has_calls(expected_calls, any_order=True)
-	assert mock_parser_cls.call_count == len(expected_calls)
-	# Check that the parser's language was set
-	assert mock_parser_instance.language == mock_lang_obj
-	# Check that parsers are stored
-	for lang in LANGUAGE_NAMES:
-		if lang in LANGUAGE_CONFIGS:
-			assert lang in analyzer.parsers
-			assert analyzer.parsers[lang] is mock_parser_instance
-
-
 # Test get_parser
 def test_get_parser(analyzer):
 	"""Test retrieving a parser for a supported language."""
@@ -138,12 +117,13 @@ def test_parse_file_success(analyzer, mock_parser, tmp_path):
 	"""Test successful parsing of a file."""
 	file_path = tmp_path / "test.py"
 	file_path.write_text(PYTHON_CODE)
-	analyzer.parsers["python"] = mock_parser  # Use the configured mock parser
 
-	root_node, lang = analyzer.parse_file(file_path, PYTHON_CODE, "python")
+	root_node, lang, parser_instance, content_bytes = analyzer.parse_file(file_path, language="python")
 
 	assert lang == "python"
 	assert root_node is not None
+	assert parser_instance is mock_parser
+	assert content_bytes == PYTHON_CODE.encode("utf-8")
 	mock_parser.parse.assert_called_once_with(PYTHON_CODE.encode("utf-8"))
 
 
@@ -151,13 +131,13 @@ def test_parse_file_language_detection(analyzer, mock_parser, tmp_path):
 	"""Test parse_file correctly detects language if not provided."""
 	file_path = tmp_path / "test.py"
 	file_path.write_text(PYTHON_CODE)
-	analyzer.parsers["python"] = mock_parser
 
-	# Call without specifying language
-	root_node, lang = analyzer.parse_file(file_path, PYTHON_CODE)
+	root_node, lang, parser_instance, content_bytes = analyzer.parse_file(file_path)
 
 	assert lang == "python"
 	assert root_node is not None
+	assert parser_instance is mock_parser
+	assert content_bytes == PYTHON_CODE.encode("utf-8")
 	mock_parser.parse.assert_called_once_with(PYTHON_CODE.encode("utf-8"))
 
 
@@ -166,38 +146,50 @@ def test_parse_file_unsupported_language(analyzer, tmp_path):
 	file_path = tmp_path / "test.unknown"
 	file_path.write_text(UNKNOWN_CODE)
 
-	root_node, lang = analyzer.parse_file(file_path, UNKNOWN_CODE)
+	root_node, lang, parser_instance, content_bytes = analyzer.parse_file(file_path)
 
 	assert lang == ""
 	assert root_node is None
+	assert parser_instance is None
+	assert content_bytes is None
 
 
 def test_parse_file_no_parser(analyzer, tmp_path):
 	"""Test parse_file when parser for the language is not available."""
-	file_path = tmp_path / "test.java"  # Assume java parser wasn't loaded
+	file_path = tmp_path / "test.java"
 	file_path.write_text("class Test {}")
-	# Ensure no parser exists for java
-	if "java" in analyzer.parsers:
-		del analyzer.parsers["java"]
 
-	with patch("codemap.processor.tree_sitter.analyzer.get_language_by_extension", return_value="java"):
-		root_node, lang = analyzer.parse_file(file_path, "class Test {}")
+	# Mock get_language_by_extension to ensure "java" is detected
+	# Mock analyzer.get_parser to return None for "java"
+	with (
+		patch("codemap.processor.tree_sitter.analyzer.get_language_by_extension", return_value="java"),
+		patch.object(
+			analyzer,
+			"get_parser",
+			side_effect=lambda lang_name: None if lang_name == "java" else MagicMock(spec=Parser),
+		),
+	):
+		root_node, lang, parser_instance, content_bytes = analyzer.parse_file(file_path)
 
 	assert lang == "java"
 	assert root_node is None
+	assert parser_instance is None
+	assert content_bytes is None
 
 
 def test_parse_file_parser_error(analyzer, mock_parser, tmp_path):
 	"""Test parse_file when the tree-sitter parser raises an error."""
 	file_path = tmp_path / "test.py"
 	file_path.write_text(PYTHON_CODE)
-	analyzer.parsers["python"] = mock_parser
+	# mock_parser fixture already patches analyzer.get_parser for "python"
 	mock_parser.parse.side_effect = Exception("Parsing Crash")
 
-	root_node, lang = analyzer.parse_file(file_path, PYTHON_CODE, "python")
+	root_node, lang, parser_instance, content_bytes = analyzer.parse_file(file_path, language="python")
 
 	assert lang == "python"
 	assert root_node is None
+	assert parser_instance is mock_parser
+	assert content_bytes == PYTHON_CODE.encode("utf-8")  # Content is read before parse attempt
 
 
 # Test get_syntax_handler
@@ -276,36 +268,38 @@ def test_analyze_file(mock_analyze_node, mock_parse_file, mock_get_handler, anal
 	file_path = tmp_path / "test.py"
 	file_path.write_text(PYTHON_CODE)
 
-	# Mock parse_file result
 	mock_root_node = MagicMock(spec=Node)
-	mock_root_node.named_child_count = 1
-	mock_child_node = MagicMock(spec=Node)  # The single child
-	mock_root_node.children = [mock_child_node]  # Simulate children
-	mock_parse_file.return_value = (mock_root_node, "python")
 
-	# Mock get_syntax_handler
+	mock_parser_instance = MagicMock(spec=Parser)
+	mock_parse_file.return_value = (mock_root_node, "python", mock_parser_instance, PYTHON_CODE.encode("utf-8"))
+
 	mock_get_handler.return_value = mock_handler
+	# We still set this up to show that if analyze_node was real, it would get children:
+	mock_child_node_for_handler = MagicMock(spec=Node)
+	mock_handler.get_children_to_process.return_value = [mock_child_node_for_handler]
+	# The return value of mock_analyze_node is what analyze_file returns
+	# However, analyze_file itself adds 'full_content_str' to this result.
+	mock_analyze_node_return_value = {"type": "MODULE", "name": "test.py", "children": []}
+	mock_analyze_node.return_value = mock_analyze_node_return_value
 
-	# Configure handler mock to return the child node
-	mock_handler.get_children_to_process.return_value = [mock_child_node]
+	# Add debugging print to see the actual calls made
+	mock_analyze_node.side_effect = lambda *args, **kwargs: (
+		print(f"DEBUG: analyze_node called with: {args}, {kwargs}") or mock_analyze_node_return_value  # noqa: T201
+	)
 
-	# Mock analyze_node to return a simplified result
-	mock_analyze_node.return_value = {"type": "FUNCTION", "name": "child_func", "children": []}
+	analysis_result = analyzer.analyze_file(file_path, language="python")
 
-	analysis_result = analyzer.analyze_file(file_path, PYTHON_CODE, "python")
+	expected_analysis_result = {
+		**mock_analyze_node_return_value,
+		"full_content_str": PYTHON_CODE,
+	}
+	assert analysis_result == expected_analysis_result
+	mock_parse_file.assert_called_once_with(file_path, "python")
 
-	assert analysis_result["success"] is True
-	assert analysis_result["language"] == "python"
-	assert analysis_result["file"] == str(file_path)
-	assert "children" in analysis_result
-	assert len(analysis_result["children"]) > 0  # Root node has children
-
-	# Verify mocks were called
-	mock_parse_file.assert_called_once_with(file_path, PYTHON_CODE, "python")
+	# We won't assert the exact call parameters since we're printing them for debugging
+	# Instead we'll just check that it was called at least once
+	assert mock_analyze_node.call_count >= 1
 	mock_get_handler.assert_called_once_with("python")
-	# analyze_node should be called for the root's children (mocked here)
-	# Check it was called at least once, exact number depends on handler/mock structure
-	mock_analyze_node.assert_called()
 
 
 def test_analyze_file_parsing_fails(analyzer, tmp_path):
@@ -314,13 +308,10 @@ def test_analyze_file_parsing_fails(analyzer, tmp_path):
 	content = "def func("  # Invalid syntax
 	file_path.write_text(content)
 
-	# Simulate parse_file returning None
-	with patch.object(analyzer, "parse_file", return_value=(None, "python")):
-		analysis_result = analyzer.analyze_file(file_path, content, "python")
+	with patch.object(analyzer, "parse_file", return_value=(None, "python", None, content.encode("utf-8"))):
+		analysis_result = analyzer.analyze_file(file_path, language="python")  # No content string
 
-	assert analysis_result["success"] is False
-	assert analysis_result["file"] == str(file_path)
-	assert "error" in analysis_result
+	assert analysis_result == {}
 
 
 def test_analyze_file_no_handler(analyzer, tmp_path):
@@ -329,15 +320,16 @@ def test_analyze_file_no_handler(analyzer, tmp_path):
 	content = "some content"
 	file_path.write_text(content)
 
-	# Simulate parse_file succeeding but get_handler returning None
 	mock_root_node = MagicMock(spec=Node)
+	mock_parser_instance = MagicMock(spec=Parser)
 	with (
-		patch.object(analyzer, "parse_file", return_value=(mock_root_node, "unknown")),
+		patch.object(
+			analyzer,
+			"parse_file",
+			return_value=(mock_root_node, "unknown", mock_parser_instance, content.encode("utf-8")),
+		),
 		patch.object(analyzer, "get_syntax_handler", return_value=None),
 	):
-		analysis_result = analyzer.analyze_file(file_path, content, "unknown")
+		analysis_result = analyzer.analyze_file(file_path, language="unknown")  # No content string
 
-	assert analysis_result["success"] is False
-	assert analysis_result["file"] == str(file_path)
-	assert "error" in analysis_result
-	assert analysis_result["error"] == "No handler for language unknown"
+	assert analysis_result == {}

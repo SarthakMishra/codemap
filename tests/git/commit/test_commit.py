@@ -94,10 +94,10 @@ def mock_diff_splitter() -> Generator[Mock, None, None]:
 def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 	"""Create a mock for git utilities."""
 	with (
-		patch("codemap.git.utils.get_staged_diff") as mock_staged,
-		patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged,
-		patch("codemap.git.utils.get_untracked_files") as mock_untracked,
-		patch("codemap.git.utils.commit_only_files") as mock_commit,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_staged_diff") as mock_staged,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_unstaged_diff") as mock_unstaged,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_untracked_files") as mock_untracked,
+		patch("codemap.git.utils.ExtendedGitRepoContext.commit_only_files") as mock_commit,
 	):
 		# Mock the staged diff
 		staged_diff = GitDiff(

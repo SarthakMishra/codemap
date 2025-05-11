@@ -42,7 +42,7 @@ class TestPRCommandInitialization(GitTestBase):
 		# Arrange: Set up mocks
 		with (
 			patch("codemap.llm.LLMClient") as mock_llm_client_cls,
-			patch("codemap.git.pr_generator.command.get_repo_root") as mock_get_repo_root,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root") as mock_get_repo_root,
 		):
 			mock_llm_client = Mock()
 			mock_llm_client_cls.return_value = mock_llm_client
@@ -62,7 +62,7 @@ class TestPRCommandInitialization(GitTestBase):
 	def test_init_git_error(self) -> None:
 		"""Test error handling when Git operations fail during initialization."""
 		# Arrange: Set up mocks
-		with patch("codemap.git.pr_generator.command.get_repo_root") as mock_get_repo_root:
+		with patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root") as mock_get_repo_root:
 			# Configure mocks to raise GitError
 			mock_get_repo_root.side_effect = GitError("Not a git repository")
 
@@ -101,7 +101,7 @@ class TestPRCommandBranchInfo(GitTestBase):
 		# Create the PRCommand with patched dependencies
 		with (
 			patch("codemap.llm.LLMClient", return_value=self.mock_llm_client),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path)),
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path)),
 		):
 			self.pr_command = PRCommand(config_loader=self.mock_config)
 
@@ -169,7 +169,7 @@ class TestPRCommandCommitHistory(GitTestBase):
 		# Create the PRCommand with patched dependencies
 		with (
 			patch("codemap.llm.LLMClient", return_value=self.mock_llm_client),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path)),
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path)),
 		):
 			self.pr_command = PRCommand(config_loader=self.mock_config)
 
@@ -274,7 +274,7 @@ class TestPRCommandDescriptionGeneration(GitTestBase):
 		self._patchers.append(patcher1)
 
 		# Patch get_repo_root
-		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path))
+		patcher2 = patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path))
 		self.mock_get_repo_root = patcher2.start()
 		self._patchers.append(patcher2)
 
@@ -386,7 +386,7 @@ class TestPRCommandRun(GitTestBase):
 		self.mock_llm_client_cls = patcher1.start()
 		self._patchers.append(patcher1)
 
-		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path))
+		patcher2 = patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path))
 		self.mock_get_repo_root = patcher2.start()
 		self._patchers.append(patcher2)
 

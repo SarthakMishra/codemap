@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -141,7 +142,7 @@ class TestPRWorkflowCommand:
 		"""Create a mock PRWorkflowCommand with necessary patches."""
 		with (
 			patch("codemap.git.pr_generator.command.PRGenerator", return_value=mock_pr_generator),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value="/path/to/repo"),
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path("/path/to/repo")),
 			patch("codemap.git.pr_generator.command.create_strategy") as mock_create_strategy,
 			patch(
 				"codemap.git.pr_generator.command.get_commit_messages",

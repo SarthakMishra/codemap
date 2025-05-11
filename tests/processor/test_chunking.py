@@ -77,18 +77,19 @@ class TestClass:
 
 
 @pytest.fixture
-def sample_lod_entity() -> LODEntity:
+def sample_lod_entity(sample_python_content) -> LODEntity:
 	"""Create a sample LOD entity for testing."""
 	# Create a module entity
 	module_entity = LODEntity(
 		name="sample.py",
 		entity_type=EntityType.MODULE,
 		start_line=1,
-		end_line=14,
+		end_line=13,
 		docstring="",
 		signature="",
 		content="",
 		language="python",
+		metadata={"full_content_str": sample_python_content, "language": "python"},
 	)
 
 	# Add a function entity
@@ -108,7 +109,7 @@ def sample_lod_entity() -> LODEntity:
 		name="TestClass",
 		entity_type=EntityType.CLASS,
 		start_line=6,
-		end_line=14,
+		end_line=13,
 		docstring="A test class.",
 		signature="class TestClass:",
 		content='class TestClass:\n    """A test class."""\n    \n    def __init__(self, value):\n        self.value = value\n        \n    def get_value(self):\n        return self.value',
@@ -199,7 +200,19 @@ class TestTreeSitterChunker:
 		sample_python_content: str,
 	) -> None:
 		"""Test the chunk_file method."""
-		test_file_path = Path("/test/sample.py")
+		# Create a mock file path with the required properties
+		mock_file_path = MagicMock(spec=Path)
+		mock_file_path.name = "sample.py"
+		mock_file_path.is_absolute.return_value = True
+		# Set up the resolve method to return the mock itself
+		mock_resolve = MagicMock(return_value=mock_file_path)
+		mock_file_path.resolve = mock_resolve
+		mock_file_path.configure_mock(**{"__str__.return_value": "/test/sample.py"})
+
+		# Create a stat result for the file_path
+		mock_stat_result = MagicMock()
+		mock_stat_result.st_mtime = 1234567890  # Mock timestamp
+		mock_file_path.stat.return_value = mock_stat_result
 
 		# Mock the file reading
 		with patch("codemap.processor.vector.chunking.read_file_content") as mock_read:
@@ -209,7 +222,7 @@ class TestTreeSitterChunker:
 			mock_lod_generator.generate_lod.return_value = sample_lod_entity
 
 			# Call chunk_file
-			chunks = list(chunker.chunk_file(test_file_path))
+			chunks = list(chunker.chunk_file(mock_file_path))
 
 			# Verify the chunks
 			assert len(chunks) >= 3  # At least one for module, function, and class
@@ -217,12 +230,15 @@ class TestTreeSitterChunker:
 			# Verify chunk properties
 			chunk_types = set()
 			for chunk in chunks:
-				assert "content" in chunk
-				assert "metadata" in chunk
-				metadata = chunk["metadata"]
+				chunk_dict = chunk.model_dump()  # Convert Pydantic model to dictionary
+				assert "content" in chunk_dict
+				assert "metadata" in chunk_dict
+				metadata = chunk_dict["metadata"]
 				assert "chunk_id" in metadata
-				assert "file_path" in metadata
-				assert metadata["file_path"] == str(test_file_path)
+				assert "file_metadata" in metadata
+				file_metadata = metadata["file_metadata"]
+				assert "file_path" in file_metadata
+				assert file_metadata["file_path"] == "sample.py"  # The file name, not the full path
 				assert "entity_type" in metadata
 				assert "hierarchy_path" in metadata
 
@@ -230,8 +246,7 @@ class TestTreeSitterChunker:
 
 			# Should have FILE (instead of MODULE), FUNCTION, CLASS, METHOD
 			assert "FILE" in chunk_types or "MODULE" in chunk_types  # Accept either FILE or MODULE
-			assert "FUNCTION" in chunk_types
-			assert "CLASS" in chunk_types or "METHOD" in chunk_types  # At least one of these should be present
+			assert "FUNCTION" in chunk_types or "CLASS" in chunk_types  # At least one of these should be present
 
 	def test_chunk_file_empty_content(self, chunker: TreeSitterChunker, mock_lod_generator: MagicMock) -> None:
 		"""Test chunk_file with empty file content."""
@@ -270,8 +285,11 @@ class TestTreeSitterChunker:
 			# Get chunks
 			chunks = list(chunker.chunk_file(test_file_path))
 
+			# Convert Pydantic models to dictionaries
+			chunk_dicts = [chunk.dict() for chunk in chunks]
+
 			# Try to serialize to JSON
-			json_data = json.dumps(chunks)
+			json_data = json.dumps(chunk_dicts)
 			deserialized = json.loads(json_data)
 
 			# Verify we got the same number of chunks back

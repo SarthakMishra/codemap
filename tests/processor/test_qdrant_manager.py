@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,9 +12,6 @@ from qdrant_client.http.models import Distance, PointStruct
 from codemap.config.config_loader import ConfigLoader
 from codemap.config.config_schema import AppConfigSchema, EmbeddingSchema
 from codemap.processor.vector.qdrant_manager import QdrantManager, create_qdrant_point
-
-if TYPE_CHECKING:
-	import uuid
 
 
 @pytest.fixture
@@ -206,7 +203,7 @@ class TestQdrantManager:
 				mock_point_ids_list.return_value = mock_point_ids
 
 				# Cast to the exact type expected by the function
-				compatible_ids = cast("list[str | int | uuid.UUID]", test_ids)
+				compatible_ids = [str(id) for _id in test_ids]
 
 				await qdrant_manager.delete_points(compatible_ids)
 
