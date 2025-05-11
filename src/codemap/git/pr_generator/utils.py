@@ -91,16 +91,12 @@ def generate_pr_title_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_TITLE_PROMPT.format(commit_list=commit_list)
 
-		title = llm_client.completion(
+		return llm_client.completion(
 			messages=[
 				{"role": "system", "content": PR_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
 			],
 		)
-
-		# Clean up the title
-		title = title.strip()
-		return title.removesuffix(".")
 
 	except (ValueError, RuntimeError, ConnectionError) as e:
 		logger.warning("Failed to generate PR title with LLM: %s", str(e))
