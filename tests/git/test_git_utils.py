@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -12,7 +11,6 @@ from codemap.git.utils import (
 	ExtendedGitRepoContext,
 	GitDiff,
 	GitError,
-	run_git_command,
 )
 
 
@@ -53,19 +51,6 @@ class TestGitUtils:
 		"""Clean up after test."""
 		# Stop the patchers
 		self.get_repo_root_patcher.stop()
-
-	def test_run_git_command_success(self) -> None:
-		"""Test successful git command execution."""
-		with patch("subprocess.run", self.mock_run):
-			result = run_git_command(["git", "status"])
-			assert result == "mock output"
-			self.mock_run.assert_called_once()
-
-	def test_run_git_command_failure(self) -> None:
-		"""Test failed git command execution."""
-		self.mock_run.side_effect = subprocess.CalledProcessError(1, ["git", "status"], stderr="error message")
-		with patch("subprocess.run", self.mock_run), pytest.raises(GitError):
-			run_git_command(["git", "status"])
 
 	def test_get_repo_root_success(self) -> None:
 		"""Test getting repository root successfully."""

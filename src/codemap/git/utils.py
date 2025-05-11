@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -13,7 +12,7 @@ from pygit2 import (
 	Patch,
 )
 
-from codemap.processor.utils.git_utils import GitRepoContext
+from codemap.utils.git_utils import GitRepoContext
 
 logger = logging.getLogger(__name__)
 
@@ -89,20 +88,6 @@ class ExtendedGitRepoContext(GitRepoContext):
 
 		return GitDiff(files=files, content=content or "", is_staged=False)
 
-	def stage_files(self, files: list[str]) -> None:
-		"""Stage the specified files."""
-		for file in files:
-			self.repo.index.add(file)
-		self.repo.index.write()
-
-	def commit(self, message: str) -> None:
-		"""Create a commit with the given message."""
-		author = self.repo.default_signature
-		committer = self.repo.default_signature
-		tree = self.repo.index.write_tree()
-		parents = [self.repo.head.target] if self.repo.head_is_unborn is False else []
-		self.repo.create_commit("HEAD", author, committer, message, tree, parents)
-
 	def get_other_staged_files(self, targeted_files: list[str]) -> list[str]:
 		"""Get staged files that are not part of the targeted files."""
 		all_staged = self.get_staged_diff().files
@@ -141,7 +126,7 @@ class ExtendedGitRepoContext(GitRepoContext):
 	) -> list[str]:
 		"""Commit only the specified files with the given message and options."""
 		try:
-			self.stage_files(files)
+			# self.stage_files(files) # Removed: Index is already prepared by the caller
 			other_staged = self.get_other_staged_files(files)
 			commit_cmd = ["git", "commit", "-m", message]
 			if commit_options:
@@ -152,7 +137,10 @@ class ExtendedGitRepoContext(GitRepoContext):
 				self.commit(message)
 				logger.info("Created commit with message: %s", message)
 			except GitError as e:
-				error_msg = f"Git commit command failed. Command: '{' '.join(commit_cmd)}'"
+				# Construct error message using the constructed commit_cmd for logging clarity,
+				# even if not directly used for execution
+				constructed_cmd_str = " ".join(commit_cmd)
+				error_msg = f"Git commit command failed. Intended command: '{constructed_cmd_str}'"
 				logger.exception("Failed to create commit: %s", error_msg)
 				raise GitError(error_msg) from e
 			return other_staged
@@ -162,17 +150,6 @@ class ExtendedGitRepoContext(GitRepoContext):
 			error_msg = f"Error in commit_only_files: {e!s}"
 			logger.exception(error_msg)
 			raise GitError(error_msg) from e
-
-	def unstage_files(self, files: list[str]) -> None:
-		"""Unstage the specified files."""
-		for file in files:
-			self.repo.index.remove(file)
-		self.repo.index.write()
-
-	def switch_branch(self, branch_name: str) -> None:
-		"""Switch the current Git branch to the specified branch name."""
-		ref = f"refs/heads/{branch_name}"
-		self.repo.checkout(ref)
 
 	def get_per_file_diff(self, file_path: str, staged: bool = False) -> GitDiff:
 		"""
@@ -248,57 +225,3 @@ class ExtendedGitRepoContext(GitRepoContext):
 			logger.exception("Failed to get %s diff for %s", "staged" if staged else "unstaged", file_path)
 			msg = f"Failed to get {'staged' if staged else 'unstaged'} diff for {file_path}: {e}"
 			raise GitError(msg) from e
-
-
-def run_git_command(
-	command: list[str],
-	cwd: Path | str | None = None,
-	environment: dict[str, str] | None = None,
-) -> str:
-	"""
-	Run a git command and return its output.
-
-	Args:
-	    command: Command to run as a list of string arguments
-	    cwd: Working directory to run the command in
-	    environment: Environment variables to use
-
-	Returns:
-	    The output from the command
-
-	Raises:
-	    GitError: If the git command fails
-
-	"""
-	try:
-		# Using subprocess.run with a list of arguments is safe since we're not using shell=True
-		# and the command is not being built from untrusted input
-		result = subprocess.run(  # noqa: S603
-			command,
-			cwd=cwd,
-			capture_output=True,
-			text=True,
-			check=True,
-			env=environment,
-		)
-		return result.stdout.strip()
-	except subprocess.CalledProcessError as e:
-		# Check if this is a pre-commit hook failure for commit - handled specially by the UI
-		if command and len(command) > 1 and command[1] == "commit":
-			if "pre-commit" in (e.stderr or ""):
-				# This is a pre-commit hook failure - which is handled by the UI, so don't log as exception
-				logger.warning("Git hooks failed: %s", e.stderr)
-				msg = f"{e.stderr}"
-				raise GitError(msg) from e
-			# Regular commit error
-			logger.exception("Git command failed: %s", " ".join(command))
-
-		cmd_str = " ".join(command)
-		error_output = e.stderr or ""
-		error_msg = f"Git command failed: {cmd_str}\n{error_output}"
-		logger.exception(error_msg)
-		raise GitError(error_output or error_msg) from e
-	except Exception as e:
-		error_msg = f"Error running git command: {e}"
-		logger.exception(error_msg)
-		raise GitError(error_msg) from e

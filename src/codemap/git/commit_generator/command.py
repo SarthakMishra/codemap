@@ -1007,7 +1007,12 @@ class SemanticCommitCommand(CommitCommand):
 			# Unstage all files first (if needed, implement as needed)
 			# Add the group files to the index individually
 			for file_path in group_files:
-				self.git_context.repo.index.add(file_path)
+				# Check file status to handle deletions correctly
+				status = self.git_context.repo.status_file(file_path)
+				if status == FileStatus.WT_DELETED:
+					self.git_context.repo.index.remove(file_path)
+				else:
+					self.git_context.repo.index.add(file_path)
 
 			self.git_context.repo.index.write()
 			# Use commit_only_files utility for commit
