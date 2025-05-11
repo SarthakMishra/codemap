@@ -1,6 +1,6 @@
-# Formatter
+# Interactive
 
-::: codemap.llm.rag.ask.formatter
+::: codemap.llm.rag.interactive
     options:
       members_order: source
       show_if_no_docstring: true

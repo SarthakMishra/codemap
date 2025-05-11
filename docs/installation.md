@@ -12,6 +12,7 @@ After installation, you can use either `codemap` or the shorter alias `cm` to ru
 
 Using `uv` is recommended as it installs the package in an isolated environment and automatically manages the PATH.
 
+
 ```bash
 # Stable version:
 uv tool install codemap
@@ -20,7 +21,6 @@ uv tool install codemap
 ```bash
 # Development Version:
 uv tool install codemap --prerelease allow
-```tall codemap
 ```
 
 ## Updating CodeMap
