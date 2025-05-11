@@ -136,13 +136,16 @@ class QdrantManager:
 			# Index fields for ChunkMetadataSchema
 			index_fields = [
 				("chunk_id", models.PayloadSchemaType.KEYWORD),
-				("file_path", models.PayloadSchemaType.KEYWORD),
 				("start_line", models.PayloadSchemaType.INTEGER),
 				("end_line", models.PayloadSchemaType.INTEGER),
 				("entity_type", models.PayloadSchemaType.KEYWORD),
 				("entity_name", models.PayloadSchemaType.KEYWORD),
-				("language", models.PayloadSchemaType.KEYWORD),
 				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				# FileMetadataSchema subfields (nested under file_metadata)
+				("file_metadata.file_path", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.language", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.last_modified_time", models.PayloadSchemaType.FLOAT),
+				("file_metadata.file_content_hash", models.PayloadSchemaType.KEYWORD),
 				# GitMetadataSchema subfields (nested under git_metadata)
 				("git_metadata.git_hash", models.PayloadSchemaType.KEYWORD),
 				("git_metadata.tracked", models.PayloadSchemaType.BOOL),
@@ -181,6 +184,12 @@ class QdrantManager:
 				("entity_name", models.PayloadSchemaType.KEYWORD),
 				("language", models.PayloadSchemaType.KEYWORD),
 				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				# FileMetadataSchema subfields
+				("file_metadata.file_path", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.language", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.last_modified_time", models.PayloadSchemaType.FLOAT),
+				("file_metadata.file_content_hash", models.PayloadSchemaType.KEYWORD),
+				# GitMetadataSchema subfields
 				("git_metadata.git_hash", models.PayloadSchemaType.KEYWORD),
 				("git_metadata.tracked", models.PayloadSchemaType.BOOL),
 				("git_metadata.branch", models.PayloadSchemaType.KEYWORD),
@@ -237,7 +246,7 @@ class QdrantManager:
 			logger.exception("Error upserting points into Qdrant")
 			# Decide if partial failure needs specific handling or re-raising
 
-	async def delete_points(self, point_ids: list[str | int | uuid.UUID]) -> None:
+	async def delete_points(self, point_ids: list[str]) -> None:
 		"""
 		Delete points from the collection by their IDs.
 
@@ -259,14 +268,35 @@ class QdrantManager:
 
 			await self.client.delete(
 				collection_name=self.collection_name,
-				# Ignore linter complaint about list type compatibility
-				points_selector=models.PointIdsList(points=qdrant_ids),  # type: ignore[arg-type]
+				points_selector=models.PointIdsList(points=qdrant_ids),
 				wait=True,
 			)
 			logger.debug(f"Successfully deleted {len(point_ids)} points.")
 		except Exception:
 			logger.exception("Error deleting points from Qdrant")
 			# Consider error handling strategy
+
+	async def delete_points_by_filter(self, qdrant_filter: models.Filter) -> None:
+		"""
+		Delete points from the collection based on a filter condition.
+
+		Args:
+			qdrant_filter: A Qdrant Filter object specifying the points to delete.
+		"""
+		await self._ensure_initialized()
+		if self.client is None:
+			msg = "Client should be initialized here"
+			raise RuntimeError(msg)
+		try:
+			logger.info(f"Deleting points from '{self.collection_name}' based on filter")
+			await self.client.delete(
+				collection_name=self.collection_name,
+				points_selector=models.FilterSelector(filter=qdrant_filter),
+				wait=True,
+			)
+			logger.debug("Successfully deleted points.")
+		except Exception:
+			logger.exception("Error deleting points from Qdrant")
 
 	async def search(
 		self,
@@ -676,6 +706,58 @@ class QdrantManager:
 			logger.debug(f"Successfully deleted payload keys: {keys}")
 		except Exception:
 			logger.exception("Error deleting payload keys in Qdrant")
+
+	async def get_all_chunks_content_hashes(self) -> set[str]:
+		"""
+		Retrieves all content hashes of chunks in the collection.
+
+		Used for deduplication when syncing.
+
+		Returns:
+			A set of combined content_hash:file_content_hash strings for all chunks in the collection.
+		"""
+		await self._ensure_initialized()
+		if self.client is None:
+			msg = "Client should be initialized here"
+			raise RuntimeError(msg)
+
+		content_hashes = set()
+
+		try:
+			# Get all payloads for deduplication check
+			all_ids = await self.get_all_point_ids_with_filter()
+
+			if not all_ids:
+				return content_hashes
+
+			# Process in batches to avoid memory issues
+			for i in range(0, len(all_ids), 100):
+				batch_ids = all_ids[i : i + 100]
+				payloads = await self.get_payloads_by_ids(batch_ids)
+
+				for payload in payloads.values():
+					if not payload:
+						continue
+
+					content_hash = payload.get("content_hash", "")
+					file_metadata = payload.get("file_metadata", {})
+
+					if isinstance(file_metadata, dict):
+						file_content_hash = file_metadata.get("file_content_hash", "")
+					else:
+						file_content_hash = ""
+
+					if content_hash and file_content_hash:
+						# Create a composite key for both the chunk content and file content
+						dedup_key = f"{content_hash}:{file_content_hash}"
+						content_hashes.add(dedup_key)
+
+			logger.info(f"Retrieved {len(content_hashes)} unique content hash combinations from Qdrant.")
+			return content_hashes
+
+		except Exception:
+			logger.exception("Error retrieving content hashes from Qdrant")
+			return set()
 
 
 # Utility function to create PointStruct easily
