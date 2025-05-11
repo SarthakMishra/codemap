@@ -127,10 +127,129 @@ class PRGitUtils(ExtendedGitRepoContext):
 				f"Attempting to push branch '{branch_name}' to remote "
 				f"'{remote_name}' with refspec '{refspec}' using pygit2."
 			)
-			# Note: pygit2 push may require credential callbacks for private repos
-			# or specific auth methods. This implementation assumes credentials
-			# are globally configured for Git (e.g., via credential helper, SSH agent).
-			remote.push([refspec])
+
+			# Import the proper pygit2 credential classes
+			import shlex
+			import subprocess
+			from pathlib import Path
+			from urllib.parse import urlparse
+
+			from pygit2.callbacks import RemoteCallbacks
+			from pygit2.enums import CredentialType
+
+			# Create a credential class to handle SSH and username/password authentication
+			class GitCredential:
+				def __init__(self, cred_type: CredentialType, *args: str | None) -> None:
+					self.credential_type = cred_type
+					self.credential_tuple = args
+
+			def credential_callback(
+				url: str, username_from_url: str | None, allowed_types: CredentialType
+			) -> GitCredential:
+				"""
+				Callback to handle credential requests from pygit2.
+
+				Args:
+					url: The URL being authenticated against
+					username_from_url: Username extracted from the URL if present
+					allowed_types: Bitmask of allowed credential types
+
+				Returns:
+					A credential object for authentication
+				"""
+				logger.debug(f"Authentication required for {url} (allowed types: {allowed_types})")
+
+				# Get username from URL or use default from git config
+				username = username_from_url
+				if not username:
+					try:
+						config = self.repo.config
+						username = config["user.name"]
+					except (KeyError, AttributeError) as e:
+						# Default if we can't get from config
+						logger.debug(f"Could not get username from git config: {e}")
+						username = "git"
+
+				# Try SSH agent authentication first (if available)
+				if CredentialType.SSH_KEY in allowed_types:
+					logger.debug(f"Attempting SSH agent authentication for {username}")
+					return GitCredential(CredentialType.SSH_KEY, username, None, None, "")
+
+				# Try SSH key authentication if agent is not available
+				if CredentialType.SSH_KEY in allowed_types:
+					try:
+						# Common SSH key paths
+						ssh_dir = Path.home() / ".ssh"
+						key_paths = [
+							ssh_dir / "id_rsa",
+							ssh_dir / "id_ed25519",
+							ssh_dir / "id_ecdsa",
+							ssh_dir / "id_dsa",
+						]
+
+						for private_key_path in key_paths:
+							public_key_path = Path(f"{private_key_path}.pub")
+							if private_key_path.exists() and public_key_path.exists():
+								logger.debug(f"Attempting SSH key authentication with {private_key_path}")
+								return GitCredential(
+									CredentialType.SSH_KEY, username, str(public_key_path), str(private_key_path), ""
+								)
+					except OSError as e:
+						logger.debug(f"SSH key authentication failed: {e}")
+
+				# Try username/password if SSH is not available or didn't work
+				if CredentialType.USERPASS_PLAINTEXT in allowed_types:
+					try:
+						# Extract hostname from URL
+						parsed_url = urlparse(url)
+						hostname = parsed_url.netloc
+
+						# Use git credential fill to get credentials - this command is safe as it's hardcoded
+						cmd = "git credential fill"
+						# Use shlex.split for secure command execution
+						process = subprocess.Popen(  # noqa: S603
+							shlex.split(cmd),
+							stdin=subprocess.PIPE,
+							stdout=subprocess.PIPE,
+							stderr=subprocess.PIPE,
+							text=True,
+						)
+
+						# Provide input for git credential fill
+						input_data = f"protocol={parsed_url.scheme}\nhost={hostname}\n\n"
+						stdout, _ = process.communicate(input=input_data)
+
+						if process.returncode == 0 and stdout:
+							# Parse the output
+							credentials = {}
+							for line in stdout.splitlines():
+								if "=" in line:
+									key, value = line.split("=", 1)
+									credentials[key] = value
+
+							if "username" in credentials and "password" in credentials:
+								logger.debug(f"Using username/password authentication for {credentials['username']}")
+								return GitCredential(
+									CredentialType.USERPASS_PLAINTEXT, credentials["username"], credentials["password"]
+								)
+					except (subprocess.SubprocessError, OSError) as e:
+						logger.debug(f"Username/password authentication failed: {e}")
+
+				# If nothing else works, try username-only authentication
+				if CredentialType.USERNAME in allowed_types:
+					logger.debug(f"Falling back to username-only authentication for {username}")
+					return GitCredential(CredentialType.USERNAME, username)
+
+				# If we get here, we couldn't find suitable credentials
+				logger.warning(f"No suitable authentication method found for {url}")
+				msg = "No suitable authentication method available"
+				raise Pygit2GitError(msg)
+
+			# Create callback object with our credential callback
+			callbacks = RemoteCallbacks(credentials=credential_callback)
+
+			# Pass callbacks to the push method
+			remote.push([refspec], callbacks=callbacks)
 			logger.info(f"Branch '{branch_name}' pushed to remote '{remote_name}' using pygit2.")
 		except (Pygit2GitError, KeyError) as e:  # KeyError for remote_name not found
 			msg = f"Failed to push branch '{branch_name}' to remote '{remote_name}' using pygit2: {e}"
@@ -279,3 +398,4 @@ class PRGitUtils(ExtendedGitRepoContext):
 			)
 			logger.warning(msg)
 			raise GitError(msg) from e  # Wrap in codemap's GitError
+
