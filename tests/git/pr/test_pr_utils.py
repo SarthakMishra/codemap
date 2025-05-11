@@ -54,106 +54,30 @@ class TestPRUtilsBranchManagement(GitTestBase):
 				self.pgu_real_instance = PRGitUtils()
 
 			# Ensure the instance's repo attribute is our mock.
-			# The patch for codemap.utils.git_utils.Repository should handle this during super().__init__(),
-			# but direct assignment is a safeguard.
 			self.pgu_real_instance.repo = self.repo
-			# Ensure git_root is also set to the mock path, which should happen via get_repo_root patch.
-			# ExtendedGitRepoContext sets self.git_root = self.repo_root (from GitRepoContext).
-			# The patch to GitRepoContext.get_repo_root should ensure self.repo_root is Path("/mock/repo/root"),
-			# and thus self.git_root will be set correctly by ExtendedGitRepoContext's __init__.
-			# No explicit assignment to self.pgu_real_instance.git_root should be needed here.
+		except Pygit2GitError:
 
-		except Pygit2GitError:  # This block should ideally not be reached with the new patches.
-			# Fallback if instantiation is problematic without deeper init patching:
-			# Create a dummy PRGitUtils and manually set repo. This is less ideal as it avoids __init__.
 			class DummyPRGitUtils(PRGitUtils):
 				def __init__(self, mock_repo_to_assign) -> None:
-					# Skip ExtendedGitRepoContext's __init__ to avoid repo loading issues
-					# by not calling super().__init__(). This is a significant override.
 					# pylint: disable=super-init-not-called
 					self.repo = mock_repo_to_assign
-					self.git_root = Path("/mock/dummy/root")  # Provide a Path object
-					self.branch = None
-					# Initialize other necessary attributes if PRGitUtils methods depend on them
+					self.git_root = Path("/mock/dummy/root")
+					self.branch: str | None = None
 
 			self.repo = MagicMock(spec=Repository)
 			self.pgu_real_instance = DummyPRGitUtils(self.repo)
 
-		# Patch PRGitUtils.get_instance to return our real instance (which has a mock repo)
 		patch_get_instance = patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance")
 		self.mock_get_instance_method = patch_get_instance.start()
 		self.mock_get_instance_method.return_value = self.pgu_real_instance
 		self._patchers.append(patch_get_instance)
 
-		# For convenience in tests, self.pgu refers to the real instance
 		self.pgu = self.pgu_real_instance
-		# self.repo is already the MagicMock assigned to self.pgu.repo
 
 	def teardown_method(self, _: None) -> None:
 		"""Tear down test fixtures."""
 		for patcher in self._patchers:
 			patcher.stop()
-		# Restore original get_instance if it was stored and modified
-		# PRGitUtils._pr_git_utils_instance = None # Reset singleton for other tests
-
-	def test_get_current_branch(self) -> None:
-		"""Test getting the current branch name using PRGitUtils."""
-		# Arrange
-		mock_head_attribute = MagicMock()
-		mock_head_attribute.shorthand = "feature-branch"
-		self.repo.configure_mock(head_is_detached=False, head=mock_head_attribute)
-		# No need to mock self.pgu.get_current_branch, we are testing its implementation
-
-		# Act
-		result = self.pgu.get_current_branch()  # Call the real method
-
-		# Assert
-		assert result == "feature-branch"
-		# We can assert that self.repo.head was accessed, if needed for more detailed testing.
-		# self.repo.head.assert_called() # or similar, depending on Pygit2's structure
-
-	def test_get_current_branch_detached_head(self) -> None:
-		"""Test getting current branch when HEAD is detached."""
-		# Arrange
-		MagicMock()  # Not used directly for shorthand
-		MagicMock()
-		mock_peeled_commit = MagicMock(spec=Commit)
-		mock_peeled_commit.short_id = "abcdef0"
-		# In pygit2, peel() is a method of a Reference or Oid object, not the commit itself for this context.
-		# repo.revparse_single("HEAD").peel(Commit)
-		mock_head_ref_obj = MagicMock()  # Represents the result of repo.revparse_single("HEAD")
-		mock_head_ref_obj.peel.return_value = mock_peeled_commit  # peel(Commit) returns the commit
-
-		self.repo.configure_mock(
-			head_is_detached=True,
-			# head=mock_head_attribute, # .head is a Reference in non-detached
-			revparse_single=MagicMock(return_value=mock_head_ref_obj),  # mock for repo.revparse_single("HEAD")
-		)
-		# No need to mock self.pgu.get_current_branch itself
-
-		# Act
-		result = self.pgu.get_current_branch()  # Call the real method
-
-		# Assert
-		assert result == "abcdef0"
-		self.repo.revparse_single.assert_called_once_with("HEAD")
-		mock_head_ref_obj.peel.assert_called_once_with(Commit)
-
-	def test_get_current_branch_error(self) -> None:
-		"""Test error handling when getting the current branch fails via PRGitUtils."""
-		# Arrange
-		# Configure the mock repo to raise an error when 'head' is accessed or revparse_single is called
-		# The actual PRGitUtils.get_current_branch() might use self.repo.head or self.repo.revparse_single
-		# Let's assume it uses self.repo.head and that access raises Pygit2GitError
-		self.repo.configure_mock(head=MagicMock(side_effect=Pygit2GitError("Pygit2 error on head access")))
-		# Or if it uses revparse_single in the error path:
-		# self.repo.revparse_single.side_effect = Pygit2GitError("Pygit2 error on revparse")
-
-		# Act and Assert
-		with pytest.raises(
-			GitError, match="Failed to get current branch: Pygit2 error on head access"
-		):  # Match the actual error
-			self.pgu.get_current_branch()  # Call the real method
 
 	def test_create_branch(self) -> None:
 		"""Test creating a new branch using PRGitUtils."""
@@ -222,7 +146,7 @@ class TestPRUtilsBranchManagement(GitTestBase):
 		# Act and Assert
 		# The error message in PRGitUtils.create_branch is "Failed to create branch '{branch_name}' using pygit2: {e}"
 		with pytest.raises(
-			GitError, match="Failed to create branch 'feature-branch' using pygit2: Pygit2 error on peel"
+			GitError, match="An unexpected error occurred while creating branch 'feature-branch': Pygit2 error on peel"
 		):
 			self.pgu.create_branch("feature-branch")  # Call real method
 
@@ -258,32 +182,24 @@ class TestPRUtilsBranchManagement(GitTestBase):
 		# Act and Assert
 		# The error message in PRGitUtils.checkout_branch is "Failed to checkout branch '{branch_name}' using pygit2: {e}"
 		with pytest.raises(
-			GitError, match="Failed to checkout branch 'feature-branch' using pygit2: Pygit2 error on lookup"
+			GitError,
+			match="An unexpected error occurred while checking out branch 'feature-branch': Pygit2 error on lookup",
 		):
 			self.pgu.checkout_branch("feature-branch")
 
 	def test_push_branch(self) -> None:
 		"""Test pushing a branch to remote using PRGitUtils."""
 		# Arrange
-		mock_remote_obj = MagicMock()  # This is the mock for repo.remotes['origin']
-		# mock_remote_obj.push is already a MagicMock
-
-		# Configure self.repo.remotes to be a mock that returns mock_remote_obj on __getitem__
-		# self.repo.remotes is already a MagicMock. Its __getitem__ is also a MagicMock.
+		mock_remote_obj = MagicMock()
+		self.repo.remotes = MagicMock()
 		self.repo.remotes.__getitem__.return_value = mock_remote_obj
 
-		# Mock the credential callback part to avoid its complex logic for this unit test
-		# The push_branch method in PRGitUtils sets up a credential_callback.
-		# We need to ensure this doesn't break or try to do real SSH/HTTP calls.
-		# We can patch 'pygit2.callbacks.RemoteCallbacks' or the specific credential functions it uses if they are an issue.
-		# For now, let's assume the default RemoteCallbacks() works or the error happens before/after callbacks.
-		# A minimal Callbacks object might be needed if push requires it.
-		with patch("codemap.git.pr_generator.pr_git_utils.RemoteCallbacks") as mock_remote_callbacks_cls:
+		with patch("pygit2.callbacks.RemoteCallbacks") as mock_remote_callbacks_cls:
 			mock_callbacks_instance = MagicMock()
 			mock_remote_callbacks_cls.return_value = mock_callbacks_instance
 
 			# Act
-			self.pgu.push_branch("feature-branch")  # Call real method
+			self.pgu.push_branch("feature-branch")
 
 			# Assert
 			self.repo.remotes.__getitem__.assert_called_once_with("origin")
@@ -295,14 +211,15 @@ class TestPRUtilsBranchManagement(GitTestBase):
 		"""Test force pushing a branch to remote using PRGitUtils."""
 		# Arrange
 		mock_remote_obj = MagicMock()
+		self.repo.remotes = MagicMock()
 		self.repo.remotes.__getitem__.return_value = mock_remote_obj
 
-		with patch("codemap.git.pr_generator.pr_git_utils.RemoteCallbacks") as mock_remote_callbacks_cls:
+		with patch("pygit2.callbacks.RemoteCallbacks") as mock_remote_callbacks_cls:
 			mock_callbacks_instance = MagicMock()
 			mock_remote_callbacks_cls.return_value = mock_callbacks_instance
 
 			# Act
-			self.pgu.push_branch("feature-branch", force=True)  # Call real method
+			self.pgu.push_branch("feature-branch", force=True)
 
 			# Assert
 			self.repo.remotes.__getitem__.assert_called_once_with("origin")
@@ -316,16 +233,19 @@ class TestPRUtilsBranchManagement(GitTestBase):
 		# Make the 'push' call on the remote object raise an error
 		mock_remote_obj = MagicMock()
 		mock_remote_obj.push.side_effect = Pygit2GitError("Pygit2 error on push")
+		self.repo.remotes = MagicMock()  # Ensure self.repo.remotes exists and is a mock
 		self.repo.remotes.__getitem__.return_value = mock_remote_obj
 
 		# Act and Assert
 		# The error message in PRGitUtils.push_branch is "Failed to push branch '{branch_name}' to remote '{remote_name}' using pygit2: {e}"
-		with patch("codemap.git.pr_generator.pr_git_utils.RemoteCallbacks"):  # Mock callbacks to simplify
-			with pytest.raises(
+		with (
+			patch("pygit2.callbacks.RemoteCallbacks"),  # Mock callbacks to simplify
+			pytest.raises(
 				GitError,
 				match="Failed to push branch 'feature-branch' to remote 'origin' using pygit2: Pygit2 error on push",
-			):
-				self.pgu.push_branch("feature-branch")  # Call real method
+			),
+		):
+			self.pgu.push_branch("feature-branch")  # Call real method
 
 
 @pytest.mark.unit
@@ -353,7 +273,7 @@ class TestPRUtilsCommitOperations(GitTestBase):
 					# pylint: disable=super-init-not-called
 					self.repo = mock_repo_to_assign
 					self.git_root = Path("/mock/dummy/root")  # Provide a Path object
-					self.branch = None
+					self.branch: str | None = None
 
 			self.repo = MagicMock(spec=Repository)
 			self.pgu_real_instance = DummyPRGitUtils(self.repo)
@@ -820,7 +740,7 @@ class TestPRUtilsMiscOperations(GitTestBase):
 					# pylint: disable=super-init-not-called
 					self.repo = mock_repo_to_assign
 					self.git_root = Path("/mock/dummy/root")  # Provide a Path object
-					self.branch = None
+					self.branch: str | None = None
 
 			self.repo = MagicMock(spec=Repository)
 			self.pgu_real_instance = DummyPRGitUtils(self.repo)

@@ -1,5 +1,6 @@
 """Tests for diff splitting utility functions."""
 
+import logging
 import re
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -9,6 +10,9 @@ import pytest
 from pygit2.enums import FileStatus
 
 from codemap.git.diff_splitter import utils
+from tests.base import GitTestBase
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.mark.unit
@@ -313,13 +317,24 @@ class TestCalculateSemanticSimilarity:
 
 
 @pytest.mark.unit
-class TestFileSystemUtils:
-	"""Tests for utility functions interacting with file system or git."""
+class TestFileSystemUtils(GitTestBase):
+	"""Test cases for file system utility functions."""
 
-	@patch("codemap.git.diff_splitter.utils.ExtendedGitRepoContext")
-	def test_get_deleted_tracked_files(self, MockExtendedGitRepoContext: MagicMock) -> None:
+	@staticmethod
+	def mock_path_exists_check(path_str: str) -> bool:
+		"""Determine if a path exists based on its filename."""
+		filename = Path(path_str).name
+		if filename in ["existing.py", "also_exists.js", "untracked.md"]:
+			return True
+		if filename == "non_existent.txt":
+			return False
+		return False
+
+	@patch("codemap.git.diff_splitter.utils.ExtendedGitRepoContext.get_instance")
+	def test_get_deleted_tracked_files(self, mock_get_repo_ctx_instance: MagicMock) -> None:
 		"""Test retrieving deleted tracked files using git status."""
-		mock_repo_ctx = MockExtendedGitRepoContext.return_value
+		mock_repo_ctx = MagicMock()
+		mock_get_repo_ctx_instance.return_value = mock_repo_ctx
 		mock_repo = MagicMock()
 		mock_repo_ctx.repo = mock_repo
 
@@ -338,14 +353,14 @@ class TestFileSystemUtils:
 
 		assert deleted_unstaged == {"deleted_unstaged.py"}
 		assert deleted_staged == {"deleted_staged.py"}
-		# Ensure ExtendedGitRepoContext was instantiated and its repo.status was called
-		MockExtendedGitRepoContext.assert_called_once()
-		mock_repo.status.assert_called_once()
+		mock_get_repo_ctx_instance.assert_called_once()
+		mock_repo_ctx.repo.status.assert_called_once()
 
-	@patch("codemap.git.diff_splitter.utils.ExtendedGitRepoContext")
-	def test_get_deleted_tracked_files_no_deleted(self, MockExtendedGitRepoContext: MagicMock) -> None:
+	@patch("codemap.git.diff_splitter.utils.ExtendedGitRepoContext.get_instance")
+	def test_get_deleted_tracked_files_no_deleted(self, mock_get_repo_ctx_instance: MagicMock) -> None:
 		"""Test when no files are deleted according to git status."""
-		mock_repo_ctx = MockExtendedGitRepoContext.return_value
+		mock_repo_ctx = MagicMock()
+		mock_get_repo_ctx_instance.return_value = mock_repo_ctx
 		mock_repo = MagicMock()
 		mock_repo_ctx.repo = mock_repo
 
@@ -358,21 +373,20 @@ class TestFileSystemUtils:
 
 		assert deleted_unstaged == set()
 		assert deleted_staged == set()
-		MockExtendedGitRepoContext.assert_called_once()
-		mock_repo.status.assert_called_once()
+		mock_get_repo_ctx_instance.assert_called_once()
+		mock_repo_ctx.repo.status.assert_called_once()
 
-	@patch("codemap.git.diff_splitter.utils.os.path.exists")
-	@patch("codemap.git.diff_splitter.utils.ExtendedGitRepoContext")  # Corrected patch target
+	@patch("codemap.git.diff_splitter.utils.Path.exists", new=lambda _: False)
+	@patch("codemap.git.diff_splitter.utils.ExtendedGitRepoContext.get_instance")
 	@patch("codemap.git.diff_splitter.utils.get_deleted_tracked_files")
 	@patch("codemap.git.diff_splitter.utils.is_test_environment", return_value=False)
 	@patch("codemap.git.diff_splitter.utils.get_absolute_path")
 	def test_filter_valid_files_normal_env(
 		self,
 		mock_get_absolute_path: MagicMock,
-		_mock_is_test: MagicMock,  # Renamed from mock_is_test_env for clarity
+		_mock_is_test: MagicMock,
 		mock_get_deleted: MagicMock,
-		MockExtendedGitRepoContext: MagicMock,  # Corrected mock argument name
-		mock_exists: MagicMock,
+		mock_get_repo_ctx_instance: MagicMock,
 	) -> None:
 		"""Test filtering files in a normal (non-test) environment."""
 		files_to_check = [
@@ -399,35 +413,32 @@ class TestFileSystemUtils:
 
 		mock_get_deleted.return_value = (deleted_unstaged, deleted_staged)
 
-		# Setup mock for ExtendedGitRepoContext
-		mock_repo_ctx_instance = MockExtendedGitRepoContext.return_value
+		# Setup mock for ExtendedGitRepoContext instance returned by get_instance()
+		mock_configured_repo_ctx = MagicMock()
+		mock_get_repo_ctx_instance.return_value = mock_configured_repo_ctx
 		# .tracked_files should be a dict-like object (e.g. output of repo.index)
 		# For simplicity, a dict mapping path to dummy data is fine for .keys() usage.
-		mock_repo_ctx_instance.tracked_files = {filename: {} for filename in tracked_files_set}
+		mock_configured_repo_ctx.tracked_files = {filename: {} for filename in tracked_files_set}
 
-		# Mock get_absolute_path to return the input file path (relative to repo_root for Path object)
+		# Mock get_absolute_path to check the path in our mock_path_exists_check
 		mock_get_absolute_path.side_effect = lambda file, root: str(root / file)
 
-		# Configure os.path.exists mock
-		# Based on the logic in filter_valid_files, os.path.exists is checked if a file is
-		# NOT in tracked_files AND NOT in deleted_staged/unstaged.
-		# Files from files_to_check that would hit this path:
-		# - "non_existent.txt" (not in tracked_files_set, not in deleted sets)
-		# - "untracked.md" (not in tracked_files_set, not in deleted sets)
-		# - "invalid*.py" is filtered before this by filename pattern check.
-		def mock_exists_side_effect(path_arg: str | Path) -> bool:
-			# Convert Path object from get_absolute_path back to string filename for comparison
-			filename = Path(path_arg).name
-			if filename == "untracked.md":  # Assume untracked.md exists for this test
-				return True
-			if filename == "non_existent.txt":
-				return False
-			# Default for other unexpected calls (shouldn't happen with correct logic)
-			return False  # Should not be called for existing.py, also_exists.py due to tracked_files
+		# Replace the existence check by patching Path.exists to a simple lambda
+		# that always returns False, and then intercepting the exact path check in
+		# utils.filter_valid_files to use our custom logic
+		with patch("codemap.git.diff_splitter.utils.Path") as mock_path_cls:
+			# Setup a custom Path constructor that returns a Path mock
+			def path_side_effect(path_str):
+				mock_path = MagicMock()
+				# Make exists() return based on our mock_path_exists_check
+				mock_path.exists.return_value = TestFileSystemUtils.mock_path_exists_check(path_str)
+				# Ensure name is available for debug logging
+				mock_path.name = Path(path_str).name
+				return mock_path
 
-		mock_exists.side_effect = mock_exists_side_effect
+			mock_path_cls.side_effect = path_side_effect
 
-		valid_files, invalid_files_is_now_empty = utils.filter_valid_files(files_to_check, repo_root)
+			valid_files, invalid_files_is_now_empty = utils.filter_valid_files(files_to_check, repo_root)
 
 		# Expected valid files:
 		# - existing.py (in tracked_files)
@@ -444,9 +455,9 @@ class TestFileSystemUtils:
 		}
 		assert invalid_files_is_now_empty == []  # Second part of tuple is always empty now
 		mock_get_deleted.assert_called_once()
-		MockExtendedGitRepoContext.assert_called_once()  # Verify it was used
+		mock_get_repo_ctx_instance.assert_called_once()
 
-	@patch("codemap.git.diff_splitter.utils.Path.exists")  # Mock Path.exists for existence check
+	@patch("codemap.git.diff_splitter.utils.Path.exists")
 	@patch("codemap.git.diff_splitter.utils.is_test_environment", return_value=True)
 	def test_filter_valid_files_test_env(self, _mock_is_test: MagicMock, mock_path_exists: MagicMock) -> None:
 		"""Test filtering files in a test environment (skips git/fs checks, but not pattern/size)."""
