@@ -174,10 +174,6 @@ class ExtendedGitRepoContext(GitRepoContext):
 		ref = f"refs/heads/{branch_name}"
 		self.repo.checkout(ref)
 
-	def is_git_ignored(self, file_path: str) -> bool:
-		"""Check if a file is ignored by Git."""
-		return self.repo.path_is_ignored(file_path)
-
 	def get_per_file_diff(self, file_path: str, staged: bool = False) -> GitDiff:
 		"""
 		Get the diff for a single file, either staged or unstaged.

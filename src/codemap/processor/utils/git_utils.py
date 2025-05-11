@@ -313,3 +313,11 @@ class GitRepoContext:
 		"""Get a list of untracked files in the repository."""
 		status = self.repo.status()
 		return [path for path, flags in status.items() if flags & FileStatus.WT_NEW]
+
+	def is_git_ignored(self, file_path: str) -> bool:
+		"""Check if a file is ignored by Git."""
+		return self.repo.path_is_ignored(file_path)
+
+	def is_file_tracked(self, file_path: str) -> bool:
+		"""Check if a file is tracked in the Git repository."""
+		return file_path in self.tracked_files
