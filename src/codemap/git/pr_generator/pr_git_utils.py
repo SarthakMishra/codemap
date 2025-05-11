@@ -398,4 +398,3 @@ class PRGitUtils(ExtendedGitRepoContext):
 			)
 			logger.warning(msg)
 			raise GitError(msg) from e  # Wrap in codemap's GitError
-
