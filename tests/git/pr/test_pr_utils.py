@@ -7,13 +7,16 @@ import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
+from pygit2 import Commit
+from pygit2 import GitError as Pygit2GitError
+from pygit2.enums import SortMode
+from pygit2.repository import Repository
 
 from codemap.config import ConfigLoader
+from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.schemas import PullRequest
 from codemap.git.pr_generator.utils import (
 	PRCreationError,
-	checkout_branch,
-	create_branch,
 	create_pull_request,
 	detect_branch_type,
 	generate_pr_content_from_template,
@@ -21,12 +24,7 @@ from codemap.git.pr_generator.utils import (
 	generate_pr_description_with_llm,
 	generate_pr_title_from_commits,
 	generate_pr_title_with_llm,
-	get_branch_relation,
-	get_commit_messages,
-	get_current_branch,
 	get_existing_pr,
-	list_branches,
-	push_branch,
 	suggest_branch_name,
 	update_pull_request,
 )
@@ -42,112 +40,209 @@ class TestPRUtilsBranchManagement(GitTestBase):
 
 	def setup_method(self) -> None:
 		"""Set up for tests."""
+		super().setup_method()  # type: ignore[misc] # pylint: disable=no-member
+		self.pgu = PRGitUtils()
+		self.pgu.repo = MagicMock(spec=Repository)
+		self.repo = self.pgu.repo
 		self._patchers = []
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_get_current_branch(self, mock_run_git) -> None:
-		"""Test getting the current branch name."""
+	def test_get_current_branch(self) -> None:
+		"""Test getting the current branch name using PRGitUtils."""
 		# Arrange
-		mock_run_git.return_value = "feature-branch\n"
+		mock_head_attribute = MagicMock()
+		mock_head_attribute.shorthand = "feature-branch"
+		self.repo.configure_mock(head_is_detached=False, head=mock_head_attribute)
 
 		# Act
-		result = get_current_branch()
+		result = self.pgu.get_current_branch()
 
 		# Assert
 		assert result == "feature-branch"
-		mock_run_git.assert_called_once_with(["git", "branch", "--show-current"])
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_get_current_branch_error(self, mock_run_git) -> None:
-		"""Test error handling when getting the current branch fails."""
+	def test_get_current_branch_detached_head(self) -> None:
+		"""Test getting current branch when HEAD is detached."""
 		# Arrange
-		mock_run_git.side_effect = GitError("Command failed")
+		mock_head_attribute = MagicMock()
+		mock_revparse_result = MagicMock()
+		mock_peeled_commit = MagicMock(spec=Commit)
+		mock_peeled_commit.short_id = "abcdef0"
+		mock_revparse_result.peel.return_value = mock_peeled_commit
+
+		self.repo.configure_mock(
+			head_is_detached=True,
+			head=mock_head_attribute,
+			revparse_single=MagicMock(return_value=mock_revparse_result),
+		)
+
+		# Act
+		result = self.pgu.get_current_branch()
+
+		# Assert
+		assert result == "abcdef0"
+
+	def test_get_current_branch_error(self) -> None:
+		"""Test error handling when getting the current branch fails via PRGitUtils."""
+		# Arrange
+		self.repo.configure_mock(head=MagicMock(side_effect=Pygit2GitError("Pygit2 error")))
 
 		# Act and Assert
 		with pytest.raises(GitError, match="Failed to get current branch"):
-			get_current_branch()
+			self.pgu.get_current_branch()
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_create_branch(self, mock_run_git) -> None:
-		"""Test creating a new branch."""
+	def test_create_branch(self) -> None:
+		"""Test creating a new branch using PRGitUtils."""
+		# Arrange
+		mock_head_peel = MagicMock(spec=Commit)
+		mock_head_peel.id = "mock_head_commit_id"
+
+		mock_head_ref_for_peel = MagicMock()
+		mock_head_ref_for_peel.peel.return_value = mock_head_peel
+
+		mock_create_branch_method = MagicMock()
+		mock_lookup_ref_method = MagicMock()
+		mock_checkout_method = MagicMock()
+
+		self.repo.configure_mock(
+			head_is_unborn=False,
+			head=mock_head_ref_for_peel,
+			create_branch=mock_create_branch_method,
+			lookup_reference=mock_lookup_ref_method,
+			checkout=mock_checkout_method,
+		)
+		mock_checkout_ref_obj = MagicMock()
+		mock_lookup_ref_method.return_value = mock_checkout_ref_obj
+
 		# Act
-		create_branch("feature-branch")
+		self.pgu.create_branch("feature-branch")
 
 		# Assert
-		mock_run_git.assert_called_once_with(["git", "checkout", "-b", "feature-branch"])
+		mock_create_branch_method.assert_called_once_with("feature-branch", mock_head_peel)
+		mock_lookup_ref_method.assert_called_with("refs/heads/feature-branch")
+		mock_checkout_method.assert_called_once_with(mock_checkout_ref_obj)
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_create_branch_error(self, mock_run_git) -> None:
-		"""Test error handling when creating a branch fails."""
+	def test_create_branch_from_reference(self) -> None:
+		"""Test creating a new branch from a specific reference."""
 		# Arrange
-		mock_run_git.side_effect = GitError("Command failed")
+		mock_ref_commit = MagicMock(spec=Commit)
+		mock_ref_commit.id = "ref_commit_id"
+		mock_revparse_obj = MagicMock()
+		mock_revparse_obj.peel.return_value = mock_ref_commit
+
+		mock_revparse_single_method = MagicMock(return_value=mock_revparse_obj)
+		mock_create_branch_method = MagicMock()
+		mock_lookup_ref_method = MagicMock()
+		mock_checkout_method = MagicMock()
+
+		self.repo.configure_mock(
+			revparse_single=mock_revparse_single_method,
+			create_branch=mock_create_branch_method,
+			lookup_reference=mock_lookup_ref_method,
+			checkout=mock_checkout_method,
+		)
+		mock_checkout_ref_obj = MagicMock()
+		mock_lookup_ref_method.return_value = mock_checkout_ref_obj
+
+		# Act
+		self.pgu.create_branch("new-feature", from_reference="main")
+
+		# Assert
+		mock_revparse_single_method.assert_called_once_with("main")
+		mock_create_branch_method.assert_called_once_with("new-feature", mock_ref_commit)
+		mock_lookup_ref_method.assert_called_with("refs/heads/new-feature")
+		mock_checkout_method.assert_called_once_with(mock_checkout_ref_obj)
+
+	def test_create_branch_error(self) -> None:
+		"""Test error handling when creating a branch fails using PRGitUtils."""
+		# Arrange
+		mock_head_ref_for_peel = MagicMock()
+		mock_head_ref_for_peel.peel.side_effect = Pygit2GitError("Pygit2 error")
+		self.repo.configure_mock(head_is_unborn=False, head=mock_head_ref_for_peel)
 
 		# Act and Assert
-		with pytest.raises(GitError, match="Failed to create branch: feature-branch"):
-			create_branch("feature-branch")
+		with pytest.raises(GitError, match="Failed to create branch 'feature-branch' using pygit2"):
+			self.pgu.create_branch("feature-branch")
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_checkout_branch(self, mock_run_git) -> None:
-		"""Test checking out an existing branch."""
+	def test_checkout_branch(self) -> None:
+		"""Test checking out an existing branch using PRGitUtils."""
+		# Arrange
+		mock_branch_ref_obj = MagicMock()
+		mock_lookup_ref_method = MagicMock(return_value=mock_branch_ref_obj)
+		mock_checkout_method = MagicMock()
+
+		mock_head_attribute = MagicMock()
+		mock_head_attribute.shorthand = "feature-branch"
+
+		self.repo.configure_mock(
+			lookup_reference=mock_lookup_ref_method,
+			checkout=mock_checkout_method,
+			head_is_detached=False,
+			head=mock_head_attribute,
+		)
+
 		# Act
-		checkout_branch("feature-branch")
+		self.pgu.checkout_branch("feature-branch")
 
 		# Assert
-		mock_run_git.assert_called_once_with(["git", "checkout", "feature-branch"])
+		mock_lookup_ref_method.assert_called_once_with("refs/heads/feature-branch")
+		mock_checkout_method.assert_called_once_with(mock_branch_ref_obj)
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_checkout_branch_error(self, mock_run_git) -> None:
-		"""Test error handling when checking out a branch fails."""
+	def test_checkout_branch_error(self) -> None:
+		"""Test error handling when checking out a branch fails using PRGitUtils."""
 		# Arrange
-		mock_run_git.side_effect = GitError("Command failed")
+		self.repo.configure_mock(lookup_reference=MagicMock(side_effect=Pygit2GitError("Pygit2 error")))
 
 		# Act and Assert
-		with pytest.raises(GitError, match="Failed to checkout branch: feature-branch"):
-			checkout_branch("feature-branch")
+		with pytest.raises(GitError, match="Failed to checkout branch 'feature-branch' using pygit2"):
+			self.pgu.checkout_branch("feature-branch")
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_push_branch(self, mock_run_git) -> None:
-		"""Test pushing a branch to remote."""
-		# Act
-		push_branch("feature-branch")
-
-		# Assert
-		mock_run_git.assert_called_once_with(["git", "push", "-u", "origin", "feature-branch"])
-
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_push_branch_force(self, mock_run_git) -> None:
-		"""Test force pushing a branch to remote."""
-		# Act
-		push_branch("feature-branch", force=True)
-
-		# Assert
-		mock_run_git.assert_called_once_with(["git", "push", "--force", "-u", "origin", "feature-branch"])
-
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_push_branch_error(self, mock_run_git) -> None:
-		"""Test error handling when pushing a branch fails."""
+	def test_push_branch(self) -> None:
+		"""Test pushing a branch to remote using PRGitUtils."""
 		# Arrange
-		mock_run_git.side_effect = GitError("Command failed")
+		mock_remote_obj = MagicMock()
+		mock_remote_obj.push = MagicMock()
+
+		# Explicitly mock the remotes collection and its __getitem__
+		mock_remotes_collection = MagicMock()
+		mock_remotes_collection.__getitem__.return_value = mock_remote_obj
+		self.repo.remotes = mock_remotes_collection  # Assign the fully mocked collection
+
+		# Act
+		self.pgu.push_branch("feature-branch")
+
+		# Assert
+		mock_remotes_collection.__getitem__.assert_called_once_with("origin")
+		mock_remote_obj.push.assert_called_once_with(["refs/heads/feature-branch:refs/heads/feature-branch"])
+
+	def test_push_branch_force(self) -> None:
+		"""Test force pushing a branch to remote using PRGitUtils."""
+		# Arrange
+		mock_remote_obj = MagicMock()
+		mock_remote_obj.push = MagicMock()
+
+		mock_remotes_collection = MagicMock()
+		mock_remotes_collection.__getitem__.return_value = mock_remote_obj
+		self.repo.remotes = mock_remotes_collection
+
+		# Act
+		self.pgu.push_branch("feature-branch", force=True)
+
+		# Assert
+		mock_remotes_collection.__getitem__.assert_called_once_with("origin")
+		mock_remote_obj.push.assert_called_once_with(["+refs/heads/feature-branch:refs/heads/feature-branch"])
+
+	def test_push_branch_error(self) -> None:
+		"""Test error handling when pushing a branch fails using PRGitUtils."""
+		# Arrange
+		mock_remote_obj = MagicMock()
+		mock_remote_obj.push.side_effect = Pygit2GitError("Pygit2 error")
+
+		mock_remotes_collection = MagicMock()
+		mock_remotes_collection.__getitem__.return_value = mock_remote_obj
+		self.repo.remotes = mock_remotes_collection
 
 		# Act and Assert
-		with pytest.raises(GitError, match="Failed to push branch: feature-branch"):
-			push_branch("feature-branch")
-
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_list_branches(self, mock_run_git) -> None:
-		"""Test listing branches."""
-		# Arrange
-		mock_run_git.side_effect = [
-			"  master\n* feature-branch\n  develop\n",  # Local branches
-			"  origin/master\n  origin/feature-branch\n  origin/develop\n",  # Remote branches
-		]
-
-		# Act
-		result = list_branches()
-
-		# Assert
-		assert set(result) == {"master", "feature-branch", "develop"}
-		assert mock_run_git.call_count == 2
+		with pytest.raises(GitError, match="Failed to push branch 'feature-branch' to remote 'origin' using pygit2"):
+			self.pgu.push_branch("feature-branch")
 
 
 @pytest.mark.unit
@@ -157,43 +252,80 @@ class TestPRUtilsCommitOperations(GitTestBase):
 
 	def setup_method(self) -> None:
 		"""Set up for tests."""
+		super().setup_method()  # type: ignore[misc] # pylint: disable=no-member
+		self.pgu = PRGitUtils()
+		self.pgu.repo = MagicMock(spec=Repository)
+		self.repo = self.pgu.repo
 		self._patchers = []
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_get_commit_messages(self, mock_run_git) -> None:
-		"""Test getting commit messages between branches."""
+	def test_get_commit_messages(self) -> None:
+		"""Test getting commit messages between branches using PRGitUtils."""
 		# Arrange
-		mock_run_git.return_value = "feat: Add feature\nfix: Fix bug\n"
+		mock_commit1 = MagicMock(spec=Commit)
+		mock_commit1.message = "feat: Add feature\nMore details."
+		mock_commit2 = MagicMock(spec=Commit)
+		mock_commit2.message = "fix: Fix bug\nMore details."
+
+		mock_walk_iter = [mock_commit1, mock_commit2]
+		mock_walker = MagicMock()
+		mock_walker.__iter__.return_value = mock_walk_iter
+		# Ensure 'hide' method exists and is callable on the walker mock
+		mock_walker.hide = MagicMock()
+		self.repo.walk.return_value = mock_walker
+
+		# Mock revparse_single and peel for base_oid and head_oid resolution
+		mock_base_rev_obj = MagicMock()
+		mock_base_peeled_commit = MagicMock(spec=Commit, id="base_id")
+		mock_base_rev_obj.peel.return_value = mock_base_peeled_commit
+
+		mock_head_rev_obj = MagicMock()
+		mock_head_peeled_commit = MagicMock(spec=Commit, id="head_id")
+		mock_head_rev_obj.peel.return_value = mock_head_peeled_commit
+
+		self.repo.revparse_single.side_effect = [mock_base_rev_obj, mock_head_rev_obj]
 
 		# Act
-		result = get_commit_messages("main", "feature")
+		result = self.pgu.get_commit_messages("main", "feature")
 
 		# Assert
 		assert result == ["feat: Add feature", "fix: Fix bug"]
-		mock_run_git.assert_called_once_with(["git", "log", "main..feature", "--pretty=format:%s"])
+		self.repo.revparse_single.assert_any_call("main")
+		self.repo.revparse_single.assert_any_call("feature")
+		self.repo.walk.assert_called_once_with(mock_head_peeled_commit.id, SortMode.TOPOLOGICAL)
+		mock_walker.hide.assert_called_once_with(mock_base_peeled_commit.id)
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_get_commit_messages_empty(self, mock_run_git) -> None:
-		"""Test getting commit messages with empty result."""
+	def test_get_commit_messages_empty(self) -> None:
+		"""Test getting commit messages with empty result using PRGitUtils."""
 		# Arrange
-		mock_run_git.return_value = ""
+		mock_walk_iter = []  # No commits
+		mock_walker = MagicMock()
+		mock_walker.__iter__.return_value = mock_walk_iter
+		mock_walker.hide = MagicMock()
+		self.repo.walk.return_value = mock_walker
+
+		# Mock revparse_single and peel
+		mock_base_rev_obj = MagicMock()
+		mock_base_peeled_commit = MagicMock(spec=Commit, id="base_id")
+		mock_base_rev_obj.peel.return_value = mock_base_peeled_commit
+		mock_head_rev_obj = MagicMock()
+		mock_head_peeled_commit = MagicMock(spec=Commit, id="head_id")
+		mock_head_rev_obj.peel.return_value = mock_head_peeled_commit
+		self.repo.revparse_single.side_effect = [mock_base_rev_obj, mock_head_rev_obj]
 
 		# Act
-		result = get_commit_messages("main", "feature")
+		result = self.pgu.get_commit_messages("main", "feature")
 
 		# Assert
 		assert result == []
-		mock_run_git.assert_called_once_with(["git", "log", "main..feature", "--pretty=format:%s"])
 
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_get_commit_messages_error(self, mock_run_git) -> None:
-		"""Test error handling when getting commit messages fails."""
+	def test_get_commit_messages_error(self) -> None:
+		"""Test error handling when getting commit messages fails using PRGitUtils."""
 		# Arrange
-		mock_run_git.side_effect = GitError("Command failed")
+		self.repo.revparse_single.side_effect = Pygit2GitError("Resolution failed")
 
 		# Act and Assert
-		with pytest.raises(GitError, match="Failed to get commit messages between main and feature"):
-			get_commit_messages("main", "feature")
+		with pytest.raises(GitError, match="Failed to get commit messages between 'main' and 'feature' using pygit2"):
+			self.pgu.get_commit_messages("main", "feature")
 
 	def test_generate_pr_title_from_commits_empty(self) -> None:
 		"""Test generating PR title with empty commits."""
@@ -552,6 +684,10 @@ class TestPRUtilsMiscOperations(GitTestBase):
 
 	def setup_method(self) -> None:
 		"""Set up for tests."""
+		super().setup_method()  # type: ignore[misc] # pylint: disable=no-member
+		self.pgu = PRGitUtils()
+		self.pgu.repo = MagicMock(spec=Repository)
+		self.repo = self.pgu.repo
 		self._patchers = []
 
 	@patch("codemap.git.pr_generator.utils.create_strategy")
@@ -595,44 +731,51 @@ class TestPRUtilsMiscOperations(GitTestBase):
 		# Check that suggest_branch_name was called with determined type and cleaned message
 		mock_strategy.suggest_branch_name.assert_called_once_with("feature", "Add user authentication")
 
-	@patch("codemap.git.pr_generator.utils.branch_exists")
-	@patch("codemap.git.pr_generator.utils.run_git_command")
-	def test_get_branch_relation(self, mock_run_git, mock_branch_exists) -> None:
-		"""Test getting the relationship between branches."""
+	def test_get_branch_relation(self) -> None:
+		"""Test getting the relationship between branches using PRGitUtils."""
 		# Arrange
-		# Mock branch_exists to return True for both branches
-		mock_branch_exists.return_value = True
+		mock_branch_commit_peeled = MagicMock(spec=Commit, id="branch_oid")
+		mock_branch_rev_obj = MagicMock()
+		mock_branch_rev_obj.peel.return_value = mock_branch_commit_peeled
 
-		# Mock run_git_command side effects for the different git commands
-		# 1. git merge-base --is-ancestor feature main (fails -> GitError)
-		# 2. git merge-base --is-ancestor main feature (succeeds -> return value doesn't matter)
-		# 3. git rev-list --count feature..main (returns "0\n")
-		mock_run_git.side_effect = [
-			GitError("is-ancestor failed"),  # First is_ancestor call
-			"",  # Second is_ancestor call (success)
-			"0\n",  # rev-list count call
-		]
+		mock_target_commit_peeled = MagicMock(spec=Commit, id="target_oid")
+		mock_target_rev_obj = MagicMock()
+		mock_target_rev_obj.peel.return_value = mock_target_commit_peeled
+
+		self.repo.revparse_single.side_effect = [mock_branch_rev_obj, mock_target_rev_obj]
+		self.repo.descendant_of.return_value = (
+			False  # feature is not ancestor of main (main is not descendant of feature)
+		)
+		self.repo.ahead_behind.return_value = (0, 5)  # main is 5 commits ahead of feature (feature is 5 behind main)
+		# (ahead, behind) relative to (target_oid, branch_oid)
+		# so (target_ahead, branch_ahead) = (target_ahead, target_behind_other_way)
+		# PRGitUtils: ahead, _ = self.repo.ahead_behind(target_oid, branch_oid)
+		# Here, target is "main", branch is "feature"
+		# So, ahead is commits in main not in feature.
+		# If we want count = commits in target not in branch, and target is main, branch is feature
+		# then we want first element of ahead_behind(main_oid, feature_oid)
+		# if the call in code is get_branch_relation("feature", "main")
+		# branch_ref_name = "feature", target_branch_ref_name = "main"
+		# branch_oid from "feature", target_oid from "main"
+		# descendant_of(main_oid, feature_oid) -> False (correct for feature not ancestor of main)
+		# ahead_behind(main_oid, feature_oid) -> (commits in main not in feature, commits in feature not in main)
+		# If main is 5 ahead of feature, this should be (5, 0)
+		self.repo.ahead_behind.return_value = (5, 0)  # main is 5 ahead of feature
 
 		# Act
-		is_ancestor, commit_count = get_branch_relation("feature", "main")
+		# get_branch_relation(branch_to_check_if_ancestor, target_branch_to_check_descendants_of)
+		# is_ancestor = self.repo.descendant_of(target_oid, branch_oid)
+		# commit_count = commits in target_branch_ref_name that are not in branch_ref_name
+		is_ancestor, commit_count = self.pgu.get_branch_relation("feature", "main")
 
-		# Assert based on the function's return value (is_ancestor, count)
-		assert is_ancestor is False  # 'feature' is not ancestor of 'main'
-		assert commit_count == 0  # Commits in 'main' not in 'feature'
+		# Assert
+		assert is_ancestor is False
+		assert commit_count == 5  # 5 commits in "main" (target) that are not in "feature" (branch)
 
-		# Verify calls
-		assert mock_branch_exists.call_count == 2  # Called for local=True for both branches
-		assert mock_run_git.call_count == 3
-		calls = mock_run_git.call_args_list
-		assert "--is-ancestor" in calls[0][0][0]
-		assert "feature" in calls[0][0][0]
-		assert "main" in calls[0][0][0]
-		assert "--is-ancestor" in calls[1][0][0]
-		assert "main" in calls[1][0][0]
-		assert "feature" in calls[1][0][0]
-		assert "rev-list" in calls[2][0][0]
-		assert "--count" in calls[2][0][0]
-		assert "feature..main" in calls[2][0][0]
+		self.repo.revparse_single.assert_any_call("feature")
+		self.repo.revparse_single.assert_any_call("main")
+		self.repo.descendant_of.assert_called_once_with(mock_target_commit_peeled.id, mock_branch_commit_peeled.id)
+		self.repo.ahead_behind.assert_called_once_with(mock_target_commit_peeled.id, mock_branch_commit_peeled.id)
 
 	@patch("codemap.git.pr_generator.utils.create_strategy")
 	def test_detect_branch_type(self, mock_create_strategy) -> None:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.schemas import PRContent, PullRequest
 from codemap.git.pr_generator.utils import (
 	create_pull_request,
@@ -18,7 +19,6 @@ from codemap.git.pr_generator.utils import (
 	generate_pr_description_with_llm,
 	generate_pr_title_from_commits,
 	generate_pr_title_with_llm,
-	get_commit_messages,
 	get_default_branch,
 	get_existing_pr,
 	suggest_branch_name,
@@ -72,7 +72,8 @@ class PRGenerator:
 
 		"""
 		# Get commit messages between branches
-		commits = get_commit_messages(base_branch, head_branch)
+		pgu = PRGitUtils.get_instance()
+		commits = pgu.get_commit_messages(base_branch, head_branch)
 
 		if not commits:
 			return {"title": "Update branch", "description": "No changes in this PR."}
@@ -201,11 +202,10 @@ class PRGenerator:
 			base_branch = get_default_branch()
 
 		# Set default head_branch to current branch if not specified
+		pgu = PRGitUtils.get_instance()
 		if head_branch is None:
 			try:
-				from codemap.git.pr_generator.utils import get_current_branch
-
-				head_branch = get_current_branch()
+				head_branch = pgu.get_current_branch()
 			except GitError as err:
 				msg = "Failed to determine current branch"
 				raise GitError(msg) from err

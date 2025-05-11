@@ -9,7 +9,10 @@ import subprocess
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, cast
 
+from pygit2 import GitError as Pygit2GitError
+
 from codemap.git.pr_generator.constants import MAX_COMMIT_PREVIEW
+from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.prompts import (
 	PR_DESCRIPTION_PROMPT,
 	PR_SYSTEM_PROMPT,
@@ -17,8 +20,8 @@ from codemap.git.pr_generator.prompts import (
 	format_commits_for_prompt,
 )
 from codemap.git.pr_generator.schemas import PRContent, PullRequest
-from codemap.git.pr_generator.strategies import branch_exists, create_strategy, get_default_branch
-from codemap.git.utils import GitError, run_git_command
+from codemap.git.pr_generator.strategies import create_strategy, get_default_branch
+from codemap.git.utils import GitError
 
 if TYPE_CHECKING:
 	from codemap.llm import LLMClient
@@ -28,110 +31,6 @@ logger = logging.getLogger(__name__)
 
 class PRCreationError(GitError):
 	"""Error raised when there's an issue creating or updating a pull request."""
-
-
-def get_current_branch() -> str:
-	"""
-	Get the name of the current branch.
-
-	Returns:
-	    Name of the current branch
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		return run_git_command(["git", "branch", "--show-current"]).strip()
-	except GitError as e:
-		msg = "Failed to get current branch"
-		raise GitError(msg) from e
-
-
-def create_branch(branch_name: str) -> None:
-	"""
-	Create a new branch and switch to it.
-
-	Args:
-	    branch_name: Name of the branch to create
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		run_git_command(["git", "checkout", "-b", branch_name])
-	except GitError as e:
-		msg = f"Failed to create branch: {branch_name}"
-		raise GitError(msg) from e
-
-
-def checkout_branch(branch_name: str) -> None:
-	"""
-	Checkout an existing branch.
-
-	Args:
-	    branch_name: Name of the branch to checkout
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		run_git_command(["git", "checkout", branch_name])
-	except GitError as e:
-		msg = f"Failed to checkout branch: {branch_name}"
-		raise GitError(msg) from e
-
-
-def push_branch(branch_name: str, force: bool = False) -> None:
-	"""
-	Push a branch to the remote.
-
-	Args:
-	    branch_name: Name of the branch to push
-	    force: Whether to force push
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		cmd = ["git", "push", "-u", "origin", branch_name]
-		if force:
-			cmd.insert(2, "--force")
-		run_git_command(cmd)
-	except GitError as e:
-		msg = f"Failed to push branch: {branch_name}"
-		raise GitError(msg) from e
-
-
-def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
-	"""
-	Get commit messages between two branches.
-
-	Args:
-	    base_branch: Base branch (e.g., main)
-	    head_branch: Head branch (e.g., feature-branch)
-
-	Returns:
-	    List of commit messages
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		# Get commit messages between base and head
-		# Add check for None branches
-		if not base_branch or not head_branch:
-			logger.warning("Base or head branch is None, cannot get commit messages.")
-			return []
-		log_output = run_git_command(["git", "log", f"{base_branch}..{head_branch}", "--pretty=format:%s"])
-		return log_output.splitlines() if log_output.strip() else []
-	except GitError as e:
-		msg = f"Failed to get commit messages between {base_branch} and {head_branch}"
-		raise GitError(msg) from e
 
 
 def generate_pr_title_from_commits(commits: list[str]) -> str:
@@ -472,7 +371,8 @@ def update_pull_request(pr_number: int | None, title: str, description: str) -> 
 			raise PRCreationError(msg) from e
 
 		# Get current branch
-		branch = get_current_branch()
+		pr_git_utils = PRGitUtils.get_instance()
+		branch = pr_git_utils.get_current_branch()
 
 		# Update PR using GitHub CLI
 		cmd = [
@@ -667,77 +567,6 @@ def suggest_branch_name(message: str, workflow: str) -> str:
 	return suggested_name
 
 
-def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
-	"""
-	Get the relationship between two branches.
-
-	Args:
-	    branch: The branch to check
-	    target_branch: The target branch to compare against
-
-	Returns:
-	    Tuple of (is_ancestor, commit_count)
-	    - is_ancestor: True if branch is an ancestor of target_branch
-	    - commit_count: Number of commits between the branches
-
-	"""
-	try:
-		# Check if both branches exist
-		branch_exists_local = branch_exists(branch, include_remote=False)
-		branch_exists_remote = not branch_exists_local and branch_exists(branch, include_remote=True)
-		target_exists_local = branch_exists(target_branch, include_remote=False)
-		target_exists_remote = not target_exists_local and branch_exists(target_branch, include_remote=True)
-
-		# If either branch doesn't exist anywhere, return default values
-		if not (branch_exists_local or branch_exists_remote) or not (target_exists_local or target_exists_remote):
-			logger.debug("One or both branches don't exist: %s, %s", branch, target_branch)
-			return (False, 0)
-
-		# Determine full ref names for branches based on where they exist
-		branch_ref = branch
-		if branch_exists_remote and not branch_exists_local:
-			branch_ref = f"origin/{branch}"
-
-		target_ref = target_branch
-		if target_exists_remote and not target_exists_local:
-			target_ref = f"origin/{target_branch}"
-
-		# Check if branch is an ancestor of target_branch
-		cmd = ["git", "merge-base", "--is-ancestor", branch_ref, target_ref]
-		try:
-			run_git_command(cmd)
-			is_ancestor = True
-		except GitError:
-			# If command fails, branch is not an ancestor
-			is_ancestor = False
-			logger.debug("Branch %s is not an ancestor of %s", branch_ref, target_ref)
-
-		# Try the reverse check as well to determine relationship
-		try:
-			reverse_cmd = ["git", "merge-base", "--is-ancestor", target_ref, branch_ref]
-			run_git_command(reverse_cmd)
-			# If we get here, target is an ancestor of branch (target is older)
-			if not is_ancestor:
-				logger.debug("Branch %s is newer than %s", branch_ref, target_ref)
-		except GitError:
-			# If both checks fail, the branches have no common ancestor
-			if not is_ancestor:
-				logger.debug("Branches %s and %s have no common history", branch_ref, target_ref)
-
-		# Get commit count between branches
-		count_cmd = ["git", "rev-list", "--count", f"{branch_ref}..{target_ref}"]
-		try:
-			count = int(run_git_command(count_cmd).strip())
-		except GitError:
-			# If this fails, branches might be completely unrelated
-			count = 0
-
-		return (is_ancestor, count)
-	except GitError as e:
-		logger.warning("Error determining branch relation: %s", e)
-		return (False, 0)
-
-
 def get_branch_description(branch_name: str) -> str:
 	"""
 	Generate a description for a branch based on its commits.
@@ -751,10 +580,13 @@ def get_branch_description(branch_name: str) -> str:
 	"""
 	try:
 		# Get base branch
-		base_branch = get_default_branch()
+		base_branch = get_default_branch()  # This is a helper from .strategies
 
-		# Get unique commits on this branch
-		commits = get_commit_messages(base_branch, branch_name)
+		# Instantiate PRGitUtils to use the new pygit2-based get_commit_messages
+		# This assumes the CWD is within a git repo.
+		# A better approach would be to pass an instance of PRGitUtils or relevant context.
+		git_utils_instance = PRGitUtils()  # This will initialize ExtendedGitRepoContext
+		commits = git_utils_instance.get_commit_messages(base_branch, branch_name)
 
 		if not commits:
 			return "No unique commits found on this branch."
@@ -796,36 +628,26 @@ def list_branches() -> list[str]:
 
 	Returns:
 	        List of branch names
-
 	"""
 	try:
-		# Get local branches
-		local_branches_output = run_git_command(["git", "branch", "--list"]).strip()
-		local_branches = []
-		if local_branches_output:
-			for branch in local_branches_output.split("\n"):
-				# Remove the '*' from current branch and any whitespace
-				branch_clean = branch.strip().removeprefix("* ")
-				if branch_clean:
-					local_branches.append(branch_clean)
-
-		# Get remote branches
-		remote_branches_output = run_git_command(["git", "branch", "-r", "--list"]).strip()
+		git_utils_instance = PRGitUtils()
+		local_branches = list(git_utils_instance.repo.branches.local)
+		remote_branches_full_refs = list(git_utils_instance.repo.branches.remote)
 		remote_branches = []
-		if remote_branches_output:
-			for branch in remote_branches_output.split("\n"):
-				branch_clean = branch.strip()
-				if branch_clean.startswith("origin/"):
-					# Remove 'origin/' prefix
-					branch_name = branch_clean[7:]
-					# Exclude HEAD reference
-					if not branch_name.startswith("HEAD"):
-						remote_branches.append(branch_name)
+		for ref_name in remote_branches_full_refs:
+			# Example ref_name: "origin/main", "origin/HEAD"
+			if not ref_name.endswith("/HEAD"):  # Exclude remote HEAD pointers
+				# Strip the remote name prefix, e.g., "origin/"
+				parts = ref_name.split("/", 1)
+				if len(parts) > 1:
+					remote_branches.append(parts[1])
+				else:  # Should not happen for valid remote branch refs like "origin/branch"
+					remote_branches.append(ref_name)
 
 		# Combine and remove duplicates
 		return list(set(local_branches + remote_branches))
-	except GitError:
-		logger.debug("Error listing branches")
+	except (GitError, Pygit2GitError) as e:
+		logger.debug(f"Error listing branches using pygit2: {e}")
 		return []
 
 

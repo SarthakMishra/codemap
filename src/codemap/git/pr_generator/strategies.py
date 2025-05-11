@@ -4,16 +4,22 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from datetime import UTC, datetime
 from typing import Any
 
+from pygit2 import Commit
+from pygit2 import GitError as Pygit2GitError
+from pygit2.enums import BranchType, ReferenceType
+
 from codemap.git.pr_generator.constants import MIN_SIGNIFICANT_WORD_LENGTH
+from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.templates import (
 	DEFAULT_PR_TEMPLATE,
 	GITFLOW_PR_TEMPLATES,
 	GITHUB_FLOW_PR_TEMPLATE,
 	TRUNK_BASED_PR_TEMPLATE,
 )
-from codemap.git.utils import GitError, run_git_command
+from codemap.git.utils import GitError
 
 
 class WorkflowStrategy(ABC):
@@ -45,9 +51,7 @@ class WorkflowStrategy(ABC):
 		    Suggested branch name
 
 		"""
-		# Default implementation
-		clean_description = re.sub(r"[^a-zA-Z0-9]+", "-", description.lower())
-		clean_description = clean_description.strip("-")
+		clean_description = re.sub(r"[^a-zA-Z0-9]+", "-", description.lower()).strip("-")
 		prefix = self.get_branch_prefix(branch_type)
 		return f"{prefix}{clean_description}"
 
@@ -104,7 +108,6 @@ class WorkflowStrategy(ABC):
 		    Dictionary with 'title' and 'description' templates
 
 		"""
-		# Return the default templates
 		return DEFAULT_PR_TEMPLATE
 
 	def get_remote_branches(self) -> list[str]:
@@ -112,22 +115,27 @@ class WorkflowStrategy(ABC):
 		Get list of remote branches.
 
 		Returns:
-		    List of remote branch names (without 'origin/' prefix)
+		    List of remote branch names (without 'origin/' prefix typically)
 
 		"""
 		try:
-			branches = run_git_command(["git", "branch", "-r"]).strip().split("\n")
-			# Clean up branch names and remove 'origin/' prefix
+			pgu = PRGitUtils.get_instance()
 			remote_branches = []
-			for branch_name in branches:
-				branch_clean = branch_name.strip()
-				if branch_clean.startswith("origin/"):
-					branch_name_without_prefix = branch_clean[7:]  # Remove 'origin/' prefix
-					# Exclude HEAD branches
+			for b_name in pgu.repo.branches.remote:
+				if b_name.startswith("origin/"):
+					branch_name_without_prefix = b_name[len("origin/") :]
 					if not branch_name_without_prefix.startswith("HEAD"):
 						remote_branches.append(branch_name_without_prefix)
-			return remote_branches
-		except GitError:
+				elif "/" in b_name and not b_name.endswith("/HEAD"):
+					parts = b_name.split("/", 1)
+					if len(parts) > 1:
+						remote_branches.append(parts[1])
+			return list(set(remote_branches))
+		except (GitError, Pygit2GitError) as e:
+			PRGitUtils.logger.debug(f"Error getting remote branches: {e}")
+			return []
+		except Exception as e:  # noqa: BLE001
+			PRGitUtils.logger.debug(f"Unexpected error getting remote branches: {e}")
 			return []
 
 	def get_local_branches(self) -> list[str]:
@@ -139,14 +147,13 @@ class WorkflowStrategy(ABC):
 
 		"""
 		try:
-			branches = run_git_command(["git", "branch"]).strip().split("\n")
-			# Clean up branch names and remove the '*' from current branch
-			local_branches = []
-			for branch_name in branches:
-				branch_clean = branch_name.strip().removeprefix("* ")  # Remove '* ' prefix
-				local_branches.append(branch_clean)
-			return local_branches
-		except GitError:
+			pgu = PRGitUtils.get_instance()
+			return list(pgu.repo.branches.local)
+		except (GitError, Pygit2GitError) as e:
+			PRGitUtils.logger.debug(f"Error getting local branches: {e}")
+			return []
+		except Exception as e:  # noqa: BLE001
+			PRGitUtils.logger.debug(f"Unexpected error getting local branches: {e}")
 			return []
 
 	def get_branches_by_type(self) -> dict[str, list[str]]:
@@ -184,37 +191,55 @@ class WorkflowStrategy(ABC):
 
 		"""
 		try:
-			# Get last commit date
-			date_cmd = [
-				"git",
-				"log",
-				"-1",
-				"--format=%ad",
-				"--date=relative",
-				branch_name if branch_exists(branch_name) else f"origin/{branch_name}",
-			]
-			date = run_git_command(date_cmd).strip()
+			pgu = PRGitUtils.get_instance()
+			repo = pgu.repo
 
-			# Get commit count (compared to default branch)
-			default = get_default_branch()
-			count_cmd = ["git", "rev-list", "--count", f"{default}..{branch_name}"]
+			# Determine full ref for revparse_single (try local, then remote)
+			branch_ref_to_parse = branch_name
+			if not branch_exists(branch_name, pgu_instance=pgu, include_remote=False) and branch_exists(
+				branch_name, pgu_instance=pgu, remote_name="origin", include_local=False
+			):
+				branch_ref_to_parse = f"origin/{branch_name}"
+			# If still not found by branch_exists, revparse_single might fail, which is caught below.
+
+			last_commit_iso_date = "unknown"
 			try:
-				count = run_git_command(count_cmd).strip()
-			except GitError:
-				count = "0"
+				commit_obj = repo.revparse_single(branch_ref_to_parse).peel(Commit)
+				commit_time = datetime.fromtimestamp(commit_obj.commit_time, tz=UTC)
+				last_commit_iso_date = commit_time.isoformat()
+			except (Pygit2GitError, GitError) as e:  # Catch errors resolving commit
+				PRGitUtils.logger.debug(f"Could not get last commit date for {branch_ref_to_parse}: {e}")
 
-			# Detect branch type
-			branch_type = self.detect_branch_type(branch_name)
+			commit_count_str = "0"
+			try:
+				default_b = get_default_branch(pgu_instance=pgu)
+				if default_b:
+					# get_branch_relation expects full ref names or resolvable names
+					_, count = pgu.get_branch_relation(default_b, branch_ref_to_parse)
+					commit_count_str = str(count)
+			except (GitError, Pygit2GitError) as e:
+				PRGitUtils.logger.debug(f"Could not get commit count for {branch_ref_to_parse} vs default: {e}")
+
+			branch_type_detected = self.detect_branch_type(branch_name)
 
 			return {
-				"last_commit_date": date,
-				"commit_count": count,
-				"branch_type": branch_type,
-				"is_local": branch_name in self.get_local_branches(),
-				"is_remote": branch_name in self.get_remote_branches(),
+				"last_commit_date": last_commit_iso_date,
+				"commit_count": commit_count_str,
+				"branch_type": branch_type_detected,
+				"is_local": branch_exists(branch_name, pgu_instance=pgu, include_remote=False, include_local=True),
+				"is_remote": branch_exists(branch_name, pgu_instance=pgu, remote_name="origin", include_local=False),
 			}
-		except GitError:
-			# Return default metadata if there's an error
+		except (GitError, Pygit2GitError) as e:
+			PRGitUtils.logger.warning(f"Error getting branch metadata for {branch_name}: {e}")
+			return {  # Fallback for broader errors during pgu instantiation or initial checks
+				"last_commit_date": "unknown",
+				"commit_count": "0",
+				"branch_type": self.detect_branch_type(branch_name),
+				"is_local": False,
+				"is_remote": False,
+			}
+		except Exception as e:  # noqa: BLE001
+			PRGitUtils.logger.warning(f"Unexpected error getting branch metadata for {branch_name}: {e}")
 			return {
 				"last_commit_date": "unknown",
 				"commit_count": "0",
@@ -232,7 +257,19 @@ class WorkflowStrategy(ABC):
 
 		"""
 		result = {}
-		all_branches = set(self.get_local_branches() + self.get_remote_branches())
+		# Using PRGitUtils for a consistent list of branches
+		pgu = PRGitUtils.get_instance()
+		local_b = list(pgu.repo.branches.local)
+		remote_b_parsed = []
+		for rb_name in pgu.repo.branches.remote:
+			if rb_name.startswith("origin/") and not rb_name.endswith("/HEAD"):
+				remote_b_parsed.append(rb_name[len("origin/") :])
+			elif "/" in rb_name and not rb_name.endswith("/HEAD"):
+				parts = rb_name.split("/", 1)
+				if len(parts) > 1:
+					remote_b_parsed.append(parts[1])
+
+		all_branches = set(local_b + remote_b_parsed)
 
 		for branch in all_branches:
 			result[branch] = self.get_branch_metadata(branch)
@@ -452,13 +489,25 @@ class TrunkBasedStrategy(WorkflowStrategy):
 
 		# Add username prefix for trunk-based (optional)
 		try:
-			username = run_git_command(["git", "config", "user.name"]).strip().split()[0].lower()
-			username = re.sub(r"[^a-zA-Z0-9]", "", username)
-			return f"{username}/{short_desc}"
-		except (GitError, IndexError):
-			# Fall back to standard prefix if username not available
+			pgu = PRGitUtils.get_instance()
+			# Ensure config is available and handle potential errors
+			user_name_config = pgu.repo.config["user.name"]
+			if user_name_config:
+				# Ensure user_name_config is treated as a string before strip/split
+				username = str(user_name_config).strip().split()[0].lower()
+				username = re.sub(r"[^a-zA-Z0-9]", "", username)
+				return f"{username}/{short_desc if short_desc else 'update'}"  # ensure short_desc is not empty
+			# Fallback if username is not configured
 			prefix = self.get_branch_prefix(branch_type)
-			return f"{prefix}{short_desc}"
+			return f"{prefix}{short_desc if short_desc else 'update'}"
+		except (GitError, Pygit2GitError, KeyError, IndexError, AttributeError) as e:  # Catch more specific errors
+			PRGitUtils.logger.debug(f"Could not get username for branch prefix: {e}")
+			prefix = self.get_branch_prefix(branch_type)
+			return f"{prefix}{short_desc if short_desc else 'update'}"
+		except Exception as e:  # noqa: BLE001
+			PRGitUtils.logger.debug(f"Unexpected error getting username for branch prefix: {e}")
+			prefix = self.get_branch_prefix(branch_type)
+			return f"{prefix}{short_desc if short_desc else 'update'}"
 
 	def get_pr_templates(self, branch_type: str) -> dict[str, str]:  # noqa: ARG002
 		"""
@@ -515,71 +564,108 @@ def create_strategy(strategy_name: str) -> WorkflowStrategy:
 	return strategy_class()
 
 
-# Utility functions to avoid circular imports
-def branch_exists(branch_name: str, include_remote: bool = True) -> bool:
+# Utility functions, now using PRGitUtils
+def branch_exists(
+	branch_name: str,
+	pgu_instance: PRGitUtils | None = None,
+	remote_name: str = "origin",
+	include_remote: bool = True,
+	include_local: bool = True,
+) -> bool:
 	"""
-	Check if a branch exists.
+	Check if a branch exists using pygit2.
 
 	Args:
-	    branch_name: Name of the branch to check
-	    include_remote: Whether to check remote branches as well
+	    branch_name: Name of the branch to check (e.g., "main", "feature/foo").
+	    pgu_instance: Optional instance of PRGitUtils. If None, one will be created.
+	    remote_name: The name of the remote to check (default: "origin").
+	    include_remote: Whether to check remote branches.
+	    include_local: Whether to check local branches.
 
 	Returns:
-	    True if the branch exists, False otherwise
-
+	    True if the branch exists in the specified locations, False otherwise.
 	"""
 	if not branch_name:
 		return False
 
-	try:
-		# First check local branches
+	pgu = pgu_instance or PRGitUtils.get_instance()
+	repo = pgu.repo
+
+	if include_local:
 		try:
-			branches = run_git_command(["git", "branch", "--list", branch_name]).strip()
-			if branches:
+			# lookup_branch checks local branches by default if branch_type is not specified
+			# or if BranchType.LOCAL is used.
+			if repo.lookup_branch(branch_name, BranchType.LOCAL):  # Explicitly check local
 				return True
-		except GitError:
-			# If local check fails, don't fail immediately
-			pass
+		except (KeyError, Pygit2GitError):  # lookup_branch raises KeyError if not found
+			pass  # Not found locally
 
-		# Then check remote branches if requested
-		if include_remote:
-			try:
-				remote_branches = run_git_command(["git", "branch", "-r", "--list", f"origin/{branch_name}"]).strip()
-				if remote_branches:
-					return True
-			except GitError:
-				# If remote check fails, don't fail immediately
-				pass
+	if include_remote:
+		remote_branch_ref = f"{remote_name}/{branch_name}"
+		try:
+			# To check a remote branch, we look it up by its full remote-prefixed name
+			# in the list of remote branches pygit2 knows.
+			# An alternative is repo.lookup_reference(f"refs/remotes/{remote_name}/{branch_name}")
+			if remote_branch_ref in repo.branches.remote:
+				return True
+		except (KeyError, Pygit2GitError):  # Should not happen with `in` check
+			pass  # Not found remotely
 
-		# If we get here, the branch doesn't exist or commands failed
-		return False
-	except GitError:
-		return False
+	return False
 
 
-def get_default_branch() -> str:
+def get_default_branch(pgu_instance: PRGitUtils | None = None) -> str:
 	"""
-	Get the default branch of the repository.
+	Get the default branch of the repository using pygit2.
+
+	Args:
+	    pgu_instance: Optional instance of PRGitUtils.
 
 	Returns:
-	    Name of the default branch (usually main or master)
-
+	    Name of the default branch (e.g., "main", "master").
 	"""
+	pgu = pgu_instance or PRGitUtils.get_instance()
+	repo = pgu.repo
 	try:
-		# Try to get the default branch from the remote
-		remote_info = run_git_command(["git", "remote", "show", "origin"])
-		match = re.search(r"HEAD branch: (\S+)", remote_info)
-		if match:
-			return match.group(1)
+		if not repo.head_is_detached:
+			# Current HEAD is a symbolic ref to a branch, this is often the default
+			# if on the default branch.
+			# However, this returns the current branch, not necessarily default.
+			# current_branch = repo.head.shorthand
+			# if current_branch in ["main", "master"]: return current_branch
+			pass  # Fall through to more robust checks for default
 
-		# Fallback to checking if main or master exists
-		branches = run_git_command(["git", "branch", "-r"]).splitlines()
-		if any("origin/main" in branch for branch in branches):
+		# Try to get the symbolic-ref of refs/remotes/origin/HEAD
+		try:
+			origin_head_ref = repo.lookup_reference("refs/remotes/origin/HEAD")
+			if origin_head_ref and origin_head_ref.type == ReferenceType.SYMBOLIC:
+				target_as_val = origin_head_ref.target
+				# Target is like 'refs/remotes/origin/main'
+				# If type is SYMBOLIC, target should be str. Add isinstance to help linter.
+				if isinstance(target_as_val, str) and target_as_val.startswith("refs/remotes/origin/"):
+					return target_as_val[len("refs/remotes/origin/") :]
+		except (KeyError, Pygit2GitError):
+			pass  # origin/HEAD might not exist or not be symbolic
+
+		# Fallback: check for common default branch names ('main', then 'master')
+		# Check remote branches first as they are more indicative of shared default
+		if "origin/main" in repo.branches.remote:
 			return "main"
-		if any("origin/master" in branch for branch in branches):
+		if "origin/master" in repo.branches.remote:
+			return "master"
+		# Then check local branches
+		if "main" in repo.branches.local:
+			return "main"
+		if "master" in repo.branches.local:
 			return "master"
 
-		# Last resort, use current branch
-		return run_git_command(["git", "branch", "--show-current"]).strip()
-	except GitError:
-		return "main"
+		# If still not found, and HEAD is not detached, use current branch as last resort.
+		if not repo.head_is_detached:
+			return repo.head.shorthand
+
+	except (GitError, Pygit2GitError) as e:
+		PRGitUtils.logger.warning(f"Could not determine default branch via pygit2: {e}. Falling back to 'main'.")
+	except Exception as e:  # noqa: BLE001
+		PRGitUtils.logger.warning(f"Unexpected error determining default branch: {e}. Falling back to 'main'.")
+
+	return "main"  # Ultimate fallback

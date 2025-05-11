@@ -18,8 +18,6 @@ from codemap.git.pr_generator.strategies import (
 )
 from codemap.git.pr_generator.utils import (
 	PRCreationError,
-	checkout_branch,
-	create_branch,
 	create_pull_request,
 	detect_branch_type,
 	generate_pr_content_from_template,
@@ -28,12 +26,8 @@ from codemap.git.pr_generator.utils import (
 	generate_pr_title_from_commits,
 	generate_pr_title_with_llm,
 	get_branch_description,
-	get_branch_relation,
-	get_commit_messages,
-	get_current_branch,
 	get_default_branch,
 	get_existing_pr,
-	push_branch,
 	suggest_branch_name,
 	update_pull_request,
 )
@@ -54,9 +48,6 @@ __all__ = [
 	"TrunkBasedStrategy",
 	"WorkflowStrategy",
 	"WorkflowStrategySchema",
-	"checkout_branch",
-	# Functions - Branch management
-	"create_branch",
 	# Functions - PR creation/update
 	"create_pull_request",
 	# Strategy functions
@@ -70,14 +61,10 @@ __all__ = [
 	"generate_pr_title_from_commits",
 	"generate_pr_title_with_llm",
 	"get_branch_description",
-	"get_branch_relation",
-	"get_commit_messages",
-	"get_current_branch",
 	"get_default_branch",
 	"get_existing_pr",
 	# Decorators
 	"git_operation",
-	"push_branch",
 	"suggest_branch_name",
 	"update_pull_request",
 ]

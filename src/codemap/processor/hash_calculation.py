@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 	# This import is conditional for type hinting and will not cause a runtime error
 	# if GitRepoContext is not available in the global scope when this module is loaded directly.
 	# However, for actual use, GitRepoContext will need to be importable.
-	from codemap.processor.utils.git_utils import GitRepoContext
+	from codemap.utils.git_utils import GitRepoContext
 
 logger = logging.getLogger(__name__)
 

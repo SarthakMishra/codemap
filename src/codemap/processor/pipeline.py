@@ -22,12 +22,12 @@ from codemap.processor.hash_calculation import RepoChecksumCalculator
 from codemap.processor.utils.embedding_utils import (
 	generate_embedding,
 )
-
-# Import Qdrant specific classes
-from codemap.processor.utils.git_utils import GitRepoContext
 from codemap.processor.vector.qdrant_manager import QdrantManager
 from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.docker_utils import ensure_qdrant_running
+
+# Import Qdrant specific classes
+from codemap.utils.git_utils import GitRepoContext
 from codemap.watcher.file_watcher import Watcher
 
 if TYPE_CHECKING:

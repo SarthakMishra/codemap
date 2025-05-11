@@ -11,7 +11,6 @@ import xxhash
 from codemap.processor.hash_calculation import RepoChecksumCalculator
 from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
 from codemap.processor.tree_sitter.base import EntityType
-from codemap.processor.utils.git_utils import GitRepoContext
 from codemap.processor.vector.schema import (
 	ChunkMetadataSchema,
 	ChunkSchema,
@@ -19,6 +18,7 @@ from codemap.processor.vector.schema import (
 	GitMetadataSchema,
 )
 from codemap.utils.file_utils import read_file_content
+from codemap.utils.git_utils import GitRepoContext
 
 if TYPE_CHECKING:
 	from codemap.config import ConfigLoader
