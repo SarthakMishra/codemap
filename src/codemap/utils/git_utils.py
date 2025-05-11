@@ -321,3 +321,28 @@ class GitRepoContext:
 	def is_file_tracked(self, file_path: str) -> bool:
 		"""Check if a file is tracked in the Git repository."""
 		return file_path in self.tracked_files
+
+	def unstage_files(self, files: list[str]) -> None:
+		"""Unstage the specified files."""
+		for file in files:
+			self.repo.index.remove(file)
+		self.repo.index.write()
+
+	def switch_branch(self, branch_name: str) -> None:
+		"""Switch the current Git branch to the specified branch name."""
+		ref = f"refs/heads/{branch_name}"
+		self.repo.checkout(ref)
+
+	def stage_files(self, files: list[str]) -> None:
+		"""Stage the specified files."""
+		for file in files:
+			self.repo.index.add(file)
+		self.repo.index.write()
+
+	def commit(self, message: str) -> None:
+		"""Create a commit with the given message."""
+		author = self.repo.default_signature
+		committer = self.repo.default_signature
+		tree = self.repo.index.write_tree()
+		parents = [self.repo.head.target] if self.repo.head_is_unborn is False else []
+		self.repo.create_commit("HEAD", author, committer, message, tree, parents)
