@@ -118,13 +118,14 @@ nav:
       - Ask:
         - Ask Overview: api/llm/rag/ask/index.md
         - Command: api/llm/rag/ask/command.md
-        - Formatter: api/llm/rag/ask/formatter.md
         - Prompts: api/llm/rag/ask/prompts.md
       - Do Overview: api/llm/rag/do/index.md
+      - Interactive: api/llm/rag/interactive.md
       - Tools Overview: api/llm/rag/tools/index.md
     - Utils: api/llm/utils.md
   - Processor:
     - Processor Overview: api/processor/index.md
+    - Hash Calculation: api/processor/hash_calculation.md
     - Lod: api/processor/lod.md
     - Pipeline: api/processor/pipeline.md
     - Tree Sitter:
@@ -146,7 +147,9 @@ nav:
       - Vector Overview: api/processor/vector/index.md
       - Chunking: api/processor/vector/chunking.md
       - Qdrant Manager: api/processor/vector/qdrant_manager.md
+      - Schema: api/processor/vector/schema.md
       - Synchronizer: api/processor/vector/synchronizer.md
+      - Utils: api/processor/vector/utils.md
   - Utils:
     - Utils Overview: api/utils/index.md
     - Cli Utils: api/utils/cli_utils.md
@@ -169,7 +172,6 @@ theme:
   - content.code.copy
   - content.tooltips
   - content.tabs.link
-  - navigation.footer
   - navigation.indexes
   - navigation.sections
   - navigation.tracking
@@ -213,6 +215,7 @@ markdown_extensions:
 plugins:
 - search
 - mermaid2
+- termynal
 - mkdocstrings:
     handlers:
       python:
