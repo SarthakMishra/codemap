@@ -145,7 +145,7 @@ class TestPRWorkflowCommand:
 			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path("/path/to/repo")),
 			patch("codemap.git.pr_generator.command.create_strategy") as mock_create_strategy,
 			patch(
-				"codemap.git.pr_generator.command.get_commit_messages",
+				"codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_commit_messages",
 				return_value=["fix: bug fix", "feat: new feature"],
 			),
 			patch("codemap.git.pr_generator.command.get_existing_pr", return_value=None),
