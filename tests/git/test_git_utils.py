@@ -54,15 +54,21 @@ class TestGitUtils:
 
 	def test_get_repo_root_success(self) -> None:
 		"""Test getting repository root successfully."""
-		result = ExtendedGitRepoContext.get_repo_root()
-		assert result == Path("/path/to/repo")
-		self.mock_get_repo_root.assert_called_once()
+		with patch(
+			"codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path("/path/to/repo")
+		) as mock_get_repo_root:
+			result = ExtendedGitRepoContext.get_repo_root()
+			assert result == Path("/path/to/repo")
+			mock_get_repo_root.assert_called_once()
 
 	def test_get_repo_root_failure(self) -> None:
 		"""Test failure when getting repository root."""
-		self.mock_get_repo_root.side_effect = GitError("Not in a Git repository")
-		with pytest.raises(GitError, match="Not in a Git repository"):
-			ExtendedGitRepoContext.get_repo_root()
+		with patch(
+			"codemap.git.utils.ExtendedGitRepoContext.get_repo_root", side_effect=GitError("Not in a Git repository")
+		) as mock_get_repo_root:
+			with pytest.raises(GitError, match="Not in a Git repository"):
+				ExtendedGitRepoContext.get_repo_root()
+			mock_get_repo_root.assert_called_once()
 
 	def test_validate_repo_path_success(self) -> None:
 		"""Test validating repository path successfully."""
