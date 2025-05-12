@@ -74,3 +74,4 @@ models/qodo_embed_m2v/tokenizer.json
 # mkdocs
 .cache
 site
+mkdocs.bak
