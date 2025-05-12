@@ -14,6 +14,7 @@ class LLMSchema(BaseModel):
 	"""Configuration for the LLM."""
 
 	model: str = "openai:gpt-4o-mini"
+	base_url: str | None = None
 	temperature: float = 0.5
 	max_output_tokens: int = 1024
 
@@ -54,20 +55,14 @@ class EmbeddingClusteringSchema(BaseModel):
 class EmbeddingSchema(BaseModel):
 	"""Configuration for the embedding."""
 
-	model_name: str = "voyage-code-3"
-	token_limit: int = 80000
-	dimension: int = 1024
+	model_name: str = "minishlab/potion-base-8M"
+	dimension: int = 256
 	dimension_metric: str = "cosine"
-	max_retries: int = 3
-	retry_delay: int = 5
 	max_content_length: int = 5000
-	qdrant_location: str = ":memory:"
-	qdrant_collection_name: str = "codemap_vectors"
-	batch_size: int = 32
-	qdrant_batch_size: int = 100
+	qdrant_batch_size: int = 1000
 	url: str = "http://localhost:6333"
 	api_key: str | None = None
-	timeout: int = 30
+	timeout: int = 120
 	prefer_grpc: bool = True
 	chunking: EmbeddingChunkingSchema = EmbeddingChunkingSchema()
 	clustering: EmbeddingClusteringSchema = EmbeddingClusteringSchema()
@@ -346,6 +341,13 @@ class AskSchema(BaseModel):
 	interactive_chat: bool = False
 
 
+class GitHubConfigSchema(BaseModel):
+	"""Configuration for GitHub integration (PRs, API, etc)."""
+
+	token: str | None = None  # OAuth token for GitHub API
+	repo: str | None = None  # Optional: default repo (e.g., user/repo)
+
+
 class AppConfigSchema(BaseModel):
 	"""Configuration for the application."""
 
@@ -358,6 +360,7 @@ class AppConfigSchema(BaseModel):
 	commit: CommitSchema = CommitSchema()
 	pr: PRSchema = PRSchema()
 	ask: AskSchema = AskSchema()
+	github: GitHubConfigSchema = GitHubConfigSchema()
 	repo_root: Path | None = None
 
 	model_config = {

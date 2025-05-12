@@ -35,3 +35,8 @@ def load_prompt_template(template_path: str | None) -> str | None:
 
 # Define a type for the response that covers all expected formats
 LLMResponseType = dict[str, Any] | Mapping[str, Any] | object
+
+
+def is_ollama_model(model_name: str) -> bool:
+	"""Check if the model name is an Ollama model."""
+	return model_name.startswith("ollama:")

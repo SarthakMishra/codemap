@@ -28,6 +28,12 @@ skip_db_tests = pytest.mark.skipif(
 	reason="Database-dependent tests are skipped in environments without PostgreSQL",
 )
 
+# Skip git tests when SKIP_GIT_TESTS environment variable is set
+skip_git_tests = pytest.mark.skipif(
+	os.environ.get("SKIP_GIT_TESTS") == "1",
+	reason="Git tests are skipped in environments with SKIP_GIT_TESTS=1",
+)
+
 
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Generator[Path, None, None]:
@@ -85,35 +91,26 @@ index 2345678..bcdefgh 100644
 
 @pytest.fixture(autouse=os.environ.get("SKIP_GIT_TESTS") == "1")
 def auto_mock_git_utils() -> Generator[dict[str, Mock], None, None]:
-	"""
-	Automatically mock git utils when SKIP_GIT_TESTS is enabled.
-
-	This fixture replaces the skip_git_tests marker and automatically
-	patches all Git utility functions when tests are run in CI or
-	other environments with SKIP_GIT_TESTS=1.
-	"""
+	"""Create a standardized mock for all git utilities automatically if SKIP_GIT_TESTS is enabled."""
 	if os.environ.get("SKIP_GIT_TESTS") == "1":
 		with (
-			patch("codemap.git.utils.run_git_command") as mock_run_git_command,
-			patch("codemap.git.utils.get_repo_root") as mock_get_repo_root,
-			patch("codemap.git.utils.validate_repo_path") as mock_validate_repo_path,
-			patch("codemap.git.utils.get_staged_diff") as mock_staged,
-			patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged,
-			patch("codemap.git.utils.stage_files") as mock_stage_files,
-			patch("codemap.git.utils.commit") as mock_commit_command,
-			patch("codemap.git.utils.get_other_staged_files") as mock_get_other_staged,
-			patch("codemap.git.utils.stash_staged_changes") as mock_stash,
-			patch("codemap.git.utils.unstash_changes") as mock_unstash,
-			patch("codemap.git.utils.get_untracked_files") as mock_untracked,
-			patch("codemap.git.utils.commit_only_files") as mock_commit,
-			patch("codemap.git.utils.unstage_files") as mock_unstage,
-			patch("codemap.git.utils.switch_branch") as mock_switch_branch,
-			patch("codemap.git.utils.get_current_branch") as mock_current_branch,
-			patch("codemap.git.utils.is_git_ignored") as mock_is_git_ignored,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root") as mock_get_repo_root,
+			patch("codemap.git.utils.ExtendedGitRepoContext.validate_repo_path") as mock_validate_repo_path,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_staged_diff") as mock_staged,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_unstaged_diff") as mock_unstaged,
+			patch("codemap.git.utils.ExtendedGitRepoContext.stage_files") as mock_stage_files,
+			patch("codemap.git.utils.ExtendedGitRepoContext.commit") as mock_commit_command,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_other_staged_files") as mock_get_other_staged,
+			patch("codemap.git.utils.ExtendedGitRepoContext.stash_staged_changes") as mock_stash,
+			patch("codemap.git.utils.ExtendedGitRepoContext.unstash_changes") as mock_unstash,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_untracked_files") as mock_untracked,
+			patch("codemap.git.utils.ExtendedGitRepoContext.commit_only_files") as mock_commit,
+			patch("codemap.git.utils.ExtendedGitRepoContext.unstage_files") as mock_unstage,
+			patch("codemap.git.utils.ExtendedGitRepoContext.switch_branch") as mock_switch_branch,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_current_branch") as mock_current_branch,
+			patch("codemap.git.utils.ExtendedGitRepoContext.is_git_ignored") as mock_is_git_ignored,
+			patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance") as mock_pr_get_instance,
 		):
-			# Mock run_git_command
-			mock_run_git_command.return_value = "mock command output"
-
 			# Mock get_repo_root
 			mock_get_repo_root.return_value = Path("/mock/repo/root")
 
@@ -166,11 +163,15 @@ def auto_mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 			# Mock get_current_branch
 			mock_current_branch.return_value = "main"
 
+			# Mock PR utils
+			mock_pr_instance = MagicMock()
+			mock_pr_instance.get_current_branch.return_value = "main"
+			mock_pr_get_instance.return_value = mock_pr_instance
+
 			# Mock is_git_ignored
 			mock_is_git_ignored.return_value = False
 
 			yield {
-				"run_git_command": mock_run_git_command,
 				"get_repo_root": mock_get_repo_root,
 				"validate_repo_path": mock_validate_repo_path,
 				"get_staged_diff": mock_staged,
@@ -186,6 +187,7 @@ def auto_mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 				"switch_branch": mock_switch_branch,
 				"get_current_branch": mock_current_branch,
 				"is_git_ignored": mock_is_git_ignored,
+				"pr_get_instance": mock_pr_get_instance,
 			}
 	else:
 		# When SKIP_GIT_TESTS is not enabled, do nothing
@@ -196,26 +198,23 @@ def auto_mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 	"""Create a standardized mock for all git utilities."""
 	with (
-		patch("codemap.git.utils.run_git_command") as mock_run_git_command,
-		patch("codemap.git.utils.get_repo_root") as mock_get_repo_root,
-		patch("codemap.git.utils.validate_repo_path") as mock_validate_repo_path,
-		patch("codemap.git.utils.get_staged_diff") as mock_staged,
-		patch("codemap.git.utils.get_unstaged_diff") as mock_unstaged,
-		patch("codemap.git.utils.stage_files") as mock_stage_files,
-		patch("codemap.git.utils.commit") as mock_commit_command,
-		patch("codemap.git.utils.get_other_staged_files") as mock_get_other_staged,
-		patch("codemap.git.utils.stash_staged_changes") as mock_stash,
-		patch("codemap.git.utils.unstash_changes") as mock_unstash,
-		patch("codemap.git.utils.get_untracked_files") as mock_untracked,
-		patch("codemap.git.utils.commit_only_files") as mock_commit,
-		patch("codemap.git.utils.unstage_files") as mock_unstage,
-		patch("codemap.git.utils.switch_branch") as mock_switch_branch,
-		patch("codemap.git.utils.get_current_branch") as mock_current_branch,
-		patch("codemap.git.utils.is_git_ignored") as mock_is_git_ignored,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root") as mock_get_repo_root,
+		patch("codemap.git.utils.ExtendedGitRepoContext.validate_repo_path") as mock_validate_repo_path,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_staged_diff") as mock_staged,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_unstaged_diff") as mock_unstaged,
+		patch("codemap.git.utils.ExtendedGitRepoContext.stage_files") as mock_stage_files,
+		patch("codemap.git.utils.ExtendedGitRepoContext.commit") as mock_commit_command,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_other_staged_files") as mock_get_other_staged,
+		patch("codemap.git.utils.ExtendedGitRepoContext.stash_staged_changes") as mock_stash,
+		patch("codemap.git.utils.ExtendedGitRepoContext.unstash_changes") as mock_unstash,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_untracked_files") as mock_untracked,
+		patch("codemap.git.utils.ExtendedGitRepoContext.commit_only_files") as mock_commit,
+		patch("codemap.git.utils.ExtendedGitRepoContext.unstage_files") as mock_unstage,
+		patch("codemap.git.utils.ExtendedGitRepoContext.switch_branch") as mock_switch_branch,
+		patch("codemap.git.utils.ExtendedGitRepoContext.get_current_branch") as mock_current_branch,
+		patch("codemap.git.utils.ExtendedGitRepoContext.is_git_ignored") as mock_is_git_ignored,
+		patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance") as mock_pr_get_instance,
 	):
-		# Mock run_git_command
-		mock_run_git_command.return_value = "mock command output"
-
 		# Mock get_repo_root
 		mock_get_repo_root.return_value = Path("/mock/repo/root")
 
@@ -268,11 +267,15 @@ def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 		# Mock get_current_branch
 		mock_current_branch.return_value = "main"
 
+		# Mock PR utils
+		mock_pr_instance = MagicMock()
+		mock_pr_instance.get_current_branch.return_value = "main"
+		mock_pr_get_instance.return_value = mock_pr_instance
+
 		# Mock is_git_ignored
 		mock_is_git_ignored.return_value = False
 
 		yield {
-			"run_git_command": mock_run_git_command,
 			"get_repo_root": mock_get_repo_root,
 			"validate_repo_path": mock_validate_repo_path,
 			"get_staged_diff": mock_staged,
@@ -288,6 +291,7 @@ def mock_git_utils() -> Generator[dict[str, Mock], None, None]:
 			"switch_branch": mock_switch_branch,
 			"get_current_branch": mock_current_branch,
 			"is_git_ignored": mock_is_git_ignored,
+			"pr_get_instance": mock_pr_get_instance,
 		}
 
 

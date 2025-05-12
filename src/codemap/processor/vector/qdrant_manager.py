@@ -5,9 +5,12 @@ import uuid
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, cast
 
+from pydantic import BaseModel, ValidationError
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.http.exceptions import UnexpectedResponse
 from qdrant_client.http.models import Distance, ExtendedPointId, PointStruct, VectorParams
+
+from codemap.processor.vector.schema import ChunkMetadataSchema
 
 if TYPE_CHECKING:
 	from codemap.config import ConfigLoader
@@ -67,7 +70,7 @@ class QdrantManager:
 		)
 
 		# Load values from parameters or fall back to config
-		self.collection_name = collection_name or embedding_config.qdrant_collection_name
+		self.collection_name = collection_name or "codemap_vectors"
 		self.dim = dim or embedding_config.dimension
 		self.distance = distance or default_distance
 
@@ -124,36 +127,44 @@ class QdrantManager:
 			raise  # Re-raise the exception to signal failure
 
 	async def _create_payload_indexes(self) -> None:
-		"""Create payload indexes for commonly used filter fields."""
+		"""Create payload indexes for all fields in ChunkMetadataSchema and GitMetadataSchema."""
 		if self.client is None:
 			msg = "Client should be initialized before creating indexes"
 			raise RuntimeError(msg)
 
 		try:
-			# Create keyword indexes for string fields commonly used in filters
+			# Index fields for ChunkMetadataSchema
 			index_fields = [
-				("file_path", models.PayloadSchemaType.KEYWORD),
-				("entity_type", models.PayloadSchemaType.KEYWORD),
-				("language", models.PayloadSchemaType.KEYWORD),
-				("git_hash", models.PayloadSchemaType.KEYWORD),
-				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				("chunk_id", models.PayloadSchemaType.KEYWORD),
 				("start_line", models.PayloadSchemaType.INTEGER),
 				("end_line", models.PayloadSchemaType.INTEGER),
+				("entity_type", models.PayloadSchemaType.KEYWORD),
+				("entity_name", models.PayloadSchemaType.KEYWORD),
+				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				# FileMetadataSchema subfields (nested under file_metadata)
+				("file_metadata.file_path", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.language", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.last_modified_time", models.PayloadSchemaType.FLOAT),
+				("file_metadata.file_content_hash", models.PayloadSchemaType.KEYWORD),
+				# GitMetadataSchema subfields (nested under git_metadata)
+				("git_metadata.git_hash", models.PayloadSchemaType.KEYWORD),
+				("git_metadata.tracked", models.PayloadSchemaType.BOOL),
+				("git_metadata.branch", models.PayloadSchemaType.KEYWORD),
+				# ("git_metadata.blame", models.PayloadSchemaType.KEYWORD),  # Blame is a list of objects, not indexed
 			]
-
+			# Add indexes for all fields
 			for field_name, field_type in index_fields:
 				logger.info(f"Creating index for field: {field_name} ({field_type})")
 				await self.client.create_payload_index(
 					collection_name=self.collection_name, field_name=field_name, field_schema=field_type
 				)
-
 			logger.info(f"Created {len(index_fields)} payload indexes successfully")
 		except Exception as e:  # noqa: BLE001
 			logger.warning(f"Error creating payload indexes: {e}")
 			# Continue even if index creation fails - collection will still work
 
 	async def _ensure_payload_indexes(self) -> None:
-		"""Check if payload indexes exist and create any missing ones."""
+		"""Check if payload indexes exist and create any missing ones to match the schema."""
 		if self.client is None:
 			msg = "Client should be initialized before checking indexes"
 			raise RuntimeError(msg)
@@ -163,17 +174,27 @@ class QdrantManager:
 			collection_info = await self.client.get_collection(collection_name=self.collection_name)
 			existing_schema = collection_info.payload_schema
 
-			# List of fields that should be indexed
+			# List of fields that should be indexed (same as in _create_payload_indexes)
 			index_fields = [
+				("chunk_id", models.PayloadSchemaType.KEYWORD),
 				("file_path", models.PayloadSchemaType.KEYWORD),
-				("entity_type", models.PayloadSchemaType.KEYWORD),
-				("language", models.PayloadSchemaType.KEYWORD),
-				("git_hash", models.PayloadSchemaType.KEYWORD),
-				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
 				("start_line", models.PayloadSchemaType.INTEGER),
 				("end_line", models.PayloadSchemaType.INTEGER),
+				("entity_type", models.PayloadSchemaType.KEYWORD),
+				("entity_name", models.PayloadSchemaType.KEYWORD),
+				("language", models.PayloadSchemaType.KEYWORD),
+				("hierarchy_path", models.PayloadSchemaType.KEYWORD),
+				# FileMetadataSchema subfields
+				("file_metadata.file_path", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.language", models.PayloadSchemaType.KEYWORD),
+				("file_metadata.last_modified_time", models.PayloadSchemaType.FLOAT),
+				("file_metadata.file_content_hash", models.PayloadSchemaType.KEYWORD),
+				# GitMetadataSchema subfields
+				("git_metadata.git_hash", models.PayloadSchemaType.KEYWORD),
+				("git_metadata.tracked", models.PayloadSchemaType.BOOL),
+				("git_metadata.branch", models.PayloadSchemaType.KEYWORD),
+				# ("git_metadata.blame", models.PayloadSchemaType.KEYWORD),  # Not indexed
 			]
-
 			# Create any missing indexes
 			for field_name, field_type in index_fields:
 				if field_name not in existing_schema:
@@ -181,7 +202,6 @@ class QdrantManager:
 					await self.client.create_payload_index(
 						collection_name=self.collection_name, field_name=field_name, field_schema=field_type
 					)
-
 		except Exception as e:  # noqa: BLE001
 			logger.warning(f"Error checking or creating payload indexes: {e}")
 			# Continue even if index check fails
@@ -200,7 +220,7 @@ class QdrantManager:
 		Add or update points (vectors and payloads) in the collection.
 
 		Args:
-		    points: A list of Qdrant PointStruct objects.
+		    points: A list of Qdrant PointStruct objects. Each payload should be a dict matching ChunkMetadataSchema.
 
 		"""
 		await self._ensure_initialized()
@@ -210,7 +230,10 @@ class QdrantManager:
 		if not points:
 			logger.warning("upsert_points called with an empty list.")
 			return
-
+		# Ensure all payloads are dicts (convert from Pydantic BaseModel if needed)
+		for point in points:
+			if hasattr(point, "payload") and isinstance(point.payload, BaseModel):
+				point.payload = point.payload.model_dump()
 		try:
 			logger.info(f"Upserting {len(points)} points into '{self.collection_name}'")
 			await self.client.upsert(
@@ -223,7 +246,7 @@ class QdrantManager:
 			logger.exception("Error upserting points into Qdrant")
 			# Decide if partial failure needs specific handling or re-raising
 
-	async def delete_points(self, point_ids: list[str | int | uuid.UUID]) -> None:
+	async def delete_points(self, point_ids: list[str]) -> None:
 		"""
 		Delete points from the collection by their IDs.
 
@@ -245,14 +268,35 @@ class QdrantManager:
 
 			await self.client.delete(
 				collection_name=self.collection_name,
-				# Ignore linter complaint about list type compatibility
-				points_selector=models.PointIdsList(points=qdrant_ids),  # type: ignore[arg-type]
+				points_selector=models.PointIdsList(points=qdrant_ids),
 				wait=True,
 			)
 			logger.debug(f"Successfully deleted {len(point_ids)} points.")
 		except Exception:
 			logger.exception("Error deleting points from Qdrant")
 			# Consider error handling strategy
+
+	async def delete_points_by_filter(self, qdrant_filter: models.Filter) -> None:
+		"""
+		Delete points from the collection based on a filter condition.
+
+		Args:
+			qdrant_filter: A Qdrant Filter object specifying the points to delete.
+		"""
+		await self._ensure_initialized()
+		if self.client is None:
+			msg = "Client should be initialized here"
+			raise RuntimeError(msg)
+		try:
+			logger.info(f"Deleting points from '{self.collection_name}' based on filter")
+			await self.client.delete(
+				collection_name=self.collection_name,
+				points_selector=models.FilterSelector(filter=qdrant_filter),
+				wait=True,
+			)
+			logger.debug("Successfully deleted points.")
+		except Exception:
+			logger.exception("Error deleting points from Qdrant")
 
 	async def search(
 		self,
@@ -371,7 +415,7 @@ class QdrantManager:
 		    point_ids: List of point IDs to fetch payloads for.
 
 		Returns:
-		    A dictionary mapping point IDs (as strings) to their payloads.
+		    A dictionary mapping point IDs (as strings) to their payloads (as dicts matching ChunkMetadataSchema).
 
 		"""
 		await self._ensure_initialized()
@@ -390,7 +434,14 @@ class QdrantManager:
 				with_payload=True,
 				with_vectors=False,
 			)
-			payloads = {str(point.id): point.payload for point in points_data if point.payload}
+			payloads = {}
+			for point in points_data:
+				if point.payload:
+					# Try to parse as ChunkMetadataSchema, fallback to dict
+					try:
+						payloads[str(point.id)] = ChunkMetadataSchema.model_validate(point.payload).model_dump()
+					except (ValidationError, TypeError, ValueError):
+						payloads[str(point.id)] = point.payload
 			logger.debug(f"Retrieved payloads for {len(payloads)} points.")
 			return payloads
 		except Exception:
@@ -656,6 +707,58 @@ class QdrantManager:
 		except Exception:
 			logger.exception("Error deleting payload keys in Qdrant")
 
+	async def get_all_chunks_content_hashes(self) -> set[str]:
+		"""
+		Retrieves all content hashes of chunks in the collection.
+
+		Used for deduplication when syncing.
+
+		Returns:
+			A set of combined content_hash:file_content_hash strings for all chunks in the collection.
+		"""
+		await self._ensure_initialized()
+		if self.client is None:
+			msg = "Client should be initialized here"
+			raise RuntimeError(msg)
+
+		content_hashes = set()
+
+		try:
+			# Get all payloads for deduplication check
+			all_ids = await self.get_all_point_ids_with_filter()
+
+			if not all_ids:
+				return content_hashes
+
+			# Process in batches to avoid memory issues
+			for i in range(0, len(all_ids), 100):
+				batch_ids = all_ids[i : i + 100]
+				payloads = await self.get_payloads_by_ids(batch_ids)
+
+				for payload in payloads.values():
+					if not payload:
+						continue
+
+					content_hash = payload.get("content_hash", "")
+					file_metadata = payload.get("file_metadata", {})
+
+					if isinstance(file_metadata, dict):
+						file_content_hash = file_metadata.get("file_content_hash", "")
+					else:
+						file_content_hash = ""
+
+					if content_hash and file_content_hash:
+						# Create a composite key for both the chunk content and file content
+						dedup_key = f"{content_hash}:{file_content_hash}"
+						content_hashes.add(dedup_key)
+
+			logger.info(f"Retrieved {len(content_hashes)} unique content hash combinations from Qdrant.")
+			return content_hashes
+
+		except Exception:
+			logger.exception("Error retrieving content hashes from Qdrant")
+			return set()
+
 
 # Utility function to create PointStruct easily
 def create_qdrant_point(chunk_id: str, vector: list[float], payload: dict[str, Any]) -> PointStruct:
@@ -673,5 +776,4 @@ def create_qdrant_point(chunk_id: str, vector: list[float], payload: dict[str, A
 	except ValueError:
 		point_id = chunk_id
 
-	# Keep type ignore for ExtendedPointId union issue
-	return PointStruct(id=point_id, vector=vector, payload=payload)  # type: ignore[arg-type]
+	return PointStruct(id=point_id, vector=vector, payload=payload)

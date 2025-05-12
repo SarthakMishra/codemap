@@ -1,24 +1,22 @@
 """Command for asking questions about the codebase using RAG."""
 
+import asyncio
 import logging
 import uuid
 from typing import Any, TypedDict
 
+import aiofiles
+
 from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
-from codemap.git.utils import get_repo_root
 from codemap.llm.client import LLMClient
+from codemap.llm.rag.interactive import RagUI
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
 
-from .formatter import format_content_for_context
 from .prompts import SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
-
-# Default values for configuration
-DEFAULT_MAX_CONTEXT_LENGTH = 8000
-DEFAULT_MAX_CONTEXT_RESULTS = 10
 
 
 class AskResult(TypedDict):
@@ -38,45 +36,73 @@ class AskCommand:
 
 	"""
 
-	def __init__(
-		self,
-	) -> None:
+	def __init__(self) -> None:
 		"""Initializes the AskCommand, setting up clients and pipeline."""
 		self.session_id = str(uuid.uuid4())  # Unique session ID for DB logging
-
 		self.config_loader = ConfigLoader.get_instance()
+		self.ui = RagUI()
+		self._db_client = None
+		self._llm_client = None
+		self._pipeline = None
 
-		if self.config_loader.get.repo_root is None:
-			self.repo_root = get_repo_root()
-		else:
-			self.repo_root = self.config_loader.get.repo_root
+	@property
+	def db_client(self) -> DatabaseClient:
+		"""Lazily initialize and return a DatabaseClient instance."""
+		if self._db_client is None:
+			self._db_client = DatabaseClient()
+		return self._db_client
 
-		# Get RAG configuration
-		rag_config = self.config_loader.get.rag
-		self.max_context_length = rag_config.max_context_length
-		self.max_context_results = rag_config.max_context_results
-		logger.debug(
-			f"Using max_context_length: {self.max_context_length}, max_context_results: {self.max_context_results}"
-		)
+	@property
+	def llm_client(self) -> LLMClient:
+		"""Lazily initialize and return an LLMClient instance."""
+		if self._llm_client is None:
+			self._llm_client = LLMClient(config_loader=self.config_loader)
+		return self._llm_client
 
-		self.db_client = DatabaseClient()  # Uses config path by default
-		self.llm_client = LLMClient(config_loader=self.config_loader)
-		# Initialize ProcessingPipeline correctly
+	@property
+	def pipeline(self) -> ProcessingPipeline | None:
+		"""Lazily initialize and return a ProcessingPipeline instance, or None if initialization fails."""
+		if self._pipeline is None:
+			try:
+				with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
+					self._pipeline = ProcessingPipeline(config_loader=self.config_loader)
+				logger.info("ProcessingPipeline initialization complete.")
+			except Exception:
+				logger.exception("Failed to initialize ProcessingPipeline")
+
+		return self._pipeline
+
+	@property
+	def max_context_length(self) -> int:
+		"""Return the maximum context length for RAG, using config or default."""
+		cached = getattr(self, "_max_context_length", None)
+		if cached is not None:
+			return cached
 		try:
-			# Show a spinner while initializing the pipeline
-			with progress_indicator(message="Initializing processing pipeline...", style="spinner", transient=True):
-				# Use the provided ConfigLoader instance
-				self.pipeline = ProcessingPipeline(
-					config_loader=self.config_loader,
-				)
+			rag_config = self.config_loader.get.rag
+			value = getattr(rag_config, "max_context_length", None)
+			if value is not None:
+				self._max_context_length = value
+				return value
+		except (AttributeError, TypeError) as e:
+			logger.debug("Error reading max_context_length from config: %s", e)
+		return self._max_context_length
 
-			# Progress context manager handles completion message
-			logger.info("ProcessingPipeline initialization complete.")
-		except Exception:
-			logger.exception("Failed to initialize ProcessingPipeline")
-			self.pipeline = None
-
-		logger.info(f"AskCommand initialized for session {self.session_id}")
+	@property
+	def max_context_results(self) -> int:
+		"""Return the maximum number of context results for RAG, using config or default."""
+		cached = getattr(self, "_max_context_results", None)
+		if cached is not None:
+			return cached
+		try:
+			rag_config = self.config_loader.get.rag
+			value = getattr(rag_config, "max_context_results", None)
+			if value is not None:
+				self._max_context_results = value
+				return value
+		except (AttributeError, TypeError) as e:
+			logger.debug("Error reading max_context_results from config: %s", e)
+		return self._max_context_results
 
 	async def initialize(self) -> None:
 		"""Perform asynchronous initialization for the command, especially the pipeline."""
@@ -91,7 +117,7 @@ class AskCommand:
 			except Exception:
 				logger.exception("Failed during async initialization of ProcessingPipeline")
 				# Optionally set pipeline to None or handle the error appropriately
-				self.pipeline = None
+				self._pipeline = None
 		elif not self.pipeline:
 			logger.error("Cannot perform async initialization: ProcessingPipeline failed to initialize earlier.")
 		else:
@@ -140,20 +166,39 @@ class AskCommand:
 
 					# Get the file content from the repo
 					try:
-						if self.repo_root and file_path and start_line > 0 and end_line > 0:
-							repo_file_path = self.repo_root / file_path
-							if repo_file_path.exists():
-								with repo_file_path.open(encoding="utf-8") as f:
-									file_content = f.read()
+						if (
+							self.config_loader.get.repo_root
+							and file_path
+							and file_path != "N/A"
+							and start_line > 0
+							and end_line > 0
+						):
+							repo_file_path = self.config_loader.get.repo_root / file_path
+							if await asyncio.to_thread(repo_file_path.exists):
+								async with aiofiles.open(repo_file_path, encoding="utf-8") as f:
+									file_content = await f.read()
 								lines = file_content.splitlines()
-								if start_line <= len(lines) and end_line <= len(lines):
+								if start_line <= len(lines) and end_line <= len(lines) and start_line <= end_line:
 									code_content = "\n".join(lines[start_line - 1 : end_line])
 									if language:
 										content_parts.append(f"```{language}\n{code_content}\n```")
 									else:
 										content_parts.append(f"```\n{code_content}\n```")
+								else:
+									logger.warning(
+										f"Invalid line numbers for file {file_path}: "
+										f"start={start_line}, end={end_line}, total_lines={len(lines)}. "
+										"Skipping code content for this chunk."
+									)
+							else:
+								logger.warning(f"File path does not exist for chunk context: {repo_file_path}")
+						elif file_path == "N/A":
+							logger.warning("File path is 'N/A' for a chunk, cannot retrieve content.")
+							# Add other conditions leading to this path if necessary for logging
 					except Exception:
-						logger.exception(f"Error reading file content for {file_path}")
+						logger.exception(f"Error reading or processing file content for {file_path}")
+						# Optionally, append a placeholder or error message to content_parts
+						# content_parts.append("[Error retrieving code content]")
 
 					content = "\n\n".join(content_parts)
 
@@ -187,7 +232,7 @@ class AskCommand:
 		context = await self._retrieve_context(question)
 
 		# Format context for inclusion in prompt
-		context_text = format_content_for_context(context)
+		context_text = self.ui.format_content_for_context(context)
 		if len(context_text) > self.max_context_length:
 			logger.warning(f"Context too long ({len(context_text)} chars), truncating.")
 			context_text = context_text[: self.max_context_length] + "... [truncated]"
@@ -211,16 +256,11 @@ class AskCommand:
 		except Exception:
 			logger.exception("Failed to store current query turn in DB")
 
-		# Get LLM config from the injected ConfigLoader
-		# At this point self.config_loader is guaranteed to be a valid instance
-		llm_config = self.config_loader.get.llm.model_dump()
-
 		# Call LLM with context
 		try:
 			with progress_indicator("Waiting for LLM response..."):
 				answer = self.llm_client.completion(
 					messages=[{"role": "user", "content": prompt}],
-					**llm_config,
 				)
 			logger.debug(f"LLM response: {answer}")
 

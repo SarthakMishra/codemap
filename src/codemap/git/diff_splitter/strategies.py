@@ -161,15 +161,33 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			logger.debug("No files to process")
 			return []
 
+		# Initialize an empty list to store all chunks
+		all_chunks = []
+
 		# Detect moved files
 		moved_files = await self._detect_moved_files(diff)
 		if moved_files:
 			logger.info("Detected %d moved files", len(moved_files))
 			move_chunks = self._create_move_chunks(moved_files, diff)
 			if move_chunks:
-				return move_chunks
+				# Add move chunks to all_chunks rather than returning immediately
+				all_chunks.extend(move_chunks)
 
-		# If no moved files or couldn't create move chunks, continue with normal processing
+				# Create a set of files that are part of moves to avoid processing them again
+				moved_file_paths = set()
+				for chunk in move_chunks:
+					moved_file_paths.update(chunk.files)
+
+				# Filter out moved files from diff.files to avoid double processing
+				non_moved_files = [f for f in diff.files if f not in moved_file_paths]
+
+				# If all files were moves, return just the move chunks
+				if not non_moved_files:
+					return all_chunks
+
+				# Update diff.files to only include non-moved files
+				diff.files = non_moved_files
+				logger.info("Continuing with %d non-moved files", len(non_moved_files))
 
 		# Handle files in manageable groups
 		if len(diff.files) > MAX_FILES_PER_GROUP:
@@ -184,7 +202,6 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				files_by_dir[dir_path].append(file)
 
 			# Process each directory group separately, keeping chunks under 5 files
-			all_chunks = []
 			# Iterate directly over the file lists since the directory path isn't used here
 			for files in files_by_dir.values():
 				# Process files in this directory in batches of 3-5
@@ -201,8 +218,11 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 
 			return all_chunks
 
-		# For smaller groups, process normally
-		return await self._process_group(diff)
+		# For smaller groups, process normally and add to all_chunks
+		regular_chunks = await self._process_group(diff)
+		all_chunks.extend(regular_chunks)
+
+		return all_chunks
 
 	async def _process_group(self, diff: GitDiff) -> list[DiffChunk]:
 		"""

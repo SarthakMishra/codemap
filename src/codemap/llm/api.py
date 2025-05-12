@@ -8,6 +8,7 @@ from typing import Literal, TypedDict, TypeVar
 from pydantic import BaseModel, ValidationError
 
 from codemap.config import ConfigLoader
+from codemap.llm.utils import is_ollama_model
 
 # Import Pydantic-AI
 try:
@@ -86,11 +87,31 @@ def call_llm_api(
 
 	try:
 		# Initialize Pydantic-AI Agent
-		agent = Agent(
-			model=config_loader.get.llm.model,
-			system_prompt=system_prompt_str,
-			output_type=agent_output_type,
-		)
+		model_name = config_loader.get.llm.model
+
+		if is_ollama_model(model_name):
+			from pydantic_ai.models.openai import OpenAIModel
+			from pydantic_ai.providers.openai import OpenAIProvider
+
+			model_name = model_name.split(":", 1)[1]
+
+			base_url = config_loader.get.llm.base_url
+			if base_url is None:
+				base_url = "http://localhost:11434/v1"
+
+			ollama_model = OpenAIModel(model_name=model_name, provider=OpenAIProvider(base_url=base_url))
+
+			agent = Agent(
+				ollama_model,
+				system_prompt=system_prompt_str,
+				output_type=agent_output_type,
+			)
+		else:
+			agent = Agent(
+				model=config_loader.get.llm.model,
+				system_prompt=system_prompt_str,
+				output_type=agent_output_type,
+			)
 
 		run_settings = {
 			"temperature": config_loader.get.llm.temperature,

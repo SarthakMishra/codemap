@@ -7,17 +7,18 @@ configuration settings.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
 from codemap.config.config_schema import AppConfigSchema
-from codemap.git.utils import get_repo_root
 
 # For type checking only
 if TYPE_CHECKING:
 	from pydantic import BaseModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,9 @@ class ConfigLoader:
 			Optional[Path]: Resolved config file path or None if no suitable file found
 
 		"""
+		# Import GitRepoContext here to avoid circular imports
+		from codemap.git.utils import GitRepoContext
+
 		# Try current directory
 		local_config = Path(".codemap.yml")
 		if local_config.exists():
@@ -104,7 +108,7 @@ class ConfigLoader:
 			return local_config
 
 		# Try repository root
-		repo_root = get_repo_root()
+		repo_root = GitRepoContext().get_repo_root()
 		self.repo_root = repo_root
 		repo_config = repo_root / ".codemap.yml"
 		if repo_config.exists():
@@ -180,7 +184,12 @@ class ConfigLoader:
 
 		try:
 			# Initialize AppConfigSchema. If file_config_dict is empty, defaults will be used.
-			return AppConfigSchema(**file_config_dict)
+			config = AppConfigSchema(**file_config_dict)
+			# Override github.token with env var if set
+			env_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("CODEMAP_GITHUB_TOKEN")
+			if env_token:
+				config.github.token = env_token
+			return config
 		except Exception as e:  # Catch Pydantic validation errors etc.
 			error_msg = f"Error parsing configuration into schema: {e}"
 			logger.exception(error_msg)

@@ -22,7 +22,6 @@ from typing import TYPE_CHECKING, Any
 
 from codemap.processor.tree_sitter.analyzer import TreeSitterAnalyzer
 from codemap.processor.tree_sitter.base import EntityType
-from codemap.utils.file_utils import read_file_content
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -77,9 +76,14 @@ class LODEntity:
 class LODGenerator:
 	"""Generates different levels of detail from source code."""
 
-	def __init__(self) -> None:
-		"""Initialize the LOD generator."""
-		self.analyzer = TreeSitterAnalyzer()
+	def __init__(self, analyzer: TreeSitterAnalyzer | None = None) -> None:
+		"""
+		Initialize the LOD generator.
+
+		Args:
+			analyzer: Optional shared TreeSitterAnalyzer instance. If None, a new one is created.
+		"""
+		self.analyzer = analyzer or TreeSitterAnalyzer()
 
 	def generate_lod(self, file_path: Path, level: LODLevel = LODLevel.STRUCTURE) -> LODEntity | None:
 		"""
@@ -93,14 +97,8 @@ class LODGenerator:
 		    LODEntity representing the file, or None if analysis failed
 
 		"""
-		# Read file content
-		content = read_file_content(file_path)
-		if not content:
-			logger.warning(f"Could not read content from {file_path}")
-			return None
-
-		# Analyze file with tree-sitter
-		analysis_result = self.analyzer.analyze_file(file_path, content)
+		# Analyze file with tree-sitter - analyzer now handles content reading & caching
+		analysis_result = self.analyzer.analyze_file(file_path)  # Pass only file_path
 		if not analysis_result:
 			logger.warning(f"Failed to analyze {file_path}")
 			return None
@@ -117,7 +115,7 @@ class LODGenerator:
 		Args:
 		    analysis_result: Tree-sitter analysis result
 		    level: Level of detail to generate
-		    file_path: Path to the file being analyzed
+		    file_path: Path to the file being analyzed (present for the root entity)
 
 		Returns:
 		    LODEntity representation
@@ -133,7 +131,6 @@ class LODGenerator:
 		start_line = location.get("start_line", 1)
 		end_line = location.get("end_line", 1)
 
-		# Create the entity with appropriate level of detail
 		entity = LODEntity(
 			name=analysis_result.get("name", ""),
 			entity_type=entity_type,
@@ -142,21 +139,20 @@ class LODGenerator:
 			language=analysis_result.get("language", ""),
 		)
 
-		# Add file_path to metadata for top-level entities
-		if file_path:
+		if file_path:  # This indicates it's the root entity for the file
 			entity.metadata["file_path"] = str(file_path)
+			# If full_content_str is available from analyzer, store it in root entity metadata
+			if "full_content_str" in analysis_result:
+				entity.metadata["full_content_str"] = analysis_result["full_content_str"]
 
-		# Add details based on LOD level (updated comparisons)
 		if level.value >= LODLevel.DOCS.value:
 			entity.docstring = analysis_result.get("docstring", "")
 
-		# Signature is needed for SIGNATURES (1), STRUCTURE (2), DOCS (3), FULL (4)
 		if level.value >= LODLevel.SIGNATURES.value:
 			# Extract signature from content if available
 			content = analysis_result.get("content", "")
 			entity.signature = self._extract_signature(content, entity_type, entity.language)
 
-		# Content is needed for FULL (4)
 		if level.value >= LODLevel.FULL.value or entity_type == EntityType.COMMENT:
 			entity.content = analysis_result.get("content", "")
 

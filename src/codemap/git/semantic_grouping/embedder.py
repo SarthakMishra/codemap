@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from codemap.git.diff_splitter import DiffChunk
-from codemap.processor.utils.embedding_utils import generate_embeddings_batch
+from codemap.processor.utils.embedding_utils import generate_embedding
 
 if TYPE_CHECKING:
 	from codemap.config import ConfigLoader
@@ -76,11 +76,7 @@ class DiffEmbedder:
 			processed_text = " ".join(chunk.files)
 
 		# Generate embeddings in batch (of 1)
-		embeddings = await generate_embeddings_batch(
-			texts=[processed_text],
-			model=None,  # Use default from config
-			config_loader=self.config_loader,
-		)
+		embeddings = generate_embedding([processed_text], self.config_loader)
 
 		if not embeddings:
 			message = f"Failed to generate embedding for chunk with files: {', '.join(chunk.files)}"
@@ -90,7 +86,7 @@ class DiffEmbedder:
 
 		return np.array(embeddings[0])
 
-	async def embed_contents(self, contents: list[str]) -> list[list[float] | None]:
+	async def embed_contents(self, contents: list[str]) -> list[float | None]:
 		"""
 		Generate embeddings for multiple content strings.
 
@@ -123,14 +119,10 @@ class DiffEmbedder:
 
 		# Generate embeddings in batch
 		try:
-			embeddings_batch = await generate_embeddings_batch(
-				texts=contents_to_embed,
-				model=None,  # Use default from config
-				config_loader=self.config_loader,
-			)
+			embeddings_batch = generate_embedding(contents_to_embed, self.config_loader)
 
 			# Rebuild result list with None for invalid contents
-			result: list[list[float] | None] = [None] * len(contents)
+			result: list[float | None] = [None] * len(contents)
 			if embeddings_batch:
 				for idx, valid_idx in enumerate(valid_indices):
 					if idx < len(embeddings_batch):
@@ -138,7 +130,7 @@ class DiffEmbedder:
 			return result
 
 		except Exception:
-			logger.exception("Unexpected error during batch embedding generation")
+			logger.exception("Unexpected error during embedding generation")
 			return [None] * len(contents)
 
 	async def embed_chunks(self, chunks: list[DiffChunk]) -> list[tuple[DiffChunk, np.ndarray]]:
@@ -168,11 +160,7 @@ class DiffEmbedder:
 			preprocessed_texts.append(processed_text)
 
 		# Generate embeddings in batch
-		embeddings = await generate_embeddings_batch(
-			texts=preprocessed_texts,
-			model=None,  # Use default from config
-			config_loader=self.config_loader,
-		)
+		embeddings = generate_embedding(preprocessed_texts, self.config_loader)
 
 		# Create result tuples
 		result = []

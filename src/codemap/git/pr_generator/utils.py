@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from dotenv import set_key
+from github import Auth, Github, GithubException
+from pygit2 import GitError as Pygit2GitError
+
+from codemap.config.config_loader import ConfigLoader
 from codemap.git.pr_generator.constants import MAX_COMMIT_PREVIEW
+from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.prompts import (
 	PR_DESCRIPTION_PROMPT,
 	PR_SYSTEM_PROMPT,
@@ -17,8 +23,8 @@ from codemap.git.pr_generator.prompts import (
 	format_commits_for_prompt,
 )
 from codemap.git.pr_generator.schemas import PRContent, PullRequest
-from codemap.git.pr_generator.strategies import branch_exists, create_strategy, get_default_branch
-from codemap.git.utils import GitError, run_git_command
+from codemap.git.pr_generator.strategies import create_strategy, get_default_branch
+from codemap.git.utils import GitError
 
 if TYPE_CHECKING:
 	from codemap.llm import LLMClient
@@ -30,108 +36,103 @@ class PRCreationError(GitError):
 	"""Error raised when there's an issue creating or updating a pull request."""
 
 
-def get_current_branch() -> str:
+# Singleton for Github client
+_github_client = None
+_github_repo = None
+
+GH_TOKEN_PARTS_LEN = 2  # Constant for token line split length
+
+
+def get_token_from_gh_cli() -> str | None:
 	"""
-	Get the name of the current branch.
+	Try to get the GitHub token from the gh CLI.
 
 	Returns:
-	    Name of the current branch
-
-	Raises:
-	    GitError: If git command fails
-
+		The token string if found, else None.
 	"""
 	try:
-		return run_git_command(["git", "branch", "--show-current"]).strip()
-	except GitError as e:
-		msg = "Failed to get current branch"
-		raise GitError(msg) from e
+		# This subprocess call is safe: command and args are hardcoded, no user input
+		result = subprocess.run(  # noqa: S603
+			["gh", "auth", "status", "--show-token"],  # noqa: S607
+			capture_output=True,
+			text=True,
+			check=True,
+		)
+		# Look for 'Token: ...' in output
+		for line in result.stdout.splitlines():
+			if line.strip().startswith("- Token:"):
+				# Extract token
+				parts = line.split(":", 1)
+				if len(parts) == GH_TOKEN_PARTS_LEN:
+					token = parts[1].strip()
+					if token:
+						return token
+		return None
+	except (subprocess.CalledProcessError, FileNotFoundError):
+		return None
 
 
-def create_branch(branch_name: str) -> None:
+def get_github_client(config_loader: ConfigLoader | None = None) -> tuple[Github, str]:
 	"""
-	Create a new branch and switch to it.
-
-	Args:
-	    branch_name: Name of the branch to create
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		run_git_command(["git", "checkout", "-b", branch_name])
-	except GitError as e:
-		msg = f"Failed to create branch: {branch_name}"
-		raise GitError(msg) from e
-
-
-def checkout_branch(branch_name: str) -> None:
-	"""
-	Checkout an existing branch.
-
-	Args:
-	    branch_name: Name of the branch to checkout
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		run_git_command(["git", "checkout", branch_name])
-	except GitError as e:
-		msg = f"Failed to checkout branch: {branch_name}"
-		raise GitError(msg) from e
-
-
-def push_branch(branch_name: str, force: bool = False) -> None:
-	"""
-	Push a branch to the remote.
-
-	Args:
-	    branch_name: Name of the branch to push
-	    force: Whether to force push
-
-	Raises:
-	    GitError: If git command fails
-
-	"""
-	try:
-		cmd = ["git", "push", "-u", "origin", branch_name]
-		if force:
-			cmd.insert(2, "--force")
-		run_git_command(cmd)
-	except GitError as e:
-		msg = f"Failed to push branch: {branch_name}"
-		raise GitError(msg) from e
-
-
-def get_commit_messages(base_branch: str, head_branch: str) -> list[str]:
-	"""
-	Get commit messages between two branches.
-
-	Args:
-	    base_branch: Base branch (e.g., main)
-	    head_branch: Head branch (e.g., feature-branch)
+	Get a singleton Github client using the OAuth token from config.
 
 	Returns:
-	    List of commit messages
-
+		(Github, repo_full_name): Tuple of Github client and repo name
 	Raises:
-	    GitError: If git command fails
-
+		PRCreationError: If token is missing or repo cannot be determined
 	"""
-	try:
-		# Get commit messages between base and head
-		# Add check for None branches
-		if not base_branch or not head_branch:
-			logger.warning("Base or head branch is None, cannot get commit messages.")
-			return []
-		log_output = run_git_command(["git", "log", f"{base_branch}..{head_branch}", "--pretty=format:%s"])
-		return log_output.splitlines() if log_output.strip() else []
-	except GitError as e:
-		msg = f"Failed to get commit messages between {base_branch} and {head_branch}"
-		raise GitError(msg) from e
+	global _github_client, _github_repo  # noqa: PLW0603
+	if _github_client is not None and _github_repo is not None:
+		return _github_client, _github_repo
+
+	config_loader = config_loader or ConfigLoader.get_instance()
+	config = config_loader.get.github
+	token = config.token
+	repo_name = config.repo
+	if not token:
+		# Try to get from gh CLI
+		token = get_token_from_gh_cli()
+		if token:
+			# Save to .env.local for future use
+			try:
+				set_key(str(Path(".env.local")), "GITHUB_TOKEN", token)
+				logger.info("Saved GitHub token from gh CLI to .env.local")
+			# Only catch expected errors from set_key
+			except (OSError, ValueError) as e:
+				logger.warning(f"Could not save GitHub token to .env.local: {e}")
+		else:
+			logger.error("GitHub OAuth token not set in config (github.token), env, or gh CLI.")
+			msg = (
+				"GitHub OAuth token not set in config (github.token), env, or gh CLI. "
+				"Please run 'gh auth login' or set GITHUB_TOKEN in your .env/.env.local."
+			)
+			raise PRCreationError(msg)
+	auth = Auth.Token(token)
+	_github_client = Github(auth=auth)
+	if not repo_name:
+		# Try to infer from git remote
+		try:
+			pr_git_utils = PRGitUtils.get_instance()
+			url = pr_git_utils.repo.remotes["origin"].url
+			# Ensure url is a string
+			if not isinstance(url, str) or not url:
+				msg = f"Could not parse GitHub repo from remote URL: {url}"
+				raise PRCreationError(msg)
+			# Parse repo name from URL (supports git@github.com:user/repo.git and https)
+			m = re.search(r"github.com[:/](.+?)(?:\\.git)?$", url)
+			if m:
+				repo_name = m.group(1)
+				# Remove .git suffix if present
+				repo_name = repo_name.removesuffix(".git")
+			else:
+				msg = f"Could not parse GitHub repo from remote URL: {url}"
+				raise PRCreationError(msg)
+		except Exception as e:
+			logger.exception("Could not determine GitHub repo from git remote")
+			msg = "Could not determine GitHub repo from git remote"
+			raise PRCreationError(msg) from e
+	_github_repo = repo_name
+	return _github_client, _github_repo
 
 
 def generate_pr_title_from_commits(commits: list[str]) -> str:
@@ -192,16 +193,12 @@ def generate_pr_title_with_llm(
 		commit_list = format_commits_for_prompt(commits)
 		prompt = PR_TITLE_PROMPT.format(commit_list=commit_list)
 
-		title = llm_client.completion(
+		return llm_client.completion(
 			messages=[
 				{"role": "system", "content": PR_SYSTEM_PROMPT},
 				{"role": "user", "content": prompt},
 			],
 		)
-
-		# Clean up the title
-		title = title.strip()
-		return title.removesuffix(".")
 
 	except (ValueError, RuntimeError, ConnectionError) as e:
 		logger.warning("Failed to generate PR title with LLM: %s", str(e))
@@ -358,205 +355,91 @@ def generate_pr_description_with_llm(
 
 
 def create_pull_request(base_branch: str, head_branch: str, title: str, description: str) -> PullRequest:
-	"""
-	Create a pull request on GitHub.
-
-	Args:
-	    base_branch: Base branch (e.g., main)
-	    head_branch: Head branch (e.g., feature-branch)
-	    title: PR title
-	    description: PR description
-
-	Returns:
-	    PullRequest object with PR details
-
-	Raises:
-	    PRCreationError: If PR creation fails
-
-	"""
+	"""Create a pull request on GitHub using PyGithub."""
 	try:
-		# Check if gh CLI is installed
-		try:
-			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
-		except (subprocess.CalledProcessError, FileNotFoundError) as e:
-			msg = "GitHub CLI (gh) is not installed or not in PATH. Please install it to create PRs."
-			raise PRCreationError(msg) from e
-
-		# Create PR using GitHub CLI
-		cmd = [
-			"gh",
-			"pr",
-			"create",
-			"--base",
-			base_branch,
-			"--head",
-			head_branch,
-			"--title",
-			title,
-			"--body",
-			description,
-		]
-
-		logger.info(f"Attempting to create PR with command: {' '.join(cmd)}")
-		logger.info(f"Arguments - Base: '{base_branch}', Head: '{head_branch}'")
-
-		logger.debug("Running GitHub CLI command: %s", " ".join(cmd))
-		result = subprocess.run(  # noqa: S603
-			cmd,
-			check=True,
-			capture_output=True,
-			text=True,
-			encoding="utf-8",
+		gh, repo_name = get_github_client()
+		repo = gh.get_repo(repo_name)
+		pr = repo.create_pull(
+			base=base_branch,
+			head=head_branch,
+			title=title,
+			body=description,
 		)
-
-		# gh pr create outputs the URL of the created PR to stdout
-		pr_url = result.stdout.strip()
-		pr_number = None
-
-		# Try to extract PR number from URL
-		match = re.search(r"/pull/(\d+)$", pr_url)
-		if match:
-			pr_number = int(match.group(1))
-		else:
-			logger.warning("Could not extract PR number from URL: %s", pr_url)
-
 		return PullRequest(
 			branch=head_branch,
 			title=title,
 			description=description,
-			url=pr_url,
-			number=pr_number,
+			url=pr.html_url,
+			number=pr.number,
 		)
-	except subprocess.CalledProcessError as e:
-		# Use stderr for the error message from gh
-		error_message = e.stderr.strip() if e.stderr else "Unknown gh error"
-		logger.exception("GitHub CLI error during PR creation: %s", error_message)
-		msg = f"Failed to create PR: {error_message}"
+	except GithubException as e:
+		logger.exception("GitHub API error during PR creation:")
+		msg = f"Failed to create PR: {e.data.get('message', str(e)) if hasattr(e, 'data') else str(e)}"
 		raise PRCreationError(msg) from e
-	except (
-		FileNotFoundError,
-		json.JSONDecodeError,
-	) as e:  # Keep JSONDecodeError in case gh output changes unexpectedly
-		# Handle gh not found or unexpected output issues
-		logger.exception("Error running gh command or parsing output: %s")
+	except Exception as e:
+		logger.exception("Error creating PR via PyGithub:")
 		msg = f"Error during PR creation: {e}"
 		raise PRCreationError(msg) from e
 
 
 def update_pull_request(pr_number: int | None, title: str, description: str) -> PullRequest:
-	"""
-	Update an existing pull request.
-
-	Args:
-	    pr_number: PR number
-	    title: New PR title
-	    description: New PR description
-
-	Returns:
-	    Updated PullRequest object
-
-	Raises:
-	    PRCreationError: If PR update fails
-
-	"""
+	"""Update an existing pull request using PyGithub."""
 	if pr_number is None:
 		msg = "PR number cannot be None"
 		raise PRCreationError(msg)
-
 	try:
-		# Check if gh CLI is installed
-		try:
-			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
-		except (subprocess.CalledProcessError, FileNotFoundError) as e:
-			msg = "GitHub CLI (gh) is not installed or not in PATH. Please install it to update PRs."
-			raise PRCreationError(msg) from e
-
-		# Get current branch
-		branch = get_current_branch()
-
-		# Update PR using GitHub CLI
-		cmd = [
-			"gh",
-			"pr",
-			"edit",
-			str(pr_number),
-			"--title",
-			title,
-			"--body",
-			description,
-		]
-
-		subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
-
-		# Get PR URL
-		url_cmd = ["gh", "pr", "view", str(pr_number), "--json", "url", "--jq", ".url"]
-		result = subprocess.run(url_cmd, check=True, capture_output=True, text=True)  # noqa: S603
-		pr_url = result.stdout.strip()
-
+		gh, repo_name = get_github_client()
+		repo = gh.get_repo(repo_name)
+		pr = repo.get_pull(pr_number)
+		pr.edit(title=title, body=description)
+		# Get current branch name
+		pr_git_utils = PRGitUtils.get_instance()
+		branch = pr_git_utils.get_current_branch()
 		return PullRequest(
 			branch=branch,
 			title=title,
 			description=description,
-			url=pr_url,
-			number=pr_number,
+			url=pr.html_url,
+			number=pr.number,
 		)
-	except subprocess.CalledProcessError as e:
-		msg = f"Failed to update PR: {e.stderr}"
+	except GithubException as e:
+		logger.exception("GitHub API error during PR update:")
+		msg = f"Failed to update PR: {e.data.get('message', str(e)) if hasattr(e, 'data') else str(e)}"
+		raise PRCreationError(msg) from e
+	except Exception as e:
+		logger.exception("Error updating PR via PyGithub:")
+		msg = f"Error during PR update: {e}"
 		raise PRCreationError(msg) from e
 
 
 def get_existing_pr(branch_name: str) -> PullRequest | None:
-	"""
-	Get an existing PR for a branch.
-
-	Args:
-	    branch_name: Branch name
-
-	Returns:
-	    PullRequest object if found, None otherwise
-
-	"""
+	"""Get an existing PR for a branch using PyGithub."""
 	try:
-		# Add check for None branch_name
 		if not branch_name:
 			logger.debug("Branch name is None, cannot get existing PR.")
 			return None
-		# Check if gh CLI is installed
+		gh, repo_name = get_github_client()
+		repo = gh.get_repo(repo_name)
 		try:
-			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
-		except (subprocess.CalledProcessError, FileNotFoundError):
+			pulls = repo.get_pulls(state="open", head=f"{repo.owner.login}:{branch_name}")
+		except Exception as e:  # noqa: BLE001
+			logger.warning(f"Error getting PRs from GitHub API: {e}")
 			return None
-
-		# List PRs for the branch
-		cmd = [
-			"gh",
-			"pr",
-			"list",
-			"--head",
-			branch_name,
-			"--json",
-			"number,title,body,url",
-			"--jq",
-			".[0]",
-		]
-
-		result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
-		if result.returncode != 0 or not result.stdout.strip():
-			return None
-
-		# Parse JSON output
-		pr_data = json.loads(result.stdout)
-		if not pr_data:
-			return None
-
-		return PullRequest(
-			branch=branch_name,
-			title=pr_data.get("title", ""),
-			description=pr_data.get("body", ""),
-			url=pr_data.get("url", ""),
-			number=pr_data.get("number"),
-		)
-	except (subprocess.CalledProcessError, json.JSONDecodeError):
+		for pr in pulls:
+			# Return the first matching PR
+			return PullRequest(
+				branch=branch_name,
+				title=pr.title,
+				description=pr.body,
+				url=pr.html_url,
+				number=pr.number,
+			)
+		return None
+	except GithubException as e:
+		logger.warning(f"GitHub API error during get_existing_pr: {e}")
+		return None
+	except (ValueError, RuntimeError, ConnectionError, TypeError) as e:
+		logger.warning(f"Error getting existing PR via PyGithub: {e}")
 		return None
 
 
@@ -667,77 +550,6 @@ def suggest_branch_name(message: str, workflow: str) -> str:
 	return suggested_name
 
 
-def get_branch_relation(branch: str, target_branch: str) -> tuple[bool, int]:
-	"""
-	Get the relationship between two branches.
-
-	Args:
-	    branch: The branch to check
-	    target_branch: The target branch to compare against
-
-	Returns:
-	    Tuple of (is_ancestor, commit_count)
-	    - is_ancestor: True if branch is an ancestor of target_branch
-	    - commit_count: Number of commits between the branches
-
-	"""
-	try:
-		# Check if both branches exist
-		branch_exists_local = branch_exists(branch, include_remote=False)
-		branch_exists_remote = not branch_exists_local and branch_exists(branch, include_remote=True)
-		target_exists_local = branch_exists(target_branch, include_remote=False)
-		target_exists_remote = not target_exists_local and branch_exists(target_branch, include_remote=True)
-
-		# If either branch doesn't exist anywhere, return default values
-		if not (branch_exists_local or branch_exists_remote) or not (target_exists_local or target_exists_remote):
-			logger.debug("One or both branches don't exist: %s, %s", branch, target_branch)
-			return (False, 0)
-
-		# Determine full ref names for branches based on where they exist
-		branch_ref = branch
-		if branch_exists_remote and not branch_exists_local:
-			branch_ref = f"origin/{branch}"
-
-		target_ref = target_branch
-		if target_exists_remote and not target_exists_local:
-			target_ref = f"origin/{target_branch}"
-
-		# Check if branch is an ancestor of target_branch
-		cmd = ["git", "merge-base", "--is-ancestor", branch_ref, target_ref]
-		try:
-			run_git_command(cmd)
-			is_ancestor = True
-		except GitError:
-			# If command fails, branch is not an ancestor
-			is_ancestor = False
-			logger.debug("Branch %s is not an ancestor of %s", branch_ref, target_ref)
-
-		# Try the reverse check as well to determine relationship
-		try:
-			reverse_cmd = ["git", "merge-base", "--is-ancestor", target_ref, branch_ref]
-			run_git_command(reverse_cmd)
-			# If we get here, target is an ancestor of branch (target is older)
-			if not is_ancestor:
-				logger.debug("Branch %s is newer than %s", branch_ref, target_ref)
-		except GitError:
-			# If both checks fail, the branches have no common ancestor
-			if not is_ancestor:
-				logger.debug("Branches %s and %s have no common history", branch_ref, target_ref)
-
-		# Get commit count between branches
-		count_cmd = ["git", "rev-list", "--count", f"{branch_ref}..{target_ref}"]
-		try:
-			count = int(run_git_command(count_cmd).strip())
-		except GitError:
-			# If this fails, branches might be completely unrelated
-			count = 0
-
-		return (is_ancestor, count)
-	except GitError as e:
-		logger.warning("Error determining branch relation: %s", e)
-		return (False, 0)
-
-
 def get_branch_description(branch_name: str) -> str:
 	"""
 	Generate a description for a branch based on its commits.
@@ -751,10 +563,13 @@ def get_branch_description(branch_name: str) -> str:
 	"""
 	try:
 		# Get base branch
-		base_branch = get_default_branch()
+		base_branch = get_default_branch()  # This is a helper from .strategies
 
-		# Get unique commits on this branch
-		commits = get_commit_messages(base_branch, branch_name)
+		# Instantiate PRGitUtils to use the new pygit2-based get_commit_messages
+		# This assumes the CWD is within a git repo.
+		# A better approach would be to pass an instance of PRGitUtils or relevant context.
+		git_utils_instance = PRGitUtils()  # This will initialize ExtendedGitRepoContext
+		commits = git_utils_instance.get_commit_messages(base_branch, branch_name)
 
 		if not commits:
 			return "No unique commits found on this branch."
@@ -796,36 +611,26 @@ def list_branches() -> list[str]:
 
 	Returns:
 	        List of branch names
-
 	"""
 	try:
-		# Get local branches
-		local_branches_output = run_git_command(["git", "branch", "--list"]).strip()
-		local_branches = []
-		if local_branches_output:
-			for branch in local_branches_output.split("\n"):
-				# Remove the '*' from current branch and any whitespace
-				branch_clean = branch.strip().removeprefix("* ")
-				if branch_clean:
-					local_branches.append(branch_clean)
-
-		# Get remote branches
-		remote_branches_output = run_git_command(["git", "branch", "-r", "--list"]).strip()
+		git_utils_instance = PRGitUtils()
+		local_branches = list(git_utils_instance.repo.branches.local)
+		remote_branches_full_refs = list(git_utils_instance.repo.branches.remote)
 		remote_branches = []
-		if remote_branches_output:
-			for branch in remote_branches_output.split("\n"):
-				branch_clean = branch.strip()
-				if branch_clean.startswith("origin/"):
-					# Remove 'origin/' prefix
-					branch_name = branch_clean[7:]
-					# Exclude HEAD reference
-					if not branch_name.startswith("HEAD"):
-						remote_branches.append(branch_name)
+		for ref_name in remote_branches_full_refs:
+			# Example ref_name: "origin/main", "origin/HEAD"
+			if not ref_name.endswith("/HEAD"):  # Exclude remote HEAD pointers
+				# Strip the remote name prefix, e.g., "origin/"
+				parts = ref_name.split("/", 1)
+				if len(parts) > 1:
+					remote_branches.append(parts[1])
+				else:  # Should not happen for valid remote branch refs like "origin/branch"
+					remote_branches.append(ref_name)
 
 		# Combine and remove duplicates
 		return list(set(local_branches + remote_branches))
-	except GitError:
-		logger.debug("Error listing branches")
+	except (GitError, Pygit2GitError) as e:
+		logger.debug(f"Error listing branches using pygit2: {e}")
 		return []
 
 
@@ -848,3 +653,36 @@ def validate_branch_name(branch_name: str | None) -> bool:
 		)
 		return False
 	return True
+
+
+def get_all_open_prs() -> list[PullRequest]:
+	"""
+	Fetch all open pull requests for the current repository.
+
+	Returns:
+		List of PullRequest objects for all open PRs.
+
+	Raises:
+		PRCreationError: If repo_name is invalid or repo cannot be found.
+	"""
+	gh, repo_name = get_github_client()
+	if not repo_name or "/" not in repo_name:
+		logger.error(f"Invalid repo_name for GitHub API: {repo_name}")
+		msg = f"Invalid repo_name for GitHub API: {repo_name}"
+		raise PRCreationError(msg)
+	try:
+		repo = gh.get_repo(repo_name)
+	except Exception as e:
+		logger.exception(f"Could not fetch repo '{repo_name}' from GitHub.")
+		msg = f"Could not fetch repo '{repo_name}' from GitHub: {e}"
+		raise PRCreationError(msg) from e
+	return [
+		PullRequest(
+			branch=pr.head.ref,
+			title=pr.title,
+			description=pr.body,
+			url=pr.html_url,
+			number=pr.number,
+		)
+		for pr in repo.get_pulls(state="open")
+	]

@@ -6,6 +6,8 @@ from pathlib import Path
 from unittest.mock import MagicMock, Mock, call, patch
 
 import pytest
+from pygit2 import Commit
+from pygit2 import GitError as Pygit2GitError
 
 from codemap.config import ConfigLoader
 from codemap.git.pr_generator.command import PRCommand
@@ -42,7 +44,7 @@ class TestPRCommandInitialization(GitTestBase):
 		# Arrange: Set up mocks
 		with (
 			patch("codemap.llm.LLMClient") as mock_llm_client_cls,
-			patch("codemap.git.pr_generator.command.get_repo_root") as mock_get_repo_root,
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root") as mock_get_repo_root,
 		):
 			mock_llm_client = Mock()
 			mock_llm_client_cls.return_value = mock_llm_client
@@ -62,7 +64,7 @@ class TestPRCommandInitialization(GitTestBase):
 	def test_init_git_error(self) -> None:
 		"""Test error handling when Git operations fail during initialization."""
 		# Arrange: Set up mocks
-		with patch("codemap.git.pr_generator.command.get_repo_root") as mock_get_repo_root:
+		with patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root") as mock_get_repo_root:
 			# Configure mocks to raise GitError
 			mock_get_repo_root.side_effect = GitError("Not a git repository")
 
@@ -101,19 +103,24 @@ class TestPRCommandBranchInfo(GitTestBase):
 		# Create the PRCommand with patched dependencies
 		with (
 			patch("codemap.llm.LLMClient", return_value=self.mock_llm_client),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path)),
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path)),
 		):
 			self.pr_command = PRCommand(config_loader=self.mock_config)
 
 	def test_get_branch_info_success(self) -> None:
 		"""Test successful retrieval of branch information."""
-		# Arrange: Set up mocks for git operations
-		with patch("codemap.git.pr_generator.command.run_git_command") as mock_run_git:
-			# Configure mocks
-			mock_run_git.side_effect = [
-				"feature-branch",  # Current branch
-				"  HEAD branch: main\n  Remote branches:\n    main\n    develop",  # Default branch
-			]
+		# Arrange: Set up mocks for pygit2 operations
+		with patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance") as mock_get_instance:
+			# Setup mock PRGitUtils instance
+			mock_pgu = Mock()
+			mock_get_instance.return_value = mock_pgu
+			mock_pgu.get_current_branch.return_value = "feature-branch"
+
+			# Mock repo branches for default branch detection
+			mock_repo = Mock()
+			mock_pgu.repo = mock_repo
+			mock_repo.branches = Mock()
+			mock_repo.branches.remote = ["origin/main", "origin/develop"]
 
 			# Act: Call the method
 			branch_info = self.pr_command._get_branch_info()
@@ -122,17 +129,19 @@ class TestPRCommandBranchInfo(GitTestBase):
 			assert branch_info["current_branch"] == "feature-branch"
 			assert branch_info["target_branch"] == "main"
 
-			# Verify git commands were called
-			assert mock_run_git.call_count == 2
-			assert mock_run_git.call_args_list[0][0][0] == ["git", "rev-parse", "--abbrev-ref", "HEAD"]
-			assert mock_run_git.call_args_list[1][0][0] == ["git", "remote", "show", "origin"]
+			# Verify methods were called
+			mock_pgu.get_current_branch.assert_called_once()
 
 	def test_get_branch_info_git_error(self) -> None:
 		"""Test error handling when Git operations fail."""
-		# Arrange: Set up mocks for git operations
-		with patch("codemap.git.pr_generator.command.run_git_command") as mock_run_git:
+		# Arrange: Set up mocks for pygit2 operations
+		with patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance") as mock_get_instance:
+			# Setup mock PRGitUtils instance
+			mock_pgu = Mock()
+			mock_get_instance.return_value = mock_pgu
+
 			# Configure mocks to raise GitError
-			mock_run_git.side_effect = GitError("Git operation failed")
+			mock_pgu.get_current_branch.side_effect = GitError("Git operation failed")
 
 			# Act and Assert: Should raise RuntimeError
 			with pytest.raises(RuntimeError) as excinfo:
@@ -169,77 +178,149 @@ class TestPRCommandCommitHistory(GitTestBase):
 		# Create the PRCommand with patched dependencies
 		with (
 			patch("codemap.llm.LLMClient", return_value=self.mock_llm_client),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path)),
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path)),
 		):
 			self.pr_command = PRCommand(config_loader=self.mock_config)
 
 	def test_get_commit_history_success(self) -> None:
 		"""Test successful retrieval of commit history."""
-		# Arrange: Set up mocks for git operations
-		with patch("codemap.git.pr_generator.command.run_git_command") as mock_run_git:
-			# Configure mocks
-			mock_run_git.return_value = "abc123||John Doe||feat: Add new feature\ndef456||Jane Smith||fix: Fix a bug"
+		# Arrange: Set up mocks for pygit2 operations
+		with patch("codemap.git.pr_generator.command.PRGitUtils.get_instance") as mock_get_instance:
+			# Setup mock PRGitUtils instance
+			mock_pgu = Mock()
+			mock_get_instance.return_value = mock_pgu
+
+			# Mock underlying repo methods used by _get_commit_history
+			mock_repo = MagicMock()
+			mock_pgu.repo = mock_repo
+
+			# Mock commit objects
+			mock_head_commit_obj = MagicMock(spec=Commit)
+			mock_head_commit_obj.id = "head_oid"
+			mock_base_commit_obj = MagicMock(spec=Commit)
+			mock_base_commit_obj.id = "base_oid"
+
+			mock_repo.revparse_single.side_effect = lambda ref: {
+				"HEAD": MagicMock(peel=lambda t: mock_head_commit_obj if t == Commit else None),
+				"main": MagicMock(peel=lambda t: mock_base_commit_obj if t == Commit else None),
+			}.get(ref)
+
+			mock_repo.merge_base.return_value = "merge_base_oid"
+
+			# Mock commits for the walker
+			commit1 = MagicMock(spec=Commit)
+			commit1.id = "commit1_oid"
+			commit1.short_id = "c1short"
+			commit1.author = MagicMock()
+			commit1.author.name = "Author One"
+			commit1.message = "feat: Add new feature\nDetails for feature."
+
+			commit2 = MagicMock(spec=Commit)
+			commit2.id = "commit2_oid"
+			commit2.short_id = "c2short"
+			commit2.author = MagicMock()
+			commit2.author.name = "Author Two"
+			commit2.message = "fix: Fix a bug\nDetails for bug fix."
+
+			mock_repo.walk.return_value = [commit1, commit2]  # This is now iterable
 
 			# Act: Call the method
-			commits = self.pr_command._get_commit_history("main")
+			commits_data = self.pr_command._get_commit_history("main")
 
-			# Assert: Verify results
-			assert len(commits) == 2
-			assert commits[0]["hash"] == "abc123"
-			assert commits[0]["author"] == "John Doe"
-			assert commits[0]["subject"] == "feat: Add new feature"
-			assert commits[1]["hash"] == "def456"
-			assert commits[1]["author"] == "Jane Smith"
-			assert commits[1]["subject"] == "fix: Fix a bug"
+			# Assert: Verify results have expected format
+			assert len(commits_data) == 2
+			assert commits_data[0]["subject"] == "feat: Add new feature"
+			assert commits_data[0]["hash"] == "c1short"
+			assert commits_data[0]["author"] == "Author One"
+			assert commits_data[1]["subject"] == "fix: Fix a bug"
+			assert commits_data[1]["hash"] == "c2short"
+			assert commits_data[1]["author"] == "Author Two"
 
-			# Verify git command was called
-			mock_run_git.assert_called_once_with(["git", "log", "main..HEAD", "--pretty=format:%H||%an||%s"])
+			# Verify pygit2 mocks were called as expected
+			assert mock_repo.revparse_single.call_count == 2
 
 	def test_get_commit_history_empty(self) -> None:
 		"""Test retrieving an empty commit history."""
-		# Arrange: Set up mocks for git operations
-		with patch("codemap.git.pr_generator.command.run_git_command") as mock_run_git:
-			# Configure mocks
-			mock_run_git.return_value = ""
+		with patch("codemap.git.pr_generator.command.PRGitUtils.get_instance") as mock_get_instance:
+			mock_pgu = Mock()
+			mock_get_instance.return_value = mock_pgu
+			mock_repo = MagicMock()
+			mock_pgu.repo = mock_repo
 
-			# Act: Call the method
-			commits = self.pr_command._get_commit_history("main")
+			mock_head_commit_obj = MagicMock(spec=Commit, id="head_oid")
+			mock_base_commit_obj = MagicMock(spec=Commit, id="base_oid")
+			mock_repo.revparse_single.side_effect = lambda ref: {
+				"HEAD": MagicMock(peel=lambda t: mock_head_commit_obj if t == Commit else None),
+				"main": MagicMock(peel=lambda t: mock_base_commit_obj if t == Commit else None),
+			}.get(ref)
+			mock_repo.merge_base.return_value = "merge_base_oid"
+			mock_repo.walk.return_value = []  # Empty list of commits
 
-			# Assert: Verify results
-			assert commits == []
+			commits_data = self.pr_command._get_commit_history("main")
+			assert commits_data == []
 
 	def test_get_commit_history_with_invalid_format(self) -> None:
-		"""Test handling of commits with invalid format."""
-		# Arrange: Set up mocks for git operations
-		with patch("codemap.git.pr_generator.command.run_git_command") as mock_run_git:
-			# Configure mocks with an invalid format commit
-			mock_run_git.return_value = (
-				"abc123||John Doe||feat: Add new feature\n"
-				"invalid_format_commit\n"  # Not enough parts
-				"def456||Jane Smith||fix: Fix a bug"
+		"""Test handling of commits with various message formats (subjects extraction)."""
+		with patch("codemap.git.pr_generator.command.PRGitUtils.get_instance") as mock_get_instance:
+			mock_pgu = Mock()
+			mock_get_instance.return_value = mock_pgu
+			mock_repo = MagicMock()
+			mock_pgu.repo = mock_repo
+
+			mock_head_commit_obj = MagicMock(spec=Commit, id="head_oid")
+			mock_base_commit_obj = MagicMock(spec=Commit, id="base_oid")
+			mock_repo.revparse_single.side_effect = lambda ref: {
+				"HEAD": MagicMock(peel=lambda t: mock_head_commit_obj if t == Commit else None),
+				"main": MagicMock(peel=lambda t: mock_base_commit_obj if t == Commit else None),
+			}.get(ref)
+			mock_repo.merge_base.return_value = "merge_base_oid"
+
+			commit1 = MagicMock(
+				spec=Commit, id="c1", short_id="s1", author=MagicMock(name="A1"), message="feat: Add new feature"
 			)
+			commit2 = MagicMock(
+				spec=Commit,
+				id="c2",
+				short_id="s2",
+				author=MagicMock(name="A2"),
+				message="invalid_format_commit\nSecond line.",
+			)
+			commit3 = MagicMock(
+				spec=Commit, id="c3", short_id="s3", author=MagicMock(name="A3"), message="fix: Fix a bug"
+			)
+			commit4 = MagicMock(
+				spec=Commit, id="c4", short_id="s4", author=MagicMock(name="A4"), message="Only one line"
+			)
+			commit5 = MagicMock(
+				spec=Commit, id="c5", short_id="s5", author=MagicMock(name="A5"), message=""
+			)  # Empty message
 
-			# Act: Call the method
-			commits = self.pr_command._get_commit_history("main")
+			mock_repo.walk.return_value = [commit1, commit2, commit3, commit4, commit5]
 
-			# Assert: Verify results
-			assert len(commits) == 2  # Invalid commit should be skipped
-			assert commits[0]["hash"] == "abc123"
-			assert commits[1]["hash"] == "def456"
+			commits_data = self.pr_command._get_commit_history("main")
+
+			assert len(commits_data) == 5
+			assert commits_data[0]["subject"] == "feat: Add new feature"
+			assert commits_data[1]["subject"] == "invalid_format_commit"
+			assert commits_data[2]["subject"] == "fix: Fix a bug"
+			assert commits_data[3]["subject"] == "Only one line"
+			assert commits_data[4]["subject"] == ""
 
 	def test_get_commit_history_git_error(self) -> None:
-		"""Test error handling when Git operations fail."""
-		# Arrange: Set up mocks for git operations
-		with patch("codemap.git.pr_generator.command.run_git_command") as mock_run_git:
-			# Configure mocks to raise GitError
-			mock_run_git.side_effect = GitError("Git operation failed")
+		"""Test error handling when Git operations fail during history retrieval."""
+		with patch("codemap.git.pr_generator.command.PRGitUtils.get_instance") as mock_get_instance:
+			mock_pgu = Mock()
+			mock_get_instance.return_value = mock_pgu
+			mock_repo = MagicMock()
+			mock_pgu.repo = mock_repo
 
-			# Act and Assert: Should raise RuntimeError
+			# Configure mock to raise Pygit2GitError (which _get_commit_history catches)
+			mock_repo.revparse_single.side_effect = Pygit2GitError("Underlying git op failed")
+
 			with pytest.raises(RuntimeError) as excinfo:
 				self.pr_command._get_commit_history("main")
 
-			# Verify error message
-			assert "Failed to get commit history: Git operation failed" in str(excinfo.value)
+			assert "Failed to get commit history using pygit2: Underlying git op failed" in str(excinfo.value)
 
 
 @pytest.mark.unit
@@ -274,7 +355,7 @@ class TestPRCommandDescriptionGeneration(GitTestBase):
 		self._patchers.append(patcher1)
 
 		# Patch get_repo_root
-		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path))
+		patcher2 = patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path))
 		self.mock_get_repo_root = patcher2.start()
 		self._patchers.append(patcher2)
 
@@ -386,7 +467,7 @@ class TestPRCommandRun(GitTestBase):
 		self.mock_llm_client_cls = patcher1.start()
 		self._patchers.append(patcher1)
 
-		patcher2 = patch("codemap.git.pr_generator.command.get_repo_root", return_value=Path(self.repo_path))
+		patcher2 = patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path(self.repo_path))
 		self.mock_get_repo_root = patcher2.start()
 		self._patchers.append(patcher2)
 

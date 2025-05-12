@@ -23,14 +23,10 @@ The `codemap pr` command helps you create and manage pull requests with ease. It
 ## Creating a PR
 
 ```bash
-codemap pr create [PATH] [OPTIONS]
+codemap pr create [OPTIONS]
 # Or using the alias:
-cm pr create [PATH] [OPTIONS]
+cm pr create [OPTIONS]
 ```
-
-**Arguments:**
-
-- `PATH`: Path to the codebase to analyze (defaults to current directory)
 
 **Options:**
 
@@ -44,19 +40,18 @@ cm pr create [PATH] [OPTIONS]
 - `--workflow`, `-w`: Git workflow strategy (github-flow, gitflow, trunk-based). Overrides config (`pr.strategy`).
 - `--non-interactive`: Run in non-interactive mode
 - `--model`, `-m`: LLM model for content generation (overrides config `llm.model`).
+- `--bypass-hooks`, `--no-verify`: Bypass git hooks with `--no-verify`
+- `--api-base`: (Advanced) Custom API base URL for LLM
+- `--api-key`: (Advanced) Custom API key for LLM
 - `--verbose`, `-v`: Enable verbose logging
 
 ## Updating a PR
 
 ```bash
-codemap pr update [PATH] [OPTIONS]
+codemap pr update [OPTIONS]
 # Or using the alias:
-cm pr update [PATH] [OPTIONS]
+cm pr update [OPTIONS]
 ```
-
-**Arguments:**
-
-- `PATH`: Path to the codebase to analyze (defaults to current directory)
 
 **Options:**
 
@@ -64,12 +59,21 @@ cm pr update [PATH] [OPTIONS]
 - `--title`: New PR title
 - `--desc`, `-d`: New PR description (file path or text)
 - `--force-push`, `-f`: Force push the branch (use with caution)
+- `--workflow`, `-w`: Git workflow strategy (github-flow, gitflow, trunk-based)
 - `--non-interactive`: Run in non-interactive mode
+- `--model`, `-m`: LLM model for content generation
+- `--bypass-hooks`, `--no-verify`: Bypass git hooks with `--no-verify`
+- `--api-base`: (Advanced) Custom API base URL for LLM
+- `--api-key`: (Advanced) Custom API key for LLM
 - `--verbose`, `-v`: Enable verbose logging
 
 /// warning
 --no-commit is NOT an option for 'update'
 ///
+
+## Notes
+- `[PATH]` is not required; the command operates in the current repository by default.
+- Advanced LLM options (`--api-base`, `--api-key`) are rarely needed unless using a custom or self-hosted LLM endpoint.
 
 ## Git Workflow Strategies
 
@@ -106,4 +110,11 @@ codemap pr create --desc "Custom description with **markdown** support"
 
 # Non-interactive PR creation with defined template usage
 codemap pr create --non-interactive --workflow gitflow --type release
+
+# Update an existing PR by PR number
+codemap pr update --pr 42 --title "Update PR Title"
+
+# Bypass git hooks when creating or updating a PR
+codemap pr create --bypass-hooks
+codemap pr update --bypass-hooks
 ``` 

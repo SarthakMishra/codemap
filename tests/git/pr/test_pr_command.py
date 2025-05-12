@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -135,16 +136,29 @@ class TestPRWorkflowCommand:
 		return generator
 
 	@pytest.fixture
+	def mock_pgu(self) -> MagicMock:
+		"""Create a mock PRGitUtils instance."""
+		mock = MagicMock()
+		# Set up necessary mock methods
+		mock.get_commit_messages.return_value = ["fix: bug fix", "feat: new feature"]
+		mock.branch = "feature/test-branch"  # Default branch for tests
+		return mock
+
+	@pytest.fixture
 	def workflow_command(
-		self, mock_llm_client: MagicMock, mock_config_loader: MagicMock, mock_pr_generator: MagicMock
+		self,
+		mock_llm_client: MagicMock,
+		mock_config_loader: MagicMock,
+		mock_pr_generator: MagicMock,
+		mock_pgu: MagicMock,
 	) -> Iterator[PRWorkflowCommand]:
 		"""Create a mock PRWorkflowCommand with necessary patches."""
 		with (
 			patch("codemap.git.pr_generator.command.PRGenerator", return_value=mock_pr_generator),
-			patch("codemap.git.pr_generator.command.get_repo_root", return_value="/path/to/repo"),
+			patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path("/path/to/repo")),
 			patch("codemap.git.pr_generator.command.create_strategy") as mock_create_strategy,
 			patch(
-				"codemap.git.pr_generator.command.get_commit_messages",
+				"codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_commit_messages",
 				return_value=["fix: bug fix", "feat: new feature"],
 			),
 			patch("codemap.git.pr_generator.command.get_existing_pr", return_value=None),
@@ -152,6 +166,7 @@ class TestPRWorkflowCommand:
 			patch(
 				"codemap.git.pr_generator.command.generate_pr_description_with_llm", return_value="Test PR Description"
 			),
+			patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance", return_value=mock_pgu),
 		):
 			# Configure strategy mock
 			strategy_mock = MagicMock()
@@ -215,15 +230,16 @@ class TestPRWorkflowCommand:
 				assert not mock_empty_desc.called
 
 	@pytest.mark.asyncio
-	async def test_create_pr_workflow(self, workflow_command, mock_pr_generator: MagicMock) -> None:
+	async def test_create_pr_workflow(
+		self, workflow_command, mock_pr_generator: MagicMock, mock_pgu: MagicMock
+	) -> None:
 		"""Test the PR creation workflow."""
 		with (
-			patch("codemap.git.pr_generator.command.get_commit_messages") as mock_get_commits,
 			patch("codemap.git.pr_generator.command.generate_pr_title_with_llm") as mock_title_gen,
 			patch("codemap.git.pr_generator.command.generate_pr_description_with_llm") as mock_desc_gen,
 		):
 			# Set up mocks
-			mock_get_commits.return_value = ["fix: bug fix", "feat: new feature"]
+			mock_pgu.get_commit_messages.return_value = ["fix: bug fix", "feat: new feature"]
 			mock_title_gen.return_value = "Test PR Title"
 			mock_desc_gen.return_value = "Test PR Description"
 
@@ -231,7 +247,7 @@ class TestPRWorkflowCommand:
 			pr = workflow_command.create_pr_workflow("main", "feature/test-branch")
 
 			# Verify the correct methods were called
-			mock_get_commits.assert_called_once_with("main", "feature/test-branch")
+			mock_pgu.get_commit_messages.assert_called_once_with("main", "feature/test-branch")
 			mock_title_gen.assert_called_once()
 			mock_desc_gen.assert_called_once()
 
@@ -245,15 +261,16 @@ class TestPRWorkflowCommand:
 			assert pr.url is not None
 
 	@pytest.mark.asyncio
-	async def test_update_pr_workflow(self, workflow_command, mock_pr_generator: MagicMock) -> None:
+	async def test_update_pr_workflow(
+		self, workflow_command, mock_pr_generator: MagicMock, mock_pgu: MagicMock
+	) -> None:
 		"""Test the PR update workflow."""
 		with (
-			patch("codemap.git.pr_generator.command.get_commit_messages") as mock_get_commits,
 			patch("codemap.git.pr_generator.command.generate_pr_title_with_llm") as mock_title_gen,
 			patch("codemap.git.pr_generator.command.generate_pr_description_with_llm") as mock_desc_gen,
 		):
 			# Set up mocks
-			mock_get_commits.return_value = ["fix: bug fix", "feat: new feature"]
+			mock_pgu.get_commit_messages.return_value = ["fix: bug fix", "feat: new feature"]
 			mock_title_gen.return_value = "Updated PR Title"
 			mock_desc_gen.return_value = "Updated PR Description"
 
@@ -261,7 +278,7 @@ class TestPRWorkflowCommand:
 			pr = workflow_command.update_pr_workflow(pr_number=1, base_branch="main", head_branch="feature/test-branch")
 
 			# Verify the correct methods were called
-			mock_get_commits.assert_called_once_with("main", "feature/test-branch")
+			mock_pgu.get_commit_messages.assert_called_once_with("main", "feature/test-branch")
 			mock_title_gen.assert_called_once()
 			mock_desc_gen.assert_called_once()
 
@@ -273,7 +290,7 @@ class TestPRWorkflowCommand:
 			assert pr.url is not None
 
 			# Reset mocks
-			mock_get_commits.reset_mock()
+			mock_pgu.get_commit_messages.reset_mock()
 			mock_title_gen.reset_mock()
 			mock_desc_gen.reset_mock()
 			mock_pr_generator.update_pr.reset_mock()
@@ -284,7 +301,7 @@ class TestPRWorkflowCommand:
 			)
 
 			# Verify no generation was needed
-			assert not mock_get_commits.called
+			assert not mock_pgu.get_commit_messages.called
 			assert not mock_title_gen.called
 			assert not mock_desc_gen.called
 

@@ -6,24 +6,27 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pygit2 import Commit
+from pygit2 import GitError as Pygit2GitError
+from pygit2.enums import SortMode
+
 from codemap.config import ConfigLoader
+from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.schemas import PullRequest
-from codemap.git.pr_generator.strategies import create_strategy
+from codemap.git.pr_generator.strategies import create_strategy, get_default_branch
 from codemap.git.pr_generator.utils import (
 	PRCreationError,
 	generate_pr_description_from_commits,
 	generate_pr_description_with_llm,
 	generate_pr_title_from_commits,
 	generate_pr_title_with_llm,
-	get_commit_messages,
 	get_existing_pr,
 )
-from codemap.git.utils import GitError, get_repo_root, run_git_command
+from codemap.git.utils import ExtendedGitRepoContext, GitError
 from codemap.llm import LLMClient, LLMError
 from codemap.utils.cli_utils import progress_indicator
 
 from . import PRGenerator
-from .constants import MIN_COMMIT_PARTS
 
 if TYPE_CHECKING:
 	from pathlib import Path
@@ -44,7 +47,7 @@ class PRCommand:
 
 		"""
 		try:
-			self.repo_root = get_repo_root(path)
+			self.repo_root = ExtendedGitRepoContext.get_repo_root(path)
 
 			# Create LLM client and configs
 			from codemap.llm import LLMClient
@@ -73,20 +76,37 @@ class PRCommand:
 
 		"""
 		try:
+			pgu = PRGitUtils.get_instance()
+			repo = pgu.repo
+
 			# Get current branch
-			current_branch = run_git_command(["git", "rev-parse", "--abbrev-ref", "HEAD"]).strip()
+			current_branch = pgu.get_current_branch()
+			if not current_branch:
+				msg = "Failed to determine current branch using PRGitUtils."
+				raise GitError(msg)
 
 			# Get default branch (usually main or master)
-			default_branch = run_git_command(["git", "remote", "show", "origin"]).strip()
-			# Parse the default branch from the output
-			for line in default_branch.splitlines():
-				if "HEAD branch" in line:
-					default_branch = line.split(":")[-1].strip()
-					break
+			# get_default_branch from strategies.py uses PRGitUtils instance
+			default_branch_name = get_default_branch(pgu_instance=pgu)
+			if not default_branch_name:
+				msg = "Failed to determine default branch using PRGitUtils and strategies."
+				# Attempt to find common names if strategy failed, as a fallback.
+				common_defaults = ["main", "master"]
+				for common_default in common_defaults:
+					if f"origin/{common_default}" in repo.branches.remote or common_default in repo.branches.local:
+						default_branch_name = common_default
+						break
+				if not default_branch_name:  # Still not found
+					msg = "Could not determine default/target branch."
+					raise GitError(msg)
 
-			return {"current_branch": current_branch, "target_branch": default_branch}
-		except GitError as e:
+			return {"current_branch": current_branch, "target_branch": default_branch_name}
+		except (GitError, Pygit2GitError) as e:
 			msg = f"Failed to get branch information: {e}"
+			raise RuntimeError(msg) from e
+		except Exception as e:
+			msg = f"Unexpected error getting branch information: {e}"
+			logger.exception("Unexpected error in _get_branch_info")
 			raise RuntimeError(msg) from e
 
 	def _get_commit_history(self, base_branch: str) -> list[dict[str, str]]:
@@ -103,24 +123,55 @@ class PRCommand:
 		    RuntimeError: If Git operations fail
 
 		"""
+		pgu = PRGitUtils.get_instance()
+		repo = pgu.repo
+		commits_data = []
 		try:
-			# Get list of commits that are in the current branch but not in the base branch
-			commits_output = run_git_command(["git", "log", f"{base_branch}..HEAD", "--pretty=format:%H||%an||%s"])
+			head_commit_obj = repo.revparse_single("HEAD").peel(Commit)
+			base_commit_obj = repo.revparse_single(base_branch).peel(Commit)
 
-			commits = []
-			if commits_output.strip():
-				for commit_line in commits_output.strip().split("\n"):
-					if not commit_line.strip():
-						continue
+			# Find the merge base between head and base
+			merge_base_oid = repo.merge_base(base_commit_obj.id, head_commit_obj.id)
 
-					parts = commit_line.split("||")
-					if len(parts) >= MIN_COMMIT_PARTS:
-						commit_hash, author, subject = parts[0], parts[1], parts[2]
-						commits.append({"hash": commit_hash, "author": author, "subject": subject})
+			# Walk from HEAD, newest first
+			for commit in repo.walk(head_commit_obj.id, SortMode.TOPOLOGICAL):
+				if merge_base_oid and commit.id == merge_base_oid:
+					break  # Stop if we reached the merge base
 
-			return commits
-		except GitError as e:
-			msg = f"Failed to get commit history: {e}"
+				# Additional check: if the commit is an ancestor of the base_commit_obj
+				# and it's not the merge_base itself, it means we're on the base branch's
+				# history before the divergence. This can happen in complex histories
+				# if merge_base_oid is None or the walk somehow includes them.
+				# The primary stop condition is hitting the merge_base_oid.
+				if (
+					repo.descendant_of(commit.id, base_commit_obj.id)
+					and (not merge_base_oid or commit.id != merge_base_oid)
+					and commit.id != head_commit_obj.id
+				):  # Don't stop if base is HEAD or commit is HEAD
+					# This commit is reachable from base_commit_obj, so it's part of base's history
+					# This logic ensures we only take commits unique to the current branch after divergence
+					# For `base..HEAD` this means commit is reachable from HEAD but not base.
+					# The simple walk from head_commit_obj stopping at merge_base_oid should correctly
+					# implement "commits on head since it diverged from base".
+					pass  # The break at merge_base_oid is the key.
+
+				commit_subject = commit.message.splitlines()[0].strip() if commit.message else ""
+				commits_data.append(
+					{
+						"hash": str(commit.short_id),
+						"author": commit.author.name if commit.author else "Unknown",
+						"subject": commit_subject,
+					}
+				)
+			return commits_data
+		except Pygit2GitError as e:
+			msg = f"Failed to get commit history using pygit2: {e}"
+			logger.exception("pygit2 error in _get_commit_history")
+			raise RuntimeError(msg) from e
+		except Exception as e:
+			# Catch other potential errors like branch not found from revparse_single
+			msg = f"Unexpected error getting commit history: {e}"
+			logger.exception("Unexpected error in _get_commit_history")
 			raise RuntimeError(msg) from e
 
 	def _generate_pr_description(self, branch_info: dict[str, str], _commits: list[dict[str, str]]) -> str:
@@ -226,7 +277,7 @@ class PRWorkflowCommand:
 		self.config_loader = config_loader
 
 		if self.config_loader.get.repo_root is None:
-			self.repo_root = get_repo_root()
+			self.repo_root = ExtendedGitRepoContext.get_repo_root()
 		else:
 			self.repo_root = self.config_loader.get.repo_root
 
@@ -322,8 +373,9 @@ class PRWorkflowCommand:
 				)
 				return existing_pr
 
+			pgu = PRGitUtils.get_instance()
 			# Get commits
-			commits = get_commit_messages(base_branch, head_branch)
+			commits = pgu.get_commit_messages(base_branch, head_branch)
 
 			# Determine branch type
 			branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
@@ -370,7 +422,8 @@ class PRWorkflowCommand:
 					msg = "Cannot regenerate content for update without base and head branches."
 					raise PRCreationError(msg)
 
-				commits = get_commit_messages(base_branch, head_branch)
+				pgu = PRGitUtils.get_instance()
+				commits = pgu.get_commit_messages(base_branch, head_branch)
 				branch_type = self.workflow.detect_branch_type(head_branch) or "feature"
 
 				if title is None:

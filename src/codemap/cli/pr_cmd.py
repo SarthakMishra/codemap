@@ -148,34 +148,28 @@ async def _pr_command_impl(
 		from codemap.config.config_schema import PRGenerateSchema
 		from codemap.git.commit_generator.command import SemanticCommitCommand
 		from codemap.git.pr_generator.command import PRWorkflowCommand
+		from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 		from codemap.git.pr_generator.strategies import (
 			WorkflowStrategy,
 			branch_exists,
 			create_strategy,
+			get_default_branch,
 		)
 		from codemap.git.pr_generator.utils import (
 			PRCreationError,
-			checkout_branch,
-			create_branch,
 			generate_pr_description_from_commits,
 			generate_pr_description_with_llm,
 			generate_pr_title_from_commits,
 			generate_pr_title_with_llm,
-			get_commit_messages,
-			get_current_branch,
-			get_default_branch,
+			get_all_open_prs,
 			get_existing_pr,
-			push_branch,
 		)
-		from codemap.git.pr_generator.utils import validate_branch_name as validate_branch_name_util  # Avoid name clash
+		from codemap.git.pr_generator.utils import validate_branch_name as validate_branch_name_util
 		from codemap.git.utils import (
+			ExtendedGitRepoContext,
 			GitError,
-			get_staged_diff,
-			get_unstaged_diff,
-			get_untracked_files,
-			run_git_command,
 		)
-		from codemap.llm import LLMError  # Import LLMError
+		from codemap.llm import LLMError
 		from codemap.llm.client import LLMClient
 		from codemap.utils.cli_utils import (
 			exit_with_error,
@@ -235,7 +229,8 @@ async def _pr_command_impl(
 
 	def _handle_branch_creation(options: PROptions, workflow: WorkflowStrategy) -> str | None:
 		"""Handle branch creation or selection."""
-		current_branch_name = get_current_branch()
+		pgu = PRGitUtils.get_instance()
+		current_branch_name = pgu.get_current_branch()
 		logger.info(f"Current branch: {current_branch_name}")
 
 		# 1. Use provided branch name if valid
@@ -243,9 +238,9 @@ async def _pr_command_impl(
 			if not validate_branch_name_util(options.branch_name):
 				return None
 			# Ensure branch exists or create it
-			if not branch_exists(options.branch_name):
+			if not branch_exists(options.branch_name, pgu_instance=pgu):
 				try:
-					create_branch(options.branch_name)
+					pgu.create_branch(options.branch_name)
 					console.print(f"[green]Created and switched to new branch: {options.branch_name}[/green]")
 					return options.branch_name
 				except GitError:
@@ -253,9 +248,9 @@ async def _pr_command_impl(
 					return None
 			else:
 				# Branch exists, switch to it if not already there
-				if get_current_branch() != options.branch_name:
+				if pgu.get_current_branch() != options.branch_name:
 					try:
-						checkout_branch(options.branch_name)
+						pgu.checkout_branch(options.branch_name)
 						console.print(f"[green]Switched to existing branch: {options.branch_name}[/green]")
 					except GitError:
 						logger.exception("Error switching to branch")
@@ -278,7 +273,7 @@ async def _pr_command_impl(
 				suggested_name = f"{prefix}new-{options.branch_type}" if prefix else f"new-{options.branch_type}"
 
 			# Get existing branches for selection
-			default_repo_branch = get_default_branch() or "main"
+			default_repo_branch = get_default_branch(pgu_instance=pgu) or "main"
 			branch_options = [{"name": "[Create new branch]", "value": "_new_"}]
 			try:
 				# Use workflow strategy to get branches with metadata
@@ -329,7 +324,7 @@ async def _pr_command_impl(
 					console.print("[yellow]Branch creation cancelled.[/yellow]")
 					return None
 				try:
-					create_branch(new_branch_name)
+					pgu.create_branch(new_branch_name)
 					console.print(f"[green]Created and switched to new branch: {new_branch_name}[/green]")
 					return new_branch_name
 				except GitError:
@@ -338,14 +333,16 @@ async def _pr_command_impl(
 			elif chosen_branch:
 				# Existing branch selected
 				try:
-					if get_current_branch() != chosen_branch:
+					if pgu.get_current_branch() != chosen_branch:
 						if chosen_branch in workflow.get_local_branches():
-							checkout_branch(chosen_branch)
+							pgu.checkout_branch(chosen_branch)
 							console.print(f"[green]Switched to existing local branch: {chosen_branch}[/green]")
 						else:
-							# Try checking out remote branch locally
-							run_git_command(["git", "checkout", "-b", chosen_branch, f"origin/{chosen_branch}"])
-							console.print(f"[green]Checked out remote branch locally: {chosen_branch}[/green]")
+							# Create local branch from remote and checkout
+							pgu.create_branch(chosen_branch, from_reference=f"origin/{chosen_branch}")
+							console.print(
+								f"[green]Created and switched to local branch '{chosen_branch}' from remote.[/green]"
+							)
 					return chosen_branch
 				except GitError:
 					logger.exception(f"Error switching to branch '{chosen_branch}'")
@@ -368,9 +365,10 @@ async def _pr_command_impl(
 
 		try:
 			# Check for changes (staged, unstaged, untracked)
-			staged = get_staged_diff()
-			unstaged = get_unstaged_diff()
-			untracked = get_untracked_files()
+			git_context = ExtendedGitRepoContext().get_instance()
+			staged = git_context.get_staged_diff()
+			unstaged = git_context.get_unstaged_diff()
+			untracked = git_context.get_untracked_files()
 			if not staged.files and not unstaged.files and not untracked:
 				logger.warning("No changes detected to commit.")
 				return True
@@ -422,9 +420,10 @@ async def _pr_command_impl(
 			logger.warning(f"Skipping push for branch '{branch_name}'.")
 			return True
 
+		pgu = PRGitUtils.get_instance()
 		try:
 			with progress_indicator(f"Pushing branch '{branch_name}'...", style="spinner"):
-				push_branch(branch_name, force=options.force_push)
+				pgu.push_branch(branch_name, force=options.force_push, ignore_hooks=options.bypass_hooks)
 			console.print(f"[green]Successfully pushed branch '{branch_name}' to remote.[/green]")
 			return True
 		except GitError:
@@ -652,8 +651,9 @@ async def _pr_command_impl(
 			# 5d. Determine Base Branch (before generating content)
 			final_base_branch = opts.base_branch
 			if not final_base_branch:
+				pgu_temp_instance = PRGitUtils.get_instance()
 				with contextlib.suppress(GitError):
-					final_base_branch = get_default_branch()
+					final_base_branch = get_default_branch(pgu_instance=pgu_temp_instance)
 				if not final_base_branch:
 					detected_branch_type = strategy.detect_branch_type(final_branch_name) or ""
 					final_base_branch = strategy.get_default_base(detected_branch_type)
@@ -711,7 +711,8 @@ async def _pr_command_impl(
 				exit_with_error("Base branch is unexpectedly None before generating content.")
 				return
 
-			commits = get_commit_messages(opts.base_branch, final_branch_name)
+			pgu = PRGitUtils.get_instance()
+			commits = pgu.get_commit_messages(opts.base_branch, final_branch_name)
 			detected_branch_type = strategy.detect_branch_type(final_branch_name) or "feature"  # Default type
 			title_strategy = content_config.title_strategy
 			description_strategy = content_config.description_strategy
@@ -787,7 +788,8 @@ async def _pr_command_impl(
 
 			# 5a. Determine PR number and current branch
 			pr_num_to_update = opts.pr_number
-			current_branch = get_current_branch()
+			pgu = PRGitUtils.get_instance()
+			current_branch = pgu.get_current_branch()
 			if not pr_num_to_update:
 				# Check existing PR for current branch only if branch name is known
 				if current_branch:
@@ -798,10 +800,23 @@ async def _pr_command_impl(
 							f"[cyan]Found existing PR #{pr_num_to_update} for current branch '{current_branch}'.[/cyan]"
 						)
 					else:
-						exit_with_error(
-							"No PR number specified and no existing PR found for the current branch.",
-						)
-						return  # Should not be reached
+						# Interactive selection from all open PRs
+						open_prs = get_all_open_prs()
+						if not open_prs:
+							exit_with_error("No open PRs found for this repository.")
+							return
+						import questionary
+
+						choices = [
+							questionary.Choice(title=f"#{pr.number}: {pr.title} [{pr.branch}]", value=pr.number)
+							for pr in open_prs
+						]
+						pr_num_to_update = questionary.select(
+							"Select a PR to update:", choices=choices, qmark="🔢"
+						).ask()
+						if not pr_num_to_update:
+							exit_with_error("No PR selected for update.")
+							return
 				else:
 					exit_with_error("Could not determine current branch to find existing PR.")
 					return
@@ -832,17 +847,57 @@ async def _pr_command_impl(
 				resolved_description = _resolve_description(opts.description)
 
 				# We need base_branch and head_branch if we intend to regenerate content
-				# Let's assume for now update only uses provided title/desc or fetches internally
-				# If regeneration is needed, the workflow command needs more context.
-				update_base_branch = opts.base_branch  # May be None if not regenerating
-				update_head_branch = current_branch  # Head is the current branch
+				update_base_branch = opts.base_branch
+				update_head_branch = current_branch
+				# If regeneration is needed, ensure both branches are set
+				if opts.title is None or resolved_description is None:
+					if not update_base_branch:
+						update_base_branch = get_default_branch(pgu_instance=pgu)
+					if not update_head_branch:
+						update_head_branch = current_branch
+
+				# --- Interactive Review Step (mirrors PR creation) ---
+				# Get commits for the PR branch (for context in review)
+				commits = pgu.get_commit_messages(update_base_branch or "main", update_head_branch)
+				detected_branch_type = strategy.detect_branch_type(update_head_branch) or "feature"
+				review_title = opts.title
+				review_description = resolved_description
+				# If title/desc are None, regenerate as in creation
+				if review_title is None:
+					review_title = _generate_title(
+						opts, content_config.title_strategy, commits, update_head_branch, detected_branch_type
+					)
+				if review_description is None:
+					review_description = _generate_description(
+						opts,
+						content_config.description_strategy,
+						commits,
+						update_head_branch,
+						detected_branch_type,
+						opts.workflow_strategy_name,
+						update_base_branch or "main",
+						content_config,
+					)
+				if opts.interactive:
+					review_title, review_description = _interactive_pr_review(
+						review_title,
+						review_description,
+						opts,
+						commits,
+						update_head_branch,
+						detected_branch_type,
+						update_base_branch or "main",
+						content_config,
+						opts.workflow_strategy_name,
+					)
+					if review_title is None or review_description is None:
+						_exit_command(0)  # User cancelled
 
 				with progress_indicator(f"Updating PR #{pr_num_to_update} on GitHub/GitLab...", style="spinner"):
 					updated_pr = pr_workflow.update_pr_workflow(
 						pr_number=pr_num_to_update,
-						title=opts.title,  # Pass provided title, None to regenerate
-						description=resolved_description,  # Pass resolved description, None to regenerate
-						# Pass branches needed ONLY if regeneration might happen
+						title=review_title,  # Use reviewed/edited title
+						description=review_description,  # Use reviewed/edited description
 						base_branch=update_base_branch if opts.title is None or resolved_description is None else None,
 						head_branch=update_head_branch if opts.title is None or resolved_description is None else None,
 					)

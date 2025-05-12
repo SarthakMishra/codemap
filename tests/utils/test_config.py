@@ -61,7 +61,7 @@ class TestConfigLoader(FileSystemTestBase):
 		os.chdir(str(self.temp_dir))
 
 		with (
-			patch("codemap.config.config_loader.get_repo_root", return_value=self.temp_dir),
+			patch("codemap.git.utils.GitRepoContext.get_repo_root", return_value=self.temp_dir),
 			patch.object(ConfigLoader, "_get_config_file", return_value=None),
 			patch.object(ConfigLoader, "repo_root", self.temp_dir, create=True),
 		):
@@ -70,7 +70,7 @@ class TestConfigLoader(FileSystemTestBase):
 			assert isinstance(config_loader._app_config, AppConfigSchema)
 			# Verify default values from schema are present
 			assert config_loader._app_config.llm.model == "openai:gpt-4o-mini"
-			assert config_loader._app_config.embedding.model_name == "voyage-code-3"
+			assert config_loader._app_config.embedding.model_name == "minishlab/potion-base-8M"
 
 	def test_custom_config_loading(self) -> None:
 		"""Test loading custom configuration from file."""
@@ -79,7 +79,7 @@ class TestConfigLoader(FileSystemTestBase):
 		create_file_content(self.config_file, yaml.dump(custom_config))
 
 		with (
-			patch("codemap.config.config_loader.get_repo_root", return_value=self.temp_dir),
+			patch("codemap.git.utils.GitRepoContext.get_repo_root", return_value=self.temp_dir),
 			patch.object(ConfigLoader, "_parse_yaml_file", return_value=custom_config),
 			patch.object(ConfigLoader, "_get_config_file", return_value=self.config_file),
 			patch.object(ConfigLoader, "repo_root", self.temp_dir, create=True),
@@ -98,7 +98,7 @@ class TestConfigLoader(FileSystemTestBase):
 
 		with (
 			pytest.raises(ConfigError),
-			patch("codemap.config.config_loader.get_repo_root", return_value=self.temp_dir),
+			patch("codemap.git.utils.GitRepoContext.get_repo_root", return_value=self.temp_dir),
 			patch.object(ConfigLoader, "_get_config_file", return_value=self.config_file),
 			patch.object(ConfigLoader, "repo_root", self.temp_dir, create=True),
 			patch.object(ConfigLoader, "_parse_yaml_file", side_effect=yaml.YAMLError("Invalid YAML")),

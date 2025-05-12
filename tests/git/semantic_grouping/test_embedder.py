@@ -1,10 +1,11 @@
 """Tests for the semantic_grouping.embedder module."""
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import numpy as np
 import pytest
 
+from codemap.config.config_loader import ConfigLoader
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.semantic_grouping.embedder import DiffEmbedder
 
@@ -12,19 +13,33 @@ from codemap.git.semantic_grouping.embedder import DiffEmbedder
 @pytest.fixture
 def mock_config_loader():
 	"""Mock for ConfigLoader to avoid actual dependency."""
-	mock_cl = Mock()
-	# Create a mock config with embedding settings that match our test expectations
-	mock_cl.get = Mock()
-	mock_cl.get.embedding = Mock()
+	mock_cl = Mock(spec=ConfigLoader)  # Using spec is good practice
+
+	# Mock the .get property to return an object that has an .embedding attribute
+	app_config_mock = Mock()
+	type(mock_cl).get = PropertyMock(return_value=app_config_mock)  # Mock .get as a property
+
+	# Mock the .embedding attribute on the object returned by .get
+	embedding_settings_mock = Mock()
+	app_config_mock.embedding = embedding_settings_mock
+
+	# Set model_name on the .embedding object to be a string
+	embedding_settings_mock.model_name = "mock_model_for_testing"
+
+	# If other attributes of embedding settings are read by the real generate_embedding
+	# before it hits the StaticModel.from_pretrained, they might need mocking too.
+	# For example:
+	# embedding_settings_mock.batch_size = 32
+	# embedding_settings_mock.dimension = 1024
 
 	return mock_cl
 
 
 @pytest.fixture
 def mock_generate_embeddings_batch():
-	"""Mock for generate_embeddings_batch function."""
-	with patch("codemap.git.semantic_grouping.embedder.generate_embeddings_batch") as mock_gen:
-		# Configure the mock to return a fixed embedding when awaited
+	"""Mock for generate_embedding function used by DiffEmbedder."""
+	with patch("codemap.git.semantic_grouping.embedder.generate_embedding") as mock_gen:
+		# Configure the mock to return a fixed embedding
 		mock_gen.return_value = [[0.1, 0.2, 0.3]]
 		yield mock_gen
 
@@ -98,16 +113,19 @@ async def test_embed_chunk(mock_config_loader, mock_generate_embeddings_batch):
 	assert isinstance(embedding, np.ndarray)
 	assert embedding.shape == (3,)  # Shape from our mock
 
-	# Verify the mock was called
+	# Verify the mock was called (mock_generate_embeddings_batch is the patched generate_embedding)
 	mock_generate_embeddings_batch.assert_called_once()
-
-	# Instead of trying to access the arguments directly, just check that our call happened
 	assert mock_generate_embeddings_batch.called
 
-	# We can also check that we passed a list to the function
-	call_kwargs = mock_generate_embeddings_batch.call_args.kwargs
-	assert "config_loader" in call_kwargs
-	assert call_kwargs["config_loader"] == mock_config_loader
+	call_args_list = mock_generate_embeddings_batch.call_args_list[0]
+	# generate_embedding takes (texts: list[str], config_loader: ConfigLoader | None = None)
+	# First positional arg is the list of texts
+	assert isinstance(call_args_list[0][0], list)
+	# Second positional arg (or kwarg) is config_loader
+	if len(call_args_list[0]) > 1:
+		assert call_args_list[0][1] == mock_config_loader
+	elif "config_loader" in call_args_list[1]:
+		assert call_args_list[1]["config_loader"] == mock_config_loader
 
 
 @pytest.mark.asyncio
@@ -128,9 +146,11 @@ async def test_embed_chunk_empty_content(mock_config_loader, mock_generate_embed
 	mock_generate_embeddings_batch.assert_called_once()
 
 	# Check that config_loader was passed
-	call_kwargs = mock_generate_embeddings_batch.call_args.kwargs
-	assert "config_loader" in call_kwargs
-	assert call_kwargs["config_loader"] == mock_config_loader
+	call_args_list = mock_generate_embeddings_batch.call_args_list[0]
+	if len(call_args_list[0]) > 1:
+		assert call_args_list[0][1] == mock_config_loader
+	elif "config_loader" in call_args_list[1]:
+		assert call_args_list[1]["config_loader"] == mock_config_loader
 
 
 @pytest.mark.asyncio

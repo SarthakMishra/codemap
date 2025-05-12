@@ -8,8 +8,9 @@ from pathlib import Path
 from re import Pattern
 
 import numpy as np
+from pygit2.enums import FileStatus
 
-from codemap.git.utils import GitError, run_git_command
+from codemap.git.utils import ExtendedGitRepoContext, GitError
 
 from .constants import EPSILON, MIN_NAME_LENGTH_FOR_SIMILARITY
 
@@ -199,20 +200,19 @@ def get_deleted_tracked_files() -> tuple[set, set]:
 	deleted_staged_files = set()
 	try:
 		# Parse git status to find deleted files
-		status_output = run_git_command(["git", "status", "--porcelain"])
-		for line in status_output.splitlines():
-			if line.startswith(" D"):
-				# Unstaged deletion (space followed by D)
-				filename = line[3:].strip()  # Skip " D " prefix and strip any whitespace
-				deleted_unstaged_files.add(filename)
-			elif line.startswith("D "):
-				# Staged deletion (D followed by space)
-				filename = line[2:].strip()  # Skip "D " prefix and strip any whitespace
-				deleted_staged_files.add(filename)
+		context = ExtendedGitRepoContext.get_instance()
+		status = context.repo.status()
+		for filepath, flags in status.items():
+			if flags & FileStatus.WT_DELETED:  # Worktree deleted (unstaged)
+				deleted_unstaged_files.add(filepath)
+			if flags & FileStatus.INDEX_DELETED:  # Index deleted (staged)
+				deleted_staged_files.add(filepath)
 		logger.debug("Found %d deleted unstaged files in git status", len(deleted_unstaged_files))
 		logger.debug("Found %d deleted staged files in git status", len(deleted_staged_files))
-	except GitError as e:  # Catch specific GitError from run_git_command
-		logger.warning("Failed to get git status for deleted files: %s. Proceeding without deleted file info.", e)
+	except GitError as e:  # Catch specific GitError from context operations
+		logger.warning(
+			"Failed to get git status for deleted files via context: %s. Proceeding without deleted file info.", e
+		)
 	except Exception:  # Catch any other unexpected error
 		logger.exception("Unexpected error getting git status: %s. Proceeding without deleted file info.")
 
@@ -301,8 +301,8 @@ def filter_valid_files(
 		# Check if files exist in the repository (tracked by git) or filesystem
 		original_count = len(valid_files_intermediate)
 		try:
-			tracked_files_output = run_git_command(["git", "ls-files"], cwd=repo_root)
-			tracked_files = set(tracked_files_output.splitlines())
+			context = ExtendedGitRepoContext.get_instance()
+			tracked_files = set(context.tracked_files.keys())
 
 			# Keep files that either:
 			# 1. Exist in filesystem
@@ -336,8 +336,8 @@ def filter_valid_files(
 					"Filtered out %d files that don't exist or aren't tracked/deleted",
 					original_count - len(valid_files),
 				)
-		except GitError as e:  # Catch GitError from run_git_command
-			logger.warning("Failed to get tracked files from git: %s. Filtering based on existence only.", e)
+		except GitError as e:  # Catch GitError from context operations
+			logger.warning("Failed to get tracked files from git context: %s. Filtering based on existence only.", e)
 			# If we can't check git tracked files, filter by filesystem existence and git status
 			filtered_files_fallback = []
 			for file in valid_files_intermediate:

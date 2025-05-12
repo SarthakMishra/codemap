@@ -30,6 +30,8 @@ IMPORTANT:
 - Do not include any other text in your response except the PR title.
 - Do not wrap the PR title in quotes.
 - Do not add any explanations or other text to your response.
+- Do not generate Capitalized PR titles.
+- Do not generate PR titles in CamelCase.
 """
 
 

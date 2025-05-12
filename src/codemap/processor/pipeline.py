@@ -10,32 +10,34 @@ synchronization with the Git repository, and provides semantic search capabiliti
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from typing import TYPE_CHECKING, Any, Self
 
-from qdrant_client import models as qdrant_models  # Use alias to avoid name clash
+from qdrant_client import models as qdrant_models
 
-from codemap.db.client import DatabaseClient
-from codemap.git.utils import get_repo_root
-from codemap.processor.tree_sitter import TreeSitterAnalyzer
+from codemap.processor.hash_calculation import RepoChecksumCalculator
 
 # Use async embedding utils
 from codemap.processor.utils.embedding_utils import (
 	generate_embedding,
 )
-
-# Import Qdrant specific classes
-from codemap.processor.vector.chunking import TreeSitterChunker
 from codemap.processor.vector.qdrant_manager import QdrantManager
-from codemap.processor.vector.synchronizer import VectorSynchronizer
 from codemap.utils.cli_utils import progress_indicator
 from codemap.utils.docker_utils import ensure_qdrant_running
+
+# Import Qdrant specific classes
+from codemap.utils.git_utils import GitRepoContext
 from codemap.watcher.file_watcher import Watcher
 
 if TYPE_CHECKING:
 	from types import TracebackType
 
 	from codemap.config import ConfigLoader
+	from codemap.db.client import DatabaseClient
+	from codemap.processor.tree_sitter import TreeSitterAnalyzer
+	from codemap.processor.vector.chunking import TreeSitterChunker
+	from codemap.processor.vector.synchronizer import VectorSynchronizer
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +53,6 @@ class ProcessingPipeline:
 
 	"""
 
-	# Note: __init__ cannot be async directly. Initialization happens in an async method.
 	def __init__(
 		self,
 		config_loader: ConfigLoader | None = None,
@@ -71,97 +72,222 @@ class ProcessingPipeline:
 
 			self.config_loader = ConfigLoader.get_instance()
 
+		self.git_context = GitRepoContext.get_instance()
+
 		self.repo_path = self.config_loader.get.repo_root
 
 		if not self.repo_path:
-			self.repo_path = get_repo_root()
+			self.repo_path = self.git_context.repo_root
 
-		_config_loader = self.config_loader.__class__
+		if not self.repo_path:
+			self.repo_path = self.git_context.get_repo_root()
+
+		if not self.repo_path:
+			msg = "Repository path could not be determined. Please ensure it's a git repository or set in config."
+			logger.critical(msg)
+
+		if self.repo_path:
+			from pathlib import Path
+
+			self.repo_path = Path(self.repo_path)
+		else:
+			logger.error("Critical: repo_path is None, RepoChecksumCalculator cannot be initialized.")
+
+		_config_loader_type_check = self.config_loader.__class__
 		if not config_loader:
 			from codemap.config import ConfigLoader as _ActualConfigLoader
 
-			_config_loader = _ActualConfigLoader
+			_config_loader_type_check = _ActualConfigLoader
 
-		if not isinstance(self.config_loader, _config_loader):
+		if not isinstance(self.config_loader, _config_loader_type_check):
 			from codemap.config import ConfigError
 
 			logger.error(f"Config loading failed or returned unexpected type: {type(self.config_loader)}")
 			msg = "Failed to load a valid Config object."
 			raise ConfigError(msg)
 
-		# --- Initialize Shared Components (Synchronous) --- #
-		self.analyzer = TreeSitterAnalyzer()
-		self.chunker = TreeSitterChunker(config_loader=self.config_loader)
-		self.db_client = DatabaseClient()
+		self.repo_checksum_calculator: RepoChecksumCalculator | None = None
+		if self.repo_path and self.repo_path.is_dir():
+			self.repo_checksum_calculator = RepoChecksumCalculator.get_instance(
+				repo_path=self.repo_path, git_context=self.git_context, config_loader=self.config_loader
+			)
+			logger.info(f"RepoChecksumCalculator initialized for {self.repo_path}")
+		else:
+			logger.warning(
+				"RepoChecksumCalculator could not be initialized because repo_path is invalid or not set. "
+				"Checksum-based quick sync will be skipped."
+			)
+
+		# --- Defer Shared Components Initialization --- #
+		self._analyzer: TreeSitterAnalyzer | None = None
+		self._chunker: TreeSitterChunker | None = None
+		self._db_client: DatabaseClient | None = None
 
 		# --- Load Configuration --- #
-		# Get embedding configuration
 		embedding_config = self.config_loader.get.embedding
 		embedding_model = embedding_config.model_name
 		qdrant_dimension = embedding_config.dimension
 		distance_metric = embedding_config.dimension_metric
 
-		# Make sure embedding_model_name is always a string
-		self.embedding_model_name: str = "voyage-code-3"  # Default
+		self.embedding_model_name: str = "minishlab/potion-base-8M"
 		if embedding_model and isinstance(embedding_model, str):
 			self.embedding_model_name = embedding_model
 
 		if not qdrant_dimension:
-			logger.warning("Missing qdrant dimension in configuration, using default 1024")
-			qdrant_dimension = 1024
+			logger.warning("Missing qdrant dimension in configuration, using default 256")
+			qdrant_dimension = 256
 
 		logger.info(f"Using embedding model: {self.embedding_model_name} with dimension: {qdrant_dimension}")
 
-		# Get Qdrant configuration
 		vector_config = self.config_loader.get.embedding
-		qdrant_location = vector_config.qdrant_location
-		qdrant_collection = vector_config.qdrant_collection_name
+
+		if self.repo_path:
+			qdrant_location = self.repo_path / ".codemap_cache" / "qdrant"
+			qdrant_location.mkdir(parents=True, exist_ok=True)
+
 		qdrant_url = vector_config.url
 		qdrant_api_key = vector_config.api_key
 
-		# Convert distance metric string to enum
 		distance_enum = qdrant_models.Distance.COSINE
-		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT"]:
+		if distance_metric and distance_metric.upper() in ["COSINE", "EUCLID", "DOT", "MANHATTAN"]:
 			distance_enum = getattr(qdrant_models.Distance, distance_metric.upper())
 
-		# Use URL if provided, otherwise use location (defaults to :memory: in QdrantManager)
+		str(self.repo_path) if self.repo_path else "no_repo_path"
+		branch_str = self.git_context.branch or "no_branch"
+
+		stable_repo_id = str(self.repo_path.resolve()) if self.repo_path else "unknown_repo"
+		collection_base_name = hashlib.sha256(stable_repo_id.encode()).hexdigest()[:16]
+		collection_name = f"codemap_{collection_base_name}_{branch_str}"
+
+		import re
+
+		safe_branch_str = re.sub(r"[^a-zA-Z0-9_-]", "_", branch_str)
+		collection_name = f"codemap_{collection_base_name}_{safe_branch_str}"
+
 		qdrant_init_args = {
-			"config_loader": self.config_loader,  # Pass ConfigLoader to QdrantManager
-			"collection_name": qdrant_collection,
+			"config_loader": self.config_loader,
+			"collection_name": collection_name,
 			"dim": qdrant_dimension,
 			"distance": distance_enum,
+			"url": qdrant_url,
+			"api_key": qdrant_api_key,
 		}
 
-		if qdrant_url:
-			qdrant_init_args["url"] = qdrant_url
-			if qdrant_api_key:
-				qdrant_init_args["api_key"] = qdrant_api_key
-			logger.info(f"Configuring Qdrant client for URL: {qdrant_url}")
-		elif qdrant_location:
-			qdrant_init_args["location"] = qdrant_location
-			logger.info(f"Configuring Qdrant client for local path/memory: {qdrant_location}")
-		else:
-			# Let QdrantManager use its default (:memory:)
-			logger.info("Configuring Qdrant client for default location (:memory:)")
+		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}, Collection: {collection_name}")
 
-		# --- Initialize Managers (Synchronous) --- #
 		self.qdrant_manager = QdrantManager(**qdrant_init_args)
-
-		# Initialize VectorSynchronizer with the embedding model name and config_loader
-		self.vector_synchronizer = VectorSynchronizer(
-			self.repo_path,
-			self.qdrant_manager,
-			self.chunker,
-			self.embedding_model_name,
-			self.analyzer,
-			config_loader=self.config_loader,  # Pass ConfigLoader to VectorSynchronizer
-		)
+		self._vector_synchronizer: VectorSynchronizer | None = None
 
 		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
 		self.is_async_initialized = False
 		self.watcher: Watcher | None = None
 		self._watcher_task: asyncio.Task | None = None
 		self._sync_lock = asyncio.Lock()
+
+	@property
+	def analyzer(self) -> TreeSitterAnalyzer:
+		"""
+		Lazily initialize and return a shared TreeSitterAnalyzer instance.
+
+		Returns:
+			TreeSitterAnalyzer: The shared analyzer instance.
+		"""
+		if self._analyzer is None:
+			from codemap.processor.tree_sitter import TreeSitterAnalyzer
+
+			self._analyzer = TreeSitterAnalyzer()
+		return self._analyzer
+
+	@property
+	def chunker(self) -> TreeSitterChunker:
+		"""
+		Lazily initialize and return a TreeSitterChunker.
+
+		Returns:
+			TreeSitterChunker: The chunker instance.
+		"""
+		if self._chunker is None:
+			from codemap.processor.lod import LODGenerator
+			from codemap.processor.vector.chunking import TreeSitterChunker
+
+			lod_generator = LODGenerator(analyzer=self.analyzer)
+			self._chunker = TreeSitterChunker(
+				lod_generator=lod_generator,
+				config_loader=self.config_loader,
+				git_context=self.git_context,
+				repo_checksum_calculator=self.repo_checksum_calculator,
+			)
+		return self._chunker
+
+	@property
+	def db_client(self) -> DatabaseClient:
+		"""
+		Lazily initialize and return a DatabaseClient instance.
+
+		Returns:
+			DatabaseClient: The database client instance.
+
+		Raises:
+			RuntimeError: If the DatabaseClient cannot be initialized.
+		"""
+		if self._db_client is None:  # Only attempt initialization if not already done
+			try:
+				from codemap.db.client import DatabaseClient
+
+				self._db_client = DatabaseClient()  # Add necessary args if any
+			except ImportError:
+				logger.exception(
+					"DatabaseClient could not be imported. DB features will be unavailable. "
+					"Ensure database dependencies are installed if needed."
+				)
+				# We will raise a RuntimeError below if _db_client is still None.
+				# Allow to proceed to the check below
+			except Exception:
+				# Catch other potential errors during DatabaseClient instantiation
+				logger.exception("Error initializing DatabaseClient")
+				# We will raise a RuntimeError below if _db_client is still None.
+
+		# After attempting initialization, check if it was successful.
+		if self._db_client is None:
+			msg = (
+				"Failed to initialize DatabaseClient. It remains None after attempting import and instantiation. "
+				"Check logs for import errors or instantiation issues."
+			)
+			logger.critical(msg)  # Use critical for such a failure
+			raise RuntimeError(msg)
+
+		return self._db_client
+
+	@property
+	def vector_synchronizer(self) -> VectorSynchronizer:
+		"""
+		Lazily initialize and return a VectorSynchronizer.
+
+		Returns:
+			VectorSynchronizer: The synchronizer instance.
+		"""
+		if self._vector_synchronizer is None:
+			from codemap.processor.vector.synchronizer import VectorSynchronizer
+
+			if self.repo_path is None:
+				msg = "repo_path must not be None for VectorSynchronizer"
+				logger.error(msg)
+				raise RuntimeError(msg)
+			if self.qdrant_manager is None:
+				msg = "qdrant_manager must not be None for VectorSynchronizer"
+				logger.error(msg)
+				raise RuntimeError(msg)
+
+			self._vector_synchronizer = VectorSynchronizer(
+				repo_path=self.repo_path,
+				qdrant_manager=self.qdrant_manager,
+				chunker=self.chunker,
+				embedding_model_name=self.embedding_model_name,
+				analyzer=self.analyzer,
+				config_loader=self.config_loader,
+				repo_checksum_calculator=self.repo_checksum_calculator,
+			)
+		return self._vector_synchronizer
 
 	async def async_init(self, sync_on_init: bool = True) -> None:
 		"""
@@ -176,9 +302,7 @@ class ProcessingPipeline:
 			logger.info("Pipeline already async initialized.")
 			return
 
-		init_description = "Initializing pipeline components..."
-
-		with progress_indicator(init_description):
+		with progress_indicator("Initializing pipeline components..."):
 			try:
 				# Get embedding configuration for Qdrant URL
 				embedding_config = self.config_loader.get.embedding
@@ -197,19 +321,6 @@ class ProcessingPipeline:
 
 							else:
 								logger.info(f"Docker container check: {message}")
-
-				# Initialize the database client asynchronously
-				with progress_indicator("Initializing database client..."):
-					try:
-						await self.db_client.initialize()
-						logger.info("Database client initialized successfully.")
-
-					except RuntimeError as e:
-						logger.warning(
-							f"Database initialization failed (RuntimeError): {e}. Some features may not work properly."
-						)
-					except (ConnectionError, OSError) as e:
-						logger.warning(f"Database connection failed: {e}. Some features may not work properly.")
 
 				# Initialize Qdrant client (connects, creates collection if needed)
 				if self.qdrant_manager:
@@ -266,16 +377,6 @@ class ProcessingPipeline:
 				logger.info("File watcher stopped.")
 			self.watcher = None
 			self._watcher_task = None
-
-		# Cleanup database client
-		if hasattr(self, "db_client") and self.db_client:
-			try:
-				await self.db_client.cleanup()
-				logger.info("Database client cleaned up.")
-			except RuntimeError:
-				logger.exception("Error during database client cleanup")
-			except (ConnectionError, OSError):
-				logger.exception("Connection error during database client cleanup")
 
 		# Other cleanup if needed
 		self.is_async_initialized = False
@@ -406,18 +507,14 @@ class ProcessingPipeline:
 
 		try:
 			# 1. Generate query embedding (must be async)
-			query_embedding = await generate_embedding(
-				query,
-				model=self.embedding_model_name,
-				config_loader=self.config_loader,  # Pass ConfigLoader to generate_embedding
-			)
+			query_embedding = generate_embedding([query], self.config_loader)
 			if query_embedding is None:
 				logger.error("Failed to generate embedding for query.")
 				return None
 
 			# Convert to numpy array if needed by Qdrant client, though list is often fine
 			# query_vector = np.array(query_embedding, dtype=np.float32)
-			query_vector = query_embedding  # Qdrant client typically accepts list[float]
+			query_vector = query_embedding[0]  # Qdrant client typically accepts list[float]
 
 			# 2. Process filter parameters to Qdrant filter format
 			query_filter = None

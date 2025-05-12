@@ -11,21 +11,15 @@ llm:
 
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
-  # Recommended models: "voyage-code-3" (best for code), "openai-3-small", "openai-3-large"
-  model_name: "voyage-code-3"
-  token_limit: 80000  # Maximum tokens to process in a single request
-  # dimension: 1024 # Embedding dimension size
+  # Recommended models: "minishlab/potion-base-8M3", Only Model2Vec static models are supported
+  model_name: "minishlab/potion-base-8M"
   # dimension_metric: "cosine" # Metric for dimension calculation (e.g., "cosine", "euclidean")
   # max_retries: 3 # Maximum retries for embedding requests
   # retry_delay: 5 # Delay in seconds between retries
-  max_content_length: 5000  # Maximum characters per file chunk
-  # batch_size: 32 # Batch size for processing embeddings
+  # max_content_length: 5000  # Maximum characters per file chunk
   # Qdrant (Vector DB) settings
-  qdrant_location: ":memory:" # Use ":memory:" for in-memory DB or a path for persistence (e.g., "./qdrant_db")
-  qdrant_collection_name: "codemap_vectors"  # Collection name in Qdrant
   # qdrant_batch_size: 100 # Batch size for Qdrant uploads
   # url: "http://localhost:6333" # Qdrant server URL
-  # api_key: null # Qdrant API key, if required (leave commented or set if needed)
   # timeout: 30 # Qdrant client timeout in seconds
   # prefer_grpc: true # Prefer gRPC for Qdrant communication
 
@@ -50,7 +44,7 @@ embedding:
 # RAG (Retrieval Augmented Generation) Configuration
 rag:
   max_context_length: 8000  # Maximum context length for the LLM
-  max_context_results: 10  # Maximum number of context results to return
+  max_context_results: 100  # Maximum number of context results to return
   similarity_threshold: 0.75  # Minimum similarity score (0-1) for relevance
   # system_prompt: null # Optional system prompt to guide the RAG model (leave commented or set if needed)
   include_file_content: true  # Include file content in context
@@ -70,10 +64,16 @@ sync:
     - "^dist/"
     - "^build/"
     - "^\\.git/"
-    - "\\\\.pyc$"
-    - "\\\\.pyo$"
-    - "\\\\.so$"
-    - "\\\\.dll$"
+    - "^typings/"
+    - "^\\.pyc$"
+    - "^\\.pyo$"
+    - "^\\.so$"
+    - "^\\.dll$"
+    - "^\\.lib$"
+    - "^\\.a$"
+    - "^\\.o$"
+    - "^\\.class$"
+    - "^\\.jar$"
 
 # Generation Configuration - Controls documentation generation
 gen:
@@ -81,7 +81,7 @@ gen:
   use_gitignore: true  # Use .gitignore patterns to exclude files
   output_dir: "documentation"  # Directory to store generated documentation
   include_tree: true  # Include directory tree in output
-  include_entity_graph: true  # Include entity relationship graph
+  include_entity_graph: false  # Include entity relationship graph
   semantic_analysis: true  # Enable semantic analysis
   lod_level: "docs"  # Level of detail: "signatures", "structure", "docs", "full"
 
@@ -122,7 +122,7 @@ processor:
 
 # Commit Command Configuration
 commit:
-  strategy: "file"  # Strategy for splitting diffs: "file", "hunk", "semantic"
+  strategy: "semantic"  # Strategy for splitting diffs: "file", "hunk", "semantic"
   bypass_hooks: false  # Whether to bypass git hooks
   use_lod_context: true  # Use level of detail context
   is_non_interactive: false  # Run in non-interactive mode

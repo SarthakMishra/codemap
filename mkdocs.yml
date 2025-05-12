@@ -31,8 +31,9 @@ nav:
     - Generate Docs (`gen`): usage/generate.md
     - Smart Commit (`commit`): usage/commit.md
     - Pull Requests (`pr`): usage/pr.md
-    - Configuration: usage/configuration.md
-    - LLM Support: usage/llm-support.md
+    - Configuration (`conf`): usage/configuration.md
+    - Ask Questions (`ask`): usage/ask.md
+    - Index Codebase (`index`): usage/index.md
   - Contributing:
     - Overview: contributing/index.md
     - Contributing Guidelines: contributing/guidelines.md
@@ -94,6 +95,7 @@ nav:
       - Constants: api/git/pr_generator/constants.md
       - Decorators: api/git/pr_generator/decorators.md
       - Generator: api/git/pr_generator/generator.md
+      - Pr Git Utils: api/git/pr_generator/pr_git_utils.md
       - Prompts: api/git/pr_generator/prompts.md
       - Schemas: api/git/pr_generator/schemas.md
       - Strategies: api/git/pr_generator/strategies.md
@@ -118,13 +120,14 @@ nav:
       - Ask:
         - Ask Overview: api/llm/rag/ask/index.md
         - Command: api/llm/rag/ask/command.md
-        - Formatter: api/llm/rag/ask/formatter.md
         - Prompts: api/llm/rag/ask/prompts.md
       - Do Overview: api/llm/rag/do/index.md
+      - Interactive: api/llm/rag/interactive.md
       - Tools Overview: api/llm/rag/tools/index.md
     - Utils: api/llm/utils.md
   - Processor:
     - Processor Overview: api/processor/index.md
+    - Hash Calculation: api/processor/hash_calculation.md
     - Lod: api/processor/lod.md
     - Pipeline: api/processor/pipeline.md
     - Tree Sitter:
@@ -140,18 +143,21 @@ nav:
     - Utils:
       - Utils Overview: api/processor/utils/index.md
       - Embedding Utils: api/processor/utils/embedding_utils.md
-      - Git Utils: api/processor/utils/git_utils.md
       - Sync Utils: api/processor/utils/sync_utils.md
     - Vector:
       - Vector Overview: api/processor/vector/index.md
       - Chunking: api/processor/vector/chunking.md
       - Qdrant Manager: api/processor/vector/qdrant_manager.md
+      - Schema: api/processor/vector/schema.md
       - Synchronizer: api/processor/vector/synchronizer.md
+      - Utils: api/processor/vector/utils.md
   - Utils:
     - Utils Overview: api/utils/index.md
     - Cli Utils: api/utils/cli_utils.md
     - Docker Utils: api/utils/docker_utils.md
     - File Utils: api/utils/file_utils.md
+    - Git Hooks: api/utils/git_hooks.md
+    - Git Utils: api/utils/git_utils.md
     - Log Setup: api/utils/log_setup.md
     - Path Utils: api/utils/path_utils.md
   - Watcher:
@@ -169,7 +175,6 @@ theme:
   - content.code.copy
   - content.tooltips
   - content.tabs.link
-  - navigation.footer
   - navigation.indexes
   - navigation.sections
   - navigation.tracking
