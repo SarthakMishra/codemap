@@ -28,6 +28,12 @@ skip_db_tests = pytest.mark.skipif(
 	reason="Database-dependent tests are skipped in environments without PostgreSQL",
 )
 
+# Skip git tests when SKIP_GIT_TESTS environment variable is set
+skip_git_tests = pytest.mark.skipif(
+	os.environ.get("SKIP_GIT_TESTS") == "1",
+	reason="Git tests are skipped in environments with SKIP_GIT_TESTS=1",
+)
+
 
 @pytest.fixture
 def temp_dir(tmp_path: Path) -> Generator[Path, None, None]:

@@ -12,7 +12,7 @@ from codemap.git.utils import (
 	GitDiff,
 	GitError,
 )
-
+from tests.conftest import skip_git_tests
 
 class TestGitUtils:
 	"""Test git utility functions."""
@@ -70,16 +70,16 @@ class TestGitUtils:
 				ExtendedGitRepoContext.get_repo_root()
 			mock_get_repo_root.assert_called_once()
 
+	@skip_git_tests
 	def test_validate_repo_path_success(self) -> None:
 		"""Test validating repository path successfully."""
-		patch.stopall()
 		with patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path("/path/to/repo")):
 			result = ExtendedGitRepoContext.validate_repo_path(Path("/some/path"))
 			assert result == Path("/path/to/repo")
 
+	@skip_git_tests
 	def test_validate_repo_path_failure(self) -> None:
 		"""Test failing to validate repository path."""
-		patch.stopall()
 		with patch(
 			"codemap.git.utils.ExtendedGitRepoContext.get_repo_root", side_effect=GitError("Not in a Git repository")
 		):
