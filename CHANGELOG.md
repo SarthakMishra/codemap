@@ -1,6 +1,14 @@
 # CHANGELOG
 
 
+## v0.3.0 (2025-05-12)
+
+### Chores
+
+- Updated uv.lock
+  ([`c96e9d0`](https://github.com/SarthakMishra/codemap/commit/c96e9d05f700416cdc61e454ac63ea77417277f2))
+
+
 ## v0.3.0-rc.5 (2025-05-12)
 
 ### Bug Fixes
