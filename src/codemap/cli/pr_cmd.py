@@ -856,11 +856,48 @@ async def _pr_command_impl(
 					if not update_head_branch:
 						update_head_branch = current_branch
 
+				# --- Interactive Review Step (mirrors PR creation) ---
+				# Get commits for the PR branch (for context in review)
+				commits = pgu.get_commit_messages(update_base_branch or "main", update_head_branch)
+				detected_branch_type = strategy.detect_branch_type(update_head_branch) or "feature"
+				review_title = opts.title
+				review_description = resolved_description
+				# If title/desc are None, regenerate as in creation
+				if review_title is None:
+					review_title = _generate_title(
+						opts, content_config.title_strategy, commits, update_head_branch, detected_branch_type
+					)
+				if review_description is None:
+					review_description = _generate_description(
+						opts,
+						content_config.description_strategy,
+						commits,
+						update_head_branch,
+						detected_branch_type,
+						opts.workflow_strategy_name,
+						update_base_branch or "main",
+						content_config,
+					)
+				if opts.interactive:
+					review_title, review_description = _interactive_pr_review(
+						review_title,
+						review_description,
+						opts,
+						commits,
+						update_head_branch,
+						detected_branch_type,
+						update_base_branch or "main",
+						content_config,
+						opts.workflow_strategy_name,
+					)
+					if review_title is None or review_description is None:
+						_exit_command(0)  # User cancelled
+
 				with progress_indicator(f"Updating PR #{pr_num_to_update} on GitHub/GitLab...", style="spinner"):
 					updated_pr = pr_workflow.update_pr_workflow(
 						pr_number=pr_num_to_update,
-						title=opts.title,  # Pass provided title, None to regenerate
-						description=resolved_description,  # Pass resolved description, None to regenerate
+						title=review_title,  # Use reviewed/edited title
+						description=review_description,  # Use reviewed/edited description
 						base_branch=update_base_branch if opts.title is None or resolved_description is None else None,
 						head_branch=update_head_branch if opts.title is None or resolved_description is None else None,
 					)
