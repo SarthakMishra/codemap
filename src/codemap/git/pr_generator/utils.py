@@ -122,6 +122,8 @@ def get_github_client(config_loader: ConfigLoader | None = None) -> tuple[Github
 			m = re.search(r"github.com[:/](.+?)(?:\\.git)?$", url)
 			if m:
 				repo_name = m.group(1)
+				# Remove .git suffix if present
+				repo_name = repo_name.removesuffix(".git")
 			else:
 				msg = f"Could not parse GitHub repo from remote URL: {url}"
 				raise PRCreationError(msg)
@@ -651,3 +653,36 @@ def validate_branch_name(branch_name: str | None) -> bool:
 		)
 		return False
 	return True
+
+
+def get_all_open_prs() -> list[PullRequest]:
+	"""
+	Fetch all open pull requests for the current repository.
+
+	Returns:
+		List of PullRequest objects for all open PRs.
+
+	Raises:
+		PRCreationError: If repo_name is invalid or repo cannot be found.
+	"""
+	gh, repo_name = get_github_client()
+	if not repo_name or "/" not in repo_name:
+		logger.error(f"Invalid repo_name for GitHub API: {repo_name}")
+		msg = f"Invalid repo_name for GitHub API: {repo_name}"
+		raise PRCreationError(msg)
+	try:
+		repo = gh.get_repo(repo_name)
+	except Exception as e:
+		logger.exception(f"Could not fetch repo '{repo_name}' from GitHub.")
+		msg = f"Could not fetch repo '{repo_name}' from GitHub: {e}"
+		raise PRCreationError(msg) from e
+	return [
+		PullRequest(
+			branch=pr.head.ref,
+			title=pr.title,
+			description=pr.body,
+			url=pr.html_url,
+			number=pr.number,
+		)
+		for pr in repo.get_pulls(state="open")
+	]

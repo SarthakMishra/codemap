@@ -161,6 +161,7 @@ async def _pr_command_impl(
 			generate_pr_description_with_llm,
 			generate_pr_title_from_commits,
 			generate_pr_title_with_llm,
+			get_all_open_prs,
 			get_existing_pr,
 		)
 		from codemap.git.pr_generator.utils import validate_branch_name as validate_branch_name_util
@@ -799,10 +800,23 @@ async def _pr_command_impl(
 							f"[cyan]Found existing PR #{pr_num_to_update} for current branch '{current_branch}'.[/cyan]"
 						)
 					else:
-						exit_with_error(
-							"No PR number specified and no existing PR found for the current branch.",
-						)
-						return  # Should not be reached
+						# Interactive selection from all open PRs
+						open_prs = get_all_open_prs()
+						if not open_prs:
+							exit_with_error("No open PRs found for this repository.")
+							return
+						import questionary
+
+						choices = [
+							questionary.Choice(title=f"#{pr.number}: {pr.title} [{pr.branch}]", value=pr.number)
+							for pr in open_prs
+						]
+						pr_num_to_update = questionary.select(
+							"Select a PR to update:", choices=choices, qmark="🔢"
+						).ask()
+						if not pr_num_to_update:
+							exit_with_error("No PR selected for update.")
+							return
 				else:
 					exit_with_error("Could not determine current branch to find existing PR.")
 					return
