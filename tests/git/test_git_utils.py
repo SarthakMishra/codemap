@@ -66,15 +66,17 @@ class TestGitUtils:
 
 	def test_validate_repo_path_success(self) -> None:
 		"""Test validating repository path successfully."""
-		result = ExtendedGitRepoContext.validate_repo_path(Path("/some/path"))
-		assert result == Path("/path/to/repo")
+		with patch("codemap.git.utils.ExtendedGitRepoContext.get_repo_root", return_value=Path("/path/to/repo")):
+			result = ExtendedGitRepoContext.validate_repo_path(Path("/some/path"))
+			assert result == Path("/path/to/repo")
 
 	def test_validate_repo_path_failure(self) -> None:
 		"""Test failing to validate repository path."""
-		self.mock_get_repo_root.side_effect = GitError("Not in a Git repository")
-		result = ExtendedGitRepoContext.validate_repo_path(Path("/some/path"))
-		assert result is None
-		self.mock_get_repo_root.side_effect = None  # Reset for other tests
+		with patch(
+			"codemap.git.utils.ExtendedGitRepoContext.get_repo_root", side_effect=GitError("Not in a Git repository")
+		):
+			result = ExtendedGitRepoContext.validate_repo_path(Path("/some/path"))
+			assert result is None
 
 	def test_get_staged_diff(self) -> None:
 		"""Test getting staged diff."""
