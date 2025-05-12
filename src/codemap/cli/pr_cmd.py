@@ -847,17 +847,20 @@ async def _pr_command_impl(
 				resolved_description = _resolve_description(opts.description)
 
 				# We need base_branch and head_branch if we intend to regenerate content
-				# Let's assume for now update only uses provided title/desc or fetches internally
-				# If regeneration is needed, the workflow command needs more context.
 				update_base_branch = opts.base_branch
 				update_head_branch = current_branch
+				# If regeneration is needed, ensure both branches are set
+				if opts.title is None or resolved_description is None:
+					if not update_base_branch:
+						update_base_branch = get_default_branch(pgu_instance=pgu)
+					if not update_head_branch:
+						update_head_branch = current_branch
 
 				with progress_indicator(f"Updating PR #{pr_num_to_update} on GitHub/GitLab...", style="spinner"):
 					updated_pr = pr_workflow.update_pr_workflow(
 						pr_number=pr_num_to_update,
 						title=opts.title,  # Pass provided title, None to regenerate
 						description=resolved_description,  # Pass resolved description, None to regenerate
-						# Pass branches needed ONLY if regeneration might happen
 						base_branch=update_base_branch if opts.title is None or resolved_description is None else None,
 						head_branch=update_head_branch if opts.title is None or resolved_description is None else None,
 					)
