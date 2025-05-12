@@ -31,8 +31,9 @@ nav:
     - Generate Docs (`gen`): usage/generate.md
     - Smart Commit (`commit`): usage/commit.md
     - Pull Requests (`pr`): usage/pr.md
-    - Configuration: usage/configuration.md
-    - LLM Support: usage/llm-support.md
+    - Configuration (`conf`): usage/configuration.md
+    - Ask Questions (`ask`): usage/ask.md
+    - Index Codebase (`index`): usage/index.md
   - Contributing:
     - Overview: contributing/index.md
     - Contributing Guidelines: contributing/guidelines.md
@@ -94,6 +95,7 @@ nav:
       - Constants: api/git/pr_generator/constants.md
       - Decorators: api/git/pr_generator/decorators.md
       - Generator: api/git/pr_generator/generator.md
+      - Pr Git Utils: api/git/pr_generator/pr_git_utils.md
       - Prompts: api/git/pr_generator/prompts.md
       - Schemas: api/git/pr_generator/schemas.md
       - Strategies: api/git/pr_generator/strategies.md
@@ -141,7 +143,6 @@ nav:
     - Utils:
       - Utils Overview: api/processor/utils/index.md
       - Embedding Utils: api/processor/utils/embedding_utils.md
-      - Git Utils: api/processor/utils/git_utils.md
       - Sync Utils: api/processor/utils/sync_utils.md
     - Vector:
       - Vector Overview: api/processor/vector/index.md
@@ -155,6 +156,8 @@ nav:
     - Cli Utils: api/utils/cli_utils.md
     - Docker Utils: api/utils/docker_utils.md
     - File Utils: api/utils/file_utils.md
+    - Git Hooks: api/utils/git_hooks.md
+    - Git Utils: api/utils/git_utils.md
     - Log Setup: api/utils/log_setup.md
     - Path Utils: api/utils/path_utils.md
   - Watcher:
@@ -215,7 +218,6 @@ markdown_extensions:
 plugins:
 - search
 - mermaid2
-- termynal
 - mkdocstrings:
     handlers:
       python:

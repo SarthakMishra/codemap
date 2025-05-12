@@ -1,6 +1,6 @@
-# Git Utils
+# Pr Git Utils
 
-::: codemap.processor.utils.git_utils
+::: codemap.git.pr_generator.pr_git_utils
     options:
       members_order: source
       show_if_no_docstring: true

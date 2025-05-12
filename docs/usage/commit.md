@@ -10,14 +10,11 @@ codemap commit
 # Or using the alias:
 cm commit
 
-# Commit with a specific message (skips AI generation)
-codemap commit -m "feat: add new feature"
+# Commit specific files or directories
+codemap commit path/to/file.py path/to/dir/
 
-# Commit all changes (including untracked files)
-codemap commit -a
-
-# Use a specific LLM model
-codemap commit --model groq/llama-3.1-8b-instant
+# Run in non-interactive mode (accepts all generated messages)
+codemap commit --non-interactive
 
 # Bypass git hooks (e.g., pre-commit)
 codemap commit --bypass-hooks
@@ -26,21 +23,17 @@ codemap commit --bypass-hooks
 ## Command Options
 
 ```bash
-codemap commit [PATH] [OPTIONS]
+codemap commit [PATHS] [OPTIONS]
 ```
 
 **Arguments:**
 
-- `PATH`: Path to repository or specific file to commit (defaults to current directory)
+- `PATHS`: Optional. One or more files or directories to include in the commit (defaults to all staged changes).
 
 **Options:**
 
-- `--message`, `-m`: Specify a commit message directly (skips AI generation)
-- `--all`, `-a`: Commit all changes (stages untracked files)
-- `--model`: LLM model to use for message generation (default: `openai/gpt-4o-mini`). Overrides config (`commit.llm.model`).
-- `--strategy`, `-s`: Strategy for splitting diffs (default: `semantic`). Options: `file`, `hunk`, `semantic`. Overrides config (`commit.strategy`).
-- `--non-interactive`: Run in non-interactive mode (accepts all generated messages)
-- `--bypass-hooks`: Bypass git hooks with `--no-verify` (overrides config `commit.bypass_hooks`).
+- `--non-interactive`, `-y`: Run in non-interactive mode (accepts all generated messages)
+- `--bypass-hooks`, `--no-verify`: Bypass git hooks with `--no-verify`
 - `--verbose`, `-v`: Enable verbose logging
 
 ## Interactive Workflow
@@ -72,16 +65,6 @@ The tool uses semantic analysis to group related changes together based on:
 - Directory structure
 - Common file patterns
 
-/// note
-The semantic strategy utilizes a custom, distilled version of the `Qodo/Qodo-Embed-1-1.5B` model, named `Qodo-Embed-M-1-1.5B-M2V-Distilled`.
-This [Model2Vec](https://github.com/MinishLab/model2vec) distilled model is significantly smaller (233MB vs 5.9GB) and faster (~112x) than the original while retaining ~85% of its performance.
-Find more details [here](https://huggingface.co/sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled).
-///
-
-## Environment Variables
-
-Refer to the [LLM Support](llm-support.md) page for relevant environment variables.
-
 ## Examples
 
 ```bash
@@ -91,15 +74,16 @@ codemap commit
 # Commit specific files
 codemap commit path/to/file.py
 
-# Use a specific model with custom strategy
-codemap commit --model anthropic/claude-3-sonnet --strategy semantic
-
 # Non-interactive commit with all changes
-codemap commit -a --non-interactive
+codemap commit --non-interactive
 
 # Commit with verbose logging
 codemap commit -v
 
-# Demonstrate automatic linting and regeneration
-codemap commit --verbose  # Will show linting feedback and regeneration attempts
-``` 
+# Bypass git hooks
+codemap commit --bypass-hooks
+```
+
+## Notes
+- Direct commit message input (`--message`), model selection (`--model`), and diff strategy (`--strategy`) are not available as CLI options. These can be configured in `.codemap.yml`.
+- The command is designed for semantic, AI-powered commit workflows.
