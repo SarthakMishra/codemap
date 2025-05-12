@@ -341,6 +341,13 @@ class AskSchema(BaseModel):
 	interactive_chat: bool = False
 
 
+class GitHubConfigSchema(BaseModel):
+	"""Configuration for GitHub integration (PRs, API, etc)."""
+
+	token: str | None = None  # OAuth token for GitHub API
+	repo: str | None = None  # Optional: default repo (e.g., user/repo)
+
+
 class AppConfigSchema(BaseModel):
 	"""Configuration for the application."""
 
@@ -353,6 +360,7 @@ class AppConfigSchema(BaseModel):
 	commit: CommitSchema = CommitSchema()
 	pr: PRSchema = PRSchema()
 	ask: AskSchema = AskSchema()
+	github: GitHubConfigSchema = GitHubConfigSchema()
 	repo_root: Path | None = None
 
 	model_config = {

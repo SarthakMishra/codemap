@@ -7,6 +7,7 @@ configuration settings.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -183,7 +184,12 @@ class ConfigLoader:
 
 		try:
 			# Initialize AppConfigSchema. If file_config_dict is empty, defaults will be used.
-			return AppConfigSchema(**file_config_dict)
+			config = AppConfigSchema(**file_config_dict)
+			# Override github.token with env var if set
+			env_token = os.environ.get("GITHUB_TOKEN") or os.environ.get("CODEMAP_GITHUB_TOKEN")
+			if env_token:
+				config.github.token = env_token
+			return config
 		except Exception as e:  # Catch Pydantic validation errors etc.
 			error_msg = f"Error parsing configuration into schema: {e}"
 			logger.exception(error_msg)

@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
+from dotenv import set_key
+from github import Auth, Github, GithubException
 from pygit2 import GitError as Pygit2GitError
 
+from codemap.config.config_loader import ConfigLoader
 from codemap.git.pr_generator.constants import MAX_COMMIT_PREVIEW
 from codemap.git.pr_generator.pr_git_utils import PRGitUtils
 from codemap.git.pr_generator.prompts import (
@@ -31,6 +34,103 @@ logger = logging.getLogger(__name__)
 
 class PRCreationError(GitError):
 	"""Error raised when there's an issue creating or updating a pull request."""
+
+
+# Singleton for Github client
+_github_client = None
+_github_repo = None
+
+GH_TOKEN_PARTS_LEN = 2  # Constant for token line split length
+
+
+def get_token_from_gh_cli() -> str | None:
+	"""
+	Try to get the GitHub token from the gh CLI.
+
+	Returns:
+		The token string if found, else None.
+	"""
+	try:
+		# This subprocess call is safe: command and args are hardcoded, no user input
+		result = subprocess.run(  # noqa: S603
+			["gh", "auth", "status", "--show-token"],  # noqa: S607
+			capture_output=True,
+			text=True,
+			check=True,
+		)
+		# Look for 'Token: ...' in output
+		for line in result.stdout.splitlines():
+			if line.strip().startswith("- Token:"):
+				# Extract token
+				parts = line.split(":", 1)
+				if len(parts) == GH_TOKEN_PARTS_LEN:
+					token = parts[1].strip()
+					if token:
+						return token
+		return None
+	except (subprocess.CalledProcessError, FileNotFoundError):
+		return None
+
+
+def get_github_client(config_loader: ConfigLoader | None = None) -> tuple[Github, str]:
+	"""
+	Get a singleton Github client using the OAuth token from config.
+
+	Returns:
+		(Github, repo_full_name): Tuple of Github client and repo name
+	Raises:
+		PRCreationError: If token is missing or repo cannot be determined
+	"""
+	global _github_client, _github_repo  # noqa: PLW0603
+	if _github_client is not None and _github_repo is not None:
+		return _github_client, _github_repo
+
+	config_loader = config_loader or ConfigLoader.get_instance()
+	config = config_loader.get.github
+	token = config.token
+	repo_name = config.repo
+	if not token:
+		# Try to get from gh CLI
+		token = get_token_from_gh_cli()
+		if token:
+			# Save to .env.local for future use
+			try:
+				set_key(str(Path(".env.local")), "GITHUB_TOKEN", token)
+				logger.info("Saved GitHub token from gh CLI to .env.local")
+			# Only catch expected errors from set_key
+			except (OSError, ValueError) as e:
+				logger.warning(f"Could not save GitHub token to .env.local: {e}")
+		else:
+			logger.error("GitHub OAuth token not set in config (github.token), env, or gh CLI.")
+			msg = (
+				"GitHub OAuth token not set in config (github.token), env, or gh CLI. "
+				"Please run 'gh auth login' or set GITHUB_TOKEN in your .env/.env.local."
+			)
+			raise PRCreationError(msg)
+	auth = Auth.Token(token)
+	_github_client = Github(auth=auth)
+	if not repo_name:
+		# Try to infer from git remote
+		try:
+			pr_git_utils = PRGitUtils.get_instance()
+			url = pr_git_utils.repo.remotes["origin"].url
+			# Ensure url is a string
+			if not isinstance(url, str) or not url:
+				msg = f"Could not parse GitHub repo from remote URL: {url}"
+				raise PRCreationError(msg)
+			# Parse repo name from URL (supports git@github.com:user/repo.git and https)
+			m = re.search(r"github.com[:/](.+?)(?:\\.git)?$", url)
+			if m:
+				repo_name = m.group(1)
+			else:
+				msg = f"Could not parse GitHub repo from remote URL: {url}"
+				raise PRCreationError(msg)
+		except Exception as e:
+			logger.exception("Could not determine GitHub repo from git remote")
+			msg = "Could not determine GitHub repo from git remote"
+			raise PRCreationError(msg) from e
+	_github_repo = repo_name
+	return _github_client, _github_repo
 
 
 def generate_pr_title_from_commits(commits: list[str]) -> str:
@@ -253,206 +353,91 @@ def generate_pr_description_with_llm(
 
 
 def create_pull_request(base_branch: str, head_branch: str, title: str, description: str) -> PullRequest:
-	"""
-	Create a pull request on GitHub.
-
-	Args:
-	    base_branch: Base branch (e.g., main)
-	    head_branch: Head branch (e.g., feature-branch)
-	    title: PR title
-	    description: PR description
-
-	Returns:
-	    PullRequest object with PR details
-
-	Raises:
-	    PRCreationError: If PR creation fails
-
-	"""
+	"""Create a pull request on GitHub using PyGithub."""
 	try:
-		# Check if gh CLI is installed
-		try:
-			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
-		except (subprocess.CalledProcessError, FileNotFoundError) as e:
-			msg = "GitHub CLI (gh) is not installed or not in PATH. Please install it to create PRs."
-			raise PRCreationError(msg) from e
-
-		# Create PR using GitHub CLI
-		cmd = [
-			"gh",
-			"pr",
-			"create",
-			"--base",
-			base_branch,
-			"--head",
-			head_branch,
-			"--title",
-			title,
-			"--body",
-			description,
-		]
-
-		logger.info(f"Attempting to create PR with command: {' '.join(cmd)}")
-		logger.info(f"Arguments - Base: '{base_branch}', Head: '{head_branch}'")
-
-		logger.debug("Running GitHub CLI command: %s", " ".join(cmd))
-		result = subprocess.run(  # noqa: S603
-			cmd,
-			check=True,
-			capture_output=True,
-			text=True,
-			encoding="utf-8",
+		gh, repo_name = get_github_client()
+		repo = gh.get_repo(repo_name)
+		pr = repo.create_pull(
+			base=base_branch,
+			head=head_branch,
+			title=title,
+			body=description,
 		)
-
-		# gh pr create outputs the URL of the created PR to stdout
-		pr_url = result.stdout.strip()
-		pr_number = None
-
-		# Try to extract PR number from URL
-		match = re.search(r"/pull/(\d+)$", pr_url)
-		if match:
-			pr_number = int(match.group(1))
-		else:
-			logger.warning("Could not extract PR number from URL: %s", pr_url)
-
 		return PullRequest(
 			branch=head_branch,
 			title=title,
 			description=description,
-			url=pr_url,
-			number=pr_number,
+			url=pr.html_url,
+			number=pr.number,
 		)
-	except subprocess.CalledProcessError as e:
-		# Use stderr for the error message from gh
-		error_message = e.stderr.strip() if e.stderr else "Unknown gh error"
-		logger.exception("GitHub CLI error during PR creation: %s", error_message)
-		msg = f"Failed to create PR: {error_message}"
+	except GithubException as e:
+		logger.exception("GitHub API error during PR creation:")
+		msg = f"Failed to create PR: {e.data.get('message', str(e)) if hasattr(e, 'data') else str(e)}"
 		raise PRCreationError(msg) from e
-	except (
-		FileNotFoundError,
-		json.JSONDecodeError,
-	) as e:  # Keep JSONDecodeError in case gh output changes unexpectedly
-		# Handle gh not found or unexpected output issues
-		logger.exception("Error running gh command or parsing output: %s")
+	except Exception as e:
+		logger.exception("Error creating PR via PyGithub:")
 		msg = f"Error during PR creation: {e}"
 		raise PRCreationError(msg) from e
 
 
 def update_pull_request(pr_number: int | None, title: str, description: str) -> PullRequest:
-	"""
-	Update an existing pull request.
-
-	Args:
-	    pr_number: PR number
-	    title: New PR title
-	    description: New PR description
-
-	Returns:
-	    Updated PullRequest object
-
-	Raises:
-	    PRCreationError: If PR update fails
-
-	"""
+	"""Update an existing pull request using PyGithub."""
 	if pr_number is None:
 		msg = "PR number cannot be None"
 		raise PRCreationError(msg)
-
 	try:
-		# Check if gh CLI is installed
-		try:
-			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
-		except (subprocess.CalledProcessError, FileNotFoundError) as e:
-			msg = "GitHub CLI (gh) is not installed or not in PATH. Please install it to update PRs."
-			raise PRCreationError(msg) from e
-
-		# Get current branch
+		gh, repo_name = get_github_client()
+		repo = gh.get_repo(repo_name)
+		pr = repo.get_pull(pr_number)
+		pr.edit(title=title, body=description)
+		# Get current branch name
 		pr_git_utils = PRGitUtils.get_instance()
 		branch = pr_git_utils.get_current_branch()
-
-		# Update PR using GitHub CLI
-		cmd = [
-			"gh",
-			"pr",
-			"edit",
-			str(pr_number),
-			"--title",
-			title,
-			"--body",
-			description,
-		]
-
-		subprocess.run(cmd, check=True, capture_output=True, text=True)  # noqa: S603
-
-		# Get PR URL
-		url_cmd = ["gh", "pr", "view", str(pr_number), "--json", "url", "--jq", ".url"]
-		result = subprocess.run(url_cmd, check=True, capture_output=True, text=True)  # noqa: S603
-		pr_url = result.stdout.strip()
-
 		return PullRequest(
 			branch=branch,
 			title=title,
 			description=description,
-			url=pr_url,
-			number=pr_number,
+			url=pr.html_url,
+			number=pr.number,
 		)
-	except subprocess.CalledProcessError as e:
-		msg = f"Failed to update PR: {e.stderr}"
+	except GithubException as e:
+		logger.exception("GitHub API error during PR update:")
+		msg = f"Failed to update PR: {e.data.get('message', str(e)) if hasattr(e, 'data') else str(e)}"
+		raise PRCreationError(msg) from e
+	except Exception as e:
+		logger.exception("Error updating PR via PyGithub:")
+		msg = f"Error during PR update: {e}"
 		raise PRCreationError(msg) from e
 
 
 def get_existing_pr(branch_name: str) -> PullRequest | None:
-	"""
-	Get an existing PR for a branch.
-
-	Args:
-	    branch_name: Branch name
-
-	Returns:
-	    PullRequest object if found, None otherwise
-
-	"""
+	"""Get an existing PR for a branch using PyGithub."""
 	try:
-		# Add check for None branch_name
 		if not branch_name:
 			logger.debug("Branch name is None, cannot get existing PR.")
 			return None
-		# Check if gh CLI is installed
+		gh, repo_name = get_github_client()
+		repo = gh.get_repo(repo_name)
 		try:
-			subprocess.run(["gh", "--version"], check=True, capture_output=True, text=True)  # noqa: S603, S607
-		except (subprocess.CalledProcessError, FileNotFoundError):
+			pulls = repo.get_pulls(state="open", head=f"{repo.owner.login}:{branch_name}")
+		except Exception as e:
+			logger.warning(f"Error getting PRs from GitHub API: {e}")
 			return None
-
-		# List PRs for the branch
-		cmd = [
-			"gh",
-			"pr",
-			"list",
-			"--head",
-			branch_name,
-			"--json",
-			"number,title,body,url",
-			"--jq",
-			".[0]",
-		]
-
-		result = subprocess.run(cmd, capture_output=True, text=True, check=False)  # noqa: S603
-		if result.returncode != 0 or not result.stdout.strip():
-			return None
-
-		# Parse JSON output
-		pr_data = json.loads(result.stdout)
-		if not pr_data:
-			return None
-
-		return PullRequest(
-			branch=branch_name,
-			title=pr_data.get("title", ""),
-			description=pr_data.get("body", ""),
-			url=pr_data.get("url", ""),
-			number=pr_data.get("number"),
-		)
-	except (subprocess.CalledProcessError, json.JSONDecodeError):
+		for pr in pulls:
+			# Return the first matching PR
+			return PullRequest(
+				branch=branch_name,
+				title=pr.title,
+				description=pr.body,
+				url=pr.html_url,
+				number=pr.number,
+			)
+		return None
+	except GithubException as e:
+		logger.warning(f"GitHub API error during get_existing_pr: {e}")
+		return None
+	except (ValueError, RuntimeError, ConnectionError, TypeError) as e:
+		logger.warning(f"Error getting existing PR via PyGithub: {e}")
 		return None
 
 

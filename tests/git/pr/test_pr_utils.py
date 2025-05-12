@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from github import Github
 from pygit2 import Commit
 from pygit2 import GitError as Pygit2GitError
 from pygit2.enums import SortMode
@@ -527,15 +526,18 @@ class TestPRUtilsPullRequestOperations(GitTestBase):
 		"""Set up for tests."""
 		self._patchers = []
 
-	@patch("subprocess.run")
-	def test_create_pull_request(self, mock_subprocess_run) -> None:
+	@patch("codemap.git.pr_generator.utils.get_github_client")
+	def test_create_pull_request(self, mock_get_github_client) -> None:
 		"""Test creating a pull request."""
-		# Arrange - Mock subprocess.run to return a successful result with a URL
-		# Mock the gh CLI check and PR creation
-		mock_subprocess_run.side_effect = [
-			MagicMock(returncode=0, stdout="gh version 2.0.0"),  # gh --version check
-			MagicMock(returncode=0, stdout="https://github.com/user/repo/pull/1"),  # gh pr create
-		]
+		# Arrange
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_pr = MagicMock()
+		mock_pr.html_url = "https://github.com/user/repo/pull/1"
+		mock_pr.number = 1
+		mock_repo.create_pull.return_value = mock_pr
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 
 		# Act
 		result = create_pull_request("main", "feature", "Add feature", "Description")
@@ -547,172 +549,118 @@ class TestPRUtilsPullRequestOperations(GitTestBase):
 		assert result.description == "Description"
 		assert result.url == "https://github.com/user/repo/pull/1"
 		assert result.number == 1
+		mock_gh.get_repo.assert_called_once_with("user/repo")
+		mock_repo.create_pull.assert_called_once()
 
-		# Verify gh CLI command was constructed correctly
-		assert mock_subprocess_run.call_count == 2  # Expect two calls (version check + create)
-		assert mock_subprocess_run.call_args_list[0][0][0] == ["gh", "--version"]  # First call checks version
-
-		args = mock_subprocess_run.call_args_list[1][0][0]  # Second call creates PR
-		assert args[0:3] == ["gh", "pr", "create"]
-		assert args[3:5] == ["--base", "main"]
-		assert args[5:7] == ["--head", "feature"]
-		assert args[7:9] == ["--title", "Add feature"]
-		assert args[9:11] == ["--body", "Description"]
-
-	@patch("subprocess.run")
-	def test_create_pull_request_error(self, mock_subprocess_run) -> None:
+	@patch("codemap.git.pr_generator.utils.get_github_client")
+	def test_create_pull_request_error(self, mock_get_github_client) -> None:
 		"""Test error handling when creating a pull request fails."""
-		# Arrange
-		# Mock the gh --version check to succeed
-		# Mock the gh pr create call to fail
-		mock_subprocess_run.side_effect = [
-			MagicMock(returncode=0, stdout="gh version 2.0.0"),  # Successful gh --version check
-			subprocess.CalledProcessError(1, ["gh", "pr", "create"], stderr="Error: Failed to create PR"),
-		]
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_repo.create_pull.side_effect = Exception("API error")
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 
-		# Act and Assert
-		with pytest.raises(PRCreationError, match="Failed to create PR"):
+		with pytest.raises(PRCreationError, match="Error during PR creation"):
 			create_pull_request("main", "feature", "Add feature", "Description")
 
-	@patch("subprocess.run")
+	@patch("codemap.git.pr_generator.utils.get_github_client")
 	@patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance")
-	def test_update_pull_request(self, mock_get_instance, mock_subprocess_run) -> None:
+	def test_update_pull_request(self, mock_get_instance, mock_get_github_client) -> None:
 		"""Test updating a pull request."""
-		# Arrange
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_pr = MagicMock()
+		mock_pr.html_url = "https://github.com/user/repo/pull/1"
+		mock_pr.number = 1
+		mock_repo.get_pull.return_value = mock_pr
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 		mock_pgu = MagicMock()
 		mock_pgu.get_current_branch.return_value = "feature"
 		mock_get_instance.return_value = mock_pgu
 
-		# Mock subprocess.run calls
-		# 1. gh --version check (succeeds)
-		# 2. gh pr edit call (succeeds)
-		# 3. gh pr view call (succeeds, returns URL)
-		mock_edit_process = MagicMock(returncode=0)
-		mock_view_process = MagicMock(stdout="https://github.com/user/repo/pull/1\n", returncode=0)
-		mock_subprocess_run.side_effect = [
-			MagicMock(returncode=0),  # gh --version
-			mock_edit_process,  # gh pr edit
-			mock_view_process,  # gh pr view ... url
-		]
-
-		# Act
 		result = update_pull_request(1, "Updated title", "Updated description")
 
-		# Assert
 		assert isinstance(result, PullRequest)
 		assert result.title == "Updated title"
 		assert result.description == "Updated description"
-		assert result.url == "https://github.com/user/repo/pull/1"  # Check against stripped URL
+		assert result.url == "https://github.com/user/repo/pull/1"
 		assert result.number == 1
+		mock_gh.get_repo.assert_called_once_with("user/repo")
+		mock_repo.get_pull.assert_called_once_with(1)
+		mock_pr.edit.assert_called_once_with(title="Updated title", body="Updated description")
 
-		# Verify gh CLI commands were constructed correctly
-		assert mock_subprocess_run.call_count == 3
-		edit_call_args = mock_subprocess_run.call_args_list[1][0][0]  # Second call is edit
-		assert edit_call_args[0:3] == ["gh", "pr", "edit"]
-		assert "1" in edit_call_args
-		assert "--title" in edit_call_args
-		assert "Updated title" in edit_call_args
-		assert "--body" in edit_call_args
-		assert "Updated description" in edit_call_args
-
-		view_call_args = mock_subprocess_run.call_args_list[2][0][0]  # Third call is view
-		assert view_call_args[0:3] == ["gh", "pr", "view"]
-		assert "1" in view_call_args
-		assert "--json" in view_call_args
-		assert "url" in view_call_args
-
-	@patch("subprocess.run")
+	@patch("codemap.git.pr_generator.utils.get_github_client")
 	@patch("codemap.git.pr_generator.pr_git_utils.PRGitUtils.get_instance")
-	def test_update_pull_request_error(self, mock_get_instance, mock_subprocess_run) -> None:
+	def test_update_pull_request_error(self, mock_get_instance, mock_get_github_client) -> None:
 		"""Test error handling when updating a pull request fails."""
-		# Arrange
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_repo.get_pull.side_effect = Exception("API error")
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 		mock_pgu = MagicMock()
 		mock_pgu.get_current_branch.return_value = "feature"
 		mock_get_instance.return_value = mock_pgu
 
-		# First call to check if gh CLI is installed succeeds
-		mock_subprocess_run.side_effect = [
-			MagicMock(),  # First call to check gh CLI succeeds
-			# Second call to update PR raises error
-			subprocess.CalledProcessError(1, ["gh", "pr", "edit"], stderr="Error: PR not found"),
-		]
-
-		# Act and Assert
-		with pytest.raises(PRCreationError, match="Failed to update PR"):
+		with pytest.raises(PRCreationError, match="Error during PR update"):
 			update_pull_request(1, "Updated title", "Updated description")
 
-	@patch("subprocess.run")
-	def test_get_existing_pr(self, mock_subprocess_run) -> None:
+	@patch("codemap.git.pr_generator.utils.get_github_client")
+	def test_get_existing_pr(self, mock_get_github_client) -> None:
 		"""Test getting an existing PR."""
-		# Arrange
-		mock_process = MagicMock()
-		pr_data = {  # Should be a dictionary, not a list
-			"number": 1,
-			"title": "Feature PR",
-			"body": "PR description",
-			"url": "https://github.com/user/repo/pull/1",
-		}
-		mock_process.stdout = json.dumps(pr_data)  # Simulate output after jq .[0]
-		mock_process.returncode = 0
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_pr = MagicMock()
+		mock_pr.title = "Feature PR"
+		mock_pr.body = "PR description"
+		mock_pr.html_url = "https://github.com/user/repo/pull/1"
+		mock_pr.number = 1
+		mock_repo.get_pulls.return_value = [mock_pr]
+		mock_repo.owner.login = "user"
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 
-		# Mock the gh --version check as well
-		mock_subprocess_run.side_effect = [
-			MagicMock(returncode=0),  # gh --version check
-			mock_process,  # gh pr list call
-		]
-
-		# Act
 		result = get_existing_pr("feature")
 
-		# Assert
 		assert result is not None
 		assert result.number == 1
 		assert result.title == "Feature PR"
 		assert result.description == "PR description"
 		assert result.branch == "feature"
+		mock_gh.get_repo.assert_called_once_with("user/repo")
+		mock_repo.get_pulls.assert_called_once()
 
-		# Verify gh CLI command was constructed correctly
-		assert mock_subprocess_run.call_count == 2  # version check + list
-		args = mock_subprocess_run.call_args_list[1][0][0]  # Check the second call
-		assert args[0:3] == ["gh", "pr", "list"]
-		assert "--head" in args
-		assert "feature" in args
-		assert "--json" in args
-
-	@patch("subprocess.run")
-	def test_get_existing_pr_not_found(self, mock_subprocess_run) -> None:
+	@patch("codemap.git.pr_generator.utils.get_github_client")
+	def test_get_existing_pr_not_found(self, mock_get_github_client) -> None:
 		"""Test getting a non-existent PR."""
-		# Arrange - Mock subprocess.run to raise CalledProcessError on the list call
-		mock_list_process = MagicMock(stdout="null", returncode=0)  # Simulate jq .[0] on empty list
-		mock_subprocess_run.side_effect = [
-			MagicMock(returncode=0),  # gh --version
-			mock_list_process,
-		]
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_repo.get_pulls.return_value = []
+		mock_repo.owner.login = "user"
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 
-		# Act
 		result = get_existing_pr("feature")
-
-		# Assert
 		assert result is None
+		mock_gh.get_repo.assert_called_once_with("user/repo")
+		mock_repo.get_pulls.assert_called_once()
 
-		# Verify gh CLI command was called
-		assert mock_subprocess_run.call_count == 2
-
-	@patch("subprocess.run")
-	def test_get_existing_pr_error(self, mock_subprocess_run) -> None:
+	@patch("codemap.git.pr_generator.utils.get_github_client")
+	def test_get_existing_pr_error(self, mock_get_github_client) -> None:
 		"""Test error handling when getting an existing PR fails."""
-		# Arrange - Mock subprocess.run to raise CalledProcessError on the list call
-		mock_subprocess_run.side_effect = [
-			MagicMock(returncode=0),  # gh --version check succeeds
-			subprocess.CalledProcessError(1, ["gh", "pr", "list"], stderr="Error: Authentication failed"),
-		]
+		mock_gh = MagicMock(spec=Github)
+		mock_repo = MagicMock()
+		mock_repo.get_pulls.side_effect = Exception("API error")
+		mock_repo.owner.login = "user"
+		mock_gh.get_repo.return_value = mock_repo
+		mock_get_github_client.return_value = (mock_gh, "user/repo")
 
-		# Act
-		result = get_existing_pr("feature")  # Should catch the error and return None
-
-		# Assert
-		assert result is None  # Function should return None on error, not raise GitError
-		assert mock_subprocess_run.call_count == 2
+		result = get_existing_pr("feature")
+		assert result is None
+		mock_gh.get_repo.assert_called_once_with("user/repo")
+		mock_repo.get_pulls.assert_called_once()
 
 
 @pytest.mark.unit
