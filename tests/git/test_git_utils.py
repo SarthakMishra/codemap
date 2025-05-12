@@ -14,6 +14,7 @@ from codemap.git.utils import (
 )
 from tests.conftest import skip_git_tests
 
+
 class TestGitUtils:
 	"""Test git utility functions."""
 
