@@ -122,7 +122,7 @@ processor:
 
 # Commit Command Configuration
 commit:
-  strategy: "file"  # Strategy for splitting diffs: "file", "hunk", "semantic"
+  strategy: "semantic"  # Strategy for splitting diffs: "file", "hunk", "semantic"
   bypass_hooks: false  # Whether to bypass git hooks
   use_lod_context: true  # Use level of detail context
   is_non_interactive: false  # Run in non-interactive mode
