@@ -12,6 +12,7 @@ from pygit2 import (
 	Patch,
 )
 
+from codemap.utils.git_hooks import hook_exists, run_hook
 from codemap.utils.git_utils import GitRepoContext
 
 logger = logging.getLogger(__name__)
@@ -120,29 +121,52 @@ class ExtendedGitRepoContext(GitRepoContext):
 		self,
 		files: list[str],
 		message: str,
-		*,
-		commit_options: list[str] | None = None,
 		ignore_hooks: bool = False,
 	) -> list[str]:
-		"""Commit only the specified files with the given message and options."""
+		"""
+		Commit only the specified files with the given message.
+
+		Runs the pre-commit, commit-msg, and post-commit hooks unless ignore_hooks is True.
+		"""
+		import tempfile
+
+		# Run pre-commit hook if not ignored
+		if not ignore_hooks and hook_exists("pre-commit"):
+			exit_code = run_hook("pre-commit")
+			if exit_code != 0:
+				error_msg = "pre-commit hook failed, aborting commit."
+				logger.error(error_msg)
+				raise RuntimeError(error_msg)
 		try:
+			# Prepare commit-msg hook: write message to a temp file if needed
+			commit_msg_file = None
+			if not ignore_hooks and hook_exists("commit-msg"):
+				with tempfile.NamedTemporaryFile("w+", delete=False) as f:
+					f.write(message)
+					commit_msg_file = f.name
+				exit_code = run_hook("commit-msg", repo_root=None)  # Could pass file as env var if needed
+				if exit_code != 0:
+					error_msg = "commit-msg hook failed, aborting commit."
+					logger.error(error_msg)
+					if commit_msg_file:
+						Path(commit_msg_file).unlink()
+					raise RuntimeError(error_msg)
 			# self.stage_files(files) # Removed: Index is already prepared by the caller
 			other_staged = self.get_other_staged_files(files)
-			commit_cmd = ["git", "commit", "-m", message]
-			if commit_options:
-				commit_cmd.extend(commit_options)
-			if ignore_hooks:
-				commit_cmd.append("--no-verify")
 			try:
 				self.commit(message)
 				logger.info("Created commit with message: %s", message)
 			except GitError as e:
-				# Construct error message using the constructed commit_cmd for logging clarity,
-				# even if not directly used for execution
-				constructed_cmd_str = " ".join(commit_cmd)
-				error_msg = f"Git commit command failed. Intended command: '{constructed_cmd_str}'"
-				logger.exception("Failed to create commit: %s", error_msg)
+				error_msg = "Git commit command failed"
+				logger.exception(error_msg)
 				raise GitError(error_msg) from e
+			# Run post-commit hook if not ignored
+			if not ignore_hooks and hook_exists("post-commit"):
+				exit_code = run_hook("post-commit")
+				if exit_code != 0:
+					logger.warning("post-commit hook failed (commit already created)")
+			if commit_msg_file:
+				Path(commit_msg_file).unlink()
 			return other_staged
 		except GitError:
 			raise

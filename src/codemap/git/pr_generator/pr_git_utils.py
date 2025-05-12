@@ -10,6 +10,7 @@ from pygit2 import GitError as Pygit2GitError
 from pygit2.enums import SortMode
 
 from codemap.git.utils import ExtendedGitRepoContext, GitError
+from codemap.utils.git_hooks import hook_exists, run_hook
 
 if TYPE_CHECKING:
 	from pygit2 import Oid
@@ -95,6 +96,11 @@ class PRGitUtils(ExtendedGitRepoContext):
 			else:
 				self.branch = ""  # Or perhaps the SHA for detached head
 			logger.info(f"Checked out branch '{branch_name}' using pygit2.")
+			# Run post-checkout hook if present
+			if hook_exists("post-checkout"):
+				exit_code = run_hook("post-checkout")
+				if exit_code != 0:
+					logger.warning("post-checkout hook failed (branch already checked out)")
 		except GitError as e:
 			msg = f"Failed to checkout branch '{branch_name}' using pygit2: {e}"
 			logger.exception(msg)
@@ -104,7 +110,9 @@ class PRGitUtils(ExtendedGitRepoContext):
 			logger.exception(msg)
 			raise GitError(msg) from e
 
-	def push_branch(self, branch_name: str, force: bool = False, remote_name: str = "origin") -> None:
+	def push_branch(
+		self, branch_name: str, force: bool = False, remote_name: str = "origin", ignore_hooks: bool = False
+	) -> None:
 		"""
 		Push a branch to the remote using pygit2.
 
@@ -112,10 +120,18 @@ class PRGitUtils(ExtendedGitRepoContext):
 		    branch_name: Name of the branch to push.
 		    force: Whether to force push.
 		    remote_name: Name of the remote (e.g., "origin").
+		    ignore_hooks: If True, skip running the pre-push hook.
 
 		Raises:
-		    GitError: If push fails.
+		    GitError: If push fails or pre-push hook fails.
 		"""
+		# Run pre-push hook if not ignored
+		if not ignore_hooks:
+			exit_code = run_hook("pre-push")
+			if exit_code != 0:
+				msg = "pre-push hook failed, aborting push."
+				logger.error(msg)
+				raise GitError(msg)
 		try:
 			remote = self.repo.remotes[remote_name]
 			local_ref = f"refs/heads/{branch_name}"
