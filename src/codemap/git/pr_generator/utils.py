@@ -420,7 +420,7 @@ def get_existing_pr(branch_name: str) -> PullRequest | None:
 		repo = gh.get_repo(repo_name)
 		try:
 			pulls = repo.get_pulls(state="open", head=f"{repo.owner.login}:{branch_name}")
-		except Exception as e:
+		except (GithubException, ValueError, RuntimeError, ConnectionError, TypeError) as e:
 			logger.warning(f"Error getting PRs from GitHub API: {e}")
 			return None
 		for pr in pulls:
