@@ -422,7 +422,7 @@ async def _pr_command_impl(
 		pgu = PRGitUtils.get_instance()
 		try:
 			with progress_indicator(f"Pushing branch '{branch_name}'...", style="spinner"):
-				pgu.push_branch(branch_name, force=options.force_push)
+				pgu.push_branch(branch_name, force=options.force_push, ignore_hooks=options.bypass_hooks)
 			console.print(f"[green]Successfully pushed branch '{branch_name}' to remote.[/green]")
 			return True
 		except GitError:
