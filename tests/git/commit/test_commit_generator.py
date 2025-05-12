@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import pytest
 
-from codemap.cli.commit_cmd import GenerationMode, generate_commit_message
 from codemap.git.commit_generator import CommitMessageGenerator
 from codemap.git.diff_splitter import DiffChunk
 from codemap.git.utils import GitDiff
@@ -69,21 +69,50 @@ class TestCommitMessageGenerator(GitTestBase):
 		self.mock_repo_path("/mock/repo/path")
 
 	def test_generate_commit_message(self, mock_diff_chunk: DiffChunk) -> None:
-		"""Test the generate_commit_message function."""
-		# Create mock generator
-		mock_generator = Mock(spec=CommitMessageGenerator)
-		mock_generator.generate_message.return_value = ("Generated Commit Message", True)
-		mock_generator.fallback_generation.return_value = "fallback: Generated Commit Message"
+		"""Test the CommitMessageGenerator.generate_message method."""
+		# Create mocks for required dependencies
+		mock_llm_client = Mock()
+		mock_config_loader = Mock()
 
-		# Test with different mode parameters
-		with patch("codemap.cli.commit_cmd.generate_message") as mock_gen_message:
-			mock_gen_message.return_value = ("Generated Commit Message", True)
+		# Create a mock CommitMessageSchema response
+		from codemap.git.commit_generator.schemas import CommitMessageSchema
 
-			# Call the function under test with the expected parameters
-			result = generate_commit_message(mock_diff_chunk, mock_generator, GenerationMode.SMART)
+		mock_response = CommitMessageSchema(
+			type="feat",
+			scope="test",
+			description="test commit message",
+			body="Detailed description of the change",
+			breaking=False,
+			footers=[],
+		)
+
+		# Set up mock LLM client to return the CommitMessageSchema
+		mock_llm_client.completion.return_value = mock_response
+
+		# Create an actual generator instance
+		generator = CommitMessageGenerator(
+			repo_root=Path("/mock/repo/path"),
+			llm_client=mock_llm_client,
+			prompt_template="test template",
+			config_loader=mock_config_loader,
+		)
+
+		# Mock the extract_file_info method
+		with patch.object(generator, "extract_file_info", return_value={}):
+			# Call generate_message directly
+			message, used_llm = generator.generate_message(mock_diff_chunk)
 
 			# Assert
-			assert len(result[0]) > 0
-			assert "Generated Commit Message" in result[0]
-			assert result[1] is True  # Should indicate LLM was used
-			mock_gen_message.assert_called_once()
+			assert isinstance(message, CommitMessageSchema)
+			assert message.type == "feat"
+			assert message.scope == "test"
+			assert message.description == "test commit message"
+			assert used_llm is True
+
+			# Verify LLM client was called
+			mock_llm_client.completion.assert_called_once()
+
+			# Test fallback as well
+			fallback_message = generator.fallback_generation(mock_diff_chunk)
+			assert len(fallback_message) > 0
+			assert fallback_message.startswith("chore:")

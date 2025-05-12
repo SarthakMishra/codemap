@@ -17,7 +17,7 @@ def filter_paths_by_gitignore(paths: Sequence[Path], repo_root: Path) -> list[Pa
 	Filter paths based on .gitignore patterns.
 
 	This function filters a list of paths to exclude those that match
-	patterns in a .gitignore file.
+	patterns in a .gitignore file, while preserving the directory structure.
 
 	Args:
 	    paths: Sequence of paths to filter
@@ -36,19 +36,53 @@ def filter_paths_by_gitignore(paths: Sequence[Path], repo_root: Path) -> list[Pa
 
 	# Read .gitignore if it exists
 	gitignore_path = repo_root / ".gitignore"
-	if not gitignore_path.exists():
-		return list(paths)
+	gitignore_patterns = []
 
-	# Parse gitignore patterns
-	with gitignore_path.open("r", encoding="utf-8") as f:
-		gitignore_content = f.read()
+	if gitignore_path.exists():
+		# Parse gitignore patterns
+		with gitignore_path.open("r", encoding="utf-8") as f:
+			gitignore_content = f.read()
+		gitignore_patterns = gitignore_content.splitlines()
+
+	# Add default patterns for common directories that should be ignored
+	default_ignore_patterns = [
+		"__pycache__/",
+		"*.py[cod]",
+		"*$py.class",
+		".git/",
+		".pytest_cache/",
+		".coverage",
+		"htmlcov/",
+		".tox/",
+		".nox/",
+		".hypothesis/",
+		".mypy_cache/",
+		".ruff_cache/",
+		"dist/",
+		"build/",
+		"*.so",
+		"*.egg",
+		"*.egg-info/",
+		".env/",
+		"venv/",
+		".venv/",
+		"env/",
+		"ENV/",
+		"node_modules/",
+	]
+
+	# Combine patterns with existing ones, avoiding duplicates
+	all_patterns = gitignore_patterns + [p for p in default_ignore_patterns if p not in gitignore_patterns]
 
 	# Create path spec with direct import
-	spec = pathspec.PathSpec.from_lines(GitWildMatchPattern, gitignore_content.splitlines())
+	spec = pathspec.PathSpec.from_lines(GitWildMatchPattern, all_patterns)
 
 	# Filter paths
 	filtered_paths = []
-	for path in paths:
+
+	# Process files first
+	file_paths = [p for p in paths if p.is_file()]
+	for path in file_paths:
 		try:
 			rel_path = path.relative_to(repo_root)
 			if not spec.match_file(str(rel_path)):
@@ -57,6 +91,42 @@ def filter_paths_by_gitignore(paths: Sequence[Path], repo_root: Path) -> list[Pa
 			# Path is not relative to repo_root
 			filtered_paths.append(path)
 
+	# Process directories
+	dir_paths = [p for p in paths if p.is_dir()]
+
+	# First check which directories are included according to gitignore patterns
+	included_dirs = []
+	for dir_path in dir_paths:
+		try:
+			rel_path = dir_path.relative_to(repo_root)
+			rel_path_str = str(rel_path) + "/"  # Add trailing slash for directory patterns
+
+			# Skip the directory if it matches a gitignore pattern
+			if spec.match_file(rel_path_str):
+				logger.debug(f"Skipping ignored directory: {rel_path}")
+				continue
+
+			# Check if any parent directory is already ignored
+			parent_ignored = False
+			for parent in rel_path.parents:
+				parent_str = str(parent) + "/"
+				if spec.match_file(parent_str):
+					parent_ignored = True
+					logger.debug(f"Skipping directory with ignored parent: {parent}")
+					break
+
+			if not parent_ignored:
+				included_dirs.append(dir_path)
+
+		except ValueError:
+			# Path is not relative to repo_root
+			included_dirs.append(dir_path)
+
+	# Include all directories at all levels to preserve hierarchy
+	# Directories with no content might still be needed for the tree visualization
+	filtered_paths.extend(included_dirs)
+
+	logger.debug(f"Filtered {len(paths)} paths down to {len(filtered_paths)} after applying gitignore patterns")
 	return filtered_paths
 
 
@@ -92,25 +162,3 @@ def get_relative_path(path: Path, base_path: Path) -> Path:
 		return path.relative_to(base_path)
 	except ValueError:
 		return path.absolute()
-
-
-def get_git_root(start_path: Path) -> Path | None:
-	"""
-	Find the root directory of a git repository.
-
-	Args:
-	    start_path: Path to start searching from
-
-	Returns:
-	    Path to the git root directory, or None if not found
-
-	"""
-	current = start_path.absolute()
-
-	while current != current.parent:
-		git_dir = current / ".git"
-		if git_dir.exists() and git_dir.is_dir():
-			return current
-		current = current.parent
-
-	return None

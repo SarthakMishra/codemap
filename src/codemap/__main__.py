@@ -1,6 +1,6 @@
-"""Entry point for running the CodeMap CLI as a Python module."""
+"""Entry point for running the module with python -m codemap."""
 
-from .cli import app
+from codemap.cli import app
 
 if __name__ == "__main__":
 	app()

@@ -64,6 +64,14 @@ JAVASCRIPT_CONFIG = JavaScriptConfig()
 class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 	"""JavaScript-specific syntax handling logic."""
 
+	@staticmethod
+	def _get_node_text(node: Node, content_bytes: bytes) -> str:
+		"""Helper to get node text safely."""
+		try:
+			return content_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="ignore")
+		except IndexError:
+			return ""
+
 	def __init__(self) -> None:
 		"""Initialize with JavaScript configuration."""
 		super().__init__(JAVASCRIPT_CONFIG)
@@ -322,28 +330,74 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 		return f"<anonymous-{node.type}>"
 
 	def get_body_node(self, node: Node) -> Node | None:
-		"""
-		Get the node representing the 'body' of a definition.
+		"""Get the statement block node for JS/TS function/class/method body."""
+		# Common body node type in JS/TS grammar
+		body_field_names = ["body", "statement_block"]
+		for field_name in body_field_names:
+			body_node = node.child_by_field_name(field_name)
+			if body_node:
+				# Sometimes the direct body is an expression (arrow functions)
+				# Check if the found node is a block type
+				if body_node.type == "statement_block":
+					return body_node
+				if body_node.type == "expression_statement":  # Arrow function returning object literal
+					if body_node.child_count > 0 and body_node.children[0].type == "object":
+						return body_node  # Treat expression as body
+				elif node.type == "arrow_function":  # Direct expression in arrow function
+					return body_node
+		# Fallback for classes where body might be direct children within curly braces
+		if node.type in ("class_declaration", "class"):
+			for child in node.children:
+				if child.type == "class_body":
+					return child
+		return None
 
-		Args:
-		    node: The tree-sitter node
+	def extract_signature(self, node: Node, content_bytes: bytes) -> str | None:
+		"""Extract the signature up to the opening curly brace '{' for JS/TS."""
+		# Find the body node first
+		body_node = self.get_body_node(node)
 
-		Returns:
-		    The body node if available, None otherwise
+		if body_node:
+			# Signature is everything from the start of the node up to the start of the body
+			start_byte = node.start_byte
+			end_byte = body_node.start_byte
+			# Adjust end_byte to exclude trailing whitespace before the body
+			while end_byte > start_byte and content_bytes[end_byte - 1 : end_byte].isspace():
+				end_byte -= 1
+			try:
+				return content_bytes[start_byte:end_byte].decode("utf-8", errors="ignore").strip()
+			except IndexError:
+				return None
+		else:
+			# Fallback: if no body found (e.g., abstract method, interface?), return the first line
+			return self._get_node_text(node, content_bytes).splitlines()[0]
 
-		"""
-		# Different fields based on node type
-		if node.type in ["function_declaration", "method_definition", "class_declaration"]:
-			return node.child_by_field_name("body")
-		if node.type in ["arrow_function"]:
-			body = node.child_by_field_name("body")
-			# Arrow functions can have expression bodies or block bodies
-			if body and body.type != "statement_block":
-				return None  # Expression bodies don't have children to process
-			return body
-		if node.type == "program":
-			return node  # Program itself is the body
+	def get_enclosing_node_of_type(self, node: Node, target_type: EntityType) -> Node | None:
+		"""Find the first ancestor node matching the target JS/TS entity type."""
+		target_node_types = []
+		if target_type == EntityType.CLASS:
+			target_node_types = ["class_declaration", "class", "class_expression"]
+		elif target_type == EntityType.FUNCTION:
+			# Includes function declarations, arrow functions, function expressions
+			target_node_types = ["function_declaration", "arrow_function", "function"]
+		elif target_type == EntityType.METHOD:
+			target_node_types = ["method_definition"]
+		elif target_type == EntityType.MODULE:
+			# Module is typically the root 'program' node
+			current = node
+			while current.parent:
+				current = current.parent
+			return current if current.type == "program" else None
+		# Add other types if needed (e.g., INTERFACE for TS)
 
+		if not target_node_types:
+			return None
+
+		current = node.parent
+		while current:
+			if current.type in target_node_types:
+				return current
+			current = current.parent
 		return None
 
 	def get_children_to_process(self, node: Node, body_node: Node | None) -> list[Node]:

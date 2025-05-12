@@ -31,6 +31,25 @@ def git_operation(func: F) -> F:
 
 	@functools.wraps(func)
 	def wrapper(*args: object, **kwargs: object) -> object:
+		"""Wrapper function for git operations that handles logging and error conversion.
+
+		Args:
+		    *args: Positional arguments passed to the decorated function.
+		    **kwargs: Keyword arguments passed to the decorated function.
+
+		Returns:
+		    The result of the decorated function if successful.
+
+		Raises:
+		    GitError: If any exception occurs during the git operation. Original GitError
+		        exceptions are re-raised as-is, while other exceptions are converted to
+		        GitError with a descriptive message.
+
+		Note:
+		    - Logs debug messages for operation start/end
+		    - Converts non-GitError exceptions to GitError
+		    - Preserves original GitError exceptions
+		"""
 		function_name = func.__name__
 		logger.debug("Starting git operation: %s", function_name)
 

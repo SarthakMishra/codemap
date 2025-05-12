@@ -209,15 +209,20 @@ class LanguageSyntaxHandler(abc.ABC):
 	@abc.abstractmethod
 	def get_body_node(self, node: Node) -> Node | None:
 		"""
-		Get the node representing the 'body' of a definition.
+		Get the main body node for a function, method, or class.
+
+		This should be overridden by subclasses to find the appropriate block node.
 
 		Args:
-		    node: The tree-sitter node
+		    node: The node representing the function, method, or class.
 
 		Returns:
-		    The body node if available, None otherwise
+		    The body node, or None if not applicable/found.
 
 		"""
+		# Default implementation: returns None or the node itself as a naive fallback
+		# Subclasses should find specific body nodes like 'block', 'statement_block' etc.
+		return node  # Naive fallback - subclasses MUST override
 
 	@abc.abstractmethod
 	def get_children_to_process(self, node: Node, body_node: Node | None) -> list[Node]:
@@ -273,6 +278,54 @@ class LanguageSyntaxHandler(abc.ABC):
 		    List of called function/method names
 
 		"""
+
+	def extract_signature(self, node: Node, content_bytes: bytes) -> str | None:
+		"""
+		Extract the signature (definition line without body) for a function, class, etc.
+
+		Args:
+		    node: The node to extract the signature from.
+		    content_bytes: Source code content as bytes.
+
+		Returns:
+		    The signature string, or None if not applicable.
+
+		"""
+		# Default implementation: return the first line of the node's text
+		try:
+			first_line = content_bytes[node.start_byte : node.end_byte].split(b"\n", 1)[0]
+			return first_line.decode("utf-8", errors="ignore").strip()
+		except (IndexError, UnicodeDecodeError):
+			# Catch specific errors related to slicing and decoding
+			return None
+
+	def get_enclosing_node_of_type(self, node: Node, target_type: EntityType) -> Node | None:
+		"""
+		Find the first ancestor node that matches the target entity type.
+
+		Args:
+		    node: The starting node.
+		    target_type: The EntityType to search for in ancestors.
+
+		Returns:
+		    The ancestor node if found, otherwise None.
+
+		"""
+		current = node.parent
+		while current:
+			# We need content_bytes to determine the type accurately, but we don't have it here.
+			# This highlights a limitation of doing this purely structurally without context.
+			# Subclasses might need a different approach or access to the analyzer/content.
+			# For a basic structural check:
+			# entity_type = self.get_entity_type(current, current.parent, ???) # Need content_bytes
+			# if entity_type == target_type:
+			#    return current
+
+			# Simplistic check based on node type name (less reliable)
+			if target_type.name.lower() in current.type.lower():  # Very rough check
+				return current
+			current = current.parent
+		return None
 
 
 class PythonConfig(LanguageConfig):

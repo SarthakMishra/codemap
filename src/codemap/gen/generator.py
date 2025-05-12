@@ -16,8 +16,19 @@ logger = logging.getLogger(__name__)
 
 # --- Mermaid Helper --- #
 def _escape_mermaid_label(label: str) -> str:
-	# Basic escaping for Mermaid node labels
-	# Replace potentially problematic characters
+	"""Escapes special characters in Mermaid node labels.
+
+	Replaces potentially problematic characters with safer alternatives:
+	- Square brackets with parentheses
+	- Curly braces with parentheses
+	- Double quotes with HTML entity
+
+	Args:
+	    label: The original label text to be escaped.
+
+	Returns:
+	    The escaped label text with special characters replaced.
+	"""
 	label = label.replace("[", "(").replace("]", ")")
 	label = label.replace("{", "(").replace("}", ")")
 	return label.replace('"', "#quot;")  # Use HTML entity for quotes
@@ -48,12 +59,33 @@ class CodeMapGenerator:
 
 		# Helper to check if an entity type should be included
 		def should_include_entity(entity_type: EntityType) -> bool:
+			"""Determines if an entity type should be included in the diagram based on allowed entities.
+
+			If no allowed entities are specified in the config, all entities will be included. Otherwise,
+			only entities whose type matches one of the allowed entity types will be included.
+
+			Args:
+				entity_type: The type of entity to check for inclusion.
+
+			Returns:
+				bool: True if the entity should be included, False otherwise.
+			"""
 			if not allowed_entities:
 				return True  # Include all if not specified
 			return entity_type.name.lower() in allowed_entities
 
-		# Helper to check if a relationship type should be included
 		def should_include_relationship(relationship_type: str) -> bool:
+			"""Determines if a relationship type should be included in the diagram based on allowed relationships.
+
+			If no allowed relationships are specified in the config, all relationships will be included. Otherwise,
+			only relationships whose type matches one of the allowed relationship types will be included.
+
+			Args:
+				relationship_type: The type of relationship to check for inclusion.
+
+			Returns:
+				bool: True if the relationship should be included, False otherwise.
+			"""
 			if not allowed_relationships:
 				return True  # Include all if not specified
 			return relationship_type.lower() in allowed_relationships
@@ -81,12 +113,48 @@ class CodeMapGenerator:
 		internal_paths = {str(e.metadata.get("file_path")) for e in entities if e.metadata.get("file_path")}
 
 		def get_node_id(entity: LODEntity) -> str:
+			"""Generates a unique node ID for an entity in Mermaid diagram format.
+
+			The ID is constructed from the entity's file path, start line, and name/type,
+			and is sanitized to be Mermaid-compatible (alphanumeric + underscore only).
+
+			Args:
+				entity: The entity to generate an ID for.
+
+			Returns:
+				str: A Mermaid-compatible node ID string.
+			"""
 			file_path_str = entity.metadata.get("file_path", "unknown_file")
 			base_id = f"{file_path_str}_{entity.start_line}_{entity.name or entity.entity_type.name}"
 			# Ensure Mermaid compatibility (alphanumeric + underscore)
 			return "".join(c if c.isalnum() else "_" for c in base_id)
 
 		def process_entity_recursive(entity: LODEntity, current_subgraph_id: str | None = None) -> None:
+			"""Recursively processes an entity to build Mermaid diagram components.
+
+			This function handles:
+			- Creating subgraphs for modules and classes
+			- Creating nodes for functions, methods, variables and constants
+			- Processing dependencies (imports)
+			- Establishing relationships between entities
+			- Recursively processing child entities
+
+			Args:
+				entity: The entity to process
+				current_subgraph_id: The ID of the current subgraph context (if any)
+
+			Returns:
+				None: Modifies various data structures in the closure:
+					- node_definitions: Dictionary of node definitions
+					- subgraph_definitions: Dictionary of subgraph definitions
+					- subgraph_hierarchy: Dictionary of subgraph parent-child relationships
+					- edges: List of edges between nodes/subgraphs
+					- processed_ids: Set of processed entity IDs
+					- entity_map: Dictionary mapping node IDs to entities
+					- connected_ids: Set of connected node/subgraph IDs
+					- name_to_node_ids: Dictionary mapping names to node IDs
+					- global_nodes: Set of nodes defined outside subgraphs
+			"""
 			nonlocal processed_ids, connected_ids, global_nodes
 
 			entity_node_id = get_node_id(entity)
@@ -269,6 +337,21 @@ class CodeMapGenerator:
 
 		# Function to recursively render subgraphs and their nodes
 		def render_subgraph(subgraph_id: str, indent: str = "") -> None:
+			"""Recursively renders a Mermaid subgraph and its contents.
+
+			Args:
+				subgraph_id: The ID of the subgraph to render
+				indent: String used for indentation in the output (default: "")
+
+			Returns:
+				None: Output is written to output_lines and style_lines lists
+
+			Side Effects:
+				- Adds to rendered_elements set to track rendered items
+				- Appends lines to output_lines for Mermaid graph definition
+				- Appends style commands to style_lines
+				- Updates used_style_keys with any styles actually used
+			"""
 			if subgraph_id in rendered_elements:
 				return
 			rendered_elements.add(subgraph_id)
@@ -448,8 +531,31 @@ class CodeMapGenerator:
 		content = []
 
 		# Add header with repository information
-		repo_name = metadata.get("name", "Repository")
-		content.append(f"# {repo_name} Documentation")
+		target_path_str = metadata.get("target_path", "")
+		original_path = metadata.get("original_path", "")
+		command_arg = metadata.get("command_arg", "")
+
+		# Debug logging to see what values we're receiving
+		logger.debug(
+			f"Metadata values for heading: "
+			f"command_arg='{command_arg}', "
+			f"original_path='{original_path}', "
+			f"target_path='{target_path_str}'"
+		)
+
+		# Use the exact command argument if available
+		if command_arg:
+			repo_name = command_arg
+		# Fall back to original path if available
+		elif original_path:
+			repo_name = original_path
+		# Further fallback to just the directory name
+		elif target_path_str:
+			repo_name = Path(target_path_str).name
+		else:
+			repo_name = metadata.get("name", "Repository")
+
+		content.append(f"# `{repo_name}` Documentation")
 		content.append(f"\nGenerated on: {datetime.now(UTC).strftime('%Y-%m-%d %H:%M:%S')}")
 
 		if "description" in metadata:
@@ -458,8 +564,8 @@ class CodeMapGenerator:
 		# Add repository statistics
 		if "stats" in metadata:
 			stats = metadata["stats"]
-			content.append("\n## Repository Statistics")
-			content.append(f"- Total files: {stats.get('total_files', 0)}")
+			content.append("\n## Document Statistics")
+			content.append(f"- Total files scanned: {stats.get('total_files_scanned', 0)}")
 			content.append(f"- Total lines of code: {stats.get('total_lines', 0)}")
 			content.append(f"- Languages: {', '.join(stats.get('languages', []))}")
 
@@ -478,11 +584,16 @@ class CodeMapGenerator:
 			content.append(mermaid_diagram)
 			content.append("```")
 
-		# Add table of contents
-		content.append("\n## Table of Contents")
+		# Add table of contents for the scanned files
+		content.append("\n## Scanned Files")
 
 		# Group entities by file
 		files: dict[Path, list[LODEntity]] = {}
+
+		# Get the target path from metadata
+		target_path_str = metadata.get("target_path", "")
+		target_path = Path(target_path_str) if target_path_str else None
+
 		for entity in entities:
 			file_path = Path(entity.metadata.get("file_path", ""))
 			if not file_path.name:
@@ -492,16 +603,57 @@ class CodeMapGenerator:
 				files[file_path] = []
 			files[file_path].append(entity)
 
-		# Create TOC entries
-		for file_path in sorted(files.keys()):
-			rel_path = file_path.name
-			content.append(f"- [{rel_path}](#{rel_path.replace('.', '-')})")
+		# Create TOC entries with properly formatted relative paths
+		for i, file_path in enumerate(sorted(files.keys()), 1):
+			# Get path relative to the target directory
+			try:
+				if target_path and target_path.exists():
+					# Get the relative path from the target directory
+					rel_path = file_path.relative_to(target_path)
+
+					# Format the path with a leading slash for files directly in the target directory
+					rel_path_str = f"/{rel_path}"
+
+					# Create a clean anchor ID by converting to lowercase and removing all special characters
+					# including underscores, to create standard anchor IDs
+					filename = file_path.name
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in filename)
+
+					# Handle paths with subdirectories
+					if len(rel_path.parts) > 1:
+						# Get directory name and filename
+						directory = rel_path.parts[-2]  # Last directory before the file
+						anchor = f"{directory}{clean_filename}"  # e.g., "raginitpy"
+					else:
+						# Just use the clean filename for files at root
+						anchor = clean_filename
+				else:
+					# Fall back to just the filename if target path is not available
+					rel_path_str = f"/{file_path.name}"
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+					anchor = clean_filename
+
+				content.append(f"{i}. [{rel_path_str}](#{anchor})")
+			except ValueError:
+				# If relative_to fails, just use the filename
+				rel_path_str = f"/{file_path.name}"
+				clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+				content.append(f"{i}. [{rel_path_str}](#{clean_filename})")
 
 		# Add code documentation grouped by file
 		content.append("\n## Code Documentation")
 
 		# Helper function to format a single entity recursively
 		def format_entity_recursive(entity: LODEntity, level: int) -> list[str]:
+			"""Recursively formats an entity and its children into markdown documentation.
+
+			Args:
+				entity: The entity to format
+				level: The current indentation level in the hierarchy
+
+			Returns:
+				A list of markdown-formatted strings representing the entity and its children
+			"""
 			entity_content = []
 			indent = "  " * level
 			list_prefix = f"{indent}- "
@@ -532,7 +684,8 @@ class CodeMapGenerator:
 				and entity.docstring
 			):
 				docstring_lines = entity.docstring.strip().split("\n")
-				# Indent docstring relative to the list item
+				# Format docstring lines with proper indentation
+				entity_content.append(f"{indent}  >")
 				entity_content.extend([f"{indent}  > {line}" for line in docstring_lines])
 
 			# Add Content if level is FULL
@@ -553,14 +706,47 @@ class CodeMapGenerator:
 			return entity_content
 
 		first_file = True
-		for file_path, file_entities in sorted(files.items()):
+		for i, (file_path, file_entities) in enumerate(sorted(files.items()), 1):
 			# Add a divider before each file section except the first one
 			if not first_file:
 				content.append("\n---")  # Horizontal rule
 			first_file = False
 
-			rel_path = file_path.name
-			content.append(f"\n### {rel_path}")
+			# Get path relative to the target directory
+			try:
+				if target_path and target_path.exists():
+					# Get the relative path from the target directory
+					rel_path = file_path.relative_to(target_path)
+
+					# Format the path with a leading slash for files directly in the target directory
+					rel_path_str = f"/{rel_path}"
+
+					# Create a clean anchor ID by converting to lowercase and removing all special characters
+					# including underscores, to create standard anchor IDs
+					filename = file_path.name
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in filename)
+
+					# Handle paths with subdirectories
+					if len(rel_path.parts) > 1:
+						# Get directory name and filename
+						directory = rel_path.parts[-2]  # Last directory before the file
+						anchor = f"{directory}{clean_filename}"  # e.g., "raginitpy"
+					else:
+						# Just use the clean filename for files at root
+						anchor = clean_filename
+				else:
+					# Fall back to just the filename if target path is not available
+					rel_path_str = f"/{file_path.name}"
+					clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+					anchor = clean_filename
+
+				# Add a custom ID to the heading to match our anchor
+				content.append(f"\n### {i}. {rel_path_str}")
+			except ValueError:
+				# If relative_to fails, just use the filename
+				rel_path_str = f"/{file_path.name}"
+				clean_filename = "".join(c.lower() if c.isalnum() else "" for c in file_path.name)
+				content.append(f"\n### {i}. {rel_path_str}")
 
 			# Sort top-level entities by line number
 			sorted_entities = sorted(file_entities, key=lambda e: e.start_line)

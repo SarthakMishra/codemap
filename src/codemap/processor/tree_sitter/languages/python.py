@@ -19,7 +19,7 @@ class PythonConfig(LanguageConfig):
 
 	# File-level entities
 	module: ClassVar[list[str]] = ["module"]
-	namespace: ClassVar[list[str]] = ["import_from_statement"]  # Using import from as namespace indicator
+	namespace: ClassVar[list[str]] = []  # Python doesn't have explicit namespaces
 
 	# Type definitions
 	class_: ClassVar[list[str]] = ["class_definition"]
@@ -59,6 +59,14 @@ PYTHON_CONFIG = PythonConfig()
 class PythonSyntaxHandler(LanguageSyntaxHandler):
 	"""Python-specific syntax handling logic."""
 
+	@staticmethod
+	def _get_node_text(node: Node, content_bytes: bytes) -> str:
+		"""Helper to get node text safely."""
+		try:
+			return content_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="ignore")
+		except IndexError:
+			return ""
+
 	def __init__(self) -> None:
 		"""Initialize with Python configuration."""
 		super().__init__(PYTHON_CONFIG)
@@ -83,7 +91,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
 		# Print node content for debugging
 		try:
-			node_content = content_bytes[node.start_byte : node.end_byte].decode("utf-8", errors="ignore")
+			node_content = self._get_node_text(node, content_bytes)
 			logger.debug("Node content: %s", node_content)
 		except (UnicodeDecodeError, IndexError) as e:
 			logger.debug("Failed to decode node content: %s", str(e))
@@ -95,16 +103,14 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 				if child.type == "assignment":
 					name_node = child.child_by_field_name("left")
 					if name_node:
-						name = content_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore")
+						name = self._get_node_text(name_node, content_bytes)
 
 						# Get the right side for type detection
 						value_node = child.child_by_field_name("right")
 						value_text = ""
 						if value_node:
 							try:
-								value_text = content_bytes[value_node.start_byte : value_node.end_byte].decode(
-									"utf-8", errors="ignore"
-								)
+								value_text = self._get_node_text(value_node, content_bytes)
 							except (UnicodeDecodeError, IndexError) as e:
 								logger.debug("Failed to decode type value: %s", str(e))
 
@@ -154,7 +160,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 			if node_type == "assignment":
 				name_node = node.child_by_field_name("left")
 				if name_node:
-					name = content_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore")
+					name = self._get_node_text(name_node, content_bytes)
 					logger.debug("Checking potential constant in type_alias: %s (is_upper: %s)", name, name.isupper())
 					# Improved check for constants: name is uppercase and contains at least one letter
 					if name.isupper() and any(c.isalpha() for c in name):
@@ -180,7 +186,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 		if node_type in self.config.property_def:
 			for child in node.children:
 				if child.type == "decorator":
-					decorator_text = content_bytes[child.start_byte : child.end_byte].decode("utf-8", errors="ignore")
+					decorator_text = self._get_node_text(child, content_bytes)
 					if "@property" in decorator_text:
 						return EntityType.PROPERTY
 			# If no @property decorator, treat as method if in class, otherwise function
@@ -193,7 +199,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 			# Check if it looks like a constant (uppercase name)
 			name_node = node.child_by_field_name("left")
 			if name_node:
-				name = content_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore")
+				name = self._get_node_text(name_node, content_bytes)
 				logger.debug("Checking potential constant: %s (is_upper: %s)", name, name.isupper())
 				# Improved check for constants: name is uppercase and contains at least one letter
 				if name.isupper() and any(c.isalpha() for c in name):
@@ -321,11 +327,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
 		if actual_string_node:
 			try:
-				docstring_text = (
-					content_bytes[actual_string_node.start_byte : actual_string_node.end_byte]
-					.decode("utf-8", errors="ignore")
-					.strip("\"' \n")
-				)
+				docstring_text = self._get_node_text(actual_string_node, content_bytes).strip("\"' \n")
 				return docstring_text, docstring_container_node
 			except (UnicodeDecodeError, IndexError, AttributeError) as e:
 				logger.warning("Failed to decode/extract Python docstring: %s", e)
@@ -367,7 +369,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 
 		if name_node:
 			try:
-				return content_bytes[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore")
+				return self._get_node_text(name_node, content_bytes)
 			except (UnicodeDecodeError, IndexError, AttributeError) as e:
 				logger.warning("Failed to decode Python name: %s", e)
 				return f"<decoding-error-{node.type}>"
@@ -375,26 +377,24 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 		return f"<anonymous-{node.type}>"
 
 	def get_body_node(self, node: Node) -> Node | None:
-		"""
-		Get the node representing the 'body' of a definition.
+		"""Get the block node for function/class definition body."""
+		if node.type in ("function_definition", "class_definition", "decorated_definition"):
+			# Handle decorated definitions properly
+			actual_def_node = node
+			if node.type == "decorated_definition":
+				# Find the actual function/class definition node within the decoration
+				for child in node.children:
+					if child.type in ("function_definition", "class_definition"):
+						actual_def_node = child
+						break
+				else:
+					return None  # Could not find definition within decorator
 
-		Args:
-		    node: The tree-sitter node
-
-		Returns:
-		    The body node if available, None otherwise
-
-		"""
-		# For functions and classes in Python, the body is a 'block' node
-		body_node = node.child_by_field_name("body")
-
-		# Handle decorated definitions
-		if not body_node and node.type == "decorated_definition":
-			func_def = node.child_by_field_name("definition")
-			if func_def:
-				body_node = func_def.child_by_field_name("body")
-
-		return body_node
+			# Find the 'block' node which contains the body statements
+			for child in actual_def_node.children:
+				if child.type == "block":
+					return child
+		return None  # Not a function/class definition or no block found
 
 	def get_children_to_process(self, node: Node, body_node: Node | None) -> list[Node]:
 		"""
@@ -451,7 +451,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 			if node.type == "import_statement":
 				for child in node.children:
 					if child.type == "dotted_name":
-						module_name = content_bytes[child.start_byte : child.end_byte].decode("utf-8", errors="ignore")
+						module_name = self._get_node_text(child, content_bytes)
 						imported_names.append(module_name)
 
 			# Handle import from statements: "from foo.bar import baz, qux"
@@ -464,9 +464,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 						break
 
 				if module_node:
-					module_name = content_bytes[module_node.start_byte : module_node.end_byte].decode(
-						"utf-8", errors="ignore"
-					)
+					module_name = self._get_node_text(module_node, content_bytes)
 
 					# Get the imported names
 					import_node = node.child_by_field_name("import")
@@ -482,9 +480,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 							if child.type == "import_list":
 								for item in child.children:
 									if item.type in {"dotted_name", "identifier"}:
-										name = content_bytes[item.start_byte : item.end_byte].decode(
-											"utf-8", errors="ignore"
-										)
+										name = self._get_node_text(item, content_bytes)
 										imported_names.append(f"{module_name}.{name}")
 		except (UnicodeDecodeError, IndexError, AttributeError) as e:
 			logger.warning("Failed to decode Python imports: %s", e)
@@ -513,9 +509,7 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 					# Extract the identifier (could be simple name or attribute access like obj.method)
 					# For simplicity, we take the full text of the function node
 					try:
-						call_name = content_bytes[function_node.start_byte : function_node.end_byte].decode(
-							"utf-8", errors="ignore"
-						)
+						call_name = self._get_node_text(function_node, content_bytes)
 						calls.append(call_name)
 					except UnicodeDecodeError:
 						pass  # Ignore decoding errors
@@ -525,3 +519,91 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 			else:
 				calls.extend(self.extract_calls(child, content_bytes))
 		return list(set(calls))  # Return unique calls
+
+	def extract_signature(self, node: Node, content_bytes: bytes) -> str | None:
+		"""Extract the signature up to the colon ':' for Python functions/classes."""
+		signature_node = node
+		# If it's a decorated definition, find the actual definition node for the signature start
+		if node.type == "decorated_definition":
+			for child in node.children:
+				if child.type in ("function_definition", "class_definition"):
+					signature_node = child
+					break
+			else:
+				return self._get_node_text(node, content_bytes).splitlines()[0]  # Fallback to first line of decorator
+
+		# Find the colon that ends the signature part
+		colon_node = None
+		for child in signature_node.children:
+			if child.type == ":":
+				colon_node = child
+				break
+			# Handle async functions where 'def' is preceded by 'async'
+			if child.type == "async":
+				continue  # skip 'async' keyword itself
+			if child.type in {"def", "class"}:
+				continue  # skip 'def'/'class' keywords
+			# Stop if we hit the body block before finding a colon (shouldn't happen in valid code)
+			if child.type == "block":
+				break
+
+		if colon_node:
+			# Extract text from the start of the definition node up to the end of the colon
+			start_byte = signature_node.start_byte
+			end_byte = colon_node.end_byte
+			try:
+				return content_bytes[start_byte:end_byte].decode("utf-8", errors="ignore").strip()
+			except IndexError:
+				return None
+		else:
+			# Fallback: if no colon found (e.g., malformed code?), return the first line
+			return self._get_node_text(signature_node, content_bytes).splitlines()[0]
+
+	def get_enclosing_node_of_type(self, node: Node, target_type: EntityType) -> Node | None:
+		"""Find the first ancestor node matching the target Python entity type."""
+		target_node_types = []
+		if target_type == EntityType.CLASS:
+			target_node_types = ["class_definition", "decorated_definition"]  # Include decorated
+		elif target_type == EntityType.FUNCTION:
+			target_node_types = ["function_definition", "decorated_definition"]  # Include decorated
+		elif target_type == EntityType.MODULE:
+			# Module is typically the root node or identified by file, not easily findable as ancestor type
+			return None  # Or return root node? Depends on desired behavior.
+		# Add other types if needed
+
+		if not target_node_types:
+			return None
+
+		current = node.parent
+		while current:
+			# Check if the current node is the target type or a decorator containing it
+			node_to_check = current
+			actual_node_type = current.type
+
+			if current.type == "decorated_definition":
+				# Check the *content* of the decorated definition
+				found_target_in_decorator = False
+				for child in current.children:
+					if child.type in target_node_types and child.type != "decorated_definition":
+						# We found the actual class/func def inside the decorator
+						node_to_check = child
+						actual_node_type = child.type
+						found_target_in_decorator = True
+						break
+				if not found_target_in_decorator:
+					actual_node_type = "decorated_definition"  # Treat decorator itself if no target found within
+
+			# Now check if the node (or the one found inside decorator) matches
+			if actual_node_type in target_node_types and actual_node_type != "decorated_definition":
+				return node_to_check  # Return the actual definition node
+
+			current = current.parent
+		return None
+
+	def _find_decorated_definition(self, node: Node) -> Node | None:
+		"""Helper to get the actual definition node from a decorated_definition."""
+		if node.type == "decorated_definition":
+			for child in node.children:
+				if child.type in ("function_definition", "class_definition"):
+					return child
+		return None

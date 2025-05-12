@@ -33,7 +33,7 @@ def assert_style_definition(mermaid_string: str, element_id: str, style_key: str
 	# Use regex to find the style command, allowing for potential whitespace variations
 	pattern = rf"^\s*style\s+{re.escape(element_id)}\s+{re.escape(expected_style_value)}\s*$"
 	assert re.search(pattern, mermaid_string, re.MULTILINE), (
-		f"Style definition for {element_id} with key {style_key} not found or incorrect:\nExpected pattern: {pattern}\nMermaid string:\n{mermaid_string}"  # noqa: E501
+		f"Style definition for {element_id} with key {style_key} not found or incorrect:\nExpected pattern: {pattern}\nMermaid string:\n{mermaid_string}"
 	)
 
 

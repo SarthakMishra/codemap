@@ -16,21 +16,21 @@
 
 ## Overview
 
-CodeMap is an AI-powered developer toolkit designed to enhance your coding workflow. It offers features for code analysis, documentation generation, and Git process streamlining, all accessible through an interactive CLI with multi-LLM support.
+CodeMap is an AI-powered developer toolkit designed to enhance your coding workflow. It offers features for code analysis, documentation generation, semantic search, and Git process streamlining—all accessible through an interactive CLI with multi-LLM support.
 
 > [!Important]
 > For detailed information on all features and commands, please visit our documentation site: **[codemap.run](https://codemap.run)**
 
 ## Features
 
-- 🎯 Token-optimized documentation generation
-- 📝 Rich markdown output with code structure
-- 🌳 Repository structure visualization
-- 🔄 Smart Git commit assistance with AI-generated messages
-- 🔃 AI-powered PR creation and management
+- 📄 **Generate Documentation:** Create optimized markdown documentation and visualize repository structures.
+- 📝 **Smart Commits:** Get AI-generated commit messages based on semantic analysis of your changes.
+- 🔃 **AI-Powered PRs:** Streamline pull request creation and management with intelligent suggestions.
+- 💬 **AI Chat:** Ask questions about your codebase using RAG and LLMs.
+- 🔍 **Index & Search:** Build a semantic vector index and search your repository for deep code understanding.
+- 🤖 **LLM Support:** Integrate with various LLM providers via [PydanticAI](https://ai.pydantic.dev/models/).
 
-
-## Installation
+## Quick Start
 
 > [!Important]
 > CodeMap currently only supports Unix-based platforms (macOS, Linux). Windows users should use WSL.
@@ -38,55 +38,53 @@ CodeMap is an AI-powered developer toolkit designed to enhance your coding workf
 > [!Tip]
 > After installation, use `codemap` or the alias `cm`.
 
-### Recommended: `pipx`
+### Installation
 
-`pipx` installs the package in an isolated environment.
-
+Ensure [uv](https://docs.astral.sh/uv/getting-started/installation/) is installed:
 ```bash
-# Ensure pipx is installed
-# python3 -m pip install --user pipx
-# python3 -m pipx ensurepath
-
-# Install codemap
-pipx install codemap
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### Alternative: `pip`
-
+Install CodeMap globally:
 ```bash
-pip install --user codemap
-# Ensure $HOME/.local/bin is in your PATH
+uv tool install codemap
 ```
 
-### Development Version
+### Key Commands
 
+- **Generate Documentation:**
+  ```bash
+  cm gen path/to/source
+  ```
+- **Smart Commits:**
+  ```bash
+  cm commit
+  ```
+- **AI-Powered PRs:**
+  ```bash
+  cm pr
+  ```
+- **AI Chat:**
+  ```bash
+  cm ask "Which module is responsible for managing auth tokens?"
+  ```
+- **Index & Search:**
+  ```bash
+  cm index
+  ```
+
+### Configuration
+
+CodeMap can be configured using a `.codemap.yml` file in your project root. Generate a default config with:
 ```bash
-pipx install codemap --pip-args='--pre'
+cm conf
 ```
-
-### Updating
-
-```bash
-pipx upgrade codemap
-# Or if installed with pip:
-# pip install --user --upgrade codemap
-```
-
-### Uninstalling
-
-```bash
-pipx uninstall codemap
-# Or if installed with pip:
-# pip uninstall codemap
-```
-
-**For more detailed installation options and troubleshooting, see the [Installation Guide](https://codemap.run/installation/) on our documentation site.**
-
-## Configuration
-
-CodeMap can be configured using a `.codemap.yml` file in your project root.
 
 **For a full list of configuration options and examples, refer to the [Configuration Guide](https://codemap.run/usage/configuration/) on our documentation site.**
+
+### Environment Variables
+
+Add your LLM API keys to `.env` or `.env.local` in your project root. See [LLM Support](https://codemap.run/usage/llm-support/) for details.
 
 ## Development Setup
 
@@ -104,28 +102,21 @@ Interested in contributing? Please read our [Code of Conduct](.github/CODE_OF_CO
 
 CodeMap relies on these excellent open-source libraries and models:
 
-*   [LiteLLM](https://github.com/BerriAI/litellm)
-*   [NumPy](https://numpy.org/)
-*   [Pygments](https://pygments.org/)
-*   [Python-dotenv](https://github.com/theskumar/python-dotenv)
-*   [PyYAML](https://pyyaml.org/)
-*   [Questionary](https://github.com/tmbo/questionary)
-*   [Requests](https://requests.readthedocs.io/)
-*   [Rich](https://rich.readthedocs.io/)
-*   [Typer](https://typer.tiangolo.com/)
-*   [Sentence-Transformers](https://www.sbert.net/)
-*   And many development tools like `ruff`, `pytest`, `isort`, `pyright`.
-
-### Models
-*   **Code Embeddings**: Leverages models like [Qodo/Qodo-Embed-1-1.5B](https://huggingface.co/Qodo/Qodo-Embed-1-1.5B).
-*   **LLM Support**: Compatible with OpenAI, Anthropic, Groq, Mistral, Cohere, Together AI, OpenRouter via LiteLLM.
-
-### Special Thanks
-*   [Cursor](https://www.cursor.com/)
-*   [OpenHands](https://github.com/All-Hands-AI/OpenHands)
-*   [GitHub Actions](https://github.com/features/actions)
-*   [Img Shields](https://shields.io)
-*   [Codecov](https://about.codecov.io/)
+### Core Dependencies
+* [PydanticAI](https://ai.pydantic.dev/) - Unified interface for LLM providers
+* [Pydantic](https://docs.pydantic.dev/latest/) - Data validation library for Python
+* [Questionary](https://github.com/tmbo/questionary) - Interactive user prompts
+* [Rich](https://rich.readthedocs.io/) - Beautiful terminal formatting and output
+* [Typer](https://typer.tiangolo.com/) - Modern CLI framework for Python
+* [Model2Vec](https://github.com/MinishLab/model2vec) - Text embeddings for semantic code analysis
+* [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) - Robust parsing system for code analysis
+* [SQLModel](https://sqlmodel.tiangolo.com/) - SQL database integration with Python
+* [Qdrant](https://qdrant.tech/) - Vector search engine for semantic analysis
+* [PyGit2](https://www.pygit2.org/) - Git repository manipulation
+* [Scikit-learn](https://scikit-learn.org/) - Machine learning utilities
+* [PyGithub](https://pygithub.readthedocs.io/) - GitHub API integration
+* [Docker SDK](https://docker-py.readthedocs.io/) - Docker container management
+* [Watchdog](https://python-watchdog.readthedocs.io/) - Filesystem event monitoring
 
 ## License
 

@@ -2,17 +2,17 @@
 
 import logging
 import os
-import re
 import sys
 from collections.abc import Iterable
 from pathlib import Path
 from re import Pattern
 
 import numpy as np
+from pygit2.enums import FileStatus
 
-from codemap.git.utils import GitError, run_git_command
+from codemap.git.utils import ExtendedGitRepoContext, GitError
 
-from .constants import EPSILON, MAX_FILE_SIZE_FOR_LLM, MIN_NAME_LENGTH_FOR_SIMILARITY
+from .constants import EPSILON, MIN_NAME_LENGTH_FOR_SIMILARITY
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +22,6 @@ __all__ = [
 	"calculate_semantic_similarity",
 	"create_chunk_description",
 	"determine_commit_type",
-	"extract_code_from_diff",
 	"filter_valid_files",
 	"get_deleted_tracked_files",
 	"get_language_specific_patterns",
@@ -31,135 +30,6 @@ __all__ = [
 	"is_test_environment",
 	"match_test_file_patterns",
 ]
-
-
-def extract_code_from_diff(diff_content: str) -> tuple[str, str]:
-	"""
-	Extract actual code content from a diff.
-
-	Args:
-	    diff_content: The raw diff content
-
-	Returns:
-	    Tuple of (old_code, new_code) extracted from the diff
-
-	"""
-	old_lines = []
-	new_lines = []
-
-	# Handle empty diff content
-	if not diff_content or diff_content.isspace():
-		return "", ""
-
-	# Check if diff content is too large and truncate if necessary
-	if len(diff_content) > MAX_FILE_SIZE_FOR_LLM:
-		logger.warning(
-			"Diff content is very large (%d bytes). Truncating to prevent API payload limits.", len(diff_content)
-		)
-		# Extract file name from the diff if possible
-		file_match = re.search(r"diff --git a/(.*) b/(.*)", diff_content)
-		file_name = file_match.group(2) if file_match else "unknown file"
-
-		# Create a summarized message instead of full content
-		return (
-			f"// Large diff content for {file_name} (truncated)",
-			f"// Large diff content for {file_name} (truncated)\n// Original size: {len(diff_content)} bytes",
-		)
-
-	# Split into lines and prepare to process
-	lines = diff_content.split("\n")
-	in_hunk = False
-	in_file = False
-	context_function = None
-	current_file = None
-
-	# Keep track of content size to avoid exceeding limits
-	estimated_size = 0
-	max_size_per_side = MAX_FILE_SIZE_FOR_LLM // 2  # Split the limit between old and new code
-	size_exceeded = False
-
-	for line in lines:
-		# Skip empty lines
-		if not line.strip():
-			continue
-
-		# Check for file headers
-		if line.startswith("diff --git"):
-			in_file = True
-			in_hunk = False
-			# Extract file name for context
-			match = re.search(r"diff --git a/(.*) b/(.*)", line)
-			if match:
-				current_file = match.group(2)
-			continue
-
-		# Skip index lines, --- and +++ lines
-		if line.startswith(("index ", "--- ", "+++ ", "new file mode", "deleted file mode")):
-			continue
-
-		# Check for binary file notice
-		if "Binary files" in line or "GIT binary patch" in line:
-			# For binary files, just add a placeholder
-			old_lines.append(f"// Binary file changed: {current_file}")
-			new_lines.append(f"// Binary file changed: {current_file}")
-			continue
-
-		# Check for hunk header
-		if line.startswith("@@"):
-			in_hunk = True
-			# Try to extract function context if available
-			context_match = re.search(r"@@ .+ @@ (.*)", line)
-			if context_match and context_match.group(1):
-				context_function = context_match.group(1).strip()
-				# Add function context to both old and new lines
-				if context_function:
-					old_lines.append(f"// {context_function}")
-					new_lines.append(f"// {context_function}")
-			continue
-
-		if not in_hunk:
-			continue
-
-		# Check if we're approaching size limits
-		estimated_size += len(line)
-		if estimated_size > max_size_per_side and not size_exceeded:
-			size_exceeded = True
-			old_lines.append(f"// Content truncated - diff too large for {current_file or 'unknown file'}")
-			new_lines.append(f"// Content truncated - diff too large for {current_file or 'unknown file'}")
-			logger.warning("Truncated diff content for %s due to size limits", current_file or "unknown file")
-			break
-
-		# Extract code content - handle edge cases
-		if line.startswith("-"):
-			old_lines.append(line[1:])
-		elif line.startswith("+"):
-			new_lines.append(line[1:])
-		elif line.startswith(" "):
-			# Context lines appear in both old and new (explicitly handle the space)
-			old_lines.append(line[1:])
-			new_lines.append(line[1:])
-		else:
-			# Handle any other lines within hunks (shouldn't normally happen, but just in case)
-			old_lines.append(line)
-			new_lines.append(line)
-
-	# If we didn't find any hunks but have a file, add placeholder
-	if in_file and not old_lines and not new_lines and current_file:
-		old_lines.append(f"// File: {current_file}")
-		new_lines.append(f"// File: {current_file}")
-
-	# Check final sizes and truncate if needed
-	old_code = "\n".join(old_lines)
-	new_code = "\n".join(new_lines)
-
-	if len(old_code) > max_size_per_side or len(new_code) > max_size_per_side:
-		logger.warning("Final extracted code still exceeds size limits, truncating further")
-		if len(old_code) > max_size_per_side:
-			old_code = old_code[: max_size_per_side - 100] + f"\n// ... truncated ({len(old_code)} bytes total)"
-		if len(new_code) > max_size_per_side:
-			new_code = new_code[: max_size_per_side - 100] + f"\n// ... truncated ({len(new_code)} bytes total)"
-
-	return old_code, new_code
 
 
 def get_language_specific_patterns(language: str) -> list[str]:
@@ -330,117 +200,176 @@ def get_deleted_tracked_files() -> tuple[set, set]:
 	deleted_staged_files = set()
 	try:
 		# Parse git status to find deleted files
-		status_output = run_git_command(["git", "status", "--porcelain"])
-		for line in status_output.splitlines():
-			if line.startswith(" D"):
-				# Unstaged deletion (space followed by D)
-				filename = line[3:].strip()  # Skip " D " prefix and strip any whitespace
-				deleted_unstaged_files.add(filename)
-			elif line.startswith("D "):
-				# Staged deletion (D followed by space)
-				filename = line[2:].strip()  # Skip "D " prefix and strip any whitespace
-				deleted_staged_files.add(filename)
+		context = ExtendedGitRepoContext.get_instance()
+		status = context.repo.status()
+		for filepath, flags in status.items():
+			if flags & FileStatus.WT_DELETED:  # Worktree deleted (unstaged)
+				deleted_unstaged_files.add(filepath)
+			if flags & FileStatus.INDEX_DELETED:  # Index deleted (staged)
+				deleted_staged_files.add(filepath)
 		logger.debug("Found %d deleted unstaged files in git status", len(deleted_unstaged_files))
 		logger.debug("Found %d deleted staged files in git status", len(deleted_staged_files))
-	except GitError:
-		logger.warning("Failed to get git status for deleted files")
+	except GitError as e:  # Catch specific GitError from context operations
+		logger.warning(
+			"Failed to get git status for deleted files via context: %s. Proceeding without deleted file info.", e
+		)
+	except Exception:  # Catch any other unexpected error
+		logger.exception("Unexpected error getting git status: %s. Proceeding without deleted file info.")
 
 	return deleted_unstaged_files, deleted_staged_files
 
 
-def filter_valid_files(files: list[str], is_test_environment: bool = False) -> tuple[list[str], list[str]]:
+def get_absolute_path(file: str, repo_root: Path) -> str:
 	"""
-	Filter invalid filenames from a list of files.
+	Get the canonical absolute path string for a file.
+
+	If 'file' is already an absolute path, it's resolved to its canonical form.
+	If 'file' is a relative path, it's considered relative to 'repo_root',
+	made absolute, and then resolved.
+
+	Args:
+	    file: File path string (can be relative or absolute).
+	    repo_root: Path to the repository root, used as a base for relative 'file' paths.
+
+	Returns:
+	    The canonical absolute path string.
+	    Returns the original 'file' string if path resolution fails.
+	"""
+	try:
+		file_path_obj = Path(file)
+		if file_path_obj.is_absolute():
+			# It's already an absolute path string, resolve it to a canonical form
+			# (e.g., remove '..', '.', and resolve symbolic links)
+			return str(file_path_obj.resolve())
+
+		# It's a relative path string; assume it's relative to repo_root.
+		# Combine with repo_root to make it absolute, then resolve.
+		absolute_path = repo_root / file_path_obj
+		return str(absolute_path.resolve())
+	except (ValueError, OSError, RuntimeError) as e:
+		# Log the error and fallback to returning the original file string
+		# if any path operation fails.
+		logger.warning(
+			f"Could not resolve absolute path for '{file}' with repo_root '{repo_root}'."
+			f" Error: {e}. Returning original.",
+			exc_info=True,
+		)
+		return file
+
+
+def filter_valid_files(
+	files: list[str], repo_root: Path, is_test_environment: bool = False
+) -> tuple[list[str], list[str]]:
+	"""
+	Filter invalid filenames and files based on existence and Git tracking.
 
 	Args:
 	    files: List of file paths to filter
+	    repo_root: Path to the repository root
 	    is_test_environment: Whether running in a test environment
 
 	Returns:
-	    Tuple of (valid_files, filtered_large_files) - both as lists of file paths
+	    Tuple of (valid_files, empty_list) - The second element is always an empty list now.
 
 	"""
 	if not files:
 		return [], []
 
-	valid_files = []
-	filtered_large_files = []
+	valid_files_intermediate = []
+	# Keep track of files filtered due to large size if needed elsewhere,
+	# but don't remove them from processing yet.
 
 	for file in files:
 		# Skip files that look like patterns or templates
 		if any(char in file for char in ["*", "+", "{", "}", "\\"]) or file.startswith('"'):
 			logger.warning("Skipping invalid filename in diff processing: %s", file)
 			continue
+		valid_files_intermediate.append(file)
 
-		# Skip extremely large files to prevent API payload size issues
-		if not is_test_environment and Path(file).exists():
-			try:
-				file_size = Path(file).stat().st_size
-				if file_size > MAX_FILE_SIZE_FOR_LLM:
-					logger.warning(
-						"Skipping very large file (%s bytes) to prevent API payload limits: %s", file_size, file
-					)
-					filtered_large_files.append(file)
-					continue
-			except OSError as e:
-				logger.warning("Error checking file size for %s: %s", file, e)
-
-		valid_files.append(file)
+	# --- File Existence and Git Tracking Checks ---
+	valid_files = []  # Reset valid_files to populate after existence checks
 
 	# Skip file existence checks in test environments
 	if is_test_environment:
-		logger.debug("In test environment - skipping file existence checks for %d files", len(valid_files))
-		return valid_files, filtered_large_files
+		logger.debug("In test environment - skipping file existence checks for %d files", len(valid_files_intermediate))
+		# In test env, assume all intermediate files are valid regarding existence/tracking
+		valid_files = valid_files_intermediate
+	else:
+		# Get deleted files
+		deleted_unstaged_files, deleted_staged_files = get_deleted_tracked_files()
 
-	# Get deleted files
-	deleted_unstaged_files, deleted_staged_files = get_deleted_tracked_files()
+		# Check if files exist in the repository (tracked by git) or filesystem
+		original_count = len(valid_files_intermediate)
+		try:
+			context = ExtendedGitRepoContext.get_instance()
+			tracked_files = set(context.tracked_files.keys())
 
-	# Check if files exist in the repository (tracked by git) or filesystem
-	original_count = len(valid_files)
-	try:
-		tracked_files_output = run_git_command(["git", "ls-files"])
-		tracked_files = set(tracked_files_output.splitlines())
+			# Keep files that either:
+			# 1. Exist in filesystem
+			# 2. Are tracked by git
+			# 3. Are known deleted files from git status
+			# 4. Are already staged deletions
+			filtered_files = []
+			for file in valid_files_intermediate:
+				try:
+					path_exists = Path(get_absolute_path(file, repo_root)).exists()
+				except OSError as e:
+					logger.warning("OS error checking existence for %s: %s. Skipping file.", file, e)
+					continue
+				except Exception:
+					logger.exception("Unexpected error checking existence for %s. Skipping file.", file)
+					continue
 
-		# Keep files that either:
-		# 1. Exist in filesystem
-		# 2. Are tracked by git
-		# 3. Are known deleted files from git status
-		# 4. Are already staged deletions
-		filtered_files = []
-		for file in valid_files:
-			if (
-				Path(file).exists()
-				or file in tracked_files
-				or file in deleted_unstaged_files
-				or file in deleted_staged_files
-			):
-				filtered_files.append(file)
-			else:
-				logger.warning("Skipping non-existent and untracked file in diff: %s", file)
+				if (
+					path_exists
+					or file in tracked_files
+					or file in deleted_unstaged_files
+					or file in deleted_staged_files
+				):
+					filtered_files.append(file)
+				else:
+					logger.warning("Skipping non-existent/untracked/not-deleted file in diff: %s", file)
 
-		valid_files = filtered_files
-		if len(valid_files) < original_count:
-			logger.warning(
-				"Filtered out %d files that don't exist in the repository",
-				original_count - len(valid_files),
-			)
-	except GitError:
-		# If we can't check git tracked files, at least filter by filesystem existence and git status
-		filtered_files = []
-		for file in valid_files:
-			if Path(file).exists() or file in deleted_unstaged_files or file in deleted_staged_files:
-				filtered_files.append(file)
-			else:
-				logger.warning("Skipping non-existent file in diff: %s", file)
+			valid_files = filtered_files
+			if len(valid_files) < original_count:
+				logger.warning(
+					"Filtered out %d files that don't exist or aren't tracked/deleted",
+					original_count - len(valid_files),
+				)
+		except GitError as e:  # Catch GitError from context operations
+			logger.warning("Failed to get tracked files from git context: %s. Filtering based on existence only.", e)
+			# If we can't check git tracked files, filter by filesystem existence and git status
+			filtered_files_fallback = []
+			for file in valid_files_intermediate:
+				try:
+					path_exists = Path(file).exists()
+				except OSError as e:
+					logger.warning("OS error checking existence for %s: %s. Skipping file.", file, e)
+					continue
+				except Exception:
+					logger.exception("Unexpected error checking existence for %s. Skipping file.", file)
+					continue
 
-		valid_files = filtered_files
-		if len(valid_files) < original_count:
-			logger.warning(
-				"Filtered out %d files that don't exist in the filesystem",
-				original_count - len(valid_files),
-			)
+				if path_exists or file in deleted_unstaged_files or file in deleted_staged_files:
+					filtered_files_fallback.append(file)
+				else:
+					logger.warning("Skipping non-existent/not-deleted file in diff (git check failed): %s", file)
 
-	return valid_files, filtered_large_files
+			valid_files = filtered_files_fallback  # Replace valid_files with the fallback list
+			if len(valid_files) < original_count:
+				# Adjust log message if git check failed
+				logger.warning(
+					"Filtered out %d files that don't exist (git check failed)",
+					original_count - len(valid_files),
+				)
+		except Exception:  # Catch any other unexpected errors during the initial try block
+			logger.exception("Unexpected error during file filtering. Proceeding with potentially incorrect list.")
+			# If a catastrophic error occurs, proceed with the intermediate list
+			valid_files = valid_files_intermediate
+
+	# Return only the list of valid files. The concept of 'filtered_large_files' is removed.
+	# Size checking will now happen within the splitting strategy.
+	return valid_files, []  # Return empty list for the second element now.
 
 
 def is_test_environment() -> bool:

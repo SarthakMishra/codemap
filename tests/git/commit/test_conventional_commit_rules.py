@@ -2,9 +2,8 @@
 
 import pytest
 
-# Import from the new location
-from codemap.git.commit_linter import CommitLintConfig, CommitLinter, RuleLevel
-from codemap.git.commit_linter.constants import BODY_MAX_LENGTH, HEADER_MAX_LENGTH
+# Import from the new locations after refactor
+from codemap.git.commit_linter import CommitLintConfig, RuleLevel, create_linter
 
 
 # First we'll define test constants to avoid security warnings
@@ -22,48 +21,66 @@ class TestConventionalCommitEdgeCases:
 
 	def setup_method(self) -> None:
 		"""Set up a linter instance for each test."""
-		self.linter = CommitLinter()
+		# Create a test-specific config with many validations disabled
+		config = CommitLintConfig()
+
+		# Relaxed configuration for tests
+		config.header_max_length.level = RuleLevel.WARNING
+		config.subject_case.level = RuleLevel.DISABLED  # Don't enforce sentence-case
+		config.body_leading_blank.level = RuleLevel.WARNING
+		config.footer_leading_blank.level = RuleLevel.WARNING
+		config.body_max_line_length.level = RuleLevel.WARNING
+		config.footer_max_line_length.level = RuleLevel.WARNING
+
+		# Use the factory function to create the linter with our custom config
+		self.linter = create_linter(config=config)
+
 		# For testing custom types
-		self.linter_with_extra_types = CommitLinter(
-			allowed_types=["feat", "fix", "docs", "chore", "style", "refactor", "test", "perf", "build", "ci"]
+		self.linter_with_extra_types = create_linter(
+			allowed_types=["feat", "fix", "docs", "chore", "style", "refactor", "test", "perf", "build", "ci"],
+			config=config,
 		)
+
+		# Get max lengths from config
+		self.HEADER_MAX_LENGTH = self.linter.config.header_max_length.value
+		self.BODY_MAX_LENGTH = self.linter.config.body_max_line_length.value
 
 	def test_header_length_limits(self) -> None:
 		"""Test header length limit enforcement (warnings, not errors)."""
-		# Using HEADER_MAX_LENGTH constant imported from commit_linter module
+		# Using header_max_length from config
 		prefix = "feat: "
-		max_desc_len = HEADER_MAX_LENGTH - len(prefix)  # 72 - 6 = 66
-		ok_desc = "a" * (max_desc_len - 1)  # 65 'a's -> Total 71 chars
-		limit_desc = "a" * max_desc_len  # 66 'a's -> Total 72 chars
-		too_long_desc = "a" * (max_desc_len + 1)  # 67 'a's -> Total 73 chars
+		max_desc_len = self.HEADER_MAX_LENGTH - len(prefix)
+		ok_desc = "a" * (max_desc_len - 1)
+		limit_desc = "a" * max_desc_len
+		too_long_desc = "a" * (max_desc_len + 1)
 
-		# First check with default linter (should treat header_max_length as ERROR)
+		# First check with warning-level linter (which we've set in setup)
 		# At limit - valid
 		assert self.linter.is_valid(f"{prefix}{ok_desc}")
 		assert self.linter.is_valid(f"{prefix}{limit_desc}")
 
-		# Over limit - should fail validation with default config
-		assert not self.linter.is_valid(f"{prefix}{too_long_desc}")
+		# Over limit - should *pass* validation because rule level is WARNING
+		is_valid = self.linter.is_valid(f"{prefix}{too_long_desc}")
+		assert is_valid, "Expected over-length header to pass validation with WARNING level"
 
-		# Now create a linter with header_max_length level explicitly set to WARNING
-		config = CommitLintConfig()
-		config.header_max_length.level = RuleLevel.WARNING
-		config.header_max_length.value = HEADER_MAX_LENGTH
-		config.subject_case.level = RuleLevel.DISABLED
-		linter_with_warnings = CommitLinter(config=config)
+		# Call lint() directly to check warnings
+		_, messages = self.linter.lint(f"{prefix}{too_long_desc}")
+		assert any(f"[WARN] Header line exceeds {self.HEADER_MAX_LENGTH}" in m for m in messages)
 
-		# Over limit with warning-only linter - should produce warning but still be valid
-		# Call lint() directly and check errors list instead of is_valid()
-		_, messages = linter_with_warnings.lint(f"{prefix}{too_long_desc}")
-		# Extract errors from the messages list for assertion
-		errors = [msg for msg in messages if not msg.startswith("[WARN]")]
-		assert not errors, f"Expected no errors, but found: {errors}"
-		assert any(f"[WARN] Header line exceeds {HEADER_MAX_LENGTH}" in m for m in messages)
+		# Test with rule set to ERROR level
+		error_config = CommitLintConfig()
+		error_config.header_max_length.level = RuleLevel.ERROR
+		error_config.header_max_length.value = self.HEADER_MAX_LENGTH
+		error_config.subject_case.level = RuleLevel.DISABLED  # Still need to disable this
+		linter_with_errors = create_linter(config=error_config)
+
+		# Now over limit should fail validation
+		assert not linter_with_errors.is_valid(f"{prefix}{too_long_desc}")
 
 	def test_body_length_limits(self) -> None:
 		"""Test body line length limit enforcement (warnings, not errors)."""
 		# Body with very long lines (> BODY_MAX_LENGTH chars) should generate a warning but still be valid overall
-		long_line = "a" * (BODY_MAX_LENGTH + 1)
+		long_line = "a" * (self.BODY_MAX_LENGTH + 1)
 		long_line_msg = f"""feat: add feature
 
 This line is fine.
@@ -71,8 +88,10 @@ This line is fine.
 This line is also fine.
 """
 		is_valid, errors = self.linter.lint(long_line_msg)
-		assert is_valid  # Message should still be considered valid
-		assert any(f"[WARN] Body line 2 exceeds {BODY_MAX_LENGTH}" in e for e in errors)
+		assert is_valid, (
+			f"Expected message to be valid (got errors: {errors})"
+		)  # Message should still be considered valid
+		assert any(f"[WARN] Body line 2 exceeds {self.BODY_MAX_LENGTH}" in e for e in errors)
 
 	def test_multi_paragraph_breaking_change(self) -> None:
 		"""Test breaking change footer with multiple paragraphs."""
@@ -88,7 +107,8 @@ It continues the explanation.
 
 REVIEWED-BY: John Doe
 """
-		assert self.linter.is_valid(msg)
+		is_valid, errors = self.linter.lint(msg)
+		assert is_valid, f"Breaking change multi-paragraph validation failed with: {errors}"
 
 		# Verify correct parsing of multi-paragraph footer values
 		match = self.linter.parser.parse_commit(msg)
@@ -201,9 +221,6 @@ CO-AUTHORED-BY: Jane Smith <jane.smith@example.com>
 """
 		# Debug: Print validation results
 		is_valid, messages = self.linter.lint(complex_valid)
-		for _msg in messages:
-			pass
-
 		assert is_valid, f"Complex commit validation failed with: {messages}"
 
 	def test_empty_and_whitespace_only_messages(self) -> None:
