@@ -1,6 +1,420 @@
 # CHANGELOG
 
 
+## v0.3.0-rc.5 (2025-05-12)
+
+### Bug Fixes
+
+- Remove pandas dependency
+  ([`2e22ac5`](https://github.com/SarthakMishra/codemap/commit/2e22ac5c818ca815ca8bfe665d4611d1175a9dbf))
+
+- **docker_utils**: Update qdrant storage path
+  ([`b8893aa`](https://github.com/SarthakMishra/codemap/commit/b8893aa245ef1761909da85728f08cbe7755e665))
+
+- **pr_generator**: Narrow exception handling in get_existing_pr
+  ([`0afba84`](https://github.com/SarthakMishra/codemap/commit/0afba84a8d8f314c1082d1af8fad1d50f1bf236a))
+
+Updated exception handling to catch specific exceptions
+
+- **pr_generator**: Simplify exception handling in get_existing_pr
+  ([`38b069b`](https://github.com/SarthakMishra/codemap/commit/38b069b5b55aed064cc9358a692a7fffb2cc3c0f))
+
+broaden exception handling to catch all exceptions
+
+- **qdrant_manager**: Remove type ignore for PointStruct
+  ([`3a508d7`](https://github.com/SarthakMishra/codemap/commit/3a508d752de52331106d7f9333283b772c8972e0))
+
+The type ignore was removed as it is no longer necessary
+
+- **test_config**: Update embedding model name
+  ([`1b85441`](https://github.com/SarthakMishra/codemap/commit/1b8544156d94edf505b8067f4e2128e391713960))
+
+- **tests**: Update mock embedding model name
+  ([`0e2e6f0`](https://github.com/SarthakMishra/codemap/commit/0e2e6f07dffe09ddb1740395101432ee2b1a2fed))
+
+Changed mock embedding model name from 'voyage-code-3' to 'voyage-3-lite'
+
+### Chores
+
+- Autofix lint errors
+  ([`40546a0`](https://github.com/SarthakMishra/codemap/commit/40546a0a57451b5663e17d2980ec50a266dc6d92))
+
+- Remove backup mkdocs configuration file
+  ([`3beac1c`](https://github.com/SarthakMishra/codemap/commit/3beac1cdc5d1ae060a2625c308f7305b047aa999))
+
+- Remove unneeded deps
+  ([`efe752f`](https://github.com/SarthakMishra/codemap/commit/efe752f6d70c96373ff2c0bca3fe426b87a3210b))
+
+- Update codemap version to 0.3.0rc4
+  ([`6c71438`](https://github.com/SarthakMishra/codemap/commit/6c71438cfb3011810e152d773e7c47a2bd71b5c5))
+
+- **auth_todo**: Remove outdated authentication documentation
+  ([`ea0d310`](https://github.com/SarthakMishra/codemap/commit/ea0d31033edb51e0e107f9075114b02049a1ee88))
+
+- **codemap**: Add vector processor utility functions
+  ([`08a079f`](https://github.com/SarthakMishra/codemap/commit/08a079fb91ec939cc80830c0a7c6868f75d4b02f))
+
+- **codemap**: Update codemap configuration
+  ([`9926af1`](https://github.com/SarthakMishra/codemap/commit/9926af18a0ec1f0bf3662453cbdf6c12eb59a8ce))
+
+disable entity graph and update ignore patterns
+
+- **config**: Adjust llm temperature for improved output creativity
+  ([`77b8417`](https://github.com/SarthakMishra/codemap/commit/77b84179851670d49f5c2831314762b27965f86f))
+
+- **config**: Update codemap configuration
+  ([`f2d24cf`](https://github.com/SarthakMishra/codemap/commit/f2d24cf4cdb6f229ef1f250d6342356642ffc7e1))
+
+decrease llm temperature for more deterministic outputs
+
+- **config**: Update env example file
+  ([`19c87d6`](https://github.com/SarthakMishra/codemap/commit/19c87d6263e9df16c5da9a37f94c6c610665b188))
+
+add GITHUB_TOKEN for managing PRs
+
+- **dependencies**: Update dependencies
+  ([`7cc7705`](https://github.com/SarthakMishra/codemap/commit/7cc77058e89d077f077df2f3247f757eebaffb21))
+
+removed requests, pandas, pytest-mock, pyxdg, requests-unixsocket, tenacity, voyageai, scikit-learn,
+  added model2vec
+
+- **docs**: Enhance README with new features and installation instructions
+  ([`07bb86b`](https://github.com/SarthakMishra/codemap/commit/07bb86b1a4c586a3e140b74255a3517c332b0a9e))
+
+- **embedding_utils**: Remove unnecessary blank line
+  ([`f24a483`](https://github.com/SarthakMishra/codemap/commit/f24a4830df11be18b5597bd77a838c360ee4cc22))
+
+- **lock**: Update lock file
+  ([`2af4fa1`](https://github.com/SarthakMishra/codemap/commit/2af4fa1cd7f647b55c19d14a9de92404bd9806ec))
+
+- **lockfile**: Update lock file
+  ([`fb82c86`](https://github.com/SarthakMishra/codemap/commit/fb82c86168ca4703246fc74e001669e69c7e8fab))
+
+- **lockfile**: Update lock file
+  ([`060dfb6`](https://github.com/SarthakMishra/codemap/commit/060dfb62f7cffd57cbf88255dcfb2a212a349b61))
+
+- **lockfile**: Update lockfile
+  ([`1107383`](https://github.com/SarthakMishra/codemap/commit/1107383bd293173ca94d3adbb2391dac9b1e5fa6))
+
+- **tests**: Remove tests for llm rag module
+  ([`51dcc5e`](https://github.com/SarthakMishra/codemap/commit/51dcc5eaea87ffff6dc827146cf3e6ee568def7e))
+
+- **uv.lock**: Update uv.lock file
+  ([`6da7b20`](https://github.com/SarthakMishra/codemap/commit/6da7b20ff45909e2f1176859b84e72f8217e8afa))
+
+Remove unused lock files
+
+### Continuous Integration
+
+- Add sync-branch job to release workflow for main to dev sync
+  ([`36c6c63`](https://github.com/SarthakMishra/codemap/commit/36c6c63440918b451a369ae407eebc1214ec1875))
+
+### Documentation
+
+- Auto generated api docs
+  ([`cca0787`](https://github.com/SarthakMishra/codemap/commit/cca0787d96ebcd25d5cff89292dbb3ebf2f9400f))
+
+- Update navigation menu
+  ([`e33b2ef`](https://github.com/SarthakMishra/codemap/commit/e33b2ef8d9fc171a02e49ca49fb8dbcbe87590aa))
+
+- Updated all docs to match implementation
+  ([`e96c61f`](https://github.com/SarthakMishra/codemap/commit/e96c61f149e347bd3eaa4abaf5d88dde5a76a24b))
+
+- **prompts.py**: Update prompts documentation
+  ([`5acd286`](https://github.com/SarthakMishra/codemap/commit/5acd286e2037715d0cb9e631d565355d89ae01f0))
+
+add guidelines for PR title formatting
+
+### Features
+
+- Add aiofiles and xxhash dependencies
+  ([`89e5f28`](https://github.com/SarthakMishra/codemap/commit/89e5f285ef993c4c1632a08d6c2001c602ef5113))
+
+- Add pygit2 dependency
+  ([`e8f6e0d`](https://github.com/SarthakMishra/codemap/commit/e8f6e0dd66dfcc7aa39844ce52ec772523373eb2))
+
+- **codemap**: Add ask command functionality
+  ([`94a86f3`](https://github.com/SarthakMishra/codemap/commit/94a86f3d971442b26932f839b2c6eb8f5722687c))
+
+Added ask command functionality to codemap module
+
+- **codemap**: Add file metadata schema
+  ([`99c8a27`](https://github.com/SarthakMishra/codemap/commit/99c8a27ec4d12378a4188466b309cc8daa4e2db9))
+
+Extract file metadata into a separate schema to improve code organization
+
+- **codemap**: Enhance qdrant manager with improved payload indexing and schema validation
+  ([`04eed39`](https://github.com/SarthakMishra/codemap/commit/04eed39aff74d1911c3258248a5eda6b564cfdb0))
+
+Added ChunkMetadataSchema and GitMetadataSchema for payload validation and indexing, and updated
+  QdrantManager to use these schemas for upserting and fetching points
+
+- **codemap**: Improve diff splitter and git utils
+  ([`9fa22d2`](https://github.com/SarthakMishra/codemap/commit/9fa22d2bdfd50b2339293294bad0b51eb0fe94d1))
+
+enhance semantic split strategy and add credential callback for pygit2 push
+
+- **codemap**: Increase max context results
+  ([`6876b11`](https://github.com/SarthakMishra/codemap/commit/6876b11cc2788c747be5473503599d9bc9ad5a13))
+
+Updated max_context_results from 10 to 100 in .codemap.yml and removed hardcoded defaults from
+  command.py
+
+- **codemap**: Update commit strategy to semantic
+  ([`08ad6af`](https://github.com/SarthakMishra/codemap/commit/08ad6af4e15313e71a2dff98ced9ea7babde4ba2))
+
+- **codemap**: Update qdrant configuration
+  ([`80f978b`](https://github.com/SarthakMishra/codemap/commit/80f978bd2f849045fd072e1ca0d02122968b52ad))
+
+Changed default embedding model name to 'voyage-3-lite' and updated qdrant configuration to use a
+  local cache directory
+
+- **config**: Add base url to LLM schema
+  ([`fe66b80`](https://github.com/SarthakMishra/codemap/commit/fe66b80c491120b7f3883cd725026e154aeab0ad))
+
+- **config**: Update embedding configuration
+  ([`1d3d656`](https://github.com/SarthakMishra/codemap/commit/1d3d656f641b7caee3b6bacba010eb67d7d6f38d))
+
+Changed the recommended model to minishlab/potion-base-8M and removed unused configuration options
+
+- **config**: Update embedding configuration
+  ([`8faf7de`](https://github.com/SarthakMishra/codemap/commit/8faf7de6a0304b9ae66f19c7cbf7df7ac2a659bb))
+
+Changed embedding model to voyage-3-lite and adjusted related settings
+
+- **config**: Update embedding model
+  ([`16acf77`](https://github.com/SarthakMishra/codemap/commit/16acf77fbd645e09e312dec3442607099f52cd02))
+
+Changed the embedding model from voyage-3-lite to minishlab/potion-base-8M and updated the dimension
+  from 512 to 256
+
+- **dependencies**: Add pygit2 dependency
+  ([`c5e4936`](https://github.com/SarthakMishra/codemap/commit/c5e49363e5477abbfe91f1068c454d21793ef7a2))
+
+- **dependencies**: Add pygithub dependency
+  ([`47ba4d3`](https://github.com/SarthakMishra/codemap/commit/47ba4d334be73df13b437afb10164b5446039902))
+
+- **embedding_utils**: Improve embedding generation with async client and token limits
+  ([`0262118`](https://github.com/SarthakMishra/codemap/commit/026211868afb5512f571b26721e0b148982752e0))
+
+Added support for asynchronous embedding generation and implemented token limits for batch
+  processing
+
+- **git**: Add git hook support
+  ([`81f4219`](https://github.com/SarthakMishra/codemap/commit/81f4219dfe897ad4cc25b325cdc2e4f8412dce8f))
+
+Added support for running git hooks directly
+
+- **pr_cmd**: Add bypass hooks option to push branch
+  ([`d0e18b3`](https://github.com/SarthakMishra/codemap/commit/d0e18b351c85c973725bc0632c12b5e7173c173c))
+
+Added an option to bypass hooks when pushing a branch
+
+- **pr_cmd**: Add interactive PR selection
+  ([`4bd491d`](https://github.com/SarthakMishra/codemap/commit/4bd491d847fc044006b8130a1a22f88fc4ec3dd7))
+
+Added a new function get_all_open_prs to fetch all open PRs for the current repository and
+  implemented interactive selection of PRs to update
+
+- **pr_cmd**: Add interactive review step to pr command
+  ([`decc83f`](https://github.com/SarthakMishra/codemap/commit/decc83ff2f164067d31c486bc97c2f76f89b6c1e))
+
+This change introduces an interactive review step to the PR command, allowing users to review and
+  edit the title and description of the PR before updating it
+
+- **utils**: Add is_ollama_model function
+  ([`adf2087`](https://github.com/SarthakMishra/codemap/commit/adf2087d64251162d0840766be7c77e07eb1e903))
+
+- **utils**: Add is_ollama_model function to check if a model name is an Ollama model
+  ([`abc94a3`](https://github.com/SarthakMishra/codemap/commit/abc94a3af703669d62fb098a9ccdcaabba20bfc3))
+
+Introduce a new function to check if a model name is an Ollama model
+
+### Refactoring
+
+- Remove unused code and improve git operations
+  ([`0b45ce3`](https://github.com/SarthakMishra/codemap/commit/0b45ce3f7a968eef91fb593c7a0aee9e2efe6600))
+
+refactor git operations and remove unused classes and methods
+
+- **analyzer**: Improve file parsing with bytes handling
+  ([`9a86baf`](https://github.com/SarthakMishra/codemap/commit/9a86baf0a7f93f8000bb48c741f65b2c1ba9624e))
+
+Initialize content_bytes_read before the try block to ensure it is always defined
+
+- **codemap**: Improve file analysis and caching
+  ([`8d384ff`](https://github.com/SarthakMishra/codemap/commit/8d384ffa546475fde92345e545f65cf0c336bdcc))
+
+Enhance tree-sitter analyzer with AST caching and improve file content handling in chunking
+
+- **codemap**: Improve repo root detection and blame handling
+  ([`332b54f`](https://github.com/SarthakMishra/codemap/commit/332b54f1fbe80e0fb1d1054c564853aa4facde1d))
+
+updated repo root retrieval logic and optimized blame processing for performance
+
+- **codemap**: Lazy initialize components for better performance
+  ([`25ce5f6`](https://github.com/SarthakMishra/codemap/commit/25ce5f688ea9de13736feccaab04856f6f300459))
+
+Refactored code to reduce memory usage and improve performance by changing initialization of
+  components to be lazy.
+
+- **codemap**: Move is_git_ignored to GitRepoContext
+  ([`4ef86fc`](https://github.com/SarthakMishra/codemap/commit/4ef86fc468e45b387d1bfd6d1a0490f8e7a49eb7))
+
+Extract is_git_ignored method from ExtendedGitRepoContext to GitRepoContext for better utility
+
+- **codemap**: Refactor codemap module
+  ([`ed20c1d`](https://github.com/SarthakMishra/codemap/commit/ed20c1d08a9252282bcca8dfaf4e7b1897f68f0a))
+
+refactor hash calculation and pipeline processing
+
+- **codemap**: Refactor codemap module to improve code organization and readability
+  ([`1717650`](https://github.com/SarthakMishra/codemap/commit/17176505d3f3c63ec5f0f8a329a7916e1e29d9a1))
+
+- **codemap**: Refactor docker utils to use async threading
+  ([`856c85a`](https://github.com/SarthakMishra/codemap/commit/856c85a095af31c3c45a2f28c99fbbec92fb6edd))
+
+Moved docker operations to separate threads to improve performance
+
+- **codemap**: Simplify llm config handling
+  ([`650bb1d`](https://github.com/SarthakMishra/codemap/commit/650bb1d42aa2dbdb89e1ec204443e0d7be009c23))
+
+removed redundant llm config retrieval and simplified the completion call
+
+- **docker_utils**: Remove unused httpx import and refactor async client usage
+  ([`8b51480`](https://github.com/SarthakMishra/codemap/commit/8b514807ff074da1528ebfd54388ec7881ceb803))
+
+Refactor docker_utils to remove unused httpx import and improve async client usage for better
+  performance and readability
+
+- **embedder**: Replace generate_embeddings_batch with generate_embedding
+  ([`a511804`](https://github.com/SarthakMishra/codemap/commit/a511804fd4c95fec861d1703df24dabf0e7adb0f))
+
+Update embedder to use generate_embedding for embedding generation
+
+- **embedding_utils**: Remove voyageai client and refactor embedding generation
+  ([`71401e7`](https://github.com/SarthakMishra/codemap/commit/71401e7d8a558a1d9f0ae339565ab4b2bee3ce9c))
+
+replaced voyageai client with model2vec for embedding generation
+
+- **git**: Simplify git command execution and error handling
+  ([`c371755`](https://github.com/SarthakMishra/codemap/commit/c37175500135aba0799bef5cb024e4344619bbdc))
+
+removed run_git_command function and replaced it with ExtendedGitRepoContext operations
+
+- **git_utils**: Move git utilities from processor to utils
+  ([`2cf8c8c`](https://github.com/SarthakMishra/codemap/commit/2cf8c8cade81edbf0c130933b85175b63f22da6c))
+
+refactored git utilities to improve organization and reusability
+
+- **lodgenerator**: Allow shared TreeSitterAnalyzer instance
+  ([`4a4ce3b`](https://github.com/SarthakMishra/codemap/commit/4a4ce3b7fb65ed98f83f66ffe99e0da4e80340a0))
+
+Updated LODGenerator to accept an optional TreeSitterAnalyzer instance
+
+- **pipeline**: Update qdrant collection naming
+  ([`a49d967`](https://github.com/SarthakMishra/codemap/commit/a49d967b9341f98fefd5987495dfb43da55439fe))
+
+Use a hash of the repository path to generate a unique collection name
+
+- **pr_cmd**: Improve pr update logic
+  ([`aa8cd82`](https://github.com/SarthakMishra/codemap/commit/aa8cd82e8c2f9573c41bffad893cb8cbf669edec))
+
+ensure base and head branches are set when regeneration is needed
+
+- **pr_cmd**: Replace git diff functions with ExtendedGitRepoContext methods
+  ([`f03262b`](https://github.com/SarthakMishra/codemap/commit/f03262b6b074dd5934fa12915524fcea30c4b605))
+
+Refactor get_staged_diff, get_unstaged_diff, get_untracked_files to use ExtendedGitRepoContext
+
+- **pr_generator**: Refactor utils to improve performance
+  ([`aab5e51`](https://github.com/SarthakMishra/codemap/commit/aab5e513af75495bc58f20369d15bec6e598d5e0))
+
+- **pr_git_utils**: Remove trailing newline
+  ([`6d1838a`](https://github.com/SarthakMishra/codemap/commit/6d1838aff5d1b5a15c5a8917488dac713b599fde))
+
+- **processor**: Update pipeline imports and variables
+  ([`4d68b1b`](https://github.com/SarthakMishra/codemap/commit/4d68b1baf8fbb7741bfb0bd7d58be49e9d0e2406))
+
+Refactored the ProcessingPipeline class to improve code organization and readability
+
+- **prompts.py**: Simplify default prompt template
+  ([`9cb960d`](https://github.com/SarthakMishra/codemap/commit/9cb960d47a66ba6bd8c85c2686528196f4768e58))
+
+removed unnecessary sections from the default prompt template
+
+- **qdrant_manager**: Refactor qdrant manager to improve data retrieval and deletion
+  ([`c3805ee`](https://github.com/SarthakMishra/codemap/commit/c3805eea497f1ff0e3fc07a0dfb852bec254de23))
+
+Added new methods to retrieve and delete points based on filters, and to get all content hashes of
+  chunks in the collection
+
+- **synchronizer**: Improve chunk generation for files
+  ([`2ad65dc`](https://github.com/SarthakMishra/codemap/commit/2ad65dcb6455408e016a5318d38d41b4f78db1c3))
+
+introduce asyncio for concurrent chunk generation
+
+- **synchronizer**: Remove batch processing
+  ([`890ff89`](https://github.com/SarthakMishra/codemap/commit/890ff89cb12d6db9abaa6569184d9651e6eb753f))
+
+simplified chunk processing by removing batch size
+
+- **synchronizer**: Update synchronizer to use ExtendedGitRepoContext
+  ([`fe6d44d`](https://github.com/SarthakMishra/codemap/commit/fe6d44d0536c9abc206c7b68031505474e1deb6a))
+
+update VectorSynchronizer to use ExtendedGitRepoContext for git operations
+
+- **tests**: Remove qdrant collection name
+  ([`1f0a591`](https://github.com/SarthakMishra/codemap/commit/1f0a591ce2c079764221854ba81ddbb34a0fe949))
+
+- **tests**: Update test_pr_command
+  ([`08f067c`](https://github.com/SarthakMishra/codemap/commit/08f067c87415ae668fba3266041b96a4990219fb))
+
+add mock_pgu fixture and update test_create_pr_workflow and test_update_pr_workflow
+
+- **tree_sitter**: Lazy load tree-sitter parsers
+  ([`74019b2`](https://github.com/SarthakMishra/codemap/commit/74019b2a3bfa9537e532c9314f8adcfbaebd6aed))
+
+Refactor TreeSitterAnalyzer to lazy load parsers for supported languages
+
+- **utils**: Simplify generate_pr_title_with_llm function
+  ([`8408a0a`](https://github.com/SarthakMishra/codemap/commit/8408a0a6fc5c8871ae62a980aa10adfae2e57b3b))
+
+### Testing
+
+- **git**: Add patch stopall calls
+  ([`c9f69ee`](https://github.com/SarthakMishra/codemap/commit/c9f69ee2cad8a194397bd6a0eefeb66a08ee6f53))
+
+Added patch.stopall() calls in test_validate_repo_path_success and test_validate_repo_path_failure
+  methods
+
+- **git**: Add skip git tests marker
+  ([`fcc6d4d`](https://github.com/SarthakMishra/codemap/commit/fcc6d4d0e8f263170a46ff3d0d1463291803b773))
+
+Added skip_git_tests marker to skip git tests when SKIP_GIT_TESTS environment variable is set
+
+- **tests**: Enhance repo path validation tests
+  ([`73b63b2`](https://github.com/SarthakMishra/codemap/commit/73b63b2afe2f0ed3d9c0ff6975866781f66c83c3))
+
+Updated the test cases for validating repository paths to use mocking for the `get_repo_root`
+  method, ensuring accurate testing of both success and failure scenarios.
+
+- **tests**: Improve repo root retrieval tests
+  ([`99bca36`](https://github.com/SarthakMishra/codemap/commit/99bca36dff05673b678f4cb0aa391df2a130494a))
+
+Refactored tests for the `get_repo_root` method to utilize mocking, ensuring both success and
+  failure scenarios are accurately validated. This enhances the reliability of the tests by
+  isolating the method's behavior.
+
+- **tests**: Update test fixtures and utils
+  ([`4d8a896`](https://github.com/SarthakMishra/codemap/commit/4d8a896c8c7b76c0b9280fc4264c7e62d49d66a1))
+
+Added new test cases and updated existing ones to improve coverage
+
+- **tests**: Update test utils and pr generator command
+  ([`2081ca7`](https://github.com/SarthakMishra/codemap/commit/2081ca7774b4f3871c8945c4e530d2cfafa9e3e6))
+
+
 ## v0.3.0-rc.4 (2025-05-09)
 
 ### Bug Fixes
