@@ -1,52 +1,82 @@
-# Tree-sitter Module Refactoring: Query-Based Entity Recognition
+# TODO: Automated Mapping of Tree-sitter Nodes to Entity Schema and Generation of language_map.py
 
-This document outlines the steps to migrate from the current manual, language-specific node type mapping to a more scalable approach using Tree-sitter queries and standard tags.
+## Goal
+Automate the process of mapping Tree-sitter node types (from `literals.py`) to the entity schemas defined in `entity/base.py`, and generate `language_map.py` (currently managed manually). This should leverage code-aware semantic similarity models to improve mapping accuracy and reduce manual effort.
 
-## Background
+---
 
-The current implementation (`LanguageSyntaxHandler` subclasses like `PythonSyntaxHandler`) requires writing detailed mapping logic for each supported language, checking `node.type` and context. This is difficult to scale and maintain.
+## Implementation Plan
 
-The proposed approach leverages Tree-sitter's query engine (`.scm` files, often `queries/tags.scm`) which use standard tags (e.g., `@definition.function`, `@reference.import`) to identify code constructs. We will map these standard tags to our internal `EntityType`.
+### 1. **Data Preparation**
+- **Extract Node Types:**
+  - Use the generated `NodeTypes` from `literals.py` for each language.
+- **Extract Entity Schemas:**
+  - Parse or introspect the classes in `entity/base.py` to get all available entity schema types and their docstrings/fields.
+- **Collect Example Node Data:**
+  - Optionally, gather example code snippets or AST fragments for ambiguous node types to improve mapping.
 
-See Tree-sitter Code Navigation Systems documentation for standard tag conventions: <https://tree-sitter.github.io/tree-sitter/4-code-navigation.html> (Referenced in [Issue #660](https://github.com/tree-sitter/tree-sitter/issues/660))
+### 2. **Semantic Similarity Model Selection**
+- **Choose a Model:**
+  - Use a code-aware embedding model (e.g., OpenAI's `code-search-ada`, HuggingFace's `CodeBERT`, `StarCoder`, or similar) that can embed both node type names and schema class names/descriptions.
+- **Set Up Embedding Pipeline:**
+  - Implement a utility to embed both node type names (and optionally, their context/examples) and entity schema names/descriptions.
 
-## Guiding Principles
+### 3. **Automated Mapping Process**
+- **Compute Embeddings:**
+  - For each node type, compute its embedding.
+  - For each entity schema, compute its embedding (using class name, docstring, and field names).
+- **Similarity Search:**
+  - For each node type, compute multiple similarity metrics:
+    - Cosine similarity between node type and schema embeddings
+    - Levenshtein distance for string similarity
+    - Jaccard similarity on tokenized names
+    - Semantic similarity using code-aware model embeddings
+  - Combine scores using weighted ensemble:
+    - Primary weight on semantic similarity
+    - Secondary weights on string-based metrics
+  - Set confidence thresholds for each metric
+  - Flag matches for manual review if:
+    - Any metric falls below its threshold
+    - Significant disagreement between metrics
+    - Ensemble score is below overall threshold
+- **Manual Overrides:**
+  - Allow for a manual mapping file or override mechanism for edge cases or ambiguous nodes.
 
-- **[IMPORTANT] Backwards Compatibility:** The external API of the `codemap.processor.tree_sitter` module (e.g., the main `TreeSitterAnalyzer.analyze` method signature and the structure of its output) **must** remain backwards compatible. Consumers of this module should not need changes. The refactoring affects internal implementation only.
-- **Scalability:** The new implementation should make adding support for new languages significantly easier, primarily requiring a suitable query file rather than extensive Python code.
-- **Maintainability:** Reduce language-specific code within the Python handlers, relying on standardized queries maintained alongside grammars.
+### 4. **Mapping Output and Generation**
+- **Generate Mapping Table:**
+  - Produce a mapping from `(language, node_type)` to `(EntityType, EntitySchemaClass)`.
+- **Generate `language_map.py`:**
+  - Write a script to output the `LANGUAGE_NODE_MAPPING` dictionary in the format currently used in `language_map.py`, using the generated mapping.
+  - Ensure the output is readable and includes comments for low-confidence or manual mappings.
 
-## Migration Tasks
+### 5. **Testing and Validation**
+- **Unit Tests:**
+  - Test that all node types for each language are mapped to a valid entity schema.
+  - Test that the generated `language_map.py` is importable and usable by downstream code.
+- **Manual Review:**
+  - Review mappings with low similarity scores or flagged by the model.
 
-- [ ] **Research & Define Standard Tags:**
-    - [ ] Review the Tree-sitter Code Navigation Systems documentation ([https://tree-sitter.github.io/tree-sitter/code-navigation-systems](https://tree-sitter.github.io/tree-sitter/code-navigation-systems)) to identify the standard set of tags relevant to our `EntityType` (e.g., definitions, references, imports, comments, documentation, etc.).
-    - [ ] Create a definitive mapping from these standard Tree-sitter tags (strings like `@definition.function`, `@comment`, `@doc`) to our internal `codemap.processor.tree_sitter.base.EntityType` enum values. Handle potential variations (e.g., `@function` vs. `@definition.function`, different comment/doc tags).
-- [ ] **Query File Management:**
-    - [ ] Determine a strategy for locating and loading `tags.scm` (or equivalent, like `locals.scm`, `highlights.scm`) files for each supported language. Options:
-        - Bundle them directly within the `codemap` package.
-        - Attempt to locate them within installed `tree-sitter-<language>` Python packages or system locations.
-        - Require users to configure paths (less ideal).
-    - [ ] Implement robust error handling for cases where query files are missing or invalid for a language. Consider logging warnings and potentially falling back (if implemented).
-- [ ] **Refactor Core Analyzer Logic:**
-    - [ ] Modify `codemap.processor.tree_sitter.analyzer.TreeSitterAnalyzer` (or create a new query-focused analyzer).
-    - [ ] Implement logic to load the appropriate language grammar and its corresponding query file(s) (e.g., `tags.scm`).
-    - [ ] In the tree traversal logic (e.g., `_traverse_node`), execute the loaded query using `query.captures(node)` for the relevant node or subtree.
-    - [ ] Prioritize using the `capture_name` (tag) from the query results and the predefined tag-to-EntityType mapping to determine the `EntityType`.
-    - [ ] Remove the direct call to language-specific `get_entity_type` methods as the primary mechanism.
-- [ ] **Handle Fallbacks & Existing Helpers:**
-    - [ ] Decide on a fallback strategy if a query file is missing or a specific node isn't captured by any relevant tag. (Options: skip node, attempt old manual mapping if kept temporarily, log warning, assign default `UNKNOWN` type).
-    - [ ] Ensure existing helper functions (like `extract_name`, `find_docstring`, `extract_imports`, `extract_calls` from `LanguageSyntaxHandler`) are still usable, likely moving them to the analyzer or a utility class, as they operate on nodes regardless of how the entity type was determined. They might need slight adjustments.
-- [ ] **Testing:**
-    - [ ] Update existing unit tests (`tests/processor/`) to reflect the new query-based approach.
-    - [ ] Add tests specifically for the query loading, tag mapping logic, and fallback mechanisms.
-    - [ ] Consider adding integration tests using sample code from multiple languages (e.g., Python, Java, Go) to verify cross-language consistency and scalability. Leverage highlighting tests format if suitable ([Tree-sitter Highlighting Tests](https://tree-sitter.github.io/tree-sitter/syntax-highlighting#unit-testing)).
-- [ ] **Cleanup:**
-    - [ ] Remove the old language-specific `LanguageSyntaxHandler` subclasses (e.g., `PythonSyntaxHandler`) and associated configuration classes (`PythonConfig`).
-    - [ ] Remove the `get_entity_type` method from the base handler or repurpose it strictly for fallback logic if chosen.
-    - [ ] Remove language-specific entity lists from `LanguageConfig` if queries provide comprehensive coverage.
+### 6. **Integration and Automation**
+- **Script Integration:**
+  - Integrate the mapping and generation scripts into the codebase (e.g., as a CLI tool or as part of the build process).
+- **Documentation:**
+  - Document the mapping process, how to update/override mappings, and how to retrain or swap out the embedding model if needed.
 
-## Deprecated Items (from previous TODO)
+---
 
-- `- check how entity recognition works in tree-sitter by default` (Superseded by query investigation)
-- `- try to find a better alternative than the current impleemntation which manually maps over entities and every languages needs to be mapped separately` (This migration *is* the alternative)
-- `- better support for all tree-sitter supported languages` (This migration *enables* better support)
+## Considerations
+- **Model Licensing:** Ensure the chosen embedding model is compatible with the project's license and can be used for this purpose.
+- **Performance:** For large numbers of node types and schemas, consider batching or caching embeddings.
+- **Extensibility:** Design the system to support new languages, node types, or entity schemas with minimal manual intervention.
+- **Fallbacks:** Always provide a fallback or 'UnknownEntitySchema' for unmapped or ambiguous nodes.
+
+---
+
+## References
+- `src/codemap/processor/tree_sitter/schema/languages/literals.py` (NodeTypes)
+- `src/codemap/processor/tree_sitter/schema/entity/base.py` (Entity Schemas)
+- `src/codemap/processor/tree_sitter/schema/language_map.py` (Target Output)
+
+---
+
+*This plan aims to reduce manual mapping effort, improve consistency, and leverage modern code understanding models for robust schema mapping.*
