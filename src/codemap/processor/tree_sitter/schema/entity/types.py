@@ -1,226 +1,213 @@
 """Basic types."""
 
-from enum import Enum, auto
+from typing import Literal
 
 # --- Detailed Entity Sub-Types --- #
 
+TopLevelEntityType = Literal[
+	"MODULE",  # Python module, Java package, etc. (e.g., 'import numpy as np')
+	"NAMESPACE",  # C++ namespace, PHP namespace (e.g., 'namespace std;')
+	"PACKAGE",  # Java package, Go package (e.g., 'package com.example;')
+]
 
-class FileModuleLevelEntityType(Enum):
-	"""File or module-level entity types."""
+ScalarDataType = Literal[
+	"INTEGER",  # Whole numbers (e.g., 1, -42, 0x1F)
+	"FLOAT",  # Floating-point numbers (e.g., 3.14, -0.001, 1e-10)
+	"STRING",  # Sequence of characters (e.g., "hello", 'world', """multiline""")
+	"CHAR",  # Single character (e.g., 'a', '\n', '\u0041')
+	"BOOLEAN",  # Logical True/False (e.g., true, false, True, False)
+	"NULL",  # Absence of value (e.g., null, None, nil, undefined)
+	"SYMBOL",  # Symbol type (e.g., :symbol in Ruby, Symbol() in JavaScript)
+	"COMPLEX",  # Complex numbers (e.g., 1+2j, 3-4i)
+	"DECIMAL",  # Arbitrary-precision decimal numbers (e.g., Decimal('3.14159'))
+]
 
-	MODULE = auto()  # Source file or logical module
-	NAMESPACE = auto()  # Namespace (e.g., C++, C#, Python modules)
-	PACKAGE = auto()  # Collection of modules (e.g., Python package, Java package)
+CollectionEntityType = Literal[
+	"ARRAY",  # Homogeneous list/array (e.g., int[] in Java, [1,2,3] in JavaScript)
+	"LIST",  # Ordered collection (e.g., ArrayList in Java, list() in Python)
+	"TUPLE",  # Ordered, immutable sequence (e.g., (1,2,3) in Python)
+	"SET",  # Unordered collection of unique elements (e.g., HashSet in Java, set() in Python)
+	"RANGE",  # Range type (e.g., range(1,10) in Python, 1..10 in Ruby)
+]
 
+AssociativeEntityType = Literal[
+	"MAP",  # Key-value pairs (e.g., Map<K,V> in Java, std::map in C++)
+	"DICT",  # Dictionary (e.g., {'key': 'value'} in Python)
+	"OBJECT",  # Structured object (e.g., {name: "John", age: 30} in JavaScript)
+	"TABLE",  # Tabular data (e.g., pandas DataFrame, SQL table)
+]
 
-class ScalarDataType(Enum):
-	"""Scalar (primitive) data and numeric extension entity types."""
+TypeDefinitionEntityType = Literal[
+	"TYPE_ALIAS",  # Type alias (e.g., typedef int Integer; in C++)
+	"GENERIC",  # Generic type (e.g., List<T> in Java, Vec<T> in Rust)
+	"TRAIT",  # Trait (e.g., trait Display in Rust)
+	"MIXIN",  # Mixin (e.g., @mixin in Dart, include in Ruby)
+	"UNION",  # Union type (e.g., string | number in TypeScript)
+	"INTERSECTION",  # Intersection type (e.g., A & B in TypeScript)
+	"POINTER",  # Memory address (e.g., int* ptr in C++)
+	"REFERENCE",  # Reference type (e.g., &mut String in Rust)
+	"DATETIME",  # Date/time value (e.g., datetime in Python, Date in JavaScript)
+	"BINARY",  # Raw binary data (e.g., bytes in Python, Buffer in Node.js)
+	"REGEXP",  # Regular expression (e.g., /pattern/ in JavaScript)
+	"OPTIONAL",  # Optional type (e.g., Option<T> in Rust, Optional<T> in Java)
+]
 
-	INTEGER = auto()  # Whole numbers (e.g., 1, -42)
-	FLOAT = auto()  # Floating-point numbers (e.g., 3.14, -0.001)
-	STRING = auto()  # Sequence of characters (e.g., "hello")
-	CHAR = auto()  # Single character (e.g., 'a')
-	BOOLEAN = auto()  # Logical True/False
-	NULL = auto()  # Absence of value (null, None)
-	SYMBOL = auto()  # Symbol type (e.g., Ruby, Lisp, JavaScript ES6)
-	COMPLEX = auto()  # Complex numbers (e.g., 1+2j)
-	DECIMAL = auto()  # Arbitrary-precision decimal numbers
+StorageEntityType = Literal[
+	"VARIABLE",  # Variable (e.g., let x = 5; in JavaScript)
+	"CONSTANT",  # Constant value (e.g., const PI = 3.14; in JavaScript)
+	"CLASS_FIELD",  # Class-level variable (e.g., static int count; in Java)
+]
 
-
-class CollectionEntityType(Enum):
-	"""Collection and sequence entity types."""
-
-	ARRAY = auto()  # Homogeneous list/array
-	LIST = auto()  # Ordered collection (may allow mixed types)
-	TUPLE = auto()  # Ordered, immutable sequence
-	SET = auto()  # Unordered collection of unique elements
-	RANGE = auto()  # Range type (e.g., Python's range, Ruby's 1..10)
-
-
-class AssociativeEntityType(Enum):
-	"""Mapping or associative structure entity types."""
-
-	MAP = auto()  # Key-value pairs (general mapping)
-	DICT = auto()  # Dictionary (Python-style mapping)
-	OBJECT = auto()  # Structured object (fields/properties)
-	TABLE = auto()  # Tabular data (e.g., database table, DataFrame)
-
-
-class TypeDefinitionEntityType(Enum):
-	"""Type definition and related construct entity types."""
-
-	TYPE_ALIAS = auto()  # Type alias or typedef
-	GENERIC = auto()  # Generic type or template (e.g., C++ template, Java generic)
-	TRAIT = auto()  # Trait (e.g., Rust, Scala, Dart)
-	MIXIN = auto()  # Mixin (multiple inheritance/behavior sharing)
-	UNION = auto()  # Value can be one of several types
-	INTERSECTION = auto()  # Intersection type (must satisfy multiple types)
-	POINTER = auto()  # Memory address/reference (low-level)
-	REFERENCE = auto()  # Reference type (as distinct from pointer)
-	DATETIME = auto()  # Date and/or time value
-	BINARY = auto()  # Raw binary data (bytes, buffers)
-	REGEXP = auto()  # Regular expression type (e.g., JavaScript, Perl)
-	OPTIONAL = auto()  # Optional/nullable type (e.g., Option, Optional)
-
-
-class StorageEntityType(Enum):
-	"""Variable, constant, and class field entity types."""
-
-	VARIABLE = auto()  # Variable (local, global, or instance)
-	CONSTANT = auto()  # Constant value
-	CLASS_FIELD = auto()  # Class-level variable/field (static or member variable)
-
-
-class DataPairEntityType(Enum):
-	"""Key-value pair entity types for data structures."""
-
-	KEY = auto()  # Key in a key-value pair (e.g., JSON, TOML)
-	VALUE = auto()  # Value in a key-value pair
-
+DataPairEntityType = Literal[
+	"KEY",  # Key in a key-value pair (e.g., "name" in {"name": "John"})
+	"VALUE",  # Value in a key-value pair (e.g., "John" in {"name": "John"})
+]
 
 # --- Scope Types --- #
 
-
-class ScopeType(Enum):
-	"""Scope types."""
-
-	GLOBAL = auto()
-	MODULE = auto()
-	CLASS = auto()
-	FUNCTION = auto()
-	METHOD = auto()
-	BLOCK = auto()
-	LAMBDA = auto()
-	NAMESPACE = auto()
-	TEMPLATE = auto()  # For generics in Java/C#
-	COMPREHENSION = auto()  # Python-specific
-	TRY_BLOCK = auto()  # Exception handling scope
-	LOOP = auto()  # For loop/while scoping rules
-	SWITCH = auto()  # C-style switch blocks
-	PATTERN = auto()  # Modern pattern matching (Python/Rust/Swift)
-
+ScopeType = Literal[
+	"GLOBAL",  # Global scope (e.g., window in browser JavaScript)
+	"MODULE",  # Module scope (e.g., __main__ in Python)
+	"CLASS",  # Class scope (e.g., class MyClass { ... })
+	"FUNCTION",  # Function scope (e.g., function myFunc() { ... })
+	"METHOD",  # Method scope (e.g., class method or instance method)
+	"BLOCK",  # Block scope (e.g., { ... } in C-style languages)
+	"LAMBDA",  # Lambda/anonymous function (e.g., x => x*2 in JavaScript)
+	"NAMESPACE",  # Namespace scope (e.g., namespace std { ... })
+	"TEMPLATE",  # Generic template scope (e.g., template<typename T>)
+	"COMPREHENSION",  # List/dict comprehension (e.g., [x for x in range(10)])
+	"TRY_BLOCK",  # Exception handling scope (e.g., try { ... } catch { ... })
+	"LOOP",  # Loop scope (e.g., for (let i = 0; i < 10; i++) { ... })
+	"SWITCH",  # Switch block (e.g., switch (value) { case 1: ... })
+	"PATTERN",  # Pattern matching scope (e.g., match value { ... } in Rust)
+]
 
 # Not an entity type, but a property of ScopeType entities
-class VisibilityModifier(Enum):
-	"""Visibility modifiers."""
-
-	PUBLIC = auto()
-	PRIVATE = auto()
-	PROTECTED = auto()
-	INTERNAL = auto()
-	PACKAGE = auto()
-
+VisibilityModifier = Literal[
+	"PUBLIC",  # Public access (e.g., public class MyClass)
+	"PRIVATE",  # Private access (e.g., private int x;)
+	"PROTECTED",  # Protected access (e.g., protected void method())
+	"INTERNAL",  # Internal access (e.g., internal class in C#)
+	"PACKAGE",  # Package-private access (e.g., default access in Java)
+]
 
 # --- Statement Types --- #
 
-
-class StatementType(Enum):
-	"""Statement types."""
-
-	IF = auto()
-	ELIF = auto()
-	ELSE = auto()
-	SWITCH = auto()
-	CASE = auto()
-	DEFAULT = auto()
-	FOR = auto()
-	FOR_IN = auto()
-	FOR_OF = auto()
-	WHILE = auto()
-	DO_WHILE = auto()
-	BREAK = auto()
-	CONTINUE = auto()
-	RETURN = auto()
-	YIELD = auto()
-	THROW = auto()
-	TRY = auto()
-	CATCH = auto()
-	FINALLY = auto()
-	WITH = auto()
-	ASSERT = auto()
-	PASS = auto()
-	RAISE = auto()
-	DEFER = auto()
-	GOTO = auto()
-
+StatementType = Literal[
+	# Control Flow
+	"IF",  # If statement (e.g., if (condition) { ... })
+	"ELIF",  # Else if statement (e.g., elif condition: ...)
+	"ELSE",  # Else statement (e.g., else { ... })
+	"SWITCH",  # Switch statement (e.g., switch (value) { ... })
+	"CASE",  # Case statement (e.g., case 1: ...)
+	"DEFAULT",  # Default case (e.g., default: ...)
+	"FOR",  # For loop (e.g., for (int i = 0; i < n; i++) { ... })
+	"FOR_IN",  # For-in loop (e.g., for (let item in array) { ... })
+	"FOR_OF",  # For-of loop (e.g., for (let item of array) { ... })
+	"WHILE",  # While loop (e.g., while (condition) { ... })
+	"DO_WHILE",  # Do-while loop (e.g., do { ... } while (condition))
+	"BREAK",  # Break statement (e.g., break;)
+	"CONTINUE",  # Continue statement (e.g., continue;)
+	"RETURN",  # Return statement (e.g., return value;)
+	"YIELD",  # Yield statement (e.g., yield value;)
+	"THROW",  # Throw statement (e.g., throw new Error();)
+	"TRY",  # Try block (e.g., try { ... })
+	"CATCH",  # Catch block (e.g., catch (Exception e) { ... })
+	"FINALLY",  # Finally block (e.g., finally { ... })
+	"WITH",  # With statement (e.g., with open(file) as f: ...)
+	"ASSERT",  # Assert statement (e.g., assert condition;)
+	"PASS",  # Pass statement (e.g., pass in Python)
+	"RAISE",  # Raise statement (e.g., raise Exception() in Python)
+	"DEFER",  # Defer statement (e.g., defer cleanup() in Go)
+	"GOTO",  # Goto statement (e.g., goto label;)
 	# Declarations
-	VARIABLE_DECLARATION = auto()
-	CONSTANT_DECLARATION = auto()
-	FUNCTION_DECLARATION = auto()
-	CLASS_DECLARATION = auto()
-	INTERFACE_DECLARATION = auto()
-	ENUM_DECLARATION = auto()
-	IMPORT = auto()
-	EXPORT = auto()
-	TYPE_ALIAS_DECLARATION = auto()
-	STRUCT_DECLARATION = auto()
-	MODULE_DECLARATION = auto()
-	NAMESPACE_DECLARATION = auto()
-	PROPERTY_DECLARATION = auto()
-	EXCEPTION_DECLARATION = auto()
-	EVENT_DECLARATION = auto()
-	ANNOTATION_DECLARATION = auto()
-	MACRO_DECLARATION = auto()
-
+	"VARIABLE_DECLARATION",  # Variable declaration (e.g., let x = 5;)
+	"CONSTANT_DECLARATION",  # Constant declaration (e.g., const PI = 3.14;)
+	"FUNCTION_DECLARATION",  # Function declaration (e.g., function myFunc() { ... })
+	"CLASS_DECLARATION",  # Class declaration (e.g., class MyClass { ... })
+	"INTERFACE_DECLARATION",  # Interface declaration (e.g., interface MyInterface { ... })
+	"ENUM_DECLARATION",  # Enum declaration (e.g., enum Colors { RED, GREEN, BLUE })
+	"IMPORT",  # Import statement (e.g., import { foo } from 'bar')
+	"EXPORT",  # Export statement (e.g., export const foo = 'bar')
+	"TYPE_ALIAS_DECLARATION",  # Type alias declaration (e.g., type Point = { x: number, y: number })
+	"STRUCT_DECLARATION",  # Struct declaration (e.g., struct Point { x: int, y: int })
+	"MODULE_DECLARATION",  # Module declaration (e.g., module MyModule { ... })
+	"NAMESPACE_DECLARATION",  # Namespace declaration (e.g., namespace MyNamespace { ... })
+	"PROPERTY_DECLARATION",  # Property declaration (e.g., public string Name { get; set; })
+	"EXCEPTION_DECLARATION",  # Exception declaration (e.g., class MyException extends Exception { ... })
+	"EVENT_DECLARATION",  # Event declaration (e.g., event EventHandler MyEvent)
+	"ANNOTATION_DECLARATION",  # Annotation declaration (e.g., @interface MyAnnotation { ... })
+	"MACRO_DECLARATION",  # Macro declaration (e.g., #define MAX(a,b) ((a) > (b) ? (a) : (b)))
 	# Assignment & Expression
-	ASSIGNMENT = auto()
-	EXPRESSION_STATEMENT = auto()
-
+	"ASSIGNMENT",  # Assignment statement (e.g., x = 5)
+	"EXPRESSION_STATEMENT",  # Expression used as statement (e.g., foo();)
 	# Miscellaneous
-	BLOCK = auto()
-	EMPTY = auto()
-	LABEL = auto()
-	COMMENT = auto()
-	DOCSTRING = auto()
-	UNKNOWN = auto()  # fallback
-
+	"BLOCK",  # Code block (e.g., { ... })
+	"EMPTY",  # Empty statement (e.g., ;)
+	"LABEL",  # Label statement (e.g., label: ...)
+	"COMMENT",  # Comment (e.g., // This is a comment)
+	"DOCSTRING",  # Documentation string (e.g., """This is a docstring""")
+]
 
 # --- Expression Types --- #
 
+ExpressionType = Literal[
+	"BINARY_OPERATION",  # Binary operation (e.g., a + b)
+	"UNARY_OPERATION",  # Unary operation (e.g., !x)
+	"CALL",  # Function call (e.g., foo(x, y))
+	"MEMBER_ACCESS",  # Member access (e.g., obj.prop)
+	"SUBSCRIPT",  # Array/object subscript (e.g., arr[0])
+	"CONDITIONAL",  # Ternary operator (e.g., condition ? trueExpr : falseExpr)
+	"LITERAL",  # Literal value (e.g., 42, "hello")
+	"IDENTIFIER",  # Variable/function name (e.g., myVar)
+	"ASSIGNMENT",  # Assignment expression (e.g., x = 5)
+	"LAMBDA",  # Lambda/anonymous function (e.g., x => x * 2)
+	"OBJECT",  # Object literal (e.g., { x: 1, y: 2 })
+	"ARRAY",  # Array literal (e.g., [1, 2, 3])
+	"TUPLE",  # Tuple literal (e.g., (1, "hello"))
+	"MAP",  # Map/dictionary literal (e.g., Map { "key" => "value" })
+	"SET",  # Set literal (e.g., Set { 1, 2, 3 })
+	"NEW",  # Object instantiation (e.g., new MyClass())
+	"CAST",  # Type cast (e.g., (int)value)
+	"YIELD",  # Yield expression (e.g., yield value)
+	"COMPREHENSION",  # List/dict comprehension (e.g., [x for x in range(10)])
+	"PATTERN_MATCH",  # Pattern matching (e.g., match value { ... })
+	"DECORATOR",  # Function/class decorator (e.g., @decorator)
+	"ANNOTATION",  # Type annotation (e.g., x: int)
+	"ASYNC",  # Async expression (e.g., async function foo() { ... })
+	"AWAIT",  # Await expression (e.g., await promise)
+]
 
-class ExpressionType(Enum):
-	"""Expression types."""
+# --- Operator Types --- #
 
-	BINARY_OPERATION = auto()
-	UNARY_OPERATION = auto()
-	CALL = auto()
-	MEMBER_ACCESS = auto()
-	SUBSCRIPT = auto()
-	CONDITIONAL = auto()
-	LITERAL = auto()
-	IDENTIFIER = auto()
-	ASSIGNMENT = auto()
-	LAMBDA = auto()
-	OBJECT = auto()
-	ARRAY = auto()
-	TUPLE = auto()
-	MAP = auto()
-	SET = auto()
-	NEW = auto()
-	CAST = auto()
-	AWAIT = auto()
-	YIELD = auto()
-	COMPREHENSION = auto()
-	PATTERN_MATCH = auto()
-	DECORATOR = auto()
-	ANNOTATION = auto()
-	UNKNOWN = auto()  # fallback
+OperatorEntityType = Literal[
+	"ARITHMETIC_OPERATOR",  # Arithmetic operations (e.g., +, -, *, /, %)
+	"ASSIGNMENT_OPERATOR",  # Assignment operations (e.g., =, +=, -=, *=, /=, %=, &=, |=, ^=, <<=, >>=, **=, //=)
+	"BITWISE_OPERATOR",  # Bitwise operations (e.g., &, |, ^, ~, <<, >>)
+	"COMPARISON_OPERATOR",  # Comparison operations (e.g., ==, !=, <, >, <=, >=, ===, !==)
+	"LOGICAL_OPERATOR",  # Logical operations (e.g., &&, ||, !, and, or, not)
+	"UNARY_OPERATOR_GENERIC",  # Generic unary operations (e.g., +, -, !, ~)
+	"BINARY_OPERATOR_GENERIC",  # Generic binary operations (e.g., +, -, *, /, etc.)
+	"TERNARY_OPERATOR",  # Ternary conditional operation (e.g., ?:)
+	"MEMBER_ACCESS_OPERATOR",  # Member access operations (e.g., ., ->, ::)
+	"SUBSCRIPT_OPERATOR",  # Array/object subscript operations (e.g., [])
+	"SPREAD_OPERATOR",  # Spread/rest operations (e.g., ...)
+	"REFERENCE_OPERATOR",  # Reference operations (e.g., & for address-of, * for dereference)
+	"LAMBDA_ARROW_OPERATOR",  # Lambda/arrow function operations (e.g., =>, ->)
+	"TYPE_OPERATOR",  # Type checking operations (e.g., instanceof, typeof, as, is)
+]
 
-
-# --- Main Entity Categories --- #
-
-
-class EntityType(Enum):
-	"""Broad categories of entities, each pointing at its detailed sub-enum."""
-
-	FILE_MODULE_LEVEL = FileModuleLevelEntityType
-	SCOPE = ScopeType
-	STATEMENT = StatementType
-	EXPRESSION = ExpressionType
-	SCALAR_DATA = ScalarDataType
-	COLLECTION = CollectionEntityType
-	ASSOCIATIVE = AssociativeEntityType
-	TYPE_DEFINITION = TypeDefinitionEntityType
-	STORAGE = StorageEntityType
-	DATA_PAIR = DataPairEntityType
-	UNKNOWN = type("UnknownEnum", (Enum,), {})  # Fallback
+EntityType = Literal[
+	TopLevelEntityType,
+	ScopeType,
+	StatementType,
+	ExpressionType,
+	ScalarDataType,
+	CollectionEntityType,
+	AssociativeEntityType,
+	TypeDefinitionEntityType,
+	StorageEntityType,
+	DataPairEntityType,
+	OperatorEntityType,
+	"UNKNOWN",
+]
