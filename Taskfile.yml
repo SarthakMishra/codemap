@@ -14,12 +14,15 @@ tasks:
     cmds:
       - task -l
 
-  gen-keys:
-    desc: Generate config keys
+  nodes:
+    desc: Update local node-types.json files
     cmds:
-      - uv run scripts/generate_config_keys.py
-      - uv run ruff format src/codemap/config/config_keys.py
-      - uv run ruff check --fix --unsafe-fixes src/codemap/config/config_keys.py
+      - uv run python {{.SCRIPT_DIR}}/get_nodes.py
+
+  grammars:
+    desc: Update local grammar sources
+    cmds:
+      - uv run python {{.SCRIPT_DIR}}/fetch_grammar_sources.py
 
   lint:
     desc: Run all linting checks
