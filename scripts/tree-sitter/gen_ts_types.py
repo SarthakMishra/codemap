@@ -1,6 +1,7 @@
 """Generate literals.py with lists for supported languages, node types, and all supported extensions."""
 
 import json
+import sys
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -9,6 +10,10 @@ from typing import Any
 from rich import print as rprint
 from rich.console import Console
 from tree_sitter_language_pack import SupportedLanguage
+
+# Add the project root to path so we can import from scripts
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from scripts.utils import escape_string
 
 NODE_TYPES_DIR = Path("src/codemap/processor/tree_sitter/schema/languages/json/languages")
 EXT_MAP_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/json/extension-map.json")
@@ -99,14 +104,6 @@ def extract_language_extensions(supported: set[str]) -> dict[str, set[str]]:
 	return lang_exts
 
 
-def escape_literal(val: str) -> str:
-	"""Escape special characters in a string to be used in a Literal."""
-	val = val.replace("\\", r"\\")
-	val = val.replace("\n", r"\\n")
-	val = val.replace("\r", r"\\r")
-	return val.replace("\t", r"\\t")
-
-
 def generate_literals_py() -> None:
 	"""Generate literals.py with lists for supported languages, node types, and all supported extensions."""
 	now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
@@ -132,34 +129,22 @@ def generate_literals_py() -> None:
 		f.write("# ruff: noqa: RUF001\n")
 		f.write("from typing import Literal\n\n")
 		# Supported languages
-		f.write("SupportedLanguages = Literal [\n")
+		f.write("SupportedLanguages = Literal[\n")
 		f.write("    # Supported programming languages (auto-generated)\n")
 		for lang in sorted(supported):
-			f.write(f'    "{lang}",\n')
+			f.write(f"    {escape_string(lang)},\n")
 		f.write("]\n\n")
 		# Node types
-		f.write("NodeTypes = Literal [\n")
+		f.write("NodeTypes = Literal[\n")
 		f.write("    # All node types from all grammars (auto-generated)\n")
 		for t in node_types:
-			t_escaped = escape_literal(t)
-			if '"' in t_escaped:
-				f.write(f"    '{t_escaped}',\n")
-			elif "'" in t_escaped:
-				f.write(f'    "{t_escaped}",\n')
-			else:
-				f.write(f'    "{t_escaped}",\n')
+			f.write(f"    {escape_string(t)},\n")
 		f.write("]\n\n")
 		# All supported extensions (without leading period)
-		f.write("SupportedExtensions = Literal [\n")
+		f.write("SupportedExtensions = Literal[\n")
 		f.write("    # All unique file extensions for supported languages (auto-generated)\n")
 		for ext in all_exts:
-			ext_escaped = escape_literal(ext)
-			if '"' in ext_escaped:
-				f.write(f"    '{ext_escaped}',\n")
-			elif "'" in ext_escaped:
-				f.write(f'    "{ext_escaped}",\n')
-			else:
-				f.write(f'    "{ext_escaped}",\n')
+			f.write(f"    {escape_string(ext)},\n")
 		f.write("]\n\n")
 
 

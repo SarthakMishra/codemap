@@ -1,10 +1,15 @@
 """Generate schema.py with a schema for each supported language, including name, extensions, and nodes."""
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
+
+# Add the project root to path so we can import from scripts
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
+from scripts.utils import escape_string
 
 # Paths
 LITERALS_PY_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/literals.py")
@@ -21,7 +26,7 @@ def load_literals() -> dict[str, set[str]]:
 	with LITERALS_PY_PATH.open() as f:
 		code = f.read()
 	for key in ("SupportedLanguages", "SupportedExtensions", "NodeTypes"):
-		start = code.find(f"{key} = Literal [")
+		start = code.find(f"{key} = Literal[")
 		if start == -1:
 			continue
 		start = code.find("[", start) + 1
@@ -79,14 +84,6 @@ def extract_nodes_for_language(json_path: Path) -> list[str]:
 	return sorted(nodes)
 
 
-def escape_literal(val: str) -> str:
-	"""Escape special characters in a string to be used in a Python literal."""
-	val = val.replace("\\", r"\\")
-	val = val.replace("\n", r"\\n")
-	val = val.replace("\r", r"\\r")
-	return val.replace("\t", r"\\t")
-
-
 def generate_schema_py():
 	"""Generate schema.py with a schema for each supported language, including name, extensions, and nodes."""
 	literals = load_literals()
@@ -113,38 +110,22 @@ def generate_schema_py():
 	with SCHEMA_PY_PATH.open("w", encoding="utf-8") as f:
 		f.write('"""Auto-generated language schema. DO NOT EDIT MANUALLY."""\n\n')
 		f.write("# ruff: noqa: E501, RUF001\n")
-		f.write("from typing import TypedDict, List\n")
-		f.write("from .literals import SupportedLanguages, SupportedExtensions, NodeTypes\n\n")
+		f.write("from typing import TypedDict\n\n")
+		f.write("from .literals import NodeTypes, SupportedExtensions, SupportedLanguages\n\n\n")
 		f.write("class LanguageSchema(TypedDict):\n")
 		f.write('    """Schema for a language."""\n')
 		f.write("    name: SupportedLanguages\n")
-		f.write("    extensions: List[SupportedExtensions]\n")
-		f.write("    nodes: List[NodeTypes]\n\n")
-		f.write("LANGUAGE_SCHEMAS: List[LanguageSchema] = [\n")
+		f.write("    extensions: list[SupportedExtensions]\n")
+		f.write("    nodes: list[NodeTypes]\n\n")
+		f.write("LANGUAGES: list[LanguageSchema] = [\n")
 		for entry in schema:
 			f.write("    {\n")
-			f.write(f'        "name": "{entry["name"]}",\n')
-			# Escape extensions
-			ext_list = []
-			for ext in entry["extensions"]:
-				ext_escaped = escape_literal(ext)
-				if '"' in ext_escaped:
-					ext_list.append(f"'{ext_escaped}'")
-				elif "'" in ext_escaped:
-					ext_list.append(f'"{ext_escaped}"')
-				else:
-					ext_list.append(f'"{ext_escaped}"')
+			f.write(f'        "name": {escape_string(entry["name"])},\n')
+			# Extensions - already quoted by escape_string so don't add more quotes
+			ext_list = [escape_string(ext) for ext in entry["extensions"]]
 			f.write(f'        "extensions": [{", ".join(ext_list)}],\n')
-			# Escape nodes
-			node_list = []
-			for n in entry["nodes"]:
-				n_escaped = escape_literal(n)
-				if '"' in n_escaped:
-					node_list.append(f"'{n_escaped}'")
-				elif "'" in n_escaped:
-					node_list.append(f'"{n_escaped}"')
-				else:
-					node_list.append(f'"{n_escaped}"')
+			# Nodes - already quoted by escape_string so don't add more quotes
+			node_list = [escape_string(n) for n in entry["nodes"]]
 			f.write(f'        "nodes": [{", ".join(node_list)}],\n')
 			f.write("    },\n")
 		f.write("]\n")
