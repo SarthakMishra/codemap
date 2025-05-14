@@ -13,7 +13,7 @@ from codemap.processor.hash_calculation import RepoChecksumCalculator
 from codemap.utils.git_utils import GitError, GitRepoContext
 
 from .entity import EntitySchema, LocationSchema, MetadataSchema, ScopeSchema
-from .entity.types import EntityType, ScopeType, VisibilityModifier
+from .entity.types import EntityType, ScopeType
 from .language_map import LANGUAGE_NODE_MAPPING
 from .languages import LANGUAGES, NodeTypes, SupportedLanguages
 
@@ -62,7 +62,7 @@ def _hash_string(text: str) -> str:
 
 def _generate_entity_id(
 	entity_type: str, name: str | None, file_path: str, location: LocationSchema, content: bytes
-) -> int:
+) -> str:
 	"""Generate a stable, content-based hash ID for an entity using RepoChecksumCalculator.
 
 	Args:
@@ -100,17 +100,13 @@ def _generate_entity_id(
 	identifier += f":{content_hash}"
 
 	# Generate final hash
-	hash_hex = _hash_string(identifier)
-
-	# Convert hex hash to integer (taking first 8 chars for reasonable integer size)
-	return int(hash_hex[:8], 16) % (2**31)
+	return _hash_string(identifier)
 
 
-def _determine_scope_type(node: Node, entity_type: str) -> ScopeType:
-	"""Determine the scope type based on the node and entity type.
+def _determine_scope_type(entity_type: str) -> ScopeType:
+	"""Determine the scope type based on the entity type.
 
 	Args:
-		node: The tree-sitter Node
 		entity_type: The mapped entity type
 
 	Returns:
@@ -138,107 +134,99 @@ def _determine_scope_type(node: Node, entity_type: str) -> ScopeType:
 		if entity_type.startswith(type_prefix):
 			return cast("ScopeType", scope_type)
 
-	# If we can't determine from entity type, check node type
-	node_type = node.type.lower()
-
-	# Common node type patterns
-	if "function" in node_type or "method" in node_type:
-		return "FUNCTION"
-	if "class" in node_type:
-		return "CLASS"
-	if "block" in node_type:
-		return "BLOCK"
-	if "for" in node_type or "while" in node_type:
-		return "LOOP"
-	if "if" in node_type or "else" in node_type:
-		return "BLOCK"
-	if "switch" in node_type or "case" in node_type:
-		return "SWITCH"
-	if "try" in node_type or "catch" in node_type or "finally" in node_type:
-		return "TRY_BLOCK"
-	if "lambda" in node_type or "arrow_function" in node_type:
-		return "LAMBDA"
-
 	# Default to BLOCK if we can't determine
 	return "BLOCK"
 
 
-def _determine_visibility(node: Node, source: bytes, lang: str) -> VisibilityModifier:
-	"""Determine the visibility modifier for an entity.
+def _is_true_scope_creator(node_type: str, entity_type: str) -> bool:
+	"""Determine if a node actually creates a new lexical scope.
+
+	This is a more restrictive version that only returns True for nodes
+	that truly create a new lexical scope in most programming languages.
 
 	Args:
-		node: The tree-sitter Node
-		source: The source code as bytes
-		lang: The programming language
+		node_type: The type of the tree-sitter node
+		entity_type: The mapped entity type
 
 	Returns:
-		A VisibilityModifier value
+		True if the node creates a new lexical scope
 	"""
-	# Check for explicit visibility modifiers in node or its children
-	for child in [node, *node.children]:
-		if child.type in ["public", "private", "protected", "internal"]:
-			return cast("VisibilityModifier", child.type.upper())
+	# Skip trivial nodes like punctuation
+	if node_type in ["(", ")", "{", "}", "[", "]", ";", ":", ",", "."]:
+		return False
 
-	# Check based on language-specific patterns
-	if lang == "python":
-		# Python convention: leading underscore for "protected", double for "private"
-		name_node = node.child_by_field_name("name") or node.child_by_field_name("identifier")
-		if name_node:
-			name = source[name_node.start_byte : name_node.end_byte].decode("utf-8", errors="ignore")
-			if name.startswith("__") and not name.endswith("__"):
-				return "PRIVATE"
-			if name.startswith("_"):
-				return "PROTECTED"
+	# Skip string literals and components
+	if "string" in node_type.lower() or node_type in ["string_start", "string_content", "string_end"]:
+		return False
 
-	elif lang in ["java", "csharp", "typescript"]:
-		# Look for modifiers in nearby nodes
-		modifier_node = node.prev_sibling
-		if modifier_node and modifier_node.type in ["public", "private", "protected", "internal"]:
-			return cast("VisibilityModifier", modifier_node.type.upper())
+	# Skip identifiers and simple expressions
+	if node_type in ["identifier", "variable", "name", "expression"]:
+		return False
 
-	# Default to PUBLIC for top-level entities, PRIVATE for others
-	parent = node.parent
-	if not parent or parent.type in ["source_file", "program", "module"]:
-		return "PUBLIC"
+	# Primary scope creators - these almost always create a lexical scope
+	if entity_type in ["CLASS", "FUNCTION", "METHOD", "MODULE"]:
+		return True
 
-	return "PRIVATE"
+	# Control flow constructs that often create scopes
+	if entity_type in ["BLOCK", "LOOP", "IF", "SWITCH", "TRY_BLOCK", "COMPREHENSION", "LAMBDA"]:
+		# For these types, check the node_type to avoid creating scopes for every node
+		# within these constructs
+		node_type_lower = node_type.lower()
 
+		# Block-level constructs
+		if "block" in node_type_lower:
+			return True
 
-def _extract_namespace(node: Node, source: bytes, lang: str, file_path: str) -> str | None:
-	"""Extract namespace information for the entity.
+		# Function-like
+		if (
+			"function" in node_type_lower
+			or "method" in node_type_lower
+			or "lambda" in node_type_lower
+			or "arrow_function" in node_type_lower
+		):
+			return True
 
-	Args:
-		node: The tree-sitter Node
-		source: The source code as bytes
-		lang: The programming language
-		file_path: Path to the file
+		# Class-like
+		if "class" in node_type_lower:
+			return True
 
-	Returns:
-		A namespace string or None
-	"""
-	# Language-specific namespace extraction
-	if lang == "python":
-		# Use package structure for Python
-		parts = Path(file_path).parts
-		if "src" in parts:
-			pkg_parts = parts[parts.index("src") + 1 :]
-			return ".".join(pkg_parts)
-	elif lang == "java":
-		# Try to find package declaration
-		root = node
-		while root.parent:
-			root = root.parent
+		# Control flow blocks
+		if node_type_lower in [
+			"for_statement",
+			"while_statement",
+			"do_statement",
+			"if_statement",
+			"else_clause",
+			"switch_statement",
+			"try_statement",
+			"catch_clause",
+			"finally_clause",
+		]:
+			return True
 
-		for child in root.children:
-			if child.type == "package_declaration":
-				pkg_node = child.child_by_field_name("name")
-				if pkg_node:
-					return source[pkg_node.start_byte : pkg_node.end_byte].decode("utf-8", errors="ignore")
-	elif lang in ["javascript", "typescript"]:
-		# For JS/TS, could use the file path relative to project root
-		return Path(file_path).stem
+	# Specialized constructs - these are important scope-creating nodes
+	specialized_node_types = [
+		"module",
+		"namespace",
+		"program",
+		"file",
+		"compilation_unit",
+		"class_declaration",
+		"interface_declaration",
+		"enum_declaration",
+		"function_definition",
+		"method_definition",
+		"constructor_declaration",
+		"for_statement",
+		"while_statement",
+		"if_statement",
+		"switch_statement",
+		"try_statement",
+		"catch_clause",
+		"with_statement",
+	]
 
-	return None
+	return any(pattern in node_type.lower() for pattern in specialized_node_types)
 
 
 def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
@@ -274,20 +262,59 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 
 	entities: list[EntitySchema] = []
 	# Track scopes with their IDs for building the hierarchy
-	scope_map: dict[int, ScopeSchema] = {}
+	scope_map: dict[str, ScopeSchema] = {}
 
-	# The current scope stack (node, scope_id) tuples
-	scope_stack: list[tuple[Node, int]] = []
+	# The current scope stack tracks (node, scope_id) tuples
+	scope_stack: list[tuple[Node, str]] = []
 
-	# Track declarations for populating scope.declarations
-	declarations_by_scope_id: dict[int, list[int]] = {}
+	# Root scope for the module
+	module_node = tree.root_node
+	module_name = Path(file_path).stem
 
-	# Track imports for populating scope.imports
-	imports_by_scope_id: dict[int, list[str]] = {}
+	sl, sc = module_node.start_point
+	el, ec = module_node.end_point
 
-	entity_schema_fields = EntitySchema.model_fields
+	module_loc = LocationSchema(
+		start_line=sl + 1,
+		start_col=sc + 1,
+		end_line=el + 1,
+		end_col=ec + 1,
+	)
 
-	def visit(node: Node, parent_scope_id: int | None = None) -> EntitySchema | None:
+	module_meta = MetadataSchema(
+		file_path=file_path,
+		language=lang,
+		node_kind="module",
+	)
+
+	# Generate a global scope for the module
+	module_id = _generate_entity_id("MODULE", module_name, file_path, module_loc, source)
+
+	root_scope = ScopeSchema(
+		scope_id=module_id,
+		parent_scope_id=None,  # No parent for the root scope
+		scope_type="GLOBAL",
+		declarations=[],
+		imports=[],
+	)
+
+	scope_map[module_id] = root_scope
+
+	# Module entity
+	module_entity = EntitySchema(
+		id=module_id,
+		type="MODULE",
+		name=module_name,
+		parent_id=None,
+		children=[],
+		location=module_loc,
+		metadata=module_meta,
+		scope=root_scope,
+	)
+
+	entities.append(module_entity)
+
+	def visit(node: Node, parent_scope_id: str) -> EntitySchema | None:
 		tag = node.type
 
 		language_specific_mapping = LANGUAGE_NODE_MAPPING.get(lang)
@@ -305,20 +332,24 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 
 		etype = cast("EntityType", etype_str)
 
+		# Extract name if available
 		name_node = node.child_by_field_name("name") or node.child_by_field_name("identifier")
 		name = None
 		if name_node:
 			raw = source[name_node.start_byte : name_node.end_byte]
 			name = raw.decode("utf-8", errors="ignore")
 
+		# Create location
 		sl, sc = node.start_point
 		el, ec = node.end_point
+
 		loc = LocationSchema(
 			start_line=sl + 1,
 			start_col=sc + 1,
 			end_line=el + 1,
 			end_col=ec + 1,
 		)
+
 		meta = MetadataSchema(
 			file_path=file_path,
 			language=lang,
@@ -331,43 +362,43 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 		# Generate a stable entity ID
 		entity_id = _generate_entity_id(etype, name, file_path, loc, node_content)
 
-		# Determine if this node creates a new scope
-		is_scope_creator = etype in [
-			"CLASS",
-			"FUNCTION",
-			"METHOD",
-			"MODULE",
-			"BLOCK",
-			"LOOP",
-			"IF",
-			"SWITCH",
-			"TRY_BLOCK",
-			"COMPREHENSION",
-			"LAMBDA",
-		] or any(
-			scope_type in etype
-			for scope_type in ["CLASS", "FUNCTION", "METHOD", "MODULE", "BLOCK", "LOOP", "SCOPE", "PATTERN"]
-		)
+		# Determine if this node creates a new scope - using more restrictive check
+		is_scope_creator = _is_true_scope_creator(node.type, etype)
 
-		# Create scope for this entity
-		scope_type = _determine_scope_type(node, etype)
-		scope_id = entity_id  # Use the entity ID as the scope ID for scope creators
+		# Create scope for this entity if it's a scope creator
+		scope_id = parent_scope_id
+		scope_type = "BLOCK"  # Default
 
-		if not is_scope_creator and parent_scope_id is not None:
-			# Non-scope creators inherit parent scope ID
+		if is_scope_creator:
+			# Use entity type to determine scope type
+			scope_type = _determine_scope_type(etype)
+
+			scope_id = entity_id  # Use entity ID as scope ID for scope creators
+
+			# Create a new scope
+			scope = ScopeSchema(
+				scope_id=scope_id,
+				parent_scope_id=parent_scope_id,
+				scope_type=scope_type,
+				declarations=[],
+				imports=[],
+			)
+
+			scope_map[scope_id] = scope
+
+			# Update parent scope's declarations
+			if parent_scope_id in scope_map:
+				scope_map[parent_scope_id].declarations.append(entity_id)
+		else:
+			# Non-scope creators inherit parent scope
 			scope_id = parent_scope_id
 
-		visibility = _determine_visibility(node, source, lang)
-		namespace = _extract_namespace(node, source, lang, file_path)
+			# Still register this entity in the parent's declarations
+			if parent_scope_id in scope_map:
+				scope_map[parent_scope_id].declarations.append(entity_id)
 
-		# Initialize declarations and imports lists if this is a new scope
-		if is_scope_creator:
-			declarations_by_scope_id[scope_id] = []
-			imports_by_scope_id[scope_id] = []
-
-		# Add this entity's ID to parent scope's declarations
-		if parent_scope_id is not None and parent_scope_id in declarations_by_scope_id:
-			declarations_by_scope_id[parent_scope_id].append(entity_id)
+		# Get the scope (either new or parent's)
+		scope = scope_map[scope_id]
 
 		# Check for imports
 		if node.type in ["import_statement", "import_declaration", "use_declaration"]:
@@ -379,41 +410,21 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 					import_name = import_bytes.decode("utf-8", errors="ignore")
 					break
 
-			if import_name and parent_scope_id is not None and parent_scope_id in imports_by_scope_id:
-				imports_by_scope_id[parent_scope_id].append(import_name)
-
-		# Create the scope schema
-		scope = ScopeSchema(
-			scope_id=scope_id,
-			parent_scope_id=parent_scope_id,
-			scope_type=scope_type,
-			visibility=visibility,
-			namespace=namespace,
-			# Temporal attributes could be enhanced with language-specific logic
-			temporal_attributes={
-				"lifetime": "automatic",  # Default to automatic memory management
-				"hoisting": "none",  # Default to no hoisting
-			},
-			# Declarations and imports will be populated after all nodes are processed
-			declarations=[],
-			imports=[],
-			location=loc,
-			# Language-specific metadata could be enhanced
-			language_metadata={},
-			metadata=meta,
-		)
-
-		# Add scope to map for lookup
-		scope_map[scope_id] = scope
+			if import_name and scope_id in scope_map:
+				scope_map[scope_id].imports.append(import_name)
 
 		# Create the entity schema
 		data: dict[str, Any] = {
 			"id": entity_id,
 			"type": etype,
 			"name": name,
+			"parent_id": None,  # Will be set when added to parent's children
 			"scope": scope,
+			"location": loc,
+			"metadata": meta,
 		}
 
+		entity_schema_fields = EntitySchema.model_fields
 		if "children" in entity_schema_fields.keys():  # noqa: SIM118
 			data["children"] = []
 
@@ -428,12 +439,13 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 		supports_children = "children" in entity_schema_fields.keys()  # noqa: SIM118
 		if supports_children and hasattr(entity, "children") and isinstance(entity.children, list):
 			for child_node in node.children:
-				child_ent = visit(child_node, scope_id if is_scope_creator else parent_scope_id)
+				child_ent = visit(child_node, scope_id)
 				if child_ent:
+					child_ent.parent_id = entity_id
 					entity.children.append(child_ent)
 		else:
 			for child_node in node.children:
-				visit(child_node, scope_id if is_scope_creator else parent_scope_id)
+				visit(child_node, scope_id)
 
 		# Pop from scope stack when done with this scope
 		if is_scope_creator:
@@ -441,15 +453,11 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 
 		return entity
 
-	# Start with the root node and no parent scope
-	visit(tree.root_node)
-
-	# Populate declarations and imports in all scopes
-	for entity in entities:
-		scope_id = entity.scope.scope_id
-		if scope_id in declarations_by_scope_id:
-			entity.scope.declarations = declarations_by_scope_id[scope_id]
-		if scope_id in imports_by_scope_id:
-			entity.scope.imports = imports_by_scope_id[scope_id]
+	# Visit all children of the root node with the module scope as parent
+	for child_node in tree.root_node.children:
+		child_entity = visit(child_node, module_id)
+		if child_entity:
+			child_entity.parent_id = module_id
+			module_entity.children.append(child_entity)
 
 	return entities

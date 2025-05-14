@@ -82,15 +82,6 @@ ScopeType = Literal[
 	"PATTERN",  # Pattern matching scope (e.g., match value { ... } in Rust)
 ]
 
-# Not an entity type, but a property of ScopeType entities
-VisibilityModifier = Literal[
-	"PUBLIC",  # Public access (e.g., public class MyClass)
-	"PRIVATE",  # Private access (e.g., private int x;)
-	"PROTECTED",  # Protected access (e.g., protected void method())
-	"INTERNAL",  # Internal access (e.g., internal class in C#)
-	"PACKAGE",  # Package-private access (e.g., default access in Java)
-]
-
 # --- Statement Types --- #
 
 StatementType = Literal[

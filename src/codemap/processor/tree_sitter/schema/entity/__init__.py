@@ -1,7 +1,7 @@
 """Entity schemas for Tree-sitter."""
 
 from .base import EntitySchema, LocationSchema, MetadataSchema, ScopeSchema
-from .types import EntityType, ScopeType, VisibilityModifier
+from .types import EntityType, ScopeType
 
 __all__ = [
 	"EntitySchema",
@@ -10,5 +10,4 @@ __all__ = [
 	"MetadataSchema",
 	"ScopeSchema",
 	"ScopeType",
-	"VisibilityModifier",
 ]
