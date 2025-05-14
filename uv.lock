@@ -418,6 +418,7 @@ requires-dist = [
 ]
 
 [package.metadata.requires-dev]
+code-struct = []
 dev = [
     { name = "build", specifier = ">=1.2.2.post1" },
     { name = "interrogate", extras = ["png"], specifier = ">=1.7.0" },
