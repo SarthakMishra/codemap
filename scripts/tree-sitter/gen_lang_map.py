@@ -1,42 +1,62 @@
 """
-Script to auto-generate language_map.py by mapping Tree-sitter node types to entity schemas using semantic similarity.
+Script to generate language_map.py by mapping Tree-sitter node types to entity types using LLM.
 
-- Embeds node types (from literals.py) and entity schema names/descriptions (from entity/base.py)
-- Uses model2vec (embedding_utils.py) for embeddings
-- Uses sklearn cosine similarity for matching (as in clusterer.py)
-- Uses node_annotations.json for node descriptions
-- Outputs LANGUAGE_NODE_MAPPING in the format of language_map.py
+- Uses LLM to map node types to appropriate entity types based on descriptions
+- Reads from node_annotations.json and type_annotations.json
+- Uses Pydantic models for structured output processing
+- Outputs the mapping as language_map.json, which can be converted to language_map.py
+- Implements incremental updates by checking what's already processed
 """
 
+import argparse
 import importlib
 import json
-import re  # For parsing literals
+import re
 import sys
 from pathlib import Path
 
-import numpy as np
+from pydantic import BaseModel, Field
 from rich.console import Console
-from sklearn.metrics.pairwise import cosine_similarity
+from rich.progress import Progress
 
-sys.path.append(str(Path(__file__).parent.parent.parent.parent))  # Add project root to sys.path
+# Add project root to path
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
-# Import StaticModel at the module level for type hinting and single load
-from model2vec import StaticModel
+from codemap.config import ConfigLoader
+from codemap.llm.api import MessageDict, call_llm_api
 
 # Paths
 LITERALS_PY_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/literals.py")
-ENTITY_TYPES_PY_PATH = Path(
-	"src/codemap/processor/tree_sitter/schema/entity/types.py"
-)  # Path to get EntityType literals
+ENTITY_TYPES_PY_PATH = Path("src/codemap/processor/tree_sitter/schema/entity/types.py")
 LANG_SCHEMA_PY_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/schema.py")
 LANG_MAP_PY_PATH = Path("src/codemap/processor/tree_sitter/schema/language_map.py")
 NODE_ANNOTATIONS_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/json/node_annotations.json")
 TYPE_ANNOTATIONS_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/json/type_annotations.json")
+OUTPUT_JSON_PATH = Path("src/codemap/processor/tree_sitter/schema/languages/json/language_map.json")
 
-MODEL_NAME = "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
-MIN_CONFIDENCE = 0.40
+MAX_BATCH = 0  # Maximum number of batches to process per run
+BATCH_SIZE = 5  # Number of nodes per batch (reduced from 10)
 
 console = Console()
+
+
+# Pydantic models for structured output
+class NodeEntityMapping(BaseModel):
+	"""Mapping from a node type to an entity type with confidence."""
+
+	entity_type: str = Field(..., description="The entity type that best matches the node")
+	confidence: float = Field(
+		..., description="Confidence score from 0.0 to 1.0 where 1.0 is highest confidence", ge=0.0, le=1.0
+	)
+	reasoning: str = Field(..., description="Brief explanation of why this entity type was chosen")
+
+
+class BatchMappingResult(BaseModel):
+	"""Result of mapping a batch of nodes to entity types."""
+
+	mappings: dict[str, NodeEntityMapping] = Field(
+		..., description="Dictionary mapping node names to their entity type mappings"
+	)
 
 
 def load_node_annotations() -> dict[str, dict[str, str]]:
@@ -77,34 +97,6 @@ def load_type_annotations() -> dict[str, str]:
 		return {}
 
 
-def generate_embedding(text: str, model: StaticModel) -> list[float] | None:
-	"""
-	Generate embedding for a single text string using a pre-loaded model.
-
-	Args:
-		text: The text string to embed.
-		model: The pre-loaded StaticModel instance.
-
-	Returns:
-		Embedding (list of floats) or None if an error occurs.
-	"""
-	try:
-		# model.encode typically expects a list of strings
-		embedding_array = model.encode([text])
-		# Assuming model.encode([text]) returns a 2D array like [[0.1, 0.2, ...]] for a single text
-		if embedding_array is not None and embedding_array.ndim == 2 and embedding_array.shape[0] == 1:
-			return embedding_array[0].tolist()
-		if (
-			embedding_array is not None and embedding_array.ndim == 1
-		):  # If it directly returns 1D for single string list
-			return embedding_array.tolist()
-		console.print(f"[yellow]Unexpected embedding shape for text '{text}'. Skipping.[/yellow]")
-		return None
-	except Exception as e:
-		console.print(f"[red]Error generating embedding for '{text}': {e}[/red]")
-		return None
-
-
 def extract_entity_types() -> list[str]:
 	"""Extract entity type names from types.py without parsing comments."""
 	try:
@@ -141,6 +133,35 @@ def extract_entity_types() -> list[str]:
 		return []
 
 
+def extract_node_types() -> list[str]:
+	"""Extract the node types from literals.py NodeTypes Literal union."""
+	try:
+		# Import the module with NodeTypes literal
+		literals_module_path = "src.codemap.processor.tree_sitter.schema.languages.literals"
+		spec = importlib.util.find_spec(literals_module_path)
+		if not spec:
+			console.print(f"[red]Module not found: {literals_module_path}[/red]")
+			return []
+
+		literals_module = importlib.import_module(literals_module_path)
+
+		# Try to get the NodeTypes from the module
+		if hasattr(literals_module, "NodeTypes") and hasattr(literals_module.NodeTypes, "__args__"):
+			# Extract valid node types from the Literal union
+			node_types = [arg for arg in literals_module.NodeTypes.__args__ if isinstance(arg, str)]
+			console.print(f"[green]Found {len(node_types)} valid node types in literals.py[/green]")
+			return node_types
+		console.print("[red]NodeTypes literal not found or does not have __args__ attribute.[/red]")
+		return []
+
+	except ImportError as e:
+		console.print(f"[red]Failed to import literals module: {e}[/red]")
+		return []
+	except Exception as e:
+		console.print(f"[red]Error extracting node types: {e}[/red]")
+		return []
+
+
 def load_target_entity_types_with_descriptions() -> list[tuple[str, str | None]]:
 	"""Load entity type names and descriptions from type_annotations.json or extract from types.py."""
 	type_annotations = load_type_annotations()
@@ -148,6 +169,7 @@ def load_target_entity_types_with_descriptions() -> list[tuple[str, str | None]]
 	if type_annotations:
 		# If we have the annotations file, use it
 		return [(name, desc) for name, desc in type_annotations.items()]
+
 	# Otherwise extract just the names without descriptions
 	console.print("[yellow]No type annotations found. Using entity type names without descriptions.[/yellow]")
 	entity_types = extract_entity_types()
@@ -183,9 +205,11 @@ def load_language_schemas() -> dict[str, list[str]]:
 		msg = f"Could not find module {module_name}"
 		console.print(f"[red]{msg}[/red]")
 		raise ImportError(msg)
+
 	module = importlib.util.module_from_spec(spec)
 	sys.modules[module_name] = module
 	spec.loader.exec_module(module)  # type: ignore[attr-defined]
+
 	lang_nodes_map = {}
 	if hasattr(module, "LANGUAGES") and isinstance(module.LANGUAGES, list):
 		for lang_item in module.LANGUAGES:
@@ -195,151 +219,456 @@ def load_language_schemas() -> dict[str, list[str]]:
 				console.print(f"[yellow]Skipping malformed language item in schema.py: {lang_item}[/yellow]")
 	else:
 		console.print("[red]LANGUAGES constant not found or not a list in schema.py[/red]")
+
 	return lang_nodes_map
 
 
-def main(
-	output_path: Path = LANG_MAP_PY_PATH,
-	similarity_threshold: float = MIN_CONFIDENCE,
-	config_path: Path | None = None,  # Not used currently
-) -> None:
-	"""Main function to generate language_map.py."""
-	console.print(f"[cyan]Loading embedding model ({MODEL_NAME})...[/cyan]")
+def load_existing_mappings() -> dict[str, dict[str, str]]:
+	"""Load existing language -> node -> entity type mappings if the file exists."""
+	if not OUTPUT_JSON_PATH.exists():
+		return {}
+
 	try:
-		model = StaticModel.from_pretrained(MODEL_NAME)
-		console.print("[green]Embedding model loaded successfully.[/green]")
-	except Exception as e:
-		console.print(f"[red]Failed to load embedding model: {e}[/red]")
+		with OUTPUT_JSON_PATH.open("r", encoding="utf-8") as f:
+			return json.load(f)
+	except (json.JSONDecodeError, OSError) as e:
+		console.print(f"[yellow]Warning: Failed to load existing mappings: {e}[/yellow]")
+		return {}
+
+
+def batch(iterable, n=10):
+	"""Batch data into lists of length n."""
+	length = len(iterable)
+	for ndx in range(0, length, n):
+		yield iterable[ndx : ndx + n]
+
+
+def map_nodes_to_entity_types(
+	node_names: list[str],
+	node_descriptions: dict[str, str],
+	entity_types_with_desc: list[tuple[str, str | None]],
+	lang: str,
+	config_loader: ConfigLoader,
+	all_mappings: dict[str, dict[str, str]],
+) -> dict[str, str]:
+	"""
+	Map node names to entity types using LLM.
+
+	Args:
+		node_names: List of node names to map
+		node_descriptions: Dictionary mapping node names to their descriptions
+		entity_types_with_desc: List of tuples (entity_type, description)
+		lang: Programming language name
+		config_loader: ConfigLoader instance for LLM API
+		all_mappings: Current mapping dictionary to update and save after each call
+
+	Returns:
+		Dictionary mapping node names to entity types
+	"""
+	# Create a formatted list of available entity types with descriptions
+	entity_types_formatted = []
+	entity_type_names = []
+
+	for entity_type, description in entity_types_with_desc:
+		entity_type_names.append(entity_type)
+		if description:
+			entity_types_formatted.append(f"- {entity_type}: {description}")
+		else:
+			entity_types_formatted.append(f"- {entity_type}")
+
+	entity_types_text = "\n".join(entity_types_formatted)
+
+	# Generate a simpler system prompt for the LLM
+	system_prompt = "You are an expert at mapping programming language syntax nodes to semantic entity types."
+
+	# Process nodes in batches
+	batch_mappings = {}
+
+	for node_batch in batch(node_names, BATCH_SIZE):
+		# Create node descriptions for the batch
+		nodes_with_desc = []
+		for node in node_batch:
+			desc = node_descriptions.get(node, "")
+			nodes_with_desc.append(f"- {node}: {desc}" if desc else f"- {node}")
+
+		nodes_text = "\n".join(nodes_with_desc)
+		json_schema = BatchMappingResult.model_json_schema()
+
+		# Create a simpler user prompt
+		user_prompt = (
+			f"Map these {lang} programming language nodes to the most appropriate entity type:\n\n"
+			f"{nodes_text}\n\n"
+			f"Available entity types:\n{entity_types_text}\n\n"
+			f"Only use entity types from the provided list.\n"
+			f"IMPORTANT: Must return a JSON object **STRICTLY** following the provided schema:\n"
+			f"1. entity_type: The most appropriate entity type from the list\n"
+			f"2. confidence: A value from 0.0 to 1.0\n"
+			f"3. reasoning: Brief explanation (less than 15 words) for your choice\n\n"
+			f"--- **JSON Schema** ---\n\n"
+			f"{json_schema}"
+		)
+
+		# Prepare messages for LLM API
+		messages: list[MessageDict] = [
+			{"role": "system", "content": system_prompt},
+			{"role": "user", "content": user_prompt},
+		]
+
+		try:
+			# Try with Pydantic model validation
+			response = call_llm_api(messages, config_loader, BatchMappingResult)
+
+			if isinstance(response, BatchMappingResult):
+				# Check and filter valid entity types
+				current_batch_mappings = {}
+				for node_name, mapping in response.mappings.items():
+					# Verify the entity type is in our allowed list
+					if mapping.entity_type in entity_type_names:
+						# Only add the mapping if confidence is above threshold
+						if mapping.confidence >= 0.5:
+							current_batch_mappings[node_name] = mapping.entity_type
+					else:
+						console.print(
+							f"[yellow]Warning: Invalid entity type '{mapping.entity_type}' for node '{node_name}'. Skipping.[/yellow]"
+						)
+
+				batch_mappings.update(current_batch_mappings)
+
+				# Update all_mappings and save immediately after each successful call
+				if lang not in all_mappings:
+					all_mappings[lang] = {}
+				all_mappings[lang].update(current_batch_mappings)
+				save_mappings_to_json(all_mappings)
+
+				console.print(
+					f"[green]Processed batch with {len(current_batch_mappings)} valid mappings and saved progress[/green]"
+				)
+			else:
+				console.print(f"[red]Unexpected response type: {type(response)}[/red]")
+
+		except Exception as e:
+			console.print(f"[red]Error processing batch: {e}[/red]")
+
+			# Fallback approach - try parsing without structured validation
+			try:
+				# Call LLM API without structured validation
+				response = call_llm_api(messages, config_loader)
+
+				if isinstance(response, str):
+					# Try to parse the JSON response manually
+					import json
+					import re
+
+					# Extract JSON from the string response
+					json_match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+					if not json_match:
+						json_match = re.search(r"\{.*\}", response, re.DOTALL)
+
+					if json_match:
+						json_str = json_match.group(1) if json_match.group(0).startswith("```") else json_match.group(0)
+						try:
+							mappings_dict = json.loads(json_str)
+
+							# Process the mappings
+							current_batch_mappings = {}
+							for node_name, mapping in mappings_dict.items():
+								if isinstance(mapping, dict) and "entity_type" in mapping:
+									entity_type = mapping["entity_type"]
+									if entity_type in entity_type_names:
+										current_batch_mappings[node_name] = entity_type
+								elif isinstance(mapping, str) and mapping in entity_type_names:
+									current_batch_mappings[node_name] = mapping
+
+							batch_mappings.update(current_batch_mappings)
+
+							# Update all_mappings and save immediately after fallback success
+							if lang not in all_mappings:
+								all_mappings[lang] = {}
+							all_mappings[lang].update(current_batch_mappings)
+							save_mappings_to_json(all_mappings)
+
+							console.print(
+								f"[yellow]Processed batch with fallback method: {len(current_batch_mappings)} mappings and saved progress[/yellow]"
+							)
+						except json.JSONDecodeError:
+							console.print("[red]Failed to parse JSON response in fallback mode[/red]")
+			except Exception as fallback_error:
+				console.print(f"[red]Fallback processing also failed: {fallback_error}[/red]")
+
+	return batch_mappings
+
+
+def save_mappings_to_json(mappings: dict[str, dict[str, str]]) -> None:
+	"""Save language -> node -> entity type mappings to JSON file."""
+	OUTPUT_JSON_PATH.parent.mkdir(parents=True, exist_ok=True)
+	with OUTPUT_JSON_PATH.open("w", encoding="utf-8") as f:
+		json.dump(mappings, f, indent=2, ensure_ascii=False)
+	console.print(f"[bold green]Saved language mappings to {OUTPUT_JSON_PATH}[/bold green]")
+
+
+def filter_valid_node_types(
+	mappings: dict[str, dict[str, str]], valid_node_types: list[str]
+) -> dict[str, dict[str, str]]:
+	"""Filter mappings to only include valid node types."""
+	filtered_mappings = {}
+	skipped_count = 0
+	valid_node_set = set(valid_node_types)
+
+	for lang, lang_mappings in mappings.items():
+		filtered_mappings[lang] = {}
+		for node_name, entity_type in lang_mappings.items():
+			if node_name in valid_node_set:
+				filtered_mappings[lang][node_name] = entity_type
+			else:
+				skipped_count += 1
+				console.print(
+					f"[yellow]Warning: Node '{node_name}' for language '{lang}' is not in NodeTypes literal. Skipping.[/yellow]"
+				)
+
+	if skipped_count > 0:
+		console.print(f"[yellow]Skipped {skipped_count} node mappings that were not in NodeTypes literal.[/yellow]")
+
+	return filtered_mappings
+
+
+def generate_language_map_py() -> None:
+	"""Generate language_map.py from the JSON mappings file."""
+	if not OUTPUT_JSON_PATH.exists():
+		console.print(f"[red]Mappings file not found at {OUTPUT_JSON_PATH}. Cannot generate language_map.py.[/red]")
 		return
 
-	# Load necessary literals
-	supported_languages = load_supported_language_literals()  # List of (name, None)
-	language_to_nodes_map = load_language_schemas()  # Maps lang_name to list of its node_names
-	target_entity_types_with_desc = load_target_entity_types_with_descriptions()  # List of (name, description)
+	try:
+		with OUTPUT_JSON_PATH.open("r", encoding="utf-8") as f:
+			mappings = json.load(f)
 
-	# Load node descriptions from node_annotations.json
-	node_annotations = load_node_annotations()  # Maps lang_name to dict of node_name -> description
+		# Get valid node types for filtering
+		valid_node_types = extract_node_types()
+		if not valid_node_types:
+			console.print(
+				"[red]Failed to extract valid node types from literals.py. Cannot generate valid language_map.py.[/red]"
+			)
+			return
+
+		# Filter to only include valid node types
+		filtered_mappings = filter_valid_node_types(mappings, valid_node_types)
+
+		# Save filtered mappings back to JSON
+		save_mappings_to_json(filtered_mappings)
+
+		LANG_MAP_PY_PATH.parent.mkdir(parents=True, exist_ok=True)
+		with LANG_MAP_PY_PATH.open("w", encoding="utf-8") as f:
+			f.write('"""Auto-generated language to node mapping. DO NOT EDIT MANUALLY."""\n\n')
+			f.write("# ruff: noqa: E501, RUF001, F405, F821\n")
+			f.write("from .entity.types import EntityType\n")
+			f.write("from .languages.literals import NodeTypes, SupportedLanguages\n\n")
+			f.write("NodeMapping = dict[NodeTypes, EntityType]\n\n")
+			f.write("LANGUAGE_NODE_MAPPING: dict[SupportedLanguages, NodeMapping] = {\n")
+
+			num_langs = len(filtered_mappings)
+			for i, (lang_key, mapping_dict) in enumerate(filtered_mappings.items()):
+				lang_key_repr = repr(lang_key)
+				f.write(f"\t{lang_key_repr}: {{\n")
+
+				for node_name_key, entity_type_val in mapping_dict.items():
+					node_name_key_repr = repr(node_name_key)
+					entity_type_repr = repr(entity_type_val)
+					f.write(f"\t\t{node_name_key_repr}: {entity_type_repr},\n")
+
+				f.write("\t}")
+				if i < num_langs - 1:
+					f.write(",")
+				f.write("\n")
+			f.write("}\n")
+
+		console.print(f"[green]Successfully generated language_map.py at: {LANG_MAP_PY_PATH}[/green]")
+	except Exception as e:
+		console.print(f"[red]Error generating language_map.py: {e}[/red]")
+
+
+def main() -> None:
+	"""Main function to generate language mappings using LLM."""
+	parser = argparse.ArgumentParser(description="Generate language mappings using LLM.")
+	parser.add_argument("--lang", type=str, help="Language to process (matches schema.py name)")
+	parser.add_argument(
+		"--batch-size", type=int, default=BATCH_SIZE, help=f"Batch size for LLM calls (default: {BATCH_SIZE})"
+	)
+	parser.add_argument("--force-all", action="store_true", help="Force regeneration of all mappings")
+	parser.add_argument("--generate-py", action="store_true", help="Generate language_map.py from JSON")
+	parser.add_argument("--filter-only", action="store_true", help="Only filter existing mappings by valid node types")
+	parser.add_argument("--max-retries", type=int, default=2, help="Maximum number of retries for failed batches")
+	args = parser.parse_args()
+
+	# If only filtering, just load existing mappings, filter, and generate language_map.py
+	if args.filter_only:
+		console.print("[cyan]Only filtering existing mappings by valid node types...[/cyan]")
+		valid_node_types = extract_node_types()
+		if not valid_node_types:
+			console.print("[red]Failed to extract valid node types. Cannot filter mappings.[/red]")
+			return
+
+		existing_mappings = load_existing_mappings()
+		filtered_mappings = filter_valid_node_types(existing_mappings, valid_node_types)
+		save_mappings_to_json(filtered_mappings)
+		generate_language_map_py()
+		return
+
+	# If only generating Python file from existing JSON
+	if args.generate_py:
+		console.print("[cyan]Generating language_map.py from existing JSON mappings...[/cyan]")
+		generate_language_map_py()
+		return
+
+	config_loader = ConfigLoader()
+
+	# Load valid node types
+	valid_node_types = extract_node_types()
+	if not valid_node_types:
+		console.print("[red]Failed to extract valid node types from literals.py. Cannot generate mappings.[/red]")
+		return
+
+	# Load existing mappings if not forcing regeneration
+	existing_mappings = {} if args.force_all else load_existing_mappings()
+
+	# Load necessary data
+	supported_languages = load_supported_language_literals()
+	language_to_nodes_map = load_language_schemas()
+	target_entity_types_with_desc = load_target_entity_types_with_descriptions()
+	node_annotations = load_node_annotations()
 
 	if not target_entity_types_with_desc:
 		console.print(
-			"[red]No target entity type literals loaded. Cannot generate mappings. Check entity/types.py and parsing logic.[/red]"
+			"[red]No target entity type literals loaded. Cannot generate mappings. Check entity/types.py and type_annotations.json.[/red]"
 		)
 		return
 
-	console.print(f"[cyan]Generating embeddings for {len(target_entity_types_with_desc)} target entity types...[/cyan]")
-	target_type_embeddings_list = []
-	valid_target_type_names = []  # Store only the name for mapping
-	for name, description in target_entity_types_with_desc:
-		text_to_embed = f"{name}: {description}" if description else name
-		emb = generate_embedding(text_to_embed, model)
-		if emb is not None:
-			target_type_embeddings_list.append(emb)
-			valid_target_type_names.append(name)
+	# Only process specified language if provided, otherwise process all supported languages
+	langs = (
+		[args.lang] if args.lang and args.lang in language_to_nodes_map else [lang for lang, _ in supported_languages]
+	)
 
-	if not target_type_embeddings_list:
-		console.print("[red]No target entity type embeddings could be generated. Aborting.[/red]")
-		return
-	target_type_embeddings = np.array(target_type_embeddings_list)
+	console.print(f"[cyan]Processing {len(langs)} languages...[/cyan]")
 
-	lang_map_output: dict[
-		str, dict[str, tuple[str, str, str]]
-	] = {}  # Output format: {lang: {node_name: (entity_type_str, prefix, comment)}}
+	all_mappings = existing_mappings.copy()
+	batch_size = args.batch_size if args.batch_size > 0 else BATCH_SIZE
+	max_retries = args.max_retries
 
-	console.print(f"[cyan]Processing {len(supported_languages)} languages...[/cyan]")
-	for lang_idx, (lang_name, _) in enumerate(supported_languages):
-		lang_tree_sitter_nodes = language_to_nodes_map.get(lang_name)
+	for lang_idx, lang in enumerate(langs):
+		# Initialize language entry if it doesn't exist
+		if lang not in all_mappings:
+			all_mappings[lang] = {}
+
+		lang_tree_sitter_nodes = language_to_nodes_map.get(lang, [])
 		if not lang_tree_sitter_nodes:
+			console.print(f"[yellow]No tree-sitter nodes found for language: {lang} in schema.py. Skipping.[/yellow]")
+			continue
+
+		# Filter out nodes that are not in the valid node types list before processing
+		valid_lang_nodes = [node for node in lang_tree_sitter_nodes if node in valid_node_types]
+		if not valid_lang_nodes:
 			console.print(
-				f"[yellow]No tree-sitter nodes found for language: {lang_name} in schema.py. Skipping.[/yellow]"
+				f"[yellow]No valid tree-sitter nodes found for language: {lang} after filtering. Skipping.[/yellow]"
+			)
+			continue
+
+		# Create a list of unprocessed nodes (not in existing mappings)
+		unprocessed_nodes = [node for node in valid_lang_nodes if node not in all_mappings.get(lang, {})]
+		total_unprocessed = len(unprocessed_nodes)
+
+		if total_unprocessed == 0:
+			console.print(
+				f"[green]All {len(valid_lang_nodes)} nodes for language '{lang}' already processed. Skipping.[/green]"
 			)
 			continue
 
 		console.print(
-			f"[magenta]Processing language: {lang_name} ({lang_idx + 1}/{len(supported_languages)}) with {len(lang_tree_sitter_nodes)} nodes...[/magenta]"
+			f"[cyan]Processing language '{lang}' ({lang_idx + 1}/{len(langs)}): {total_unprocessed} nodes remaining to map[/cyan]"
 		)
 
-		# Get node descriptions for this language
-		lang_node_descriptions = node_annotations.get(lang_name, {})
-		if lang_node_descriptions:
-			console.print(f"[green]Found {len(lang_node_descriptions)} node descriptions for {lang_name}[/green]")
-		else:
-			console.print(f"[yellow]No node descriptions found for {lang_name}. Using node names only.[/yellow]")
+		# Process nodes in batches
+		with Progress() as progress:
+			task = progress.add_task(f"[cyan]Mapping {lang} nodes...", total=total_unprocessed)
 
-		node_to_entity_type_map: dict[str, tuple[str, str, str]] = {}
+			# We'll try to process batches with retries for failed ones
+			nodes_to_process = unprocessed_nodes.copy()
+			failed_nodes = []
+			retry_count = 0
 
-		for ts_node_name in lang_tree_sitter_nodes:
-			# Preprocess node name for embedding: replace underscores with spaces
-			node_name_for_embed = ts_node_name.replace("_", " ")
+			while nodes_to_process and (MAX_BATCH == 0 or retry_count <= max_retries):
+				# Process in batches
+				batches = list(batch(nodes_to_process, batch_size))
+				if MAX_BATCH > 0:
+					batches = batches[:MAX_BATCH]
 
-			# Use node description if available
-			node_description = lang_node_descriptions.get(ts_node_name, "")
-			text_to_embed = f"{node_name_for_embed}: {node_description}" if node_description else node_name_for_embed
+				# Reset for this attempt
+				nodes_to_process = []
 
-			node_embedding = generate_embedding(text_to_embed, model)
-			mapped_entity_type: str = "UNKNOWN"  # Default to UNKNOWN
-			prefix_for_file = ""  # Empty prefix by default (no commenting out)
-			comment_for_file = ""  # Empty comment by default
+				for i, node_batch in enumerate(batches):
+					console.print(f"[cyan]Processing batch {i + 1}/{len(batches)} for {lang}...[/cyan]")
 
-			if node_embedding is not None and target_type_embeddings.size > 0:
-				similarities = cosine_similarity(np.array(node_embedding).reshape(1, -1), target_type_embeddings)[0]
-				best_idx = np.argmax(similarities)
-				best_score = similarities[best_idx]
+					# Get descriptions for the nodes in this batch
+					node_descriptions = {node: node_annotations.get(lang, {}).get(node, "") for node in node_batch}
 
-				if best_score >= similarity_threshold:
-					mapped_entity_type = valid_target_type_names[best_idx]
+					try:
+						# Map nodes to entity types (pass all_mappings to save after each successful call)
+						batch_mappings = map_nodes_to_entity_types(
+							node_batch,
+							node_descriptions,
+							target_entity_types_with_desc,
+							lang,
+							config_loader,
+							all_mappings,
+						)
+
+						# Add successful mappings (already done within map_nodes_to_entity_types)
+
+						# Track failed nodes for retry
+						successful_nodes = set(batch_mappings.keys())
+						current_failed = [node for node in node_batch if node not in successful_nodes]
+						if current_failed:
+							failed_nodes.extend(current_failed)
+							console.print(
+								f"[yellow]Failed to map {len(current_failed)} nodes in batch {i + 1}[/yellow]"
+							)
+
+						# Update progress
+						progress.update(task, advance=len(successful_nodes))
+
+					except Exception as e:
+						console.print(f"[red]Error processing batch {i + 1}: {e}[/red]")
+						failed_nodes.extend(node_batch)
+
+				# If we have failed nodes and still have retries left, try again with smaller batch size
+				if failed_nodes and retry_count < max_retries:
+					retry_count += 1
+					nodes_to_process = failed_nodes
+					failed_nodes = []
+					batch_size = max(1, batch_size // 2)  # Reduce batch size for retries
+					console.print(
+						f"[yellow]Retry attempt {retry_count}/{max_retries} with {len(nodes_to_process)} nodes and batch size {batch_size}[/yellow]"
+					)
 				else:
-					best_guess_type = (
-						valid_target_type_names[best_idx] if best_idx < len(valid_target_type_names) else "N/A"
-					)
-					# Low confidence mapping: comment out the line and add score info
-					prefix_for_file = "# "
-					comment_for_file = (
-						f"  # LOW CONFIDENCE ({best_score:.2f}) for node {ts_node_name!r} -> {best_guess_type}"
-					)
-			else:
-				# Unable to embed: comment out the line
-				prefix_for_file = "# "
-				comment_for_file = f"  # UNABLE TO EMBED node {ts_node_name!r}"
+					# Add any remaining failed nodes to a "failed_nodes" section for reference
+					if failed_nodes:
+						if "failed_nodes" not in all_mappings:
+							all_mappings["failed_nodes"] = {}
+						if lang not in all_mappings["failed_nodes"]:
+							all_mappings["failed_nodes"][lang] = []
+						all_mappings["failed_nodes"][lang].extend(failed_nodes)
+						console.print(
+							f"[red]{len(failed_nodes)} nodes could not be mapped after {retry_count} retries. Added to failed_nodes section.[/red]"
+						)
+						# Save the failed nodes too
+						save_mappings_to_json(all_mappings)
+					break
 
-			node_to_entity_type_map[ts_node_name] = (mapped_entity_type, prefix_for_file, comment_for_file)
+		# Filter mappings to include only valid node types
+		filtered_mappings = filter_valid_node_types(all_mappings, valid_node_types)
+		save_mappings_to_json(filtered_mappings)
 
-		lang_map_output[lang_name] = node_to_entity_type_map
+		# Generate language_map.py
+		generate_language_map_py()
 
-	# Write language_map.py
-	output_path.parent.mkdir(parents=True, exist_ok=True)
-	with output_path.open("w", encoding="utf-8") as f:
-		f.write('"""Auto-generated language to node mapping. DO NOT EDIT MANUALLY."""\n\n')
-		f.write("# ruff: noqa: E501, RUF001, F405, F821\n")  # Removed F403 (star import) as it's no longer used
-		# No more schema class imports from .entity.base
-		f.write("from .entity.types import EntityType\n")  # Only EntityType is needed now from types
-		f.write("from .languages.literals import NodeTypes, SupportedLanguages\n\n")
-		# Updated NodeMapping definition
-		f.write("NodeMapping = dict[NodeTypes, EntityType]\n\n")
-
-		f.write("LANGUAGE_NODE_MAPPING: dict[SupportedLanguages, NodeMapping] = {\n")
-		num_langs = len(lang_map_output)
-		for i, (lang_key, mapping_dict) in enumerate(lang_map_output.items()):
-			lang_key_repr = repr(lang_key)
-			f.write(f"    {lang_key_repr}: {{\n")
-
-			for node_name_key, mapped_data in mapping_dict.items():
-				mapped_entity_type_val, prefix_val, comment_suffix_val = mapped_data
-
-				node_name_key_repr = repr(node_name_key)
-				mapped_entity_type_repr = repr(mapped_entity_type_val)
-
-				line_end = "," if not prefix_val else ""  # No comma for commented lines
-				f.write(
-					f"        {prefix_val}{node_name_key_repr}: {mapped_entity_type_repr}{line_end}{comment_suffix_val}\n"
-				)
-
-			f.write("    }")
-			if i < num_langs - 1:
-				f.write(",")
-			f.write("\n")
-		f.write("}\n")
-
-	console.print(f"[green]Successfully generated language map at: {output_path}[/green]")
+	console.print("[bold green]Successfully completed language mapping generation![/bold green]")
 
 
 if __name__ == "__main__":
