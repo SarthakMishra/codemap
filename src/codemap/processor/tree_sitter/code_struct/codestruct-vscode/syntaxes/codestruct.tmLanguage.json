@@ -1,0 +1,142 @@
+{
+    "name": "CodeStruct",
+    "scopeName": "source.codestruct",
+    "patterns": [
+        { "include": "#keywords" },
+        { "include": "#short_keywords" },
+        { "include": "#attributes" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#boolean" },
+        { "include": "#comments" },
+        { "include": "#indentation" },
+        { "include": "#entity_names" },
+        { "include": "#minified_separators" }
+    ],
+    "repository": {
+        "keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(dir|file|module|namespace|class|func|lambda|attr|param|returns|var|const|type_alias|union|optional|import)\\b:",
+                    "name": "keyword.codestruct"
+                },
+                {
+                    "match": "\\b(doc)\\b:",
+                    "name": "keyword.codestruct"
+                }
+            ]
+        },
+        "short_keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(d|f|m|cl|fn|at|p|r|v|c|i|dc|t|s|rf)\\b:",
+                    "name": "keyword.minified"
+                }
+            ]
+        },
+        "attributes": {
+            "patterns": [
+                {
+                    "name": "meta.attributes",
+                    "begin": "\\[",
+                    "end": "\\]",
+                    "beginCaptures": { "0": { "name": "punctuation.bracket" } },
+                    "endCaptures": { "0": { "name": "punctuation.bracket" } },
+                    "patterns": [
+                        {
+                            "match": "\\b(type|default|source|ref)\\b:",
+                            "name": "entity.attribute"
+                        },
+                        {
+                            "match": ",",
+                            "name": "punctuation.comma"
+                        },
+                        { "include": "#strings" },
+                        { "include": "#numbers" },
+                        { "include": "#boolean" }
+                    ]
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.double",
+                    "begin": "\"",
+                    "end": "\"",
+                    "beginCaptures": { "0": { "name": "string.begin" } },
+                    "endCaptures": { "0": { "name": "string.end" } },
+                    "patterns": [ ]
+                },
+                {
+                    "name": "string.single",
+                    "begin": "'",
+                    "end": "'",
+                    "beginCaptures": { "0": { "name": "string.begin" } },
+                    "endCaptures": { "0": { "name": "string.end" } },
+                    "patterns": [ ]
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "match": "-?\\d+(\\.\\d+)?",
+                    "name": "constant.numeric"
+                }
+            ]
+        },
+        "boolean": {
+            "patterns": [
+                {
+                    "match": "\\b(true|false)\\b",
+                    "name": "constant.boolean"
+                }
+            ]
+        },
+        "comments": {
+            "patterns": [
+                {
+                    "match": "#[^\\n]*",
+                    "name": "comment.line"
+                }
+            ]
+        },
+        "indentation": {
+            "patterns": [
+                {
+                    "match": "^[ \\t]+",
+                    "name": "meta.whitespace"
+                }
+            ]
+        },
+        "entity_names": {
+            "patterns": [
+                {
+                    "match": "(?<=doc:)\\s+(.+)$",
+                    "name": "string.unquoted.doc"
+                },
+                {
+                    "match": "(?<=:)[ \\t]+([a-zA-Z0-9_./\\-]+)",
+                    "name": "entity.name"
+                }
+            ]
+        },
+        "minified_separators": {
+            "patterns": [
+                {
+                    "match": ";",
+                    "name": "punctuation.semicolon"
+                },
+                {
+                    "match": "\\|",
+                    "name": "punctuation.pipe"
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.comma"
+                }
+            ]
+        }
+    }
+}

@@ -1,0 +1,23 @@
+{
+  "iconDefinitions": {
+    "_codemap": {
+      "iconPath": "./fileicons/codemap.svg"
+    }
+  },
+  "fileExtensions": {
+    "cstxt": "_codemap",
+    "codestruct": "_codemap",
+    "cs.txt": "_codemap"
+  },
+  "fileNames": {
+    ".codemap": "_codemap",
+    ".codemap.yml": "_codemap",
+    "cstxt": "_codemap",
+    "codestruct": "_codemap",
+    "cs.txt": "_codemap"
+  },
+  "languageIds": {
+    "codestruct": "_codemap",
+    "codemapyaml": "_codemap"
+  }
+}
