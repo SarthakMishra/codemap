@@ -68,6 +68,7 @@ dev = [
     "build>=1.2.2.post1",
     "interrogate[png]>=1.7.0",
     "isort>=6.0.1",
+    "mypy>=1.15.0",
     "packaging>=25.0",
     "pre-commit>=4.2.0",
     "pylint>=3.3.6",
