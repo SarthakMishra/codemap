@@ -2,12 +2,13 @@
   "name": "codestruct",
   "displayName": "CodeStruct",
   "description": "Syntax highlighting for CodeStruct notation",
-  "version": "0.1.0",
-  "publisher": "codemap",
+  "version": "0.1.1",
+  "publisher": "SarthakMishra",
   "author": {
     "name": "Sarthak Mishra"
   },
   "license": "MIT",
+  "icon": "images/icon.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/SarthakMishra/codemap"
