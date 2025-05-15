@@ -166,6 +166,8 @@ nav:
 
 theme:
   name: material
+  logo: assets/codemap_logo_white.svg
+  favicon: assets/codemap_logo.svg
   custom_dir: overrides
   icon:
     logo: material/library
@@ -185,21 +187,21 @@ theme:
   palette:
   - media: (prefers-color-scheme)
     toggle:
-      icon: material/link
+      icon: material/brightness-auto
       name: Switch to light mode
   - media: '(prefers-color-scheme: light)'
     scheme: default
-    primary: indigo
-    accent: indigo
+    primary: deep orange
+    accent: deep orange
     toggle:
-      icon: material/toggle-switch
+      icon: material/brightness-7
       name: Switch to dark mode
   - media: '(prefers-color-scheme: dark)'
     scheme: slate
-    primary: black
-    accent: indigo
+    primary: deep orange
+    accent: deep orange
     toggle:
-      icon: material/toggle-switch-off
+      icon: material/brightness-4
       name: Switch to system preference
   font:
     text: Geist
@@ -215,6 +217,10 @@ markdown_extensions:
     - name: mermaid
       class: mermaid
       format: !!python/name:mermaid2.fence_mermaid_custom
+
+extra_css:
+  - stylesheet/extra.css
+
 plugins:
 - search
 - mermaid2

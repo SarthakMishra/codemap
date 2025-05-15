@@ -1,0 +1,71 @@
+{
+  "name": "codestruct",
+  "displayName": "CodeStruct",
+  "description": "Syntax highlighting for CodeStruct notation",
+  "version": "0.1.4",
+  "publisher": "SarthakMishra",
+  "author": {
+    "name": "Sarthak Mishra"
+  },
+  "license": "MIT",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/SarthakMishra/codemap"
+  },
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "keywords": [
+    "codestruct",
+    "code structure",
+    "notation",
+    "syntax highlighting",
+    "llm"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "codestruct",
+        "aliases": ["CodeStruct", "codestruct"],
+        "extensions": [".cstxt", ".codestruct", ".cs.txt"],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./icons/fileicons/codemap.svg",
+          "dark": "./icons/fileicons/codemap.svg"
+        }
+      },
+      {
+        "id": "codemap",
+        "aliases": ["CodeMap", "codemap"],
+        "filenames": [".codemap", ".codemap.yml"],
+        "icon": {
+          "light": "./icons/fileicons/codemap.svg",
+          "dark": "./icons/fileicons/codemap.svg"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "codestruct",
+        "scopeName": "source.codestruct",
+        "path": "./syntaxes/codestruct.tmLanguage.json"
+      },
+      {
+        "language": "codemap",
+        "scopeName": "source.codemap",
+        "path": "./syntaxes/codemap.tmLanguage.json"
+      }
+    ],
+    "iconThemes": [
+      {
+        "id": "codestruct-icons",
+        "label": "CodeStruct Icons",
+        "path": "./icons/icons-theme.json"
+      }
+    ]
+  }
+}

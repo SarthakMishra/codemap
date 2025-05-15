@@ -1,0 +1,189 @@
+{
+    "name": "CodeStruct",
+    "scopeName": "source.codestruct",
+    "patterns": [
+        { "include": "#comments" },
+        { "include": "#indentation" },
+        { "include": "#import_statements" },
+        { "include": "#keywords" },
+        { "include": "#short_keywords" },
+        { "include": "#attributes" },
+        { "include": "#entity_names" },
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#boolean" }
+    ],
+    "repository": {
+        "keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(dir|file|module|namespace|class|func|lambda|attr|param|returns|var|const|type_alias|union|optional|import)\\b:",
+                    "name": "keyword.codestruct"
+                },
+                {
+                    "match": "\\b(doc)\\b:",
+                    "name": "keyword.codestruct"
+                },
+                {
+                    "match": "\\b(source)\\b:",
+                    "name": "keyword.source"
+                }
+            ]
+        },
+        "short_keywords": {
+            "patterns": [
+                {
+                    "match": "\\b(d|f|m|cl|fn|at|p|r|v|c|i|dc|t|s|rf)\\b:",
+                    "name": "keyword.minified"
+                }
+            ]
+        },
+        "attributes": {
+            "name": "meta.attributes.codestruct",
+            "begin": "\\[",
+            "end": "\\]",
+            "beginCaptures": { "0": { "name": "punctuation.definition.attributes.begin.codestruct" } },
+            "endCaptures": { "0": { "name": "punctuation.definition.attributes.end.codestruct" } },
+            "patterns": [
+                {
+                    "match": "(type)(:)\\s*\"([^\"]*?)\"",
+                    "captures": {
+                        "1": { "name": "entity.name.attribute.type.codestruct" },
+                        "2": { "name": "punctuation.separator.key-value.codestruct" },
+                        "3": { "name": "storage.type.complex.quoted.codestruct" }
+                    }
+                },
+                {
+                    "match": "(type)(:)\\s*([^,\\]]*)",
+                    "captures": {
+                        "1": { "name": "entity.name.attribute.type.codestruct" },
+                        "2": { "name": "punctuation.separator.key-value.codestruct" },
+                        "3": { "name": "storage.type.simple.codestruct" }
+                    }
+                },
+                {
+                    "match": "(default|source|ref)(:)\\s*([^,\\]]*)",
+                    "captures": {
+                        "1": { "name": "entity.name.attribute.codestruct" },
+                        "2": { "name": "punctuation.separator.key-value.codestruct" },
+                        "3": { "name": "string.unquoted.attribute-value.codestruct" }
+                    }
+                },
+                {
+                    "match": ",",
+                    "name": "punctuation.separator.comma.codestruct"
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.codestruct",
+                    "begin": "\"",
+                    "end": "\"",
+                    "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.codestruct" } },
+                    "endCaptures": { "0": { "name": "punctuation.definition.string.end.codestruct" } },
+                    "patterns": [
+                        { "include": "#string_escapes" },
+                        {
+                            "match": "[^\\\"]+",
+                            "name": "string.quoted.double.content.codestruct"
+                        }
+                    ]
+                },
+                {
+                    "name": "string.quoted.single.codestruct",
+                    "begin": "'",
+                    "end": "'",
+                    "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.codestruct" } },
+                    "endCaptures": { "0": { "name": "punctuation.definition.string.end.codestruct" } },
+                    "patterns": [
+                        { "include": "#string_escapes" },
+                        {
+                            "match": "[^\\']+",
+                            "name": "string.quoted.single.content.codestruct"
+                        }
+                    ]
+                }
+            ]
+        },
+        "string_escapes": {
+            "patterns": [
+                {
+                    "match": "\\\\.",
+                    "name": "constant.character.escape.codestruct"
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "match": "-?\\d+(\\.\\d+)?",
+                    "name": "constant.numeric.codestruct"
+                }
+            ]
+        },
+        "boolean": {
+            "patterns": [
+                {
+                    "match": "\\b(true|false)\\b",
+                    "name": "constant.language.boolean.codestruct"
+                }
+            ]
+        },
+        "comments": {
+            "patterns": [
+                {
+                    "match": "#[^\\n]*",
+                    "name": "comment.line.number-sign.codestruct"
+                }
+            ]
+        },
+        "indentation": {
+            "patterns": [
+                {
+                    "match": "^[ \\t]+",
+                    "name": "meta.whitespace.indentation.codestruct"
+                }
+            ]
+        },
+        "import_statements": {
+            "patterns": [
+                {
+                    "match": "(import:)(\\s*)(.+)",
+                    "captures": {
+                        "1": { "name": "keyword.codestruct" },
+                        "3": {
+                            "patterns": [
+                                {
+                                    "match": "&",
+                                    "name": "punctuation.separator.imports.codestruct"
+                                },
+                                {
+                                    "match": "[^&]+",
+                                    "name": "entity.name.import.codestruct"
+                                }
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        "entity_names": {
+            "patterns": [
+                {
+                    "match": "(?<=doc:)\\s+(.+)$",
+                    "name": "string.unquoted.docinfo.codestruct"
+                },
+                {
+                    "match": "(?<=:)\\s+([a-zA-Z_][a-zA-Z0-9_./-]*)(?=\\s*(\\[|$|#))",
+                    "captures": { "1": { "name": "entity.name.generic.codestruct" } }
+                },
+                {
+                    "match": "(?<=:)\\s+([^#\\[\\n]+)(?<!\\s)(?=\\s*($|#))",
+                    "captures": { "1": { "name": "string.unquoted.value.codestruct" } }
+                }
+            ]
+        }
+    }
+}
