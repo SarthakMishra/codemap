@@ -10,6 +10,7 @@ from tree_sitter import Node
 from tree_sitter_language_pack import get_parser
 
 from codemap.processor.hash_calculation import RepoChecksumCalculator
+from codemap.processor.tree_sitter.code_struct.converter import entities_to_codestruct, minify_codestruct
 from codemap.utils.git_utils import GitError, GitRepoContext
 
 from .entity import EntitySchema, LocationSchema, MetadataSchema, ScopeSchema
@@ -461,3 +462,30 @@ def extract_entities(source: bytes, file_path: str) -> list[EntitySchema]:
 			module_entity.children.append(child_entity)
 
 	return entities
+
+
+def extract_entities_as_codestruct(source: bytes, file_path: str, minify: bool = False) -> str:
+	"""Extract entities from source code and convert to CodeStruct notation.
+
+	Args:
+		source: The source code content as bytes
+		file_path: The path to the file being parsed
+		minify: Whether to return minified CodeStruct notation
+
+	Returns:
+		CodeStruct notation as a string
+
+	Raises:
+		ValueError: If the file extension is not supported
+	"""
+	# First extract entities using the existing function
+	entities = extract_entities(source, file_path)
+
+	# Convert to CodeStruct notation
+	codestruct = entities_to_codestruct(entities)
+
+	# Minify if requested
+	if minify:
+		return minify_codestruct(codestruct)
+
+	return codestruct

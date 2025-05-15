@@ -26,6 +26,7 @@
 
 - Attributes are key-value pairs: `key: value`
 - Multiple attributes are separated by commas: `[type: INTEGER, default: 0]`
+- Complex type annotations containing special characters (like `[]|,(){}`) should be wrapped in double quotes: `[type: "List[Dict[str, Any]]"]`
 
 ### 2.4. Documentation
 
@@ -34,6 +35,16 @@
 ### 2.5. Comments
 
 - Lines starting with `#` are comments and ignored by parsers.
+
+### 2.6. Grouping Entities
+
+- Use the ampersand (`&`) to group related entities of the same type under a common parent. This is especially useful for imports from the same source:
+  ```
+  import: logging & os & sys & pathlib
+    source: stdlib
+  ```
+- Grouped entities remain separate logical entities but share common attributes, reducing repetition.
+- Unlike comma-separated lists (which separate attributes), ampersand indicates entity grouping and doesn't conflict with minification.
 
 ---
 
@@ -46,7 +57,7 @@
 | `module:`    | Module or package                           | `module: user_management`            |
 | `namespace:` | Namespace (for languages with namespaces)    | `namespace: std`                     |
 | `class:`     | Class or type definition                    | `class: User`                        |
-| `func:`      | Function or method                          | `func: login`                        |
+| `func:`      | Function or method                          | `func: login [type: Async]`          |
 | `lambda:`    | Lambda expression                           | `lambda: double`                     |
 | `attr:`      | Attribute or class field                    | `attr: name [type: STRING]`          |
 | `param:`     | Function/method parameter                   | `param: username [type: STRING]`     |
@@ -78,6 +89,41 @@ import: User
 import: os
   type: external
   source: stdlib
+```
+
+Grouped imports example:
+```
+import: os & sys & pathlib
+  source: stdlib
+
+import: numpy & pandas & sklearn
+  source: external
+  type: pip
+```
+
+### 3.2. Function and Method Types
+
+Functions and methods can be assigned types to indicate special behavior:
+
+| Type Value | Description                          | Example Usage                     |
+|------------|--------------------------------------|-----------------------------------|
+| `Async`    | Asynchronous function                | `func: fetch_data [type: Async]`  |
+| `Generator`| Function that yields values          | `func: stream [type: Generator]`  |
+| `Callback` | Function intended as a callback      | `func: on_event [type: Callback]` |
+
+### 3.3. Complex Type Annotations
+
+For type annotations containing special characters that might conflict with CodeStruct's own syntax:
+
+- Wrap the type in double quotes: `[type: "List[Dict[str, Any]]"]`
+- Special characters requiring quotes include: `[]|,(){}`
+- This prevents parsing ambiguity while preserving the full type information
+
+Examples:
+```
+param: users [type: "List[User]"]
+param: config [type: "Dict[str, Any]"]
+returns: "Union[str, None]"
 ```
 
 ---
@@ -140,9 +186,25 @@ module: user_management
   func: get_home_directory
     doc: Returns the user's home directory...
     returns: STRING
-    import: os
+    import: os & pathlib & sys
       type: external
       source: stdlib
+```
+
+### 4.3. Async Function Example
+
+```
+module: api_client
+  func: fetch_data [type: Async]
+    doc: Fetches data from the API asynchronously...
+    param: endpoint [type: STRING]
+    param: params [type: "Dict[str, Any]"]
+    returns: "Dict[str, Any]"
+    
+  func: process_results
+    doc: Processes the results returned from the API...
+    param: data [type: "Dict[str, Any]"]
+    returns: "List[Result]"
 ```
 
 ---
@@ -159,11 +221,15 @@ module: user_management
 - **Indentation:** Use 2 or 4 spaces for indentation; do not mix tabs and spaces.
 - **Docstrings:** Always provide a `doc:` field for classes and functions for clarity.
 - **Type Annotations:** Use `[type: ...]` for all parameters, attributes, and return values where possible.
+  - Wrap complex type annotations in double quotes when they contain special characters.
 - **Default Values:** Specify default values in attributes: `[default: ...]`.
 - **Imports:** Use `import:` for dependencies at the file or module level.
   - Classify imports as `internal` or `external` using the `type:` field.
   - For internal imports, use `ref:` to link to the entity definition within the file.
   - For external imports, use `source:` to specify the origin (e.g., `stdlib`, `pypi`).
+  - Group related imports with `&` when they share the same source or type.
+- **Grouping:** Use ampersand (`&`) to group related entities that share common attributes.
+  - Avoid comma-separated lists for entity names to prevent minification conflicts.
 
 ---
 
@@ -181,7 +247,7 @@ dir: my_project
   file: math_utils.py
     module: math_utils
       doc: Math utilities module...
-      import: numpy
+      import: numpy & scipy & matplotlib
         type: external
         source: pypi
       func: add
@@ -198,6 +264,10 @@ dir: my_project
           type: internal
           ref: func: add
       const: PI [type: FLOAT, default: 3.14159]
+      func: process_data
+        doc: Processes data using numpy...
+        param: data [type: "List[Dict[str, float]]"]
+        returns: "numpy.ndarray"
   file: README.md
 ```
 
@@ -256,7 +326,7 @@ dir: my_project
   file: math_utils.py
     module: math_utils
       doc: Math utilities module...
-      import: numpy
+      import: numpy & scipy
         type: external
         source: pypi
       func: add
@@ -278,7 +348,7 @@ dir: my_project
 
 Minified Version:
 ```
-d:my_project;f:math_utils.py;m:math_utils;i:numpy[t:ext,s:pypi];fn:add|p:a[t:INT],p:b[t:INT],r:INT;fn:multiply|p:a[t:INT],p:b[t:INT],r:INT,i:add[t:int,rf:fn:add];c:PI[t:FLT,d:3.14159];f:README.md
+d:my_project;f:math_utils.py;m:math_utils;i:numpy&scipy[t:ext,s:pypi];fn:add|p:a[t:INT],p:b[t:INT],r:INT;fn:multiply|p:a[t:INT],p:b[t:INT],r:INT,i:add[t:int,rf:fn:add];c:PI[t:FLT,d:3.14159];f:README.md
 ```
 
 ### 9.5. Structure Legend
@@ -288,5 +358,18 @@ When using minified CodeStruct, include a legend to assist LLMs:
 Format: Entity;Entity|Child,Child[Attribute,Attribute]
 Keyword map: d=dir,f=file,m=module,cl=class,fn=func,at=attr,p=param,r=returns,v=var,c=const,i=import,t=type,s=source,rf=ref
 Type map: INT=INTEGER,STR=STRING,BOOL=BOOLEAN,FLT=FLOAT,ext=external,int=internal
-Delimiters: ;=entity separator, |=child separator, ,=attribute separator, []=attribute container
+Delimiters: ;=entity separator, |=child separator, ,=attribute separator, &=entity grouping, []=attribute container
+```
+
+### 10. Dev Note:
+
+```bash
+# Install vsce (VS Code Extension Manager)
+npm install -g @vscode/vsce
+
+# Package the extension
+vsce package
+
+# Install the extension
+code --install-extension codestruct-0.1.4.vsix
 ```
