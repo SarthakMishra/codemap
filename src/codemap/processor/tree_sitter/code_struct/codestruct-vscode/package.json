@@ -2,7 +2,7 @@
   "name": "codestruct",
   "displayName": "CodeStruct",
   "description": "Syntax highlighting for CodeStruct notation",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "publisher": "SarthakMishra",
   "author": {
     "name": "Sarthak Mishra"
@@ -34,8 +34,8 @@
         "extensions": [".cstxt", ".codestruct", ".cs.txt"],
         "configuration": "./language-configuration.json",
         "icon": {
-          "light": "./icons/fileicons/codestruct.svg",
-          "dark": "./icons/fileicons/codestruct.svg"
+          "light": "./icons/fileicons/codemap.svg",
+          "dark": "./icons/fileicons/codemap.svg"
         }
       },
       {

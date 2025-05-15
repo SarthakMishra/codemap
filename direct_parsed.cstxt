@@ -1,0 +1,41 @@
+module: file_watcher
+  doc: File watcher module for CodeMap.
+  import: asyncio & collections.abc.Callable & collections.abc.Coroutine & logging & pathlib.Path & queue & threading & time
+    source: stdlib
+  import: anyio & watchdog.events.FileSystemEvent & watchdog.events.FileSystemEventHandler & watchdog.observers.Observer
+    source: external
+  class: FileChangeHandler
+    doc: Handles file system events and triggers a callback.
+    func: __init__
+      doc: Initialize the handler....
+      param: callback [type: "Callable[[], Coroutine[None, None, None]]"]
+      param: debounce_delay [type: float]
+      param: event_loop [type: "asyncio.AbstractEventLoop | None"]
+      returns: None
+    func: _schedule_callback
+      doc: Schedule the callback execution from a thread-safe context.
+      returns: None
+    func: _process_events [type: Async]
+      doc: Process events from the queue in the event loop's context.
+      returns: None
+    func: _debounced_callback [type: Async]
+      doc: Wait for the debounce period and then execute the callback.
+      returns: None
+    func: on_any_event
+      doc: Catch all events and schedule the callback after debouncing....
+      param: event [type: FileSystemEvent]
+      returns: None
+  class: Watcher
+    doc: Monitors a directory for changes and triggers a callback.
+    func: __init__
+      doc: Initialize the watcher....
+      param: path_to_watch [type: "str | Path"]
+      param: on_change_callback [type: "Callable[[], Coroutine[None, None, None]]"]
+      param: debounce_delay [type: float]
+      returns: None
+    func: start [type: Async]
+      doc: Start monitoring the directory.
+      returns: None
+    func: stop
+      doc: Stop monitoring the directory.
+      returns: None
