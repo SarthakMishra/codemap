@@ -119,7 +119,7 @@ jobs:
         run: uv publish
 
   sync-branch: 
-    if: github.ref == 'refs/heads/main'
+    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:  
       - name: Sync main to dev
@@ -127,3 +127,75 @@ jobs:
         with:
           base: dev
           head: main
+
+  docs-push:
+    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main' && !contains(needs.release.outputs.version, 'rc')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update docs
+        run: task docs:update
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Commit and push updated docs (if changed)
+        run: |
+          git add docs/api
+          if ! git diff --cached --quiet; then
+            git commit -m "ci(docs): update API docs [skip ci]"
+            git push origin HEAD:${GITHUB_REF#refs/heads/}
+          else
+            echo "No documentation changes to commit."
+      - name: Deploy docs (stable)
+        run: uv run mike deploy ${{ needs.release.outputs.version }} latest --update-aliases --push
+
+  docs-push-pre:
+    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main' && contains(needs.release.outputs.version, 'rc')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install uv
+        run: curl -LsSf https://astral.sh/uv/install.sh | sh
+      - name: Install Task
+        uses: arduino/setup-task@v2
+        with:
+          version: 3.x
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Update docs
+        run: task docs:update
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Commit and push updated docs (if changed)
+        run: |
+          git add docs/api
+          if ! git diff --cached --quiet; then
+            git commit -m "ci(docs): update API docs [skip ci]"
+            git push origin HEAD:${GITHUB_REF#refs/heads/}
+          else
+            echo "No documentation changes to commit."
+      - name: Deploy docs (pre-release)
+        run: DOCS_PRERELEASE=true uv run mike deploy ${{ needs.release.outputs.version }} pre-release --update-aliases --push
