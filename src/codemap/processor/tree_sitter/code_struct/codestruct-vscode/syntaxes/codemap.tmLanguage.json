@@ -1,9 +1,0 @@
-{
-	"information_for_contributors": [ "This is a simple reference to VS Code's built-in YAML grammar" ],
-	"version": "1.0.0",
-	"name": "CodeMap",
-	"scopeName": "source.codemap",
-	"patterns": [
-		{ "include": "source.yaml" }
-	]
-} 
