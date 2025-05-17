@@ -362,27 +362,3 @@ class TypeScriptConfig(LanguageConfig):
 	struct: ClassVar[list[str]] = []
 	docstring: ClassVar[list[str]] = ["comment"]
 	file_extensions: ClassVar[list[str]] = [".ts", ".tsx"]
-
-
-class RustConfig(LanguageConfig):
-	"""Configuration for Rust language."""
-
-	module: ClassVar[list[str]] = ["source_file"]
-	class_: ClassVar[list[str]] = ["impl_item"]
-	function: ClassVar[list[str]] = ["function_item"]
-	property_def: ClassVar[list[str]] = []
-	struct: ClassVar[list[str]] = ["struct_item"]
-	docstring: ClassVar[list[str]] = ["line_comment", "block_comment"]
-	file_extensions: ClassVar[list[str]] = [".rs"]
-
-
-class GoConfig(LanguageConfig):
-	"""Configuration for Go language."""
-
-	module: ClassVar[list[str]] = ["source_file"]
-	class_: ClassVar[list[str]] = ["type_declaration"]
-	function: ClassVar[list[str]] = ["function_declaration"]
-	property_def: ClassVar[list[str]] = []
-	struct: ClassVar[list[str]] = ["struct_type"]
-	docstring: ClassVar[list[str]] = ["comment"]
-	file_extensions: ClassVar[list[str]] = [".go"]
