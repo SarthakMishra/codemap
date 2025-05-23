@@ -25,8 +25,7 @@ tasks:
     desc: Run all linting checks
     cmds:
       - task: lint:ruff
-      - task: lint:pylint
-      - task: lint:pyright
+      - task: lint:pyrefly
 
   lint:ruff:
     desc: Run ruff linter
@@ -43,20 +42,14 @@ tasks:
     cmds:
       - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
-  lint:pylint:
-    desc: Run pylint
+  lint:pyrefly:
+    desc: Run pyrefly type checker
     cmds:
-      - uv run pylint --load-plugins pylint_pydantic {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
-
-  lint:pyright:
-    desc: Run pyright type checker
-    cmds:
-      - uv run pyright {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
+      - uv run pyrefly check {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:
     desc: Run all formatters
     cmds:
-      - task: format:isort
       - task: lint:fix-unsafe
       - task: format:ruff
 
@@ -64,44 +57,6 @@ tasks:
     desc: Run ruff formatter
     cmds:
       - uv run ruff format {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
-
-  format:isort:
-    desc: Run isort
-    cmds:
-      - uv run isort {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
-
-  radon:
-    desc: Run radon
-    cmds:
-      - task: radon:cc
-      - task: radon:mi
-      - task: radon:raw
-      - task: radon:hal
-
-  radon:cc:
-    desc: Run radon cc
-    cmds:
-      - uv run radon cc {{.SRC_DIR}} -O .radon/cc.txt
-
-  radon:mi:
-    desc: Run radon mi
-    cmds:
-      - uv run radon mi {{.SRC_DIR}} -O .radon/mi.txt
-
-  radon:raw:
-    desc: Run radon raw
-    cmds:
-      - uv run radon raw {{.SRC_DIR}} -O .radon/raw.txt
-
-  radon:hal:
-    desc: Run radon hal
-    cmds:
-      - uv run radon hal {{.SRC_DIR}} -O .radon/hal.txt
-
-  vulture:
-    desc: Finds unused code
-    cmds:
-      - uv run vulture {{.SRC_DIR}} --min-confidence 80
 
   test:
     desc: Run all tests
@@ -199,10 +154,4 @@ tasks:
         else
           echo "No Python files staged for commit"
         fi
-  
-  pre-push:
-    desc: Run pre-push hooks
-    cmds:
-      - task: format
-      - task: lint
-      - task: test
+
