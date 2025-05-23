@@ -1,6 +1,151 @@
 # CHANGELOG
 
 
+## v0.3.1-rc.1 (2025-05-23)
+
+### Chores
+
+- Moved codetruct to a separate repo
+  ([`8c83bfa`](https://github.com/SarthakMishra/codemap/commit/8c83bfa55c82dae4f61eee49f8cf5878ba4859d6))
+
+- Removed pylint and isort, replaced pyright with pyrefly for type checking
+  ([`955f394`](https://github.com/SarthakMishra/codemap/commit/955f394a61a44308e09064215ca4fe69b939106d))
+
+Removed pylint and isort configurations and dependencies, and updated the project to use pyrefly for
+  type checking. Adjusted task definitions in Taskfile.yml to reflect these changes, ensuring a
+  streamlined linting process.
+
+- Update embedding model to improve accuracy
+  ([`fd9c77f`](https://github.com/SarthakMishra/codemap/commit/fd9c77f1f3612b18acec3c387a3164f15df462d8))
+
+The previous model was not performing as well as expected. This change updates the model to a more
+  robust and accurate one.
+
+- Update LLM model to Gemini 2.0 Flash
+  ([`eb3530b`](https://github.com/SarthakMishra/codemap/commit/eb3530b1d3d4f2e489867e767ec4bcd63f79d308))
+
+This commit updates the LLM model to use Gemini 2.0 Flash, which may offer a better balance of speed
+  and performance for AI operations within the CodeMap system.
+
+- Updated uv.lock
+  ([`a03638c`](https://github.com/SarthakMishra/codemap/commit/a03638c4e58e53ac6868c81bd52e2c8ac10d3c71))
+
+- Upgrade pydantic-ai version
+  ([`24b5584`](https://github.com/SarthakMishra/codemap/commit/24b5584f75266b54e367e3aca9746767eb744d8b))
+
+- **config**: Update LLM and embedding model configurations
+  ([`44314e1`](https://github.com/SarthakMishra/codemap/commit/44314e1df35c866c4ff4d04ac87906a3140a5f08))
+
+Replaced the LLM model with "groq:meta-llama/llama-4-maverick-17b-128e-instruct" and updated the
+  embedding model to "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled".
+
+- **uv.lock**: Upgrade pydantic-ai and pydantic-ai-slim dependencies
+  ([`bf3915e`](https://github.com/SarthakMishra/codemap/commit/bf3915e75a5bdbba176185fef63a78bdeb276a87))
+
+### Continuous Integration
+
+- Add documentation deployment steps to release workflow
+  ([`44a7ba5`](https://github.com/SarthakMishra/codemap/commit/44a7ba5c0396c72731db6b8ab562c73ab36eedc5))
+
+Introduced new jobs for pushing updated documentation based on release status. The 'docs-push' job
+  handles stable releases, while 'docs-push-pre' manages pre-releases, ensuring documentation is
+  updated and deployed accordingly.
+
+### Documentation
+
+- **config**: Update mkdocs theme and color scheme
+  ([`7e53746`](https://github.com/SarthakMishra/codemap/commit/7e5374688088c758bff254881bab13c0de244339))
+
+Changes include updating the logo, favicon, color palette, and adding extra CSS stylesheet.
+
+### Features
+
+- **config**: Add dimension to embedding config
+  ([`d652b6e`](https://github.com/SarthakMishra/codemap/commit/d652b6e0e11f5b1c9c8c101fc1c72349328b7de8))
+
+- **llm**: Add support for tools in LLM client and API
+  ([`3b68208`](https://github.com/SarthakMishra/codemap/commit/3b68208be3816a95a61af94fde6eb38c74a76dae))
+
+This change introduces the ability to use tools with the LLM client and API. The `tools` parameter
+  allows specifying a list of tools to be used by the Pydantic-AI Agent, enhancing its capabilities.
+
+- **llm**: Integrate code retrieval tool for semantic context
+  ([`6777462`](https://github.com/SarthakMishra/codemap/commit/67774627255ece0af14faa3e60c0e57648870ef6))
+
+This commit introduces a new tool for retrieving code context using semantic search. It replaces the
+  previous context retrieval logic within the AskCommand with a more robust and extensible approach.
+  The new tool accumulates code chunks, identifies their position in the AST, and traverses the AST
+  to extend context, providing more relevant information to the LLM.
+
+- **pr-cmd, commit-generator**: Handle None action and improve prompts
+  ([`7589093`](https://github.com/SarthakMishra/codemap/commit/75890938adb11d772e9e3bb20b53b64288d7cfb2))
+
+This commit improves the pull request command by handling 'None' action results explicitly,
+  providing a more robust user experience. It also refactors the commit message generation prompts
+  to align with Conventional Commit standards and improve clarity.
+
+- **processor**: Implement singleton pattern and improve search results
+  ([`729ef19`](https://github.com/SarthakMishra/codemap/commit/729ef19f9fcdd665b1e10b199be58b24d45497b0))
+
+This commit introduces a singleton pattern for the ProcessingPipeline to ensure a single instance is
+  used throughout the application. It also enhances the search results formatting by validating the
+  payload against ChunkMetadataSchema for consistent output.
+
+- **rag**: Improve code retrieval context and validation
+  ([`a9f54a5`](https://github.com/SarthakMishra/codemap/commit/a9f54a5d520f68c52287ed8992d15d21733204dd))
+
+The RAG context length is increased to allow for larger contexts when retrieving code. The retrieval
+  tool is simplified to return a markdown string directly without AST traversal and outlier
+  filtering. Validation is added to handle empty files and invalid line numbers.
+
+### Performance Improvements
+
+- **git**: Optimize commit generation for single-file changes
+  ([`3e2f72f`](https://github.com/SarthakMishra/codemap/commit/3e2f72f6c5f9183a500ea77a80a3c187e5aa2428))
+
+This optimization skips the diff splitter for single-file changes, which can significantly speed up
+  the commit message generation process for simple changes.
+
+- **rag**: Reduce max context results
+  ([`e87943f`](https://github.com/SarthakMishra/codemap/commit/e87943fcd210b534648de23be214b4a8df62177d))
+
+The number of context results was reduced to optimize performance and relevance in RAG.
+
+### Refactoring
+
+- **code_struct**: Remove CodeStruct notation converter module
+  ([`667304a`](https://github.com/SarthakMishra/codemap/commit/667304ad76a1a37a62fc98607532f2a39d38f60b))
+
+- **db**: Refactor database client initialization and error handling
+  ([`c3555ad`](https://github.com/SarthakMishra/codemap/commit/c3555add50721b4a8bdecbec4e8c6794f15975f8))
+
+Refactor database client for improved initialization and error handling.
+
+This commit streamlines the database client initialization process by using asyncio tasks to handle
+  database creation. It also enhances error handling by logging exceptions during initialization,
+  providing better visibility into potential issues.
+
+- **git**: Improve git utilities and update dependencies
+  ([`bb43f64`](https://github.com/SarthakMishra/codemap/commit/bb43f64ce1f543160c7539f02af0fa039786513a))
+
+This commit introduces several enhancements and fixes:
+
+- Updates dependencies in pyproject.toml and Taskfile.yml. - Refactors the PRGitUtils class for
+  improved code clarity and maintainability. - Implements more robust error handling when creating
+  branches. - Adds logging for debugging purposes.
+
+- **pipeline**: Ensure ConfigLoader is always available
+  ([`cbb0d8e`](https://github.com/SarthakMishra/codemap/commit/cbb0d8e1cbfb8640abe04cb16760ce3b89882e5d))
+
+Import ConfigLoader at the beginning to ensure it's always available
+
+- **tree_sitter**: Remove redundant language configurations
+  ([`0ee5c80`](https://github.com/SarthakMishra/codemap/commit/0ee5c80d5fd6b0f705ce489ff6050b5b496ae82a))
+
+Removed unused language configurations for Rust and Go from the tree-sitter module, simplifying the
+  codebase and reducing maintenance overhead.
+
+
 ## v0.3.0 (2025-05-12)
 
 ### Chores
