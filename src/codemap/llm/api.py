@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal, TypedDict, TypeVar, cast
+from typing import TYPE_CHECKING, Literal, TypedDict, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -23,6 +23,9 @@ except ImportError:
 	ModelSettings = None
 
 from .errors import LLMError
+
+if TYPE_CHECKING:
+	from pydantic_ai.tools import Tool
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +49,7 @@ def validate_schema(model: type[PydanticModelT], input_data: str | object) -> Py
 def call_llm_api(
 	messages: list[MessageDict],
 	config_loader: ConfigLoader,
+	tools: list[Tool] | None = None,
 	pydantic_model: type[PydanticModelT] | None = None,
 ) -> str | PydanticModelT:
 	"""
@@ -54,6 +58,7 @@ def call_llm_api(
 	Args:
 	    messages: The list of messages to send to the LLM
 	    config_loader: ConfigLoader instance for additional configuration
+	    tools: Optional list of tools to use.
 	    pydantic_model: Optional Pydantic model class to structure the output.
 	                  If provided, the function will return an instance of this model.
 	                  Otherwise, it returns a string.
@@ -85,6 +90,9 @@ def call_llm_api(
 	# Determine the output_type for the Pydantic-AI Agent
 	agent_output_type: type = pydantic_model if pydantic_model else str
 
+	# Convert None to empty list if tools is None
+	agent_tools: list[Tool] = tools or []
+
 	try:
 		# Initialize Pydantic-AI Agent
 		model_name = config_loader.get.llm.model
@@ -103,12 +111,14 @@ def call_llm_api(
 
 			agent = Agent(
 				ollama_model,
+				tools=agent_tools,
 				system_prompt=system_prompt_str,
 				output_type=agent_output_type,
 			)
 		else:
 			agent = Agent(
 				model=config_loader.get.llm.model,
+				tools=agent_tools,
 				system_prompt=system_prompt_str,
 				output_type=agent_output_type,
 			)

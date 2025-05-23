@@ -12,6 +12,8 @@ from .api import MessageDict, PydanticModelT, call_llm_api
 if TYPE_CHECKING:
 	from pathlib import Path
 
+	from pydantic_ai.tools import Tool
+
 logger = logging.getLogger(__name__)
 
 
@@ -51,6 +53,7 @@ class LLMClient:
 	def completion(
 		self,
 		messages: list[MessageDict],
+		tools: list[Tool] | None = None,
 		pydantic_model: type[PydanticModelT] | None = None,
 	) -> str | PydanticModelT:
 		"""
@@ -58,6 +61,7 @@ class LLMClient:
 
 		Args:
 		    messages: List of messages to send to the LLM
+		    tools: Optional list of tools to use.
 		    pydantic_model: Optional Pydantic model for response validation
 
 		Returns:
@@ -70,6 +74,7 @@ class LLMClient:
 		# Call the API
 		return call_llm_api(
 			messages=messages,
+			tools=tools,
 			pydantic_model=pydantic_model,
 			config_loader=self.config_loader,
 		)
