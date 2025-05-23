@@ -123,7 +123,9 @@ nav:
         - Prompts: api/llm/rag/ask/prompts.md
       - Do Overview: api/llm/rag/do/index.md
       - Interactive: api/llm/rag/interactive.md
-      - Tools Overview: api/llm/rag/tools/index.md
+      - Tools:
+        - Tools Overview: api/llm/rag/tools/index.md
+        - Retrieval: api/llm/rag/tools/retrieval.md
     - Utils: api/llm/utils.md
   - Processor:
     - Processor Overview: api/processor/index.md
