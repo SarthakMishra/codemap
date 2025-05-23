@@ -53,6 +53,34 @@ class ProcessingPipeline:
 
 	"""
 
+	_instance: ProcessingPipeline | None = None
+	_lock = asyncio.Lock()
+
+	@classmethod
+	async def get_instance(
+		cls,
+		config_loader: ConfigLoader | None = None,
+	) -> ProcessingPipeline:
+		"""
+		Get or create a singleton instance of ProcessingPipeline.
+
+		Args:
+		    config_loader: Application configuration loader. If None, a default one is created.
+
+		Returns:
+		    The singleton ProcessingPipeline instance.
+		"""
+		async with cls._lock:
+			if cls._instance is None:
+				cls._instance = cls(config_loader=config_loader)
+				await cls._instance.async_init()
+			return cls._instance
+
+	@classmethod
+	def reset_instance(cls) -> None:
+		"""Reset the singleton instance. Useful for testing."""
+		cls._instance = None
+
 	def __init__(
 		self,
 		config_loader: ConfigLoader | None = None,
@@ -529,12 +557,14 @@ class ProcessingPipeline:
 			for scored_point in search_results:
 				# Convert Qdrant model to dict for consistent output
 				# Include score (similarity) and payload
+				from codemap.processor.vector.schema import ChunkMetadataSchema
+
+				payload = ChunkMetadataSchema.model_validate(scored_point.payload)
+
 				result_dict = {
 					"id": str(scored_point.id),  # Ensure ID is string
 					"score": scored_point.score,
-					"payload": scored_point.payload,
-					# Optionally include version if needed
-					# "version": scored_point.version,
+					"payload": payload,
 				}
 				formatted_results.append(result_dict)
 
