@@ -219,8 +219,8 @@ def _gen_command_impl(
 		# Convert the final string to the LODLevel enum
 		try:
 			# Look up enum member by name (uppercase) instead of value
-			lod_level = LODLevel[final_lod_str.upper()]
-		except (ValueError, KeyError) as e:  # Catch KeyError for invalid names
+			lod_level = getattr(LODLevel, final_lod_str.upper())
+		except (ValueError, AttributeError) as e:  # Catch AttributeError for invalid names
 			# Provide a more helpful error message if conversion fails
 			# Get valid names (lowercase) for the error message
 			valid_names = [name.lower() for name in LODLevel.__members__]

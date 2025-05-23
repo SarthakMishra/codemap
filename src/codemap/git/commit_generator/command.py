@@ -40,8 +40,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Constants for content truncation
-MAX_FILE_CONTENT_LINES = 300  # Maximum number of lines to include for a single file
-MAX_TOTAL_CONTENT_LINES = 1000  # Maximum total lines across all untracked files
+MAX_FILE_CONTENT_LINES = 500  # Maximum number of lines to include for a single file
+MAX_TOTAL_CONTENT_LINES = 2000  # Maximum total lines across all untracked files
 
 # Git output constants
 MIN_PORCELAIN_LINE_LENGTH = 3  # Minimum length of a valid porcelain status line
@@ -79,15 +79,15 @@ class CommitCommand:
 
 			# Store the current branch at initialization to ensure we don't switch branches unexpectedly
 			try:
-				self.original_branch = self.git_context.branch
+				self.original_branch: str | None = self.git_context.branch
 			except (ImportError, GitError):
 				self.original_branch = None
 
 			# Remove eager initialization of config_loader, llm_client, splitter, message_generator
-			self._config_loader = None
-			self._llm_client = None
-			self._splitter = None
-			self._message_generator = None
+			self._config_loader: ConfigLoader | None = None
+			self._llm_client: LLMClient | None = None
+			self._splitter: DiffSplitter | None = None
+			self._message_generator: CommitMessageGenerator | None = None
 
 			current_repo_root = self.config_loader.get.repo_root
 
@@ -449,10 +449,12 @@ class CommitCommand:
 					return False
 				# If user cancels exit, loop back to show the chunk again
 				continue
-
-			# Should not be reached
+			# Should not be reached, but handle unknown actions
 			logger.error("Unhandled action in _process_chunk: %s", action)
 			return False
+
+		# This should never be reached due to the while True loop, but add for type checker
+		return False
 
 	def process_all_chunks(self, chunks: list[DiffChunk], grand_total: int, interactive: bool = True) -> bool:
 		"""
@@ -630,6 +632,9 @@ class CommitCommand:
 				except (GitError, Exception) as e:
 					logger.warning("Could not restore original branch %s: %s", self.original_branch, e)
 
+		# This should never be reached due to explicit returns in try/except blocks
+		return False
+
 	def _try_create_fallback_chunks(self, files: list[str]) -> list[DiffChunk]:
 		"""
 		Try to create fallback chunks for files when regular splitting fails.
@@ -706,6 +711,11 @@ class SemanticCommitCommand(CommitCommand):
 
 		self.clustering_method = config_loader.get.embedding.clustering.method
 		self.similarity_threshold = config_loader.get.commit.diff_splitter.similarity_threshold
+
+		# Initialize attributes that may be set during execution
+		self.target_files: list[str] = []
+		self.is_pathspec_mode: bool = False
+		self.all_repo_files: set[str] = set()
 
 		from codemap.git.semantic_grouping.clusterer import DiffClusterer
 		from codemap.git.semantic_grouping.embedder import DiffEmbedder

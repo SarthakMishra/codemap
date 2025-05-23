@@ -123,8 +123,8 @@ class LODGenerator:
 		"""
 		entity_type_str = analysis_result.get("type", "UNKNOWN")
 		try:
-			entity_type = EntityType[entity_type_str]
-		except KeyError:
+			entity_type = getattr(EntityType, entity_type_str)
+		except AttributeError:
 			entity_type = EntityType.UNKNOWN
 
 		location = analysis_result.get("location", {})

@@ -1,6 +1,5 @@
 """Module for calculating hierarchical repository checksums."""
 
-import asyncio
 import json
 import logging
 import re
@@ -257,14 +256,11 @@ class RepoChecksumCalculator:
 			return node_hash
 
 		if current_path.is_dir():
-			children_info_for_hash = []
+			children_info_for_hash: list[str] = []
 			try:
 				# Sort children by name for deterministic hashing.
-				# The synchronous list(current_path.iterdir()) and sorted() are run in a separate thread.
 				children_paths_sync = list(current_path.iterdir())  # Sync part
-				children_paths = await asyncio.to_thread(
-					sorted, children_paths_sync, key=lambda p: p.name
-				)  # Async wrapper
+				children_paths = sorted(children_paths_sync, key=lambda p: p.name)
 			except OSError:
 				logger.exception(f"Error listing directory {current_path}")
 				node_hash = self._hash_string(f"ERROR_LISTING_DIR:{current_path.name}")
@@ -275,7 +271,7 @@ class RepoChecksumCalculator:
 				# The recursive call populates current_nodes_map for the child and its descendants.
 				child_hash = await self._calculate_node_hash_recursive(child_path, current_nodes_map)
 				# The directory's hash depends on its children's names and their hashes.
-				children_info_for_hash.append(f"{child_path.name}:{child_hash}")
+				children_info_for_hash.append(str(f"{child_path.name}:{child_hash}"))
 
 			# Concatenate all children's "name:hash" strings.
 			# An empty directory will hash an empty string.

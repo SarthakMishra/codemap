@@ -101,6 +101,9 @@ class VectorSynchronizer:
 		if not self.repo_checksum_calculator:
 			logger.warning("RepoChecksumCalculator could not be initialized. Checksum-based sync will be skipped.")
 
+		# Initialize checksum map attribute
+		self.all_nodes_map_from_checksum: dict[str, dict[str, str]] = {}
+
 	def _get_checksum_cache_path(self) -> Path:
 		"""Gets the path to the checksum cache file within .codemap_cache."""
 		# Ensure .codemap_cache directory is at the root of the repo_path passed to VectorSynchronizer
@@ -607,7 +610,6 @@ class VectorSynchronizer:
 
 		num_files_to_process = len(files_to_process)
 		all_chunks: list[dict[str, Any]] = []  # Ensure all_chunks is initialized
-		processed_files_count = 0
 		msg = "Processing new/updated files..."
 
 		with progress_indicator(
@@ -617,16 +619,17 @@ class VectorSynchronizer:
 			transient=True,
 		) as update_file_progress:
 			if num_files_to_process > 0:
-				processed_files_count = 0
+				processed_files_counter = [0]  # Use list to make it mutable from inner function
 
 				# Wrapper coroutine to update progress as tasks complete
 				async def wrapped_generate_chunks(file_path: str, f_hash: str) -> list[dict[str, Any]]:
-					nonlocal processed_files_count  # Allow modification of the outer scope variable
+					result: list[dict[str, Any]] = []
 					try:
-						return await self._generate_chunks_for_file(file_path, f_hash)
+						result = await self._generate_chunks_for_file(file_path, f_hash)
 					finally:
-						processed_files_count += 1
-						update_file_progress(None, processed_files_count, None)
+						processed_files_counter[0] += 1
+						update_file_progress(None, processed_files_counter[0], None)
+					return result
 
 				tasks_to_gather = []
 				for file_path_to_proc in files_to_process:
@@ -638,8 +641,8 @@ class VectorSynchronizer:
 							f"File '{file_path_to_proc}' marked to process but its current hash not found. Skipping."
 						)
 						# If a file is skipped, increment progress here as it won't be wrapped
-						processed_files_count += 1
-						update_file_progress(None, processed_files_count, None)
+						processed_files_counter[0] += 1
+						update_file_progress(None, processed_files_counter[0], None)
 
 				if tasks_to_gather:
 					logger.info(f"Concurrently generating chunks for {len(tasks_to_gather)} files...")
@@ -651,7 +654,7 @@ class VectorSynchronizer:
 
 				# Final update to ensure the progress bar completes to 100% if some files were skipped
 				# and caused processed_files_count to not reach num_files_to_process via the finally blocks alone.
-				if processed_files_count < num_files_to_process:
+				if processed_files_counter[0] < num_files_to_process:
 					update_file_progress(None, num_files_to_process, None)
 
 			else:  # num_files_to_process == 0

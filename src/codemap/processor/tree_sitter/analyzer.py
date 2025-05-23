@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from tree_sitter import Language, Node, Parser
 from tree_sitter_language_pack import SupportedLanguage, get_language
@@ -230,7 +230,7 @@ class TreeSitterAnalyzer:
 				logger.debug("Failed to extract dependencies: %s", e)
 
 		# Build result
-		result = {
+		result: dict[str, Any] = {
 			"type": entity_type.name if entity_type != EntityType.UNKNOWN else "UNKNOWN",
 			"name": name,
 			"location": {

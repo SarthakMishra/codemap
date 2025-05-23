@@ -95,7 +95,18 @@ class QdrantManager:
 
 		try:
 			logger.info("Initializing Qdrant client with args: %s", self.client_args)
-			self.client = AsyncQdrantClient(**self.client_args)
+			# Create client with explicit type casting to avoid type issues
+			client_kwargs: dict[str, Any] = {}
+			if "api_key" in self.client_args and self.client_args["api_key"] is not None:
+				client_kwargs["api_key"] = str(self.client_args["api_key"])
+			if "url" in self.client_args and self.client_args["url"] is not None:
+				client_kwargs["url"] = str(self.client_args["url"])
+			if "prefer_grpc" in self.client_args and self.client_args["prefer_grpc"] is not None:
+				client_kwargs["prefer_grpc"] = bool(self.client_args["prefer_grpc"])
+			if "timeout" in self.client_args and self.client_args["timeout"] is not None:
+				client_kwargs["timeout"] = int(self.client_args["timeout"])
+
+			self.client = AsyncQdrantClient(**client_kwargs)
 
 			# Check if collection exists
 			collections_response = await self.client.get_collections()
@@ -131,6 +142,7 @@ class QdrantManager:
 		if self.client is None:
 			msg = "Client should be initialized before creating indexes"
 			raise RuntimeError(msg)
+		client: AsyncQdrantClient = self.client
 
 		try:
 			# Index fields for ChunkMetadataSchema
@@ -155,7 +167,7 @@ class QdrantManager:
 			# Add indexes for all fields
 			for field_name, field_type in index_fields:
 				logger.info(f"Creating index for field: {field_name} ({field_type})")
-				await self.client.create_payload_index(
+				await client.create_payload_index(
 					collection_name=self.collection_name, field_name=field_name, field_schema=field_type
 				)
 			logger.info(f"Created {len(index_fields)} payload indexes successfully")
@@ -168,10 +180,11 @@ class QdrantManager:
 		if self.client is None:
 			msg = "Client should be initialized before checking indexes"
 			raise RuntimeError(msg)
+		client: AsyncQdrantClient = self.client
 
 		try:
 			# Get existing collection info
-			collection_info = await self.client.get_collection(collection_name=self.collection_name)
+			collection_info = await client.get_collection(collection_name=self.collection_name)
 			existing_schema = collection_info.payload_schema
 
 			# List of fields that should be indexed (same as in _create_payload_indexes)
@@ -199,7 +212,7 @@ class QdrantManager:
 			for field_name, field_type in index_fields:
 				if field_name not in existing_schema:
 					logger.info(f"Creating missing index for field: {field_name} ({field_type})")
-					await self.client.create_payload_index(
+					await client.create_payload_index(
 						collection_name=self.collection_name, field_name=field_name, field_schema=field_type
 					)
 		except Exception as e:  # noqa: BLE001
@@ -227,6 +240,7 @@ class QdrantManager:
 		if self.client is None:
 			msg = "Client should be initialized here"
 			raise RuntimeError(msg)
+		client: AsyncQdrantClient = self.client
 		if not points:
 			logger.warning("upsert_points called with an empty list.")
 			return
@@ -236,7 +250,7 @@ class QdrantManager:
 				point.payload = point.payload.model_dump()
 		try:
 			logger.info(f"Upserting {len(points)} points into '{self.collection_name}'")
-			await self.client.upsert(
+			await client.upsert(
 				collection_name=self.collection_name,
 				points=points,
 				wait=True,  # Wait for operation to complete
@@ -358,6 +372,7 @@ class QdrantManager:
 		if self.client is None:
 			msg = "Client should be initialized here"
 			raise RuntimeError(msg)
+		client: AsyncQdrantClient = self.client
 		all_ids: list[str | int | uuid.UUID] = []
 		# Use Any for offset type hint due to persistent linter issues
 		next_offset: Any | None = None
@@ -372,7 +387,7 @@ class QdrantManager:
 		while True:
 			try:
 				logger.debug(f"[QdrantManager Get IDs] Scrolling with offset: {next_offset}")
-				scroll_response, next_offset_id = await self.client.scroll(
+				scroll_response, next_offset_id = await client.scroll(
 					collection_name=self.collection_name,
 					scroll_filter=query_filter,
 					limit=limit_per_scroll,

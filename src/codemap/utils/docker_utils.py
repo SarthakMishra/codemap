@@ -4,9 +4,13 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 import docker
 from docker.errors import APIError, DockerException, ImageNotFound, NotFound
+
+if TYPE_CHECKING:
+	from docker.models.containers import Container
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,7 @@ async def is_docker_running() -> bool:
 		finally:
 			if client is not None:
 				client.close()
+		return False
 
 	return await asyncio.to_thread(_check_docker_sync)
 
@@ -63,7 +68,7 @@ async def is_container_running(container_name: str) -> bool:
 		try:
 			client = docker.from_env()
 			try:
-				container = client.containers.get(name)
+				container = cast("Container", client.containers.get(name))
 				return container.status == "running"
 			except NotFound:
 				return False
@@ -73,6 +78,7 @@ async def is_container_running(container_name: str) -> bool:
 		finally:
 			if client is not None:
 				client.close()
+		return False
 
 	return await asyncio.to_thread(_check_container_sync, container_name)
 
@@ -112,6 +118,7 @@ async def pull_image_if_needed(image_name: str) -> bool:
 		finally:
 			if client is not None:
 				client.close()
+		return False
 
 	return await asyncio.to_thread(_pull_image_sync, image_name)
 
@@ -154,7 +161,7 @@ async def start_qdrant_container() -> bool:
 
 			# Check if container already exists
 			try:
-				container = client.containers.get(QDRANT_CONTAINER_NAME)
+				container = cast("Container", client.containers.get(QDRANT_CONTAINER_NAME))
 				if container.status == "running":
 					logger.info(f"Container {QDRANT_CONTAINER_NAME} is already running")
 					return True
@@ -199,6 +206,7 @@ async def start_qdrant_container() -> bool:
 		finally:
 			if client is not None:
 				client.close()
+		return False
 
 	# Ensure image is available
 	if not await pull_image_if_needed(QDRANT_IMAGE):
@@ -233,7 +241,7 @@ async def start_postgres_container() -> bool:
 
 			# Check if container already exists
 			try:
-				container = client.containers.get(POSTGRES_CONTAINER_NAME)
+				container = cast("Container", client.containers.get(POSTGRES_CONTAINER_NAME))
 				if container.status == "running":
 					logger.info(f"Container {POSTGRES_CONTAINER_NAME} is already running")
 					return True
@@ -276,6 +284,7 @@ async def start_postgres_container() -> bool:
 		finally:
 			if client is not None:
 				client.close()
+		return False
 
 	# Ensure image is available
 	if not await pull_image_if_needed(POSTGRES_IMAGE):
@@ -421,7 +430,7 @@ async def stop_container(container_name: str) -> bool:
 		try:
 			client = docker.from_env()
 			try:
-				container = client.containers.get(name)
+				container = cast("Container", client.containers.get(name))
 				if container.status == "running":
 					logger.info(f"Stopping container {name}")
 					container.stop(timeout=10)  # Wait up to 10 seconds for clean shutdown
@@ -436,6 +445,7 @@ async def stop_container(container_name: str) -> bool:
 		finally:
 			if client is not None:
 				client.close()
+		return False
 
 	return await asyncio.to_thread(_stop_sync, container_name)
 

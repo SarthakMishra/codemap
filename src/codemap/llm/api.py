@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal, TypedDict, TypeVar
+from typing import Literal, TypedDict, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -39,8 +39,8 @@ class MessageDict(TypedDict):
 def validate_schema(model: type[PydanticModelT], input_data: str | object) -> PydanticModelT:
 	"""Validate the schema of the input data."""
 	if isinstance(input_data, str):
-		return model.model_validate_json(input_data)
-	return model.model_validate(input_data)
+		return cast("PydanticModelT", model.model_validate_json(input_data))
+	return cast("PydanticModelT", model.model_validate(input_data))
 
 
 def call_llm_api(
@@ -113,18 +113,6 @@ def call_llm_api(
 				output_type=agent_output_type,
 			)
 
-		run_settings = {
-			"temperature": config_loader.get.llm.temperature,
-			"max_tokens": config_loader.get.llm.max_output_tokens,
-		}
-
-		logger.debug(
-			"Calling Pydantic-AI Agent with model: %s, system_prompt: '%s...', params: %s",
-			config_loader.get.llm.model,
-			system_prompt_str[:100],
-			run_settings,
-		)
-
 		if not any(msg.get("role") == "user" for msg in messages):
 			msg = "No user content found in messages for Pydantic-AI agent."
 			logger.exception(msg)
@@ -143,7 +131,11 @@ def call_llm_api(
 			raise LLMError(msg)
 
 		# Run the agent and validate the output
-		run = agent.run_sync(user_prompt=user_prompt, model_settings=ModelSettings(**run_settings))
+		model_settings = ModelSettings(
+			temperature=float(config_loader.get.llm.temperature),
+			max_tokens=int(config_loader.get.llm.max_output_tokens),
+		)
+		run = agent.run_sync(user_prompt=user_prompt, model_settings=model_settings)
 
 		if run.output is not None:
 			if pydantic_model:
@@ -151,8 +143,11 @@ def call_llm_api(
 					return validate_schema(pydantic_model, run.output)
 				except ValidationError as e:
 					raise LLMError from e
-			elif isinstance(run.output, (str, BaseModel)):
-				return run.output  # type: ignore[return-value]
+			elif isinstance(run.output, str):
+				return run.output
+			elif isinstance(run.output, BaseModel):
+				# This shouldn't happen when pydantic_model is None, but handle it
+				return str(run.output)
 
 		msg = "Pydantic-AI call succeeded but returned no structured data or text."
 		logger.error(msg)

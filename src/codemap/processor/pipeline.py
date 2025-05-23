@@ -93,13 +93,7 @@ class ProcessingPipeline:
 		else:
 			logger.error("Critical: repo_path is None, RepoChecksumCalculator cannot be initialized.")
 
-		_config_loader_type_check = self.config_loader.__class__
-		if not config_loader:
-			from codemap.config import ConfigLoader as _ActualConfigLoader
-
-			_config_loader_type_check = _ActualConfigLoader
-
-		if not isinstance(self.config_loader, _config_loader_type_check):
+		if not isinstance(self.config_loader, ConfigLoader):
 			from codemap.config import ConfigError
 
 			logger.error(f"Config loading failed or returned unexpected type: {type(self.config_loader)}")
@@ -164,18 +158,16 @@ class ProcessingPipeline:
 		safe_branch_str = re.sub(r"[^a-zA-Z0-9_-]", "_", branch_str)
 		collection_name = f"codemap_{collection_base_name}_{safe_branch_str}"
 
-		qdrant_init_args = {
-			"config_loader": self.config_loader,
-			"collection_name": collection_name,
-			"dim": qdrant_dimension,
-			"distance": distance_enum,
-			"url": qdrant_url,
-			"api_key": qdrant_api_key,
-		}
-
 		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}, Collection: {collection_name}")
 
-		self.qdrant_manager = QdrantManager(**qdrant_init_args)
+		self.qdrant_manager = QdrantManager(
+			config_loader=self.config_loader,
+			collection_name=collection_name,
+			dim=qdrant_dimension,
+			distance=distance_enum,
+			url=qdrant_url,
+			api_key=qdrant_api_key,
+		)
 		self._vector_synchronizer: VectorSynchronizer | None = None
 
 		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")

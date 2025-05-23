@@ -53,7 +53,7 @@ class ConfigLoader:
 
 	"""
 
-	_instance = None
+	_instance: "ConfigLoader | None" = None
 
 	@classmethod
 	def get_instance(
@@ -79,6 +79,8 @@ class ConfigLoader:
 			repo_root: Repository root path (optional)
 
 		"""
+		# Initialize repo_root attribute
+		self.repo_root: Path | None = None
 		# Load configuration eagerly during initialization instead of lazy loading
 		self._app_config = self._load_config()
 		logger.debug("ConfigLoader initialized with eager configuration loading")

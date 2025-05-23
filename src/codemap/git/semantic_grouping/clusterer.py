@@ -18,7 +18,7 @@ The module supports multiple clustering methods:
 """
 
 import logging
-from typing import TYPE_CHECKING, TypedDict, TypeVar
+from typing import TYPE_CHECKING, TypedDict, TypeVar, cast
 
 import numpy as np
 
@@ -161,7 +161,7 @@ class DiffClusterer:
 				"metric": self.config.agglomerative.metric,
 				"linkage": self.config.agglomerative.linkage,
 			}
-			params.update(self.kwargs)
+			params.update(cast("dict[str, float | str | None]", self.kwargs))
 
 			clustering = self.AgglomerativeClustering(**params)
 			labels = clustering.fit_predict(distance_matrix)
@@ -173,7 +173,7 @@ class DiffClusterer:
 				"min_samples": self.config.dbscan.min_samples,
 				"metric": self.config.dbscan.metric,
 			}
-			params.update(self.kwargs)
+			params.update(cast("dict[str, float | int | str]", self.kwargs))
 
 			clustering = self.DBSCAN(**params)
 			labels = clustering.fit_predict(distance_matrix)
@@ -184,7 +184,8 @@ class DiffClusterer:
 
 		# Group chunks by cluster label
 		clusters: dict[int, list[DiffChunk]] = {}
-		for i, label in enumerate(labels):
+		labels_list: list[int] = labels.tolist()  # Convert numpy array to list for type safety
+		for i, label in enumerate(labels_list):
 			# Convert numpy integer to Python int
 			label_key = int(label)
 			if label_key not in clusters:

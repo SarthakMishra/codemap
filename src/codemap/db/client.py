@@ -2,13 +2,18 @@
 
 import asyncio
 import logging
+from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from sqlalchemy import asc
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import select
 
-from .engine import create_db_and_tables, get_engine, get_session  # get_engine is now async
+from .engine import create_db_and_tables, get_engine, get_session
 from .models import ChatHistory
+
+if TYPE_CHECKING:
+	from sqlalchemy.engine import Engine
 
 logger = logging.getLogger(__name__)
 
@@ -26,9 +31,9 @@ class DatabaseClient:
 		required.
 
 		"""
-		self.engine = None  # Initialize engine as None
+		self.engine: Engine | None = None  # Initialize engine as None
 		self.initialized = False  # Flag to track initialization status
-		self._init_task = None  # Store reference to initialization task
+		self._init_task: asyncio.Task[None] | None = None  # Store reference to initialization task
 
 		# Initialize engine in event loop if possible
 		try:
@@ -165,7 +170,7 @@ class DatabaseClient:
 			logger.exception("Error adding chat message")
 			raise  # Re-raise after logging
 
-	def get_chat_history(self, session_id: str, limit: int = 50) -> list[ChatHistory]:
+	def get_chat_history(self, session_id: str, limit: int = 50) -> Sequence[ChatHistory]:
 		"""
 		Retrieves chat history for a session, ordered chronologically.
 
@@ -174,7 +179,7 @@ class DatabaseClient:
 		    limit (int): The maximum number of messages to return.
 
 		Returns:
-		    List[ChatHistory]: A list of chat history records.
+		    Sequence[ChatHistory]: A sequence of chat history records.
 
 		"""
 		# Ensure engine is initialized - run in a new event loop if needed
@@ -200,9 +205,9 @@ class DatabaseClient:
 		)
 		try:
 			with get_session(self.engine) as session:
-				results = session.exec(statement).all()
+				results: Sequence[ChatHistory] = session.exec(statement).all()  # type: ignore[assignment]
 				logger.debug(f"Retrieved {len(results)} messages for session {session_id}.")
-				return list(results)
+				return results
 		except Exception:
 			logger.exception("Error retrieving chat history")
 			raise
@@ -233,7 +238,7 @@ class DatabaseClient:
 
 		try:
 			with get_session(self.engine) as session:
-				db_entry = session.get(ChatHistory, message_id)
+				db_entry = session.get(ChatHistory, message_id)  # type: ignore[arg-type]
 				if db_entry:
 					db_entry.ai_response = ai_response
 					session.commit()

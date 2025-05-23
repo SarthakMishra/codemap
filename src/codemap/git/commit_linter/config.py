@@ -407,7 +407,7 @@ class CommitLintConfig:
 				if rule_config:
 					rule_obj.rule = rule_config.rule
 					rule_obj.value = rule_config.value
-					rule_obj.level = RuleLevel[rule_config.level]
+					rule_obj.level = getattr(RuleLevel, rule_config.level)
 
 		# Handle special cases from commit convention
 		if commit_config.convention.types:

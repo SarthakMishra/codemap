@@ -130,7 +130,7 @@ class TreeSitterChunker:
 
 			entity_info = {
 				"type": nested_entity.entity_type.name,
-				"name": nested_entity.name or f"<{nested_entity.entity_type.name.lower()}>",
+				"name": nested_entity.name or f"<{str(nested_entity.entity_type.name).lower()}>",
 				"signature": nested_entity.signature or "",
 				"depth": depth,
 				"line_range": f"{nested_entity.start_line}-{nested_entity.end_line}"
@@ -237,7 +237,7 @@ class TreeSitterChunker:
 						absolute_file_path,
 						entity.start_line,
 						entity.end_line,
-						entity.entity_type.name,
+						str(entity.entity_type.name),
 						entity.name or "",
 						language,
 						entity_hierarchy,
@@ -293,7 +293,7 @@ class TreeSitterChunker:
 						absolute_file_path,
 						entity.start_line,
 						entity.end_line,
-						entity.entity_type.name,
+						str(entity.entity_type.name),
 						entity.name or "",
 						language,
 						entity_hierarchy,

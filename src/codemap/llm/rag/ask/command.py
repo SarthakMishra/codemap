@@ -37,13 +37,15 @@ class AskCommand:
 	"""
 
 	def __init__(self) -> None:
-		"""Initializes the AskCommand, setting up clients and pipeline."""
-		self.session_id = str(uuid.uuid4())  # Unique session ID for DB logging
+		"""Initialize the AskCommand with lazy-loaded dependencies."""
 		self.config_loader = ConfigLoader.get_instance()
 		self.ui = RagUI()
-		self._db_client = None
-		self._llm_client = None
-		self._pipeline = None
+		self.session_id = str(uuid.uuid4())
+		self._db_client: DatabaseClient | None = None
+		self._llm_client: LLMClient | None = None
+		self._pipeline: ProcessingPipeline | None = None
+		self._max_context_length: int = 8000  # Default value
+		self._max_context_results: int = 10  # Default value
 
 	@property
 	def db_client(self) -> DatabaseClient:

@@ -37,9 +37,13 @@ class SpinnerState:
 	"""Singleton class to manage the stack and display of active spinners."""
 
 	_instance: Self | None = None
-	spinner_message_stack: list[str]
-	active_rich_status_cm: Status | None
-	tree_display_active: bool = False  # Track if we're using tree display
+
+	def __init__(self) -> None:
+		"""Initialize the spinner state attributes."""
+		if not hasattr(self, "spinner_message_stack"):
+			self.spinner_message_stack: list[str] = []
+			self.active_rich_status_cm: Status | None = None
+			self.tree_display_active: bool = False
 
 	def __new__(cls) -> Self:
 		"""Create or return the singleton instance.
@@ -49,9 +53,6 @@ class SpinnerState:
 		"""
 		if cls._instance is None:
 			cls._instance = super().__new__(cls)
-			cls._instance.spinner_message_stack = []
-			cls._instance.active_rich_status_cm = None
-			cls._instance.tree_display_active = False  # Initialize
 		return cls._instance
 
 	def _stop_active_status_cm(self) -> None:
@@ -233,7 +234,7 @@ def progress_indicator(
 		yield lambda _d=None, _c=None, _t=None: None
 
 
-def exit_with_error(message: str, exit_code: int = 1, exception: Exception | None = None) -> None:
+def exit_with_error(message: str, exit_code: int = 1, exception: BaseException | None = None) -> None:
 	"""
 	Display an error message and exit.
 
@@ -244,7 +245,9 @@ def exit_with_error(message: str, exit_code: int = 1, exception: Exception | Non
 
 	"""
 	logger.error(message, exc_info=exception)
-	raise typer.Exit(exit_code) from exception
+	if exception is not None:
+		raise typer.Exit(exit_code) from exception
+	raise typer.Exit(exit_code)
 
 
 def handle_keyboard_interrupt() -> None:

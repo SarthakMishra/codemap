@@ -322,7 +322,8 @@ class LanguageSyntaxHandler(abc.ABC):
 			#    return current
 
 			# Simplistic check based on node type name (less reliable)
-			if target_type.name.lower() in current.type.lower():  # Very rough check
+			target_name = str(target_type.name).lower()  # Extract name explicitly for type checker
+			if target_name in current.type.lower():  # Very rough check
 				return current
 			current = current.parent
 		return None
