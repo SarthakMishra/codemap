@@ -71,7 +71,7 @@ class EmbeddingSchema(BaseModel):
 class RAGSchema(BaseModel):
 	"""Configuration for the RAG."""
 
-	max_context_length: int = 8000
+	max_context_length: int = 10000
 	max_context_results: int = 10
 	similarity_threshold: float = 0.75
 	system_prompt: str | None = None
