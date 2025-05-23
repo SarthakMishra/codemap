@@ -1,10 +1,5 @@
 # Tools Overview
 
-::: codemap.llm.rag.tools
-    options:
-      members_order: source
-      show_if_no_docstring: true
-      show_signature_annotations: true
-      separate_signature: true
-      show_submodules: true
+Tool Implementations for the RAG-commands.
 
+- [Retrieval](retrieval.md) - Retrieval tool for PydanticAI agents to search and retrieve code context.
