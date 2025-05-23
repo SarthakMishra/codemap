@@ -16,7 +16,6 @@
         "**/scripts/**",
         "**/typings/**"
     ],
-    "pylint.args": ["--load-plugins", "pylint_pydantic"],
     "terminal.integrated.suggest.enabled": true,
     "terminal.integrated.suggest.enableExtensionCompletions": true,
 }

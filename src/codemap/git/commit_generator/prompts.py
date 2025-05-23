@@ -10,17 +10,9 @@ from codemap.config import ConfigLoader
 from .schemas import CommitMessageSchema
 
 COMMIT_SYSTEM_PROMPT = """
-You are an AI assistant knowledgeable in Git best practices.
-You are tasked with generating Conventional Commit 1.0.0 messages from Git diffs.
-Follow the user's requirements carefully and to the letter.
-Your response must be a valid JSON object matching the provided schema.
-"""
+**Conventional Commit 1.0.0 Specification:**
 
-# Default prompt template for commit message generation
-DEFAULT_PROMPT_TEMPLATE = """
-**Instructions & Rules:**
-
-1.  **Type:** REQUIRED. Must be lowercase and one of: {convention.types}.
+1.  **Type:** REQUIRED. Must be lowercase.
     *   `feat`: New feature (MINOR SemVer).
     *   `fix`: Bug fix (PATCH SemVer).
     *   Other types (`build`, `chore`, `ci`, `docs`, `style`, `refactor`, `perf`, `test`, etc.) are allowed.
@@ -30,7 +22,6 @@ DEFAULT_PROMPT_TEMPLATE = """
     *   Must follow the colon and space.
     *   Must be >= 10 characters.
     *   Must NOT end with a period.
-    *   The entire header line (`<type>[scope]: <description>`) must be <= {convention.max_length} characters.
 4.  **Body:** OPTIONAL. Explain *why* and *how*. Start one blank line after the description.
 	*	Use the body only if extra context is needed to understand the changes.
 	*	Do not use the body to add unrelated information.
@@ -48,6 +39,22 @@ DEFAULT_PROMPT_TEMPLATE = """
     *   Be specific about what changed (e.g., "update image assets", "add new icon files", "replace binary database")
     *   If the diff content is empty or shows binary file changes, focus on the filenames to determine the purpose
 
+---
+
+You are an AI assistant specialized in writing git commit messages.
+You are tasked with generating Conventional Commit messages from Git diffs.
+Follow the user's requirements carefully and to the letter.
+Your response must be a valid JSON object matching the provided schema.
+"""
+
+# Default prompt template for commit message generation
+DEFAULT_PROMPT_TEMPLATE = """
+**File Summary:**
+{files_summary}
+
+**Git diff:**
+{diff}
+
 **Commit Message Format:**
 ```
 <type>[optional scope]: <description>
@@ -57,22 +64,18 @@ DEFAULT_PROMPT_TEMPLATE = """
 [optional footer(s)]
 ```
 
-**File Summary:**
-{files_summary}
-
-**Git diff:**
-{diff}
-
 **Output Requirements:**
 
-**(IMPORTANT) STRICTLY OMIT footers: `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED`.
-
-**(IMPORTANT) Following JSON Schema must be followed for Output:**
+- Type must be one of: {convention.types}
+- Length of the entire header line (`<type>[scope]: <description>`) must be less than {convention.max_length} characters
+- Strictly omit footers: `Related Issue #`, `Closes #`, `REVIEWED-BY`, `TRACKING #`, `APPROVED`.
+- Following JSON Schema must be followed for Output:
 {schema}
+- Return your answer as json.
 
 ---
-Please analyze the `Git diff` and `File Summary` and create a valid commit message.
-Return your answer as json.
+Please analyze the `Git diff` and `File Summary` carefully and generate an appropriate commit message for all the changes made in all the files.
+Write commits like an experienced developer. Use simple language and avoid technical jargon.
 """
 
 # Context for move operations

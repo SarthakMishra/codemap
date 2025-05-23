@@ -1,0 +1,11 @@
+body > header > nav > a > img {
+  height: 1.4rem !important;
+}
+
+body > header > nav > a {
+  padding: 0.2rem !important;
+}
+
+body > header > nav > div.md-header__title {
+	margin-left: 0.2rem !important;
+}

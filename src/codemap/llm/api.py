@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Literal, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Literal, TypedDict, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -24,6 +24,9 @@ except ImportError:
 
 from .errors import LLMError
 
+if TYPE_CHECKING:
+	from pydantic_ai.tools import Tool
+
 logger = logging.getLogger(__name__)
 
 PydanticModelT = TypeVar("PydanticModelT", bound=BaseModel)
@@ -39,13 +42,14 @@ class MessageDict(TypedDict):
 def validate_schema(model: type[PydanticModelT], input_data: str | object) -> PydanticModelT:
 	"""Validate the schema of the input data."""
 	if isinstance(input_data, str):
-		return model.model_validate_json(input_data)
-	return model.model_validate(input_data)
+		return cast("PydanticModelT", model.model_validate_json(input_data))
+	return cast("PydanticModelT", model.model_validate(input_data))
 
 
 def call_llm_api(
 	messages: list[MessageDict],
 	config_loader: ConfigLoader,
+	tools: list[Tool] | None = None,
 	pydantic_model: type[PydanticModelT] | None = None,
 ) -> str | PydanticModelT:
 	"""
@@ -54,6 +58,7 @@ def call_llm_api(
 	Args:
 	    messages: The list of messages to send to the LLM
 	    config_loader: ConfigLoader instance for additional configuration
+	    tools: Optional list of tools to use.
 	    pydantic_model: Optional Pydantic model class to structure the output.
 	                  If provided, the function will return an instance of this model.
 	                  Otherwise, it returns a string.
@@ -85,6 +90,9 @@ def call_llm_api(
 	# Determine the output_type for the Pydantic-AI Agent
 	agent_output_type: type = pydantic_model if pydantic_model else str
 
+	# Convert None to empty list if tools is None
+	agent_tools: list[Tool] = tools or []
+
 	try:
 		# Initialize Pydantic-AI Agent
 		model_name = config_loader.get.llm.model
@@ -103,27 +111,17 @@ def call_llm_api(
 
 			agent = Agent(
 				ollama_model,
+				tools=agent_tools,
 				system_prompt=system_prompt_str,
 				output_type=agent_output_type,
 			)
 		else:
 			agent = Agent(
 				model=config_loader.get.llm.model,
+				tools=agent_tools,
 				system_prompt=system_prompt_str,
 				output_type=agent_output_type,
 			)
-
-		run_settings = {
-			"temperature": config_loader.get.llm.temperature,
-			"max_tokens": config_loader.get.llm.max_output_tokens,
-		}
-
-		logger.debug(
-			"Calling Pydantic-AI Agent with model: %s, system_prompt: '%s...', params: %s",
-			config_loader.get.llm.model,
-			system_prompt_str[:100],
-			run_settings,
-		)
 
 		if not any(msg.get("role") == "user" for msg in messages):
 			msg = "No user content found in messages for Pydantic-AI agent."
@@ -143,7 +141,11 @@ def call_llm_api(
 			raise LLMError(msg)
 
 		# Run the agent and validate the output
-		run = agent.run_sync(user_prompt=user_prompt, model_settings=ModelSettings(**run_settings))
+		model_settings = ModelSettings(
+			temperature=float(config_loader.get.llm.temperature),
+			max_tokens=int(config_loader.get.llm.max_output_tokens),
+		)
+		run = agent.run_sync(user_prompt=user_prompt, model_settings=model_settings)
 
 		if run.output is not None:
 			if pydantic_model:
@@ -151,8 +153,11 @@ def call_llm_api(
 					return validate_schema(pydantic_model, run.output)
 				except ValidationError as e:
 					raise LLMError from e
-			elif isinstance(run.output, (str, BaseModel)):
-				return run.output  # type: ignore[return-value]
+			elif isinstance(run.output, str):
+				return run.output
+			elif isinstance(run.output, BaseModel):
+				# This shouldn't happen when pydantic_model is None, but handle it
+				return str(run.output)
 
 		msg = "Pydantic-AI call succeeded but returned no structured data or text."
 		logger.error(msg)

@@ -1,7 +1,7 @@
 """Module for generating embeddings from diff chunks."""
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 
@@ -86,7 +86,7 @@ class DiffEmbedder:
 
 		return np.array(embeddings[0])
 
-	async def embed_contents(self, contents: list[str]) -> list[float | None]:
+	async def embed_contents(self, contents: list[str]) -> list[list[float] | None]:
 		"""
 		Generate embeddings for multiple content strings.
 
@@ -115,14 +115,14 @@ class DiffEmbedder:
 
 		# Return early if no valid contents
 		if not contents_to_embed:
-			return [None] * len(contents)
+			return cast("list[list[float] | None]", [None] * len(contents))
 
 		# Generate embeddings in batch
 		try:
 			embeddings_batch = generate_embedding(contents_to_embed, self.config_loader)
 
 			# Rebuild result list with None for invalid contents
-			result: list[float | None] = [None] * len(contents)
+			result: list[list[float] | None] = cast("list[list[float] | None]", [None] * len(contents))
 			if embeddings_batch:
 				for idx, valid_idx in enumerate(valid_indices):
 					if idx < len(embeddings_batch):
@@ -131,7 +131,7 @@ class DiffEmbedder:
 
 		except Exception:
 			logger.exception("Unexpected error during embedding generation")
-			return [None] * len(contents)
+			return cast("list[list[float] | None]", [None] * len(contents))
 
 	async def embed_chunks(self, chunks: list[DiffChunk]) -> list[tuple[DiffChunk, np.ndarray]]:
 		"""

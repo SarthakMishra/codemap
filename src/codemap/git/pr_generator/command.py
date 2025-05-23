@@ -60,7 +60,7 @@ class PRCommand:
 				llm_client=llm_client,
 			)
 
-			self.error_state = None  # Tracks reason for failure: "failed", "aborted", etc.
+			self.error_state: str | None = None  # Tracks reason for failure: "failed", "aborted", etc.
 		except GitError as e:
 			raise RuntimeError(str(e)) from e
 

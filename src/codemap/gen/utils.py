@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from codemap.config import ConfigLoader
 from codemap.processor.lod import LODEntity, LODGenerator, LODLevel
@@ -106,7 +106,7 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 
 	"""
 	# Build a nested dictionary representing the file structure
-	tree = {}
+	tree: dict[str, Any] = {}
 
 	# Process directories first to ensure complete structure
 	# Sort paths to process directories first, then files, all in alphabetical order
@@ -122,7 +122,7 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 			rel_path = abs_path.relative_to(target_path)
 			dir_parts = rel_path.parts
 
-			current_level = tree
+			current_level: dict[str, Any] = tree
 			for _i, part in enumerate(dir_parts):
 				if part not in current_level:
 					current_level[part] = {}
@@ -168,7 +168,7 @@ def generate_tree(target_path: Path, filtered_paths: Sequence[Path]) -> str:
 	tree_lines = [target_dir_name]
 
 	# Recursive function to generate formatted tree lines
-	def format_level(level: dict, prefix: str = "") -> None:
+	def format_level(level: dict[str, Any], prefix: str = "") -> None:
 		"""Recursively formats a directory tree level into ASCII tree representation.
 
 		Args:

@@ -1,16 +1,15 @@
 """Command for asking questions about the codebase using RAG."""
 
-import asyncio
 import logging
 import uuid
 from typing import Any, TypedDict
 
-import aiofiles
-
 from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
+from codemap.llm.api import MessageDict
 from codemap.llm.client import LLMClient
 from codemap.llm.rag.interactive import RagUI
+from codemap.llm.rag.tools.retrieval import code_retrieval_tool
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
 
@@ -37,13 +36,15 @@ class AskCommand:
 	"""
 
 	def __init__(self) -> None:
-		"""Initializes the AskCommand, setting up clients and pipeline."""
-		self.session_id = str(uuid.uuid4())  # Unique session ID for DB logging
+		"""Initialize the AskCommand with lazy-loaded dependencies."""
 		self.config_loader = ConfigLoader.get_instance()
 		self.ui = RagUI()
-		self._db_client = None
-		self._llm_client = None
-		self._pipeline = None
+		self.session_id = str(uuid.uuid4())
+		self._db_client: DatabaseClient | None = None
+		self._llm_client: LLMClient | None = None
+		self._pipeline: ProcessingPipeline | None = None
+		self._max_context_length: int = 8000  # Default value
+		self._max_context_results: int = 10  # Default value
 
 	@property
 	def db_client(self) -> DatabaseClient:
@@ -123,101 +124,6 @@ class AskCommand:
 		else:
 			logger.info("AskCommand async components already initialized.")
 
-	async def _retrieve_context(self, query: str, limit: int | None = None) -> list[dict[str, Any]]:
-		"""Retrieve relevant code chunks based on the query."""
-		if not self.pipeline:
-			logger.warning("ProcessingPipeline not available, no context will be retrieved.")
-			return []
-
-		# Use configured limit or default
-		actual_limit = limit or self.max_context_results
-
-		try:
-			logger.info(f"Retrieving context for query: '{query}', limit: {actual_limit}")
-			# Use synchronous method to get results (pipeline.semantic_search is async)
-			# Now call await directly as this method is async
-			# import asyncio
-			# results = asyncio.run(self.pipeline.semantic_search(query, k=actual_limit))
-			results = await self.pipeline.semantic_search(query, k=actual_limit)
-
-			# Format results for the LLM
-			formatted_results = []
-			if results:  # Check if results is not None and has items
-				for r in results:
-					# Extract relevant fields from payload
-					payload = r.get("payload", {})
-
-					# Get file content from repo using file_path, start_line, and end_line
-					file_path = payload.get("file_path", "N/A")
-					start_line = payload.get("start_line", -1)
-					end_line = payload.get("end_line", -1)
-
-					# Get content from repository if needed and build a content representation
-					# For now, we'll use a simple representation that includes metadata
-					entity_type = payload.get("entity_type", "")
-					entity_name = payload.get("entity_name", "")
-					language = payload.get("language", "")
-
-					# Build a content representation from the metadata
-					content_parts = []
-					content_parts.append(f"Type: {entity_type}")
-					if entity_name:
-						content_parts.append(f"Name: {entity_name}")
-
-					# Get the file content from the repo
-					try:
-						if (
-							self.config_loader.get.repo_root
-							and file_path
-							and file_path != "N/A"
-							and start_line > 0
-							and end_line > 0
-						):
-							repo_file_path = self.config_loader.get.repo_root / file_path
-							if await asyncio.to_thread(repo_file_path.exists):
-								async with aiofiles.open(repo_file_path, encoding="utf-8") as f:
-									file_content = await f.read()
-								lines = file_content.splitlines()
-								if start_line <= len(lines) and end_line <= len(lines) and start_line <= end_line:
-									code_content = "\n".join(lines[start_line - 1 : end_line])
-									if language:
-										content_parts.append(f"```{language}\n{code_content}\n```")
-									else:
-										content_parts.append(f"```\n{code_content}\n```")
-								else:
-									logger.warning(
-										f"Invalid line numbers for file {file_path}: "
-										f"start={start_line}, end={end_line}, total_lines={len(lines)}. "
-										"Skipping code content for this chunk."
-									)
-							else:
-								logger.warning(f"File path does not exist for chunk context: {repo_file_path}")
-						elif file_path == "N/A":
-							logger.warning("File path is 'N/A' for a chunk, cannot retrieve content.")
-							# Add other conditions leading to this path if necessary for logging
-					except Exception:
-						logger.exception(f"Error reading or processing file content for {file_path}")
-						# Optionally, append a placeholder or error message to content_parts
-						# content_parts.append("[Error retrieving code content]")
-
-					content = "\n\n".join(content_parts)
-
-					formatted_results.append(
-						{
-							"file_path": file_path,
-							"start_line": start_line,
-							"end_line": end_line,
-							"content": content,
-							"score": r.get("score", -1.0),
-						}
-					)
-
-			logger.debug(f"Semantic search returned {len(formatted_results)} results.")
-			return formatted_results
-		except Exception:
-			logger.exception("Error retrieving context")
-			return []
-
 	async def run(self, question: str) -> AskResult:
 		"""Executes one turn of the ask command, returning the answer and context."""
 		logger.info(f"Processing question for session {self.session_id}: '{question}'")
@@ -228,21 +134,11 @@ class AskCommand:
 		if not self.pipeline:
 			return AskResult(answer="Processing pipeline not available.", context=[])
 
-		# Retrieve relevant context first
-		context = await self._retrieve_context(question)
-
-		# Format context for inclusion in prompt
-		context_text = self.ui.format_content_for_context(context)
-		if len(context_text) > self.max_context_length:
-			logger.warning(f"Context too long ({len(context_text)} chars), truncating.")
-			context_text = context_text[: self.max_context_length] + "... [truncated]"
-
 		# Construct prompt text from the context and question
-		prompt = (
-			f"System: {SYSTEM_PROMPT}\n\n"
-			f"User: Here's my question about the codebase: {question}\n\n"
-			f"Relevant context from the codebase:\n{context_text}"
-		)
+		messages: list[MessageDict] = [
+			{"role": "system", "content": SYSTEM_PROMPT},
+			{"role": "user", "content": f"Here's my question about the codebase: {question}"},
+		]
 
 		# Store user query in DB
 		db_entry_id = None
@@ -260,7 +156,8 @@ class AskCommand:
 		try:
 			with progress_indicator("Waiting for LLM response..."):
 				answer = self.llm_client.completion(
-					messages=[{"role": "user", "content": prompt}],
+					messages=messages,
+					tools=[code_retrieval_tool],
 				)
 			logger.debug(f"LLM response: {answer}")
 
@@ -271,7 +168,7 @@ class AskCommand:
 				if not success:
 					logger.warning(f"Failed to update DB entry {db_entry_id} via client method.")
 
-			return AskResult(answer=answer, context=context)
+			return AskResult(answer=answer, context=[])
 		except Exception as e:  # Keep the outer exception for LLM call errors
 			logger.exception("Error during LLM completion")
-			return AskResult(answer=f"Error: {e!s}", context=context)
+			return AskResult(answer=f"Error: {e!s}", context=[])

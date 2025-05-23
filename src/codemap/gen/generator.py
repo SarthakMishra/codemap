@@ -188,7 +188,8 @@ class CodeMapGenerator:
 			elif include_this_entity and entity.entity_type != EntityType.IMPORT:  # Imports handled separately
 				node_definition = ""
 				node_class = ""
-				label = _escape_mermaid_label(entity.name or f"({entity.entity_type.name.lower()})")
+				entity_type_name = str(entity.entity_type.name).lower()
+				label = _escape_mermaid_label(entity.name or f"({entity_type_name})")
 
 				if entity.entity_type in (EntityType.FUNCTION, EntityType.METHOD):
 					node_definition = f'{entity_node_id}("{label}")'

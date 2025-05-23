@@ -29,7 +29,6 @@ def filter_paths_by_gitignore(paths: Sequence[Path], repo_root: Path) -> list[Pa
 	"""
 	try:
 		import pathspec
-		from pathspec.patterns.gitwildmatch import GitWildMatchPattern
 	except ImportError:
 		logger.warning("pathspec package not installed, gitignore filtering disabled")
 		return list(paths)
@@ -75,7 +74,7 @@ def filter_paths_by_gitignore(paths: Sequence[Path], repo_root: Path) -> list[Pa
 	all_patterns = gitignore_patterns + [p for p in default_ignore_patterns if p not in gitignore_patterns]
 
 	# Create path spec with direct import
-	spec = pathspec.PathSpec.from_lines(GitWildMatchPattern, all_patterns)
+	spec = pathspec.PathSpec.from_lines("gitwildmatch", all_patterns)
 
 	# Filter paths
 	filtered_paths = []

@@ -160,9 +160,10 @@ class CommitParser:
 			Only executes if there is a current_footer being processed.
 			"""
 			nonlocal current_footer, current_value_lines
-			if current_footer:
-				current_footer["value"] = "\n".join(current_value_lines).strip()
-				footers.append(current_footer)
+			if current_footer is not None:
+				footer_dict: dict[str, Any] = current_footer
+				footer_dict["value"] = "\n".join(current_value_lines).strip()
+				footers.append(footer_dict)
 				current_footer = None
 				current_value_lines = []
 

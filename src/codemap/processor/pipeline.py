@@ -53,6 +53,34 @@ class ProcessingPipeline:
 
 	"""
 
+	_instance: ProcessingPipeline | None = None
+	_lock = asyncio.Lock()
+
+	@classmethod
+	async def get_instance(
+		cls,
+		config_loader: ConfigLoader | None = None,
+	) -> ProcessingPipeline:
+		"""
+		Get or create a singleton instance of ProcessingPipeline.
+
+		Args:
+		    config_loader: Application configuration loader. If None, a default one is created.
+
+		Returns:
+		    The singleton ProcessingPipeline instance.
+		"""
+		async with cls._lock:
+			if cls._instance is None:
+				cls._instance = cls(config_loader=config_loader)
+				await cls._instance.async_init()
+			return cls._instance
+
+	@classmethod
+	def reset_instance(cls) -> None:
+		"""Reset the singleton instance. Useful for testing."""
+		cls._instance = None
+
 	def __init__(
 		self,
 		config_loader: ConfigLoader | None = None,
@@ -65,11 +93,12 @@ class ProcessingPipeline:
 		Args:
 		    config_loader: Application configuration loader. If None, a default one is created.
 		"""
+		# Import ConfigLoader at the beginning to ensure it's always available
+		from codemap.config import ConfigLoader
+
 		if config_loader:
 			self.config_loader = config_loader
 		else:
-			from codemap.config import ConfigLoader
-
 			self.config_loader = ConfigLoader.get_instance()
 
 		self.git_context = GitRepoContext.get_instance()
@@ -93,13 +122,7 @@ class ProcessingPipeline:
 		else:
 			logger.error("Critical: repo_path is None, RepoChecksumCalculator cannot be initialized.")
 
-		_config_loader_type_check = self.config_loader.__class__
-		if not config_loader:
-			from codemap.config import ConfigLoader as _ActualConfigLoader
-
-			_config_loader_type_check = _ActualConfigLoader
-
-		if not isinstance(self.config_loader, _config_loader_type_check):
+		if not isinstance(self.config_loader, ConfigLoader):
 			from codemap.config import ConfigError
 
 			logger.error(f"Config loading failed or returned unexpected type: {type(self.config_loader)}")
@@ -164,18 +187,16 @@ class ProcessingPipeline:
 		safe_branch_str = re.sub(r"[^a-zA-Z0-9_-]", "_", branch_str)
 		collection_name = f"codemap_{collection_base_name}_{safe_branch_str}"
 
-		qdrant_init_args = {
-			"config_loader": self.config_loader,
-			"collection_name": collection_name,
-			"dim": qdrant_dimension,
-			"distance": distance_enum,
-			"url": qdrant_url,
-			"api_key": qdrant_api_key,
-		}
-
 		logger.info(f"Configuring Qdrant client for URL: {qdrant_url}, Collection: {collection_name}")
 
-		self.qdrant_manager = QdrantManager(**qdrant_init_args)
+		self.qdrant_manager = QdrantManager(
+			config_loader=self.config_loader,
+			collection_name=collection_name,
+			dim=qdrant_dimension,
+			distance=distance_enum,
+			url=qdrant_url,
+			api_key=qdrant_api_key,
+		)
 		self._vector_synchronizer: VectorSynchronizer | None = None
 
 		logger.info(f"ProcessingPipeline synchronous initialization complete for repo: {self.repo_path}")
@@ -536,12 +557,14 @@ class ProcessingPipeline:
 			for scored_point in search_results:
 				# Convert Qdrant model to dict for consistent output
 				# Include score (similarity) and payload
+				from codemap.processor.vector.schema import ChunkMetadataSchema
+
+				payload = ChunkMetadataSchema.model_validate(scored_point.payload)
+
 				result_dict = {
 					"id": str(scored_point.id),  # Ensure ID is string
 					"score": scored_point.score,
-					"payload": scored_point.payload,
-					# Optionally include version if needed
-					# "version": scored_point.version,
+					"payload": payload,
 				}
 				formatted_results.append(result_dict)
 

@@ -939,7 +939,7 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 			return
 
 		all_files = []
-		combined_content = []
+		combined_content: list[str] = []
 		is_move = any(getattr(chunk, "is_move", False) for chunk in related_chunks)
 
 		for rc in related_chunks:
@@ -1136,7 +1136,9 @@ class SemanticSplitStrategy(BaseSplitStrategy):
 				continue
 
 			# Get embeddings for all deleted and added contents in batch
-			all_contents = [content for _, content in deleted_items + added_items]
+			all_contents = []
+			for _, content in deleted_items + added_items:
+				all_contents.append(content)
 			all_embeddings = await self.embedder.embed_contents(all_contents)
 
 			# Split embeddings back to deleted and added

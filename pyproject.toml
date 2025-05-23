@@ -45,7 +45,7 @@ dependencies = [
     "docker>=7.1.0",
     "psycopg2-binary>=2.9.10",
     "watchdog>=6.0.0",
-    "pydantic-ai>=0.1.10",
+    "pydantic-ai>=0.2.6",
     "nest-asyncio>=1.6.0",
     "asyncer",
     "pygit2>=1.18.0",
@@ -67,12 +67,9 @@ Issues = "https://github.com/SarthakMishra/codemap/issues"
 dev = [
     "build>=1.2.2.post1",
     "interrogate[png]>=1.7.0",
-    "isort>=6.0.1",
     "packaging>=25.0",
     "pre-commit>=4.2.0",
-    "pylint>=3.3.6",
-    "pylint-pydantic>=0.3.5",
-    "pyright>=1.1.400",
+    "pyrefly>=0.16.2",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.1.1",
@@ -92,10 +89,11 @@ docs = [
     "mkdocstrings-python>=1.16.10",
 ]
 
-[tool.pyright]
-# Define included and excluded directories
-include = ["src", "tests"]
-exclude = [
+[tool.pyrefly]
+project_includes = [
+    "src",
+]
+project_excludes = [
     ".git",
     ".ruff_cache",
     ".venv",
@@ -103,31 +101,12 @@ exclude = [
     "__pycache__",
     "build",
     "dist",
-    "vendor"
+    "vendor",
+    "tests",
+    "scripts",
 ]
-# Basic type checking mode - more lenient than strict
-typeCheckingMode = "standard"
-# Analyze unannotated functions
-analyzeUnannotatedFunctions = true
-# Configuration to enable good type checking but not be too strict
-reportMissingImports = "error"
-reportMissingTypeStubs = "warning"
-reportUnusedImport = "warning"
-reportUnusedVariable = "warning"
-reportGeneralTypeIssues = "error"
-# Useful for catching common errors
-reportOptionalSubscript = "error"
-reportOptionalMemberAccess = "error"
-reportOptionalCall = "error"
-# Enable Python 3.12 features
-pythonVersion = "3.12"
-# Use library code for types when type stubs are missing
-useLibraryCodeForTypes = true
-# Virtual environment configuration
-venvPath = "."
-venv = ".venv"
-# Extra paths to search for imported modules
-extraPaths = ["src"]
+search_path = ["src"]
+python_version = "3.12.0"
 
 [project.scripts]
 codemap = "codemap.cli:main"
@@ -239,36 +218,6 @@ quote-style = "double"
 indent-style = "tab"
 skip-magic-trailing-comma = false
 line-ending = "auto"
-
-[tool.docformatter]
-recursive = true
-wrap-summaries = 120
-pre-summary-newline = true
-blank = true
-
-[tool.isort]
-profile = "black"
-line_length = 120
-multi_line_output = 3
-include_trailing_comma = true
-use_parentheses = true
-ensure_newline_before_comments = true
-skip_gitignore = true
-skip_glob = [
-    ".git",
-    ".ruff_cache",
-    ".venv",
-    "venv",
-    "__pycache__",
-    "build",
-    "dist",
-    "vendor"
-]
-sections = ["FUTURE", "STDLIB", "THIRDPARTY", "FIRSTPARTY", "LOCALFOLDER"]
-known_first_party = ["codemap"]
-known_third_party = ["litellm", "numpy", "pygments", "dotenv", "yaml", "questionary", 
-                    "requests", "rich", "typer", "typing_extensions", "sentence_transformers", 
-                    "watchdog", "tree_sitter", "lancedb", "pandas", "multilspy"]
 
 [tool.semantic_release]
 version_variables = [

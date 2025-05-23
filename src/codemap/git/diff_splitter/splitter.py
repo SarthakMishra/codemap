@@ -129,7 +129,7 @@ class DiffSplitter:
 					# Use a heuristic to match file sections in the original content
 					for file_path in chunk.files:
 						file_marker = f"diff --git a/{file_path} b/{file_path}"
-						if file_marker in diff.content:
+						if isinstance(diff.content, str) and file_marker in diff.content:
 							# Found a match for this file in the original content
 							# Extract that file's complete diff section
 							start_idx = diff.content.find(file_marker)
@@ -141,7 +141,7 @@ class DiffSplitter:
 
 							# Now replace just this file's content in the chunk
 							# This is a heuristic that may need adjustment based on your diff format
-							if chunk.content and file_marker in chunk.content:
+							if chunk.content and isinstance(chunk.content, str) and file_marker in chunk.content:
 								chunk_start = chunk.content.find(file_marker)
 								chunk_end = chunk.content.find("diff --git", chunk_start + len(file_marker))
 								if chunk_end == -1:  # Last file in the chunk
