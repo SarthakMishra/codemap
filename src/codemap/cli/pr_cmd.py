@@ -464,8 +464,15 @@ async def _pr_command_impl(
 				qmark="\U0001f4dd",  # Memo emoji
 			).ask()
 
+			# Handle None case explicitly
+			if action is None:
+				console.print("[yellow]PR operation cancelled.[/yellow]")
+				return None, None
 			if action == "Confirm and Proceed":
 				return title, description
+			if action == "Cancel":
+				console.print("[yellow]PR operation cancelled.[/yellow]")
+				return None, None
 			if action == "Edit Title":
 				new_title = questionary.text("Enter new title:", default=title).ask()
 				if new_title is not None:
@@ -493,12 +500,9 @@ async def _pr_command_impl(
 					base_branch,
 					content_config,
 				)
-			elif action == "Cancel" or action is None:
-				console.print("[yellow]PR operation cancelled.[/yellow]")
-				return None, None
-			else:
-				logger.exception("Invalid action selected.")  # Should not happen
-				return None, None
+			# Continue loop for edit/regenerate actions
+		# Should not be reached
+		return None, None
 
 	# --- Generation Helpers (Adapted from pr_cmd_old, now use options dataclass) ---
 	def _generate_title(
