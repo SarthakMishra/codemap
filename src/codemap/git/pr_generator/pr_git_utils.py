@@ -23,6 +23,7 @@ class PRGitUtils(ExtendedGitRepoContext):
 	"""Provides Git operations for PR generation using pygit2."""
 
 	_pr_git_utils_instance: PRGitUtils | None = None
+	branch: str  # Explicitly declare the inherited attribute
 
 	@classmethod
 	def get_instance(cls) -> PRGitUtils:

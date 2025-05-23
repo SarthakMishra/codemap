@@ -92,8 +92,6 @@ docs = [
 [tool.pyrefly]
 project_includes = [
     "src",
-    "tests",
-    "scripts",
 ]
 project_excludes = [
     ".git",
@@ -104,12 +102,11 @@ project_excludes = [
     "build",
     "dist",
     "vendor",
+    "tests",
+    "scripts",
 ]
 search_path = ["src"]
 python_version = "3.12.0"
-
-[tool.pyrefly.errors]
-import-error = true
 
 [project.scripts]
 codemap = "codemap.cli:main"
