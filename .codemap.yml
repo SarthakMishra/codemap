@@ -5,7 +5,7 @@
 # LLM Configuration - Controls which model is used for AI operations
 llm:
   # Format: "provider:model-name", e.g., "openai:gpt-4o", "anthropic:claude-3-opus"
-  model: "groq:meta-llama/llama-4-maverick-17b-128e-instruct"
+  model: "google-gla:gemini-2.0-flash"
   temperature: 0.5  # Lower for more deterministic outputs, higher for creativity
   max_output_tokens: 1024  # Maximum tokens in responses
 
