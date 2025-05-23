@@ -65,11 +65,12 @@ class ProcessingPipeline:
 		Args:
 		    config_loader: Application configuration loader. If None, a default one is created.
 		"""
+		# Import ConfigLoader at the beginning to ensure it's always available
+		from codemap.config import ConfigLoader
+
 		if config_loader:
 			self.config_loader = config_loader
 		else:
-			from codemap.config import ConfigLoader
-
 			self.config_loader = ConfigLoader.get_instance()
 
 		self.git_context = GitRepoContext.get_instance()
