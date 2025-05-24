@@ -26,18 +26,39 @@ def search_files_by_name(filename: str, search_root: Path | None = None) -> list
 	if search_root is None:
 		search_root = Path.cwd()
 
-	# Search for exact matches first
-	matching_files = [file_path for file_path in search_root.rglob(filename) if file_path.is_file()]
+	# Handle absolute paths by converting them to relative paths
+	if filename.startswith("/"):
+		# Remove leading slash and any 'src/' prefix if present
+		filename = filename.lstrip("/")
+		filename = filename.removeprefix("src/")  # Remove 'src/' prefix
 
-	# If no exact matches, search for partial matches
-	if not matching_files:
-		matching_files.extend(
-			[
-				file_path
-				for file_path in search_root.rglob("*")
-				if file_path.is_file() and filename.lower() in file_path.name.lower()
-			]
-		)
+	# If the filename contains path separators, treat it as a path pattern
+	if "/" in filename:
+		# Split into directory and filename parts
+		path_parts = filename.split("/")
+		actual_filename = path_parts[-1]
+
+		# Search for the filename first, then filter by path
+		matching_files = []
+		for file_path in search_root.rglob(actual_filename):
+			if file_path.is_file():
+				# Check if the file path contains the directory structure we're looking for
+				relative_path = str(file_path.relative_to(search_root))
+				if all(part in relative_path for part in path_parts[:-1]):
+					matching_files.append(file_path)
+	else:
+		# Search for exact matches first
+		matching_files = [file_path for file_path in search_root.rglob(filename) if file_path.is_file()]
+
+		# If no exact matches, search for partial matches
+		if not matching_files:
+			matching_files.extend(
+				[
+					file_path
+					for file_path in search_root.rglob("*")
+					if file_path.is_file() and filename.lower() in file_path.name.lower()
+				]
+			)
 
 	return matching_files
 
