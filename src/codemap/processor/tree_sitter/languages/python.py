@@ -96,40 +96,18 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 		except (UnicodeDecodeError, IndexError) as e:
 			logger.debug("Failed to decode node content: %s", str(e))
 
-		# Special case: if this is an expression statement containing a constant assignment
+		# Special case: if this is an expression statement containing an assignment
+		# We do NOT want to classify the expression_statement itself as a constant/variable
+		# Instead, let the child assignment node be classified properly to avoid duplicates
 		if node_type == "expression_statement":
-			# Check if it contains an assignment that is a constant
+			# Check if it contains an assignment - if so, return UNKNOWN for the expression_statement
+			# The assignment child will be processed separately and classified properly
 			for child in node.children:
 				if child.type == "assignment":
-					name_node = child.child_by_field_name("left")
-					if name_node:
-						name = self._get_node_text(name_node, content_bytes)
-
-						# Get the right side for type detection
-						value_node = child.child_by_field_name("right")
-						value_text = ""
-						if value_node:
-							try:
-								value_text = self._get_node_text(value_node, content_bytes)
-							except (UnicodeDecodeError, IndexError) as e:
-								logger.debug("Failed to decode type value: %s", str(e))
-
-						# Check for type alias - TypeVar or anything referencing typing types like Dict, List, etc.
-						if "TypeVar" in value_text or any(
-							typing_type in value_text
-							for typing_type in ["Dict", "List", "Tuple", "Set", "Union", "Optional", "Callable", "Any"]
-						):
-							logger.debug("Expression statement with TYPE_ALIAS: %s", name)
-							return EntityType.TYPE_ALIAS
-
-						# Check for constant (all uppercase with at least one letter)
-						if name.isupper() and any(c.isalpha() for c in name):
-							logger.debug("Expression statement with CONSTANT assignment: %s", name)
-							return EntityType.CONSTANT
-						# Check for regular variable
-						if not name.startswith("_") and any(c.isalpha() for c in name):
-							logger.debug("Expression statement with VARIABLE assignment: %s", name)
-							return EntityType.VARIABLE
+					logger.debug(
+						"Expression statement contains assignment - skipping classification to avoid duplicates"
+					)
+					return EntityType.UNKNOWN
 
 		# Module-level
 		if node_type in self.config.module:
@@ -155,20 +133,49 @@ class PythonSyntaxHandler(LanguageSyntaxHandler):
 		if node_type in self.config.protocol:
 			# Would need to check for Protocol inheritance to be precise
 			return EntityType.PROTOCOL
-		if node_type in self.config.type_alias:
+		if node_type in self.config.type_alias and node_type == "assignment":
 			# For assignments, check if it's a constant (all uppercase) first
-			if node_type == "assignment":
-				name_node = node.child_by_field_name("left")
-				if name_node:
-					name = self._get_node_text(name_node, content_bytes)
-					logger.debug("Checking potential constant in type_alias: %s (is_upper: %s)", name, name.isupper())
-					# Improved check for constants: name is uppercase and contains at least one letter
-					if name.isupper() and any(c.isalpha() for c in name):
-						logger.debug("Identified as CONSTANT: %s", name)
-						return EntityType.CONSTANT
+			name_node = node.child_by_field_name("left")
+			if name_node:
+				name = self._get_node_text(name_node, content_bytes)
+				logger.debug("Checking potential constant in type_alias: %s (is_upper: %s)", name, name.isupper())
+				# Improved check for constants: name is uppercase and contains at least one letter
+				if name.isupper() and any(c.isalpha() for c in name):
+					logger.debug("Identified as CONSTANT: %s", name)
+					return EntityType.CONSTANT
 
-			# Otherwise, treat as a type alias
-			return EntityType.TYPE_ALIAS
+			# Check if this is actually a type alias by examining the right-hand side
+			value_node = node.child_by_field_name("right")
+			if value_node:
+				try:
+					value_text = self._get_node_text(value_node, content_bytes)
+					# Check for type alias indicators - TypeVar or typing module types
+					if "TypeVar" in value_text or any(
+						typing_type in value_text
+						for typing_type in [
+							"Dict",
+							"List",
+							"Tuple",
+							"Set",
+							"Union",
+							"Optional",
+							"Callable",
+							"Any",
+							"Type[",
+							"ClassVar",
+							"Final",
+							"Literal",
+							"Protocol",
+							"Generic",
+						]
+					):
+						logger.debug("Identified as TYPE_ALIAS: %s", name if name_node else "unknown")
+						return EntityType.TYPE_ALIAS
+				except (UnicodeDecodeError, IndexError) as e:
+					logger.debug("Failed to decode type value: %s", str(e))
+
+		# If it's an assignment but not a constant or type alias, fall through to variable check
+		# Don't return TYPE_ALIAS by default for all assignments
 
 		# Functions and methods
 		if node_type in self.config.function:
