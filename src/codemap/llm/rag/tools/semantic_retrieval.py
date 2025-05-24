@@ -215,9 +215,8 @@ async def retrieve_code_context(query: str) -> str:
 semantic_retrieval_tool = Tool(
 	retrieve_code_context,
 	takes_ctx=False,
-	name="retriever",
+	name="semantic_retrieval",
 	description=(
-		"Universal retriever for codebase context."
 		"Retrieve relevant context from the codebase using semantic search for the given query. "
 		"The query should be technical and specific to the codebase. "
 		"Mention keywords like functions, classes, modules, etc. if applicable."
