@@ -82,7 +82,7 @@ gen:
   use_gitignore: true  # Use .gitignore patterns to exclude files
   output_dir: "documentation"  # Directory to store generated documentation
   include_tree: true  # Include directory tree in output
-  include_entity_graph: false  # Include entity relationship graph
+  include_entity_graph: true  # Include entity relationship graph
   semantic_analysis: true  # Enable semantic analysis
   lod_level: "docs"  # Level of detail: "signatures", "structure", "docs", "full"
 
@@ -99,8 +99,9 @@ gen:
   #   - "declares"
   #   - "imports"
   #   - "calls"
-  # mermaid_show_legend: true
-  # mermaid_remove_unconnected: false  # Show isolated nodes
+  mermaid_show_legend: false
+  mermaid_remove_unconnected: true  # Show isolated nodes
+  mermaid_styled: false  # Style the mermaid diagram
 
 # Processor Configuration - Controls code processing behavior
 processor:
