@@ -135,11 +135,13 @@ class GenSchema(BaseModel):
 				"signatures": LODLevel.SIGNATURES,
 				"structure": LODLevel.STRUCTURE,
 				"docs": LODLevel.DOCS,
+				"skeleton": LODLevel.SKELETON,
 				"full": LODLevel.FULL,
 				"1": LODLevel.SIGNATURES,
 				"2": LODLevel.STRUCTURE,
 				"3": LODLevel.DOCS,
-				"4": LODLevel.FULL,
+				"4": LODLevel.SKELETON,
+				"5": LODLevel.FULL,
 			}
 			# Try lowercase first, then original case
 			if v.lower() in level_map:
@@ -154,7 +156,7 @@ class GenSchema(BaseModel):
 			try:
 				return LODLevel(v)
 			except ValueError:
-				valid_numbers = [1, 2, 3, 4]
+				valid_numbers = [1, 2, 3, 4, 5]
 				msg = f"Invalid lod_level number '{v}'. Valid numbers are: {valid_numbers}"
 				raise ValueError(msg) from None
 		msg = f"lod_level must be a string, number, or LODLevel enum, got {type(v)}"
