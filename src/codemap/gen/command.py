@@ -8,12 +8,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from codemap.config import ConfigLoader
+from codemap.config.config_schema import GenSchema
 from codemap.processor.lod import LODEntity
 from codemap.utils.cli_utils import console, progress_indicator
 from codemap.utils.file_utils import is_binary_file
 from codemap.utils.path_utils import filter_paths_by_gitignore
 
-from .models import GenConfig
 from .utils import generate_tree, process_files_for_lod
 
 if TYPE_CHECKING:
@@ -34,7 +34,7 @@ def show_error(message: str) -> None:
 
 def process_codebase(
 	target_path: Path,
-	config: GenConfig,
+	config: GenSchema,
 	config_loader: ConfigLoader | None = None,
 ) -> tuple[list[LODEntity], dict]:
 	"""
@@ -124,7 +124,7 @@ def process_codebase(
 class GenCommand:
 	"""Main implementation of the gen command."""
 
-	def __init__(self, config: GenConfig, config_loader: ConfigLoader | None = None) -> None:
+	def __init__(self, config: GenSchema, config_loader: ConfigLoader | None = None) -> None:
 		"""
 		Initialize the gen command.
 

@@ -12,9 +12,9 @@ import aiofiles
 import xxhash
 from pygit2 import GitError
 
-from codemap.config.config_loader import ConfigLoader
-
 if TYPE_CHECKING:
+	from codemap.config.config_loader import ConfigLoader
+
 	# This import is conditional for type hinting and will not cause a runtime error
 	# if GitRepoContext is not available in the global scope when this module is loaded directly.
 	# However, for actual use, GitRepoContext will need to be importable.
@@ -59,6 +59,8 @@ class RepoChecksumCalculator:
 
 		if not self.config_loader:
 			# Ensure we have a config loader instance to fetch default/user configs
+			from codemap.config.config_loader import ConfigLoader
+
 			self.config_loader = ConfigLoader().get_instance()
 
 		self.checksums_base_dir = self.repo_path / ".codemap_cache" / "checksums"
