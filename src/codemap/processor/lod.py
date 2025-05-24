@@ -35,7 +35,8 @@ class LODLevel(Enum):
 	SIGNATURES = 1  # Top-level entity names, docstrings, and signatures
 	STRUCTURE = 2  # All entity signatures, indented structure
 	DOCS = 3  # Level 2 + Docstrings for all entities
-	FULL = 4  # Level 3 + Full implementation content
+	SKELETON = 4  # Level 3 + Implementation skeleton (key patterns, control flow, important assignments)
+	FULL = 5  # Level 4 + Full implementation content
 
 
 @dataclass
@@ -132,8 +133,15 @@ class LODGenerator:
 		start_line = location.get("start_line", 1)
 		end_line = location.get("end_line", 1)
 
+		# Get the name from analysis result
+		entity_name = analysis_result.get("name", "")
+
+		# For modules with placeholder names, use the filename instead
+		if entity_type == EntityType.MODULE and entity_name.startswith("<anonymous-") and file_path:
+			entity_name = file_path.stem  # Get filename without extension
+
 		entity = LODEntity(
-			name=analysis_result.get("name", ""),
+			name=entity_name,
 			entity_type=entity_type,
 			start_line=start_line,
 			end_line=end_line,
@@ -155,7 +163,7 @@ class LODGenerator:
 			content = analysis_result.get("content", "")
 			entity.signature = self._extract_signature(content, entity_type, entity.language)
 
-		if level.value >= LODLevel.FULL.value or entity_type == EntityType.COMMENT:
+		if level.value >= LODLevel.SKELETON.value or entity_type in {EntityType.COMMENT, EntityType.CONSTANT}:
 			entity.content = analysis_result.get("content", "")
 
 		# Process children recursively (propagate file_path to children but mark as non-root)
