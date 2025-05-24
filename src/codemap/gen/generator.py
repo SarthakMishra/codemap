@@ -100,17 +100,15 @@ def _add_range_styles(link_styles: list[str], indices: list[int], style_def: str
 class CodeMapGenerator:
 	"""Generates code documentation based on LOD (Level of Detail)."""
 
-	def __init__(self, config: GenSchema, output_path: Path) -> None:
+	def __init__(self, config: GenSchema) -> None:
 		"""
 		Initialize the code map generator.
 
 		Args:
 		    config: Generation configuration settings
-		    output_path: Path to write the output
 
 		"""
 		self.config = config
-		self.output_path = output_path
 
 	def _generate_mermaid_diagram(self, entities: list[LODEntity]) -> str:
 		"""Generate a Mermaid diagram string for entity relationships using subgraphs."""

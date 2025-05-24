@@ -108,12 +108,6 @@ def basic_gen_config() -> GenConfig:
 
 
 @pytest.fixture
-def mock_output_path(tmp_path: Path) -> Path:
-	"""Provides a mock output path."""
-	return tmp_path / "output.md"
-
-
-@pytest.fixture
 def simple_module_entity() -> LODEntity:
 	"""Provides a simple MODULE entity."""
 	return LODEntity(
@@ -289,9 +283,9 @@ def module_with_unconnected_entity() -> LODEntity:
 class TestCodeMapGeneratorMermaid:
 	"""Tests focused on the Mermaid diagram generation."""
 
-	def test_generate_mermaid_empty(self, basic_gen_config: GenConfig, mock_output_path: Path) -> None:
+	def test_generate_mermaid_empty(self, basic_gen_config: GenConfig) -> None:
 		"""Test Mermaid generation with no entities."""
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		mermaid_string = generator._generate_mermaid_diagram([])
 
 		assert "graph LR" in mermaid_string
@@ -302,11 +296,9 @@ class TestCodeMapGeneratorMermaid:
 		assert "subgraph sg" not in mermaid_string  # No subgraphs with short IDs
 		assert "style" not in mermaid_string  # No styles applied
 
-	def test_generate_mermaid_simple_module(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, simple_module_entity: LODEntity
-	) -> None:
+	def test_generate_mermaid_simple_module(self, basic_gen_config: GenConfig, simple_module_entity: LODEntity) -> None:
 		"""Test Mermaid generation with a single simple module."""
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [simple_module_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -329,10 +321,10 @@ class TestCodeMapGeneratorMermaid:
 		assert_style_definition(mermaid_string, "sg1", "moduleSubgraph")
 
 	def test_generate_mermaid_module_with_class_and_func(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, module_with_content_entity: LODEntity
+		self, basic_gen_config: GenConfig, module_with_content_entity: LODEntity
 	) -> None:
 		"""Test Mermaid with module, class, and function."""
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [module_with_content_entity]  # Contains class which contains func
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -374,12 +366,10 @@ class TestCodeMapGeneratorMermaid:
 		assert f"  {module_node_id} --- {class_node_id}" in mermaid_string
 		assert f"  {class_node_id} --- {func_node_id}" in mermaid_string
 
-	def test_generate_mermaid_no_legend(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, simple_module_entity: LODEntity
-	) -> None:
+	def test_generate_mermaid_no_legend(self, basic_gen_config: GenConfig, simple_module_entity: LODEntity) -> None:
 		"""Test disabling the Mermaid legend."""
 		basic_gen_config.mermaid_show_legend = False
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [simple_module_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -393,11 +383,11 @@ class TestCodeMapGeneratorMermaid:
 		assert_style_definition(mermaid_string, node_id, "moduleSubgraph")
 
 	def test_generate_mermaid_filter_entities(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, module_with_content_entity: LODEntity
+		self, basic_gen_config: GenConfig, module_with_content_entity: LODEntity
 	) -> None:
 		"""Test filtering entities shown in the Mermaid diagram."""
 		basic_gen_config.mermaid_entities = ["MODULE", "FUNCTION"]  # Only show modules and functions
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [module_with_content_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -434,7 +424,7 @@ class TestCodeMapGeneratorMermaid:
 		assert "legend_class" not in mermaid_string
 
 	def test_generate_mermaid_filter_relationships(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, module_with_content_entity: LODEntity
+		self, basic_gen_config: GenConfig, module_with_content_entity: LODEntity
 	) -> None:
 		"""Test filtering relationships shown in the Mermaid diagram."""
 		# Add an import dependency for testing
@@ -442,7 +432,7 @@ class TestCodeMapGeneratorMermaid:
 		class_entity_in_test.metadata["dependencies"] = ["os"]  # Add dep to class
 
 		basic_gen_config.mermaid_relationships = ["imports"]  # Only show imports
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [module_with_content_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -487,13 +477,13 @@ class TestCodeMapGeneratorMermaid:
 		)
 
 	def test_generate_mermaid_calls_relationship(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, module_with_call_entity: LODEntity
+		self, basic_gen_config: GenConfig, module_with_call_entity: LODEntity
 	) -> None:
 		"""Test visualizing the 'calls' relationship."""
 		# Ensure 'calls' is included in relationships (default is all)
 		# basic_gen_config.mermaid_relationships = ["calls", "declares"] # Or rely on default
 
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [module_with_call_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -534,10 +524,10 @@ class TestCodeMapGeneratorMermaid:
 		assert re.search(r"linkStyle \d+ stroke:#28a745,stroke-width:2px;", mermaid_string), "Call link style not found"
 
 	def test_generate_mermaid_import_visualization(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, module_with_imports_entity: LODEntity
+		self, basic_gen_config: GenConfig, module_with_imports_entity: LODEntity
 	) -> None:
 		"""Test visualization of internal vs external imports."""
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [module_with_imports_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
@@ -576,7 +566,7 @@ class TestCodeMapGeneratorMermaid:
 		)
 
 	def test_generate_mermaid_remove_unconnected(
-		self, basic_gen_config: GenConfig, mock_output_path: Path, module_with_unconnected_entity: LODEntity
+		self, basic_gen_config: GenConfig, module_with_unconnected_entity: LODEntity
 	) -> None:
 		"""Test the mermaid_remove_unconnected flag."""
 		basic_gen_config.mermaid_remove_unconnected = True
@@ -593,7 +583,7 @@ class TestCodeMapGeneratorMermaid:
 		)
 		module_with_unconnected_entity.children.append(caller_func)
 
-		generator = CodeMapGenerator(basic_gen_config, mock_output_path)
+		generator = CodeMapGenerator(basic_gen_config)
 		entities = [module_with_unconnected_entity]
 		mermaid_string = generator._generate_mermaid_diagram(entities)
 
