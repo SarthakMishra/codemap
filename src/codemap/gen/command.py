@@ -156,7 +156,7 @@ class GenCommand:
 
 		try:
 			# Create generator
-			generator = CodeMapGenerator(self.config, output_path)
+			generator = CodeMapGenerator(self.config)
 
 			# Process codebase with progress tracking
 			with progress_indicator("Processing codebase..."):
