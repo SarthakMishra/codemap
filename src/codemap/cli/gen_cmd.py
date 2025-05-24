@@ -179,13 +179,15 @@ def _gen_command_impl(
 	mermaid_relationships_str: str | None = None,
 	mermaid_show_legend_flag: bool | None = None,
 	mermaid_remove_unconnected_flag: bool | None = None,
+	mermaid_styled_flag: bool | None = None,
 ) -> None:
 	"""Implementation of the gen command with heavy imports deferred."""
 	# Import heavy dependencies here instead of at the top
 
 	with progress_indicator("Setting up environment..."):
-		from codemap.config.config_loader import ConfigLoader
-		from codemap.gen import GenCommand, GenConfig
+		from codemap.config import ConfigLoader
+		from codemap.config.config_schema import GenSchema
+		from codemap.gen import GenCommand
 		from codemap.processor.lod import LODLevel
 		from codemap.utils.cli_utils import exit_with_error, handle_keyboard_interrupt
 
@@ -210,23 +212,17 @@ def _gen_command_impl(
 		# Initialize lod_level to a default before the try block
 		lod_level: LODLevel = LODLevel.DOCS  # Default if conversion fails somehow
 
-		# Get LOD level from config if not specified
-		config_lod_str = str(gen_config_data.lod_level)  # Default to 'docs'
-
-		# Determine the final LOD level string (CLI > Config > Default)
-		final_lod_str = lod_level_str if lod_level_str != LODLevel.DOCS.name.lower() else config_lod_str
-
-		# Convert the final string to the LODLevel enum
-		try:
-			# Look up enum member by name (uppercase) instead of value
-			lod_level = getattr(LODLevel, final_lod_str.upper())
-		except (ValueError, AttributeError) as e:  # Catch AttributeError for invalid names
-			# Provide a more helpful error message if conversion fails
-			# Get valid names (lowercase) for the error message
-			valid_names = [name.lower() for name in LODLevel.__members__]
-			exit_with_error(
-				f"Invalid LOD level '{final_lod_str}'. Valid levels are: {', '.join(valid_names)}", exception=e
-			)
+		# Handle LOD level (CLI > Config > Default)
+		if lod_level_str != "docs":  # CLI argument was explicitly provided
+			# Convert CLI string to LODLevel enum
+			try:
+				lod_level = getattr(LODLevel, lod_level_str.upper())
+			except AttributeError:
+				valid_names = [name.lower() for name in LODLevel.__members__]
+				exit_with_error(f"Invalid LOD level '{lod_level_str}'. Valid levels are: {', '.join(valid_names)}")
+		else:
+			# Use config value (which is already a LODLevel enum thanks to our validator)
+			lod_level = gen_config_data.lod_level
 
 		# Handle Mermaid config (CLI > Config > Default)
 		default_mermaid_entities = gen_config_data.mermaid_entities
@@ -255,19 +251,22 @@ def _gen_command_impl(
 			else gen_config_data.mermaid_remove_unconnected
 		)
 
+		mermaid_styled = mermaid_styled_flag if mermaid_styled_flag is not None else gen_config_data.mermaid_styled
+
 		# Create generation config
-		gen_config = GenConfig(
+		gen_config = GenSchema(
 			lod_level=lod_level,
 			max_content_length=content_length,
 			include_tree=include_tree,
 			semantic_analysis=enable_semantic,
 			include_entity_graph=include_entity_graph,
 			use_gitignore=gen_config_data.use_gitignore,
-			output_dir=Path(gen_config_data.output_dir),
+			output_dir=str(gen_config_data.output_dir),  # Convert Path to string
 			mermaid_entities=mermaid_entities,
 			mermaid_relationships=mermaid_relationships,
 			mermaid_show_legend=mermaid_show_legend,
 			mermaid_remove_unconnected=mermaid_remove_unconnected,
+			mermaid_styled=mermaid_styled,
 		)
 
 		# Determine output path
