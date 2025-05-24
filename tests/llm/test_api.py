@@ -29,10 +29,12 @@ def mock_config_loader():
 	mock_get = Mock()
 	mock_llm = Mock()
 
-	# Set up the llm config properties
+	# Set up the llm config properties with all required values
 	mock_llm.model = "openai:gpt-4o-mini"
 	mock_llm.temperature = 0.7
 	mock_llm.max_output_tokens = 1000
+	mock_llm.max_input_tokens = 10000  # Add missing required property
+	mock_llm.max_requests = 5  # Add missing required property
 
 	# Attach the llm config to the get property
 	mock_get.llm = mock_llm
