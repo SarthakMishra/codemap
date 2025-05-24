@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 # --- Constants --- #
 SMALL_RANGE_THRESHOLD = 5  # Threshold for adding range comments in link styles
+MAX_SKELETON_EARLY_CALLS = 5  # Maximum number of early function calls to show in skeleton
 
 
 # --- Mermaid Helper --- #
@@ -483,6 +484,35 @@ class CodeMapGenerator:
 		style_lines = []  # Collect individual style commands for subgraphs
 		used_style_keys = set()  # Track which styles (funcNode, classSubgraph etc.) are used
 
+		# Helper function to check if a subgraph has any content after filtering
+		def subgraph_has_content(subgraph_id: str) -> bool:
+			"""Check if a subgraph has any content (nodes or nested subgraphs) after filtering.
+
+			Args:
+				subgraph_id: The ID of the subgraph to check
+
+			Returns:
+				True if the subgraph has any content that would be rendered, False otherwise
+			"""
+			if subgraph_id not in subgraph_definitions:
+				return False
+
+			_, _, contained_node_ids = subgraph_definitions[subgraph_id]
+
+			# Check if any nodes in this subgraph would be rendered
+			for node_id in contained_node_ids:
+				if node_id in node_definitions:
+					# If filtering is disabled, all nodes are rendered
+					if not self.config.mermaid_remove_unconnected:
+						return True
+					# If filtering is enabled, check if node is connected
+					if node_id in connected_ids:
+						return True
+
+			# Check if any nested subgraphs have content
+			nested_subgraphs = [sid for sid, parent_id in subgraph_hierarchy.items() if parent_id == subgraph_id]
+			return any(subgraph_has_content(nested_id) for nested_id in nested_subgraphs)
+
 		# Function to recursively render subgraphs and their nodes
 		def render_subgraph(subgraph_id: str, indent: str = "") -> None:
 			"""Recursively renders a Mermaid subgraph and its contents.
@@ -502,6 +532,11 @@ class CodeMapGenerator:
 			"""
 			if subgraph_id in rendered_elements:
 				return
+
+			# Skip empty subgraphs when filtering is enabled
+			if self.config.mermaid_remove_unconnected and not subgraph_has_content(subgraph_id):
+				return
+
 			rendered_elements.add(subgraph_id)
 
 			label, sg_type, contained_node_ids = subgraph_definitions[subgraph_id]
@@ -536,11 +571,8 @@ class CodeMapGenerator:
 			# Render nested subgraphs
 			nested_subgraphs = [sid for sid, parent_id in subgraph_hierarchy.items() if parent_id == subgraph_id]
 			for nested_id in sorted(nested_subgraphs):  # Sort for consistent output
-				# Apply filtering if enabled - check if the subgraph itself or any node inside it is connected
-				is_nested_connected = subgraph_id in connected_ids or any(
-					nid in connected_ids for nid in subgraph_definitions[nested_id][2]
-				)
-				if self.config.mermaid_remove_unconnected and not is_nested_connected:
+				# Apply filtering if enabled - use the comprehensive content check
+				if self.config.mermaid_remove_unconnected and not subgraph_has_content(nested_id):
 					continue
 				render_subgraph(nested_id, indent + "  ")
 
@@ -609,11 +641,8 @@ class CodeMapGenerator:
 		output_lines.append("\n  %% Subgraphs")
 		top_level_subgraphs = [sg_id for sg_id in subgraph_definitions if sg_id not in subgraph_hierarchy]
 		for sg_id in sorted(top_level_subgraphs):
-			# Apply filtering if enabled - check if the subgraph itself or any node inside it is connected
-			is_sg_connected = sg_id in connected_ids or any(
-				nid in connected_ids for nid in subgraph_definitions[sg_id][2]
-			)
-			if self.config.mermaid_remove_unconnected and not is_sg_connected:
+			# Apply filtering if enabled - use the comprehensive content check
+			if self.config.mermaid_remove_unconnected and not subgraph_has_content(sg_id):
 				continue
 			render_subgraph(sg_id, "  ")  # Use 2-space base indentation for top-level subgraphs
 
@@ -887,67 +916,201 @@ class CodeMapGenerator:
 		# Add code documentation grouped by file
 		content.append("\n## Code Documentation")
 
-		# Helper function to format a single entity recursively
-		def format_entity_recursive(entity: LODEntity, level: int) -> list[str]:
-			"""Recursively formats an entity and its children into markdown documentation.
+		# Helper function to get comment syntax for a language
+		def get_comment_syntax(language: str) -> str:
+			"""Get the appropriate comment syntax for a programming language.
 
 			Args:
-				entity: The entity to format
-				level: The current indentation level in the hierarchy
+				language: The programming language name
 
 			Returns:
-				A list of markdown-formatted strings representing the entity and its children
+				The comment prefix for that language
 			"""
-			entity_content = []
-			indent = "  " * level
-			list_prefix = f"{indent}- "
+			language_lower = language.lower() if language else ""
 
-			# Basic entry: Type and Name/Signature
-			entry_line = f"{list_prefix}**{entity.entity_type.name.capitalize()}**: `{entity.name}`"
-			if self.config.lod_level.value >= LODLevel.STRUCTURE.value and entity.signature:
-				entry_line = f"{list_prefix}**{entity.entity_type.name.capitalize()}**: `{entity.signature}`"
-			# Special handling for comments
-			elif entity.entity_type == EntityType.COMMENT and entity.content:
-				comment_lines = entity.content.strip().split("\n")
-				# Format as italicized blockquote
-				entity_content.extend([f"{indent}> *{line.strip()}*" for line in comment_lines])
-				entry_line = None  # Don't print the default entry line
-			elif not entity.name and entity.entity_type == EntityType.MODULE:
-				# Skip module node if it has no name (handled by file heading)
-				# Don't add the list item itself
-				entry_line = None  # Don't print the default entry line
-
-			# Add the generated entry line if it wasn't skipped
-			if entry_line:
-				entity_content.append(entry_line)
-
-			# Add Docstring if level is DOCS or FULL (and not a comment)
-			if (
-				entity.entity_type != EntityType.COMMENT
-				and self.config.lod_level.value >= LODLevel.DOCS.value
-				and entity.docstring
+			# Languages using // for comments
+			if language_lower in (
+				"javascript",
+				"java",
+				"c",
+				"cpp",
+				"c++",
+				"csharp",
+				"c#",
+				"go",
+				"rust",
+				"php",
+				"kotlin",
+				"swift",
+				"typescript",
 			):
-				docstring_lines = entity.docstring.strip().split("\n")
-				# Format docstring lines with proper indentation
-				entity_content.append(f"{indent}  >")
-				entity_content.extend([f"{indent}  > {line}" for line in docstring_lines])
+				return "//"
+			# Languages using -- for comments
+			if language_lower in ("sql", "haskell", "lua"):
+				return "--"
+			# Languages using % for comments
+			if language_lower in ("matlab", "octave"):
+				return "%"
+			# Languages using ; for comments
+			if language_lower in ("assembly", "asm"):
+				return ";"
+			# Default to # for Python, Ruby, Shell, Perl, etc.
+			return "#"
 
-			# Add Content if level is FULL
-			if self.config.lod_level.value >= LODLevel.FULL.value and entity.content:
-				content_lang = entity.language or ""
-				entity_content.append(f"{indent}  ```{content_lang}")
-				# Indent content lines as well
-				content_lines = entity.content.strip().split("\n")
-				entity_content.extend([f"{indent}  {line}" for line in content_lines])
-				entity_content.append(f"{indent}  ```")
+		# Helper function to reconstruct code with LOD filtering
+		def reconstruct_code_with_lod(entity: LODEntity, current_indent: str = "") -> list[str]:
+			"""Reconstructs code content based on LOD level.
 
-			# Recursively format children
-			for child in sorted(entity.children, key=lambda e: e.start_line):
-				# Skip unknown children
-				if child.entity_type != EntityType.UNKNOWN:
-					entity_content.extend(format_entity_recursive(child, level + 1))
+			Args:
+				entity: The entity to process
+				current_indent: Current indentation level
 
-			return entity_content
+			Returns:
+				List of code lines with appropriate LOD filtering
+			"""
+			lines = []
+
+			# Skip certain entity types based on LOD level
+			if entity.entity_type == EntityType.IMPORT and self.config.lod_level.value < LODLevel.FULL.value:
+				return []  # Skip imports except at FULL level
+
+			if entity.entity_type == EntityType.COMMENT and self.config.lod_level.value < LODLevel.FULL.value:
+				return []  # Skip comments except at FULL level
+
+			# Handle different entity types
+			if entity.entity_type == EntityType.MODULE:
+				# For modules, process children without adding module declaration
+				for child in sorted(entity.children, key=lambda e: e.start_line):
+					if child.entity_type != EntityType.UNKNOWN:
+						child_lines = reconstruct_code_with_lod(child, current_indent)
+						lines.extend(child_lines)
+						if child_lines:  # Add spacing between entities
+							lines.append("")
+					else:
+						# For UNKNOWN entities, check if they contain constants/variables as direct children
+						# This handles cases where expression_statement wrappers contain assignment nodes
+						for grandchild in sorted(child.children, key=lambda e: e.start_line):
+							if grandchild.entity_type in (EntityType.CONSTANT, EntityType.VARIABLE):
+								grandchild_lines = reconstruct_code_with_lod(grandchild, current_indent)
+								lines.extend(grandchild_lines)
+								if grandchild_lines:  # Add spacing between entities
+									lines.append("")
+
+			elif entity.entity_type in (EntityType.CLASS, EntityType.FUNCTION, EntityType.METHOD):
+				# Add signature/declaration
+				if entity.signature:
+					lines.append(f"{current_indent}{entity.signature}:")
+				elif entity.content:
+					# Extract first line as signature
+					first_line = entity.content.split("\n")[0].strip()
+					lines.append(f"{current_indent}{first_line}:")
+				else:
+					# Fallback
+					entity_keyword = "class" if entity.entity_type == EntityType.CLASS else "def"
+					lines.append(f"{current_indent}{entity_keyword} {entity.name}:")
+
+				# Add docstring if available and level permits (but not at SKELETON/FULL level)
+				if (
+					entity.docstring
+					and self.config.lod_level.value >= LODLevel.DOCS.value
+					and self.config.lod_level.value < LODLevel.SKELETON.value
+				):
+					lines.append(f'{current_indent}    """')
+					lines.extend(f"{current_indent}    {doc_line}" for doc_line in entity.docstring.strip().split("\n"))
+					lines.append(f'{current_indent}    """')
+
+				# Determine indentation for children
+				child_indent = current_indent + "    "
+
+				if self.config.lod_level.value >= LODLevel.FULL.value:
+					# FULL level: include full implementation
+					if entity.content and entity.entity_type != EntityType.MODULE:
+						content_lines = entity.content.strip().split("\n")
+						# Skip the first line (signature) as we already added it
+						lines.extend(f"{current_indent}{content_line}" for content_line in content_lines[1:])
+				elif self.config.lod_level.value >= LODLevel.SKELETON.value:
+					# SKELETON level: show full content but filter out comments
+					if entity.content and entity.entity_type != EntityType.MODULE:
+						content_lines = entity.content.strip().split("\n")
+						# Skip the first line (signature) as we already added it
+						for content_line in content_lines[1:]:
+							stripped = content_line.strip()
+
+							# Skip lines that are entirely comments
+							if stripped and any(stripped.startswith(prefix) for prefix in ("#", "//", "/*")):
+								continue
+
+							# Handle inline comments by removing them
+							if stripped:
+								cleaned_line = content_line
+								# Remove inline comments (simple approach - look for comment markers)
+								for comment_prefix in ["#", "//"]:
+									if comment_prefix in content_line:
+										# Find the comment position (avoiding strings)
+										comment_pos = content_line.find(comment_prefix)
+										if comment_pos != -1:
+											# Simple check: if not in quotes, it's likely a comment
+											before_comment = content_line[:comment_pos]
+											if (
+												before_comment.count('"') % 2 == 0
+												and before_comment.count("'") % 2 == 0
+											):
+												cleaned_line = before_comment.rstrip()
+												break
+
+								if cleaned_line.strip():  # Only add if there's actual code content
+									lines.append(f"{current_indent}{cleaned_line}")
+							else:  # Keep empty lines for structure
+								lines.append(f"{current_indent}{content_line}")
+				else:
+					# SIGNATURES/STRUCTURE/DOCS: process children as signatures only
+					has_children = False
+					for child in sorted(entity.children, key=lambda e: e.start_line):
+						if child.entity_type != EntityType.UNKNOWN:
+							child_lines = reconstruct_code_with_lod(child, child_indent)
+							if child_lines:
+								lines.extend(child_lines)
+								has_children = True
+						else:
+							# For UNKNOWN entities, check if they contain constants/variables as direct children
+							for grandchild in sorted(child.children, key=lambda e: e.start_line):
+								if grandchild.entity_type in (EntityType.CONSTANT, EntityType.VARIABLE):
+									grandchild_lines = reconstruct_code_with_lod(grandchild, child_indent)
+									if grandchild_lines:
+										lines.extend(grandchild_lines)
+										has_children = True
+
+					# If we have content but not showing full, add truncation comment
+					comment_prefix = get_comment_syntax(entity.language or "")
+					if entity.content and not has_children:
+						lines.append(f"{child_indent}{comment_prefix} truncated for brevity")
+					elif not has_children and entity.entity_type != EntityType.CLASS:
+						# For functions/methods without children, add truncation comment
+						lines.append(f"{child_indent}{comment_prefix} hidden for brevity")
+
+			elif entity.entity_type in (EntityType.VARIABLE, EntityType.CONSTANT):
+				# At FULL level, show everything; at SKELETON+ levels, show the declaration
+				if entity.content:
+					if self.config.lod_level.value >= LODLevel.FULL.value:
+						# Show complete content at FULL level
+						content_lines = entity.content.strip().split("\n")
+						lines.extend(f"{current_indent}{content_line}" for content_line in content_lines)
+					elif self.config.lod_level.value >= LODLevel.SKELETON.value:
+						# Show just the first line (declaration) at SKELETON and higher levels
+						first_line = entity.content.strip().split("\n")[0]
+						lines.append(f"{current_indent}{first_line}")
+				# If no content is available, skip the entity entirely
+
+			elif entity.entity_type == EntityType.IMPORT:
+				if entity.content:
+					lines.append(f"{current_indent}{entity.content.strip()}")
+				else:
+					lines.append(f"{current_indent}import {entity.name}")
+
+			elif entity.entity_type == EntityType.COMMENT and entity.content:
+				lines.extend(f"{current_indent}{comment_line}" for comment_line in entity.content.strip().split("\n"))
+
+			return lines
 
 		first_file = True
 		for i, (file_path, file_entities) in enumerate(sorted(files.items()), 1):
@@ -995,35 +1158,28 @@ class CodeMapGenerator:
 			# Sort top-level entities by line number
 			sorted_entities = sorted(file_entities, key=lambda e: e.start_line)
 
-			if self.config.lod_level == LODLevel.SIGNATURES:
-				# Level 1: Only top-level signatures
+			# Generate code content using LOD-based reconstruction
+			code_lines = []
+			for entity in sorted_entities:
+				# Process all entities and collect code lines
+				entity_lines = reconstruct_code_with_lod(entity)
+				code_lines.extend(entity_lines)
+
+			# Remove trailing empty lines
+			while code_lines and not code_lines[-1].strip():
+				code_lines.pop()
+
+			# Add the code block with proper language detection
+			if code_lines:
+				# Get language from the first entity with language info
+				lang = ""
 				for entity in sorted_entities:
-					if entity.entity_type in (
-						EntityType.CLASS,
-						EntityType.FUNCTION,
-						EntityType.METHOD,
-						EntityType.INTERFACE,
-						EntityType.MODULE,
-					):
-						content.append(f"\n#### {entity.name or '(Module Level)'}")
-						if entity.signature:
-							sig_lang = entity.language or ""
-							content.append(f"\n```{sig_lang}")
-							content.append(entity.signature)
-							content.append("```")
-			else:
-				# Levels 2, 3, 4: Use recursive formatting
-				for entity in sorted_entities:
-					# Process top-level entities (usually MODULE, but could be others if file has only one class/func)
-					if entity.entity_type == EntityType.MODULE:
-						# If it's the module, start recursion from its children
-						for child in sorted(entity.children, key=lambda e: e.start_line):
-							# Skip unknown children
-							if child.entity_type != EntityType.UNKNOWN:
-								content.extend(format_entity_recursive(child, level=0))
-					# Handle cases where the top-level entity isn't MODULE (e.g., a file with just one class)
-					# Skip if unknown
-					elif entity.entity_type != EntityType.UNKNOWN:
-						content.extend(format_entity_recursive(entity, level=0))
+					if entity.language:
+						lang = entity.language
+						break
+
+				content.append(f"\n```{lang}")
+				content.extend(code_lines)
+				content.append("```")
 
 		return "\n".join(content)
