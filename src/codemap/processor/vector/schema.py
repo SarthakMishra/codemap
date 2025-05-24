@@ -19,7 +19,7 @@ class GitMetadataSchema(BaseModel):
 	git_hash: str
 	tracked: bool
 	branch: str
-	blame: list[GitBlameSchema]
+	blame: list[GitBlameSchema] = []
 
 
 class FileMetadataSchema(BaseModel):
