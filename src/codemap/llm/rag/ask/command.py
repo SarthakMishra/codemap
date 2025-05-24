@@ -9,7 +9,7 @@ from codemap.db.client import DatabaseClient
 from codemap.llm.api import MessageDict
 from codemap.llm.client import LLMClient
 from codemap.llm.rag.interactive import RagUI
-from codemap.llm.rag.tools import read_file_tool, semantic_retrieval_tool
+from codemap.llm.rag.tools import read_file_tool, semantic_retrieval_tool, web_search_tool
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
 
@@ -157,7 +157,7 @@ class AskCommand:
 			with progress_indicator("Waiting for LLM response..."):
 				answer = self.llm_client.completion(
 					messages=messages,
-					tools=[read_file_tool, semantic_retrieval_tool],
+					tools=[read_file_tool, semantic_retrieval_tool, web_search_tool()],
 				)
 			logger.debug(f"LLM response: {answer}")
 
