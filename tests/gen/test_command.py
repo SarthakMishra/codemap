@@ -92,7 +92,7 @@ class TestGenCommand(CLITestBase, FileSystemTestBase):
 		assert mock_process_codebase.call_args[0][0] == self.test_target_path
 		assert mock_process_codebase.call_args[0][1] == self.config
 
-		mock_generator_cls.assert_called_once_with(self.config, self.test_output_path)
+		mock_generator_cls.assert_called_once_with(self.config)
 		mock_generator_instance.generate_documentation.assert_called_once_with(
 			[MOCK_ENTITY_1, MOCK_ENTITY_2],
 			{"name": "my_project", "stats": {"total_files": 2}},
