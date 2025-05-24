@@ -10,6 +10,7 @@ from codemap.llm.client import LLMClient
 from codemap.llm.rag.interactive import RagUI
 from codemap.llm.rag.tools import (
 	codebase_summary_tool,
+	pattern_search_tool,
 	read_file_tool,
 	semantic_retrieval_tool,
 	web_search_tool,
@@ -128,7 +129,7 @@ class AskCommand:
 		else:
 			logger.info("AskCommand async components already initialized.")
 
-	async def run(self, question: str) -> AskResult:
+	async def run(self, question: str, show_usage: bool = False) -> AskResult:
 		"""Executes one turn of the ask command, returning the answer and context."""
 		logger.info(f"Processing question for session {self.session_id}: '{question}'")
 
@@ -151,12 +152,16 @@ class AskCommand:
 			logger.exception("Failed to store current query turn in DB")
 
 		try:
+			# Reset usage tracking for this question
+			self.llm_client.reset_usage_tracking()
+
 			# Use the new iterative completion method
 			final_answer = self.llm_client.iterative_completion(
 				question=question,
 				system_prompt=SYSTEM_PROMPT,
 				tools=[
 					codebase_summary_tool,
+					pattern_search_tool,
 					read_file_tool,
 					semantic_retrieval_tool,
 					web_search_tool(),
@@ -165,6 +170,11 @@ class AskCommand:
 			)
 
 			logger.debug(f"Final LLM response: {final_answer}")
+
+			# Show usage summary if requested
+			if show_usage:
+				usage_summary = self.llm_client.get_usage_summary()
+				self.ui.print_usage_summary(usage_summary)
 
 			# Update DB with answer using the dedicated client method
 			if db_entry_id and final_answer:
@@ -177,3 +187,8 @@ class AskCommand:
 		except Exception as e:  # Keep the outer exception for LLM call errors
 			logger.exception("Error during LLM completion")
 			return AskResult(answer=f"Error: {e!s}", context=[])
+
+	def show_usage_summary(self) -> None:
+		"""Display the current usage summary."""
+		usage_summary = self.llm_client.get_usage_summary()
+		self.ui.print_usage_summary(usage_summary)
