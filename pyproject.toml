@@ -55,6 +55,8 @@ dependencies = [
     "scikit-learn>=1.6.1",
     "pygithub>=2.6.1",
     "pydantic-ai-slim[duckduckgo]>=0.2.6",
+    "ast-grep-py>=0.38.2",
+    "tokencost>=0.1.22",
 ]
 
 [project.urls]
