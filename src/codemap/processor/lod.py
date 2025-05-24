@@ -107,7 +107,7 @@ class LODGenerator:
 		return self._convert_to_lod(analysis_result, level, file_path)
 
 	def _convert_to_lod(
-		self, analysis_result: dict[str, Any], level: LODLevel, file_path: Path | None = None
+		self, analysis_result: dict[str, Any], level: LODLevel, file_path: Path | None = None, is_root: bool = True
 	) -> LODEntity:
 		"""
 		Convert tree-sitter analysis to LOD format.
@@ -116,6 +116,7 @@ class LODGenerator:
 		    analysis_result: Tree-sitter analysis result
 		    level: Level of detail to generate
 		    file_path: Path to the file being analyzed (present for the root entity)
+		    is_root: Whether the entity is the root entity for the file
 
 		Returns:
 		    LODEntity representation
@@ -139,10 +140,11 @@ class LODGenerator:
 			language=analysis_result.get("language", ""),
 		)
 
-		if file_path:  # This indicates it's the root entity for the file
+		# Store file_path for all entities for node ID generation, but mark as root only for the top entity
+		if file_path:
 			entity.metadata["file_path"] = str(file_path)
-			# If full_content_str is available from analyzer, store it in root entity metadata
-			if "full_content_str" in analysis_result:
+			if is_root and "full_content_str" in analysis_result:
+				# If full_content_str is available from analyzer, store it in root entity metadata
 				entity.metadata["full_content_str"] = analysis_result["full_content_str"]
 
 		if level.value >= LODLevel.DOCS.value:
@@ -156,10 +158,10 @@ class LODGenerator:
 		if level.value >= LODLevel.FULL.value or entity_type == EntityType.COMMENT:
 			entity.content = analysis_result.get("content", "")
 
-		# Process children recursively (without passing file_path)
+		# Process children recursively (propagate file_path to children but mark as non-root)
 		children = analysis_result.get("children", [])
 		for child in children:
-			child_entity = self._convert_to_lod(child, level)
+			child_entity = self._convert_to_lod(child, level, file_path, is_root=False)
 			entity.children.append(child_entity)
 
 		# Add any additional metadata
