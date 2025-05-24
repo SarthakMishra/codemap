@@ -17,6 +17,7 @@ llm:
 embedding:
   # Recommended models: "minishlab/potion-base-8M3", Only Model2Vec static models are supported
   model_name: "minishlab/potion-base-8M"
+  # dimension: 256
   # dimension_metric: "cosine" # Metric for dimension calculation (e.g., "cosine", "euclidean")
   # max_retries: 3 # Maximum retries for embedding requests
   # retry_delay: 5 # Delay in seconds between retries
@@ -81,7 +82,7 @@ gen:
   include_tree: true  # Include directory tree in output
   include_entity_graph: true  # Include entity relationship graph
   semantic_analysis: true  # Enable semantic analysis
-  lod_level: "docs"  # Level of detail: "signatures", "structure", "docs", "full"
+  lod_level: "docs"  # Level of detail: "signatures", "structure", "docs", "skeleton", "full"
 
   # Mermaid diagram configuration for entity graphs
   # mermaid_entities:
