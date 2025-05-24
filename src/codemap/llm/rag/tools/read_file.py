@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 
 import aiofiles
+from pydantic_ai import ModelRetry
 from pydantic_ai.tools import Tool
 
 logger = logging.getLogger(__name__)
@@ -94,13 +95,16 @@ async def read_file_content(filename: str) -> str:
 				result += f"```{file_ext}\n{content}\n```\n\n"
 
 			except (OSError, UnicodeDecodeError) as e:
-				result += f"## {file_path}\n\n*Error reading file: {e}*\n\n"
+				msg = f"Failed to read file: {file_path}"
+				logger.exception(msg)
+				raise ModelRetry(msg) from e
 
 		return result.strip()
 
 	except Exception as e:
-		logger.exception("Error in read_file_content")
-		return f"Error searching for or reading file '{filename}': {e}"
+		msg = f"Failed to search for or read file '{filename}': {e}"
+		logger.exception(msg)
+		raise ModelRetry(msg) from e
 
 
 # Create the PydanticAI Tool instance

@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import aiofiles
+from pydantic_ai import ModelRetry
 from pydantic_ai.tools import Tool
 
 from codemap.config import ConfigLoader
@@ -53,6 +54,11 @@ def gen_doc(target_path: Path) -> str:
 
 	entities, metadata = process_codebase(target_path, config, config_loader=config_loader)
 
+	if len(entities) == 0:
+		msg = f"No entities found for {target_path}"
+		logger.exception(msg)
+		raise ModelRetry(msg)
+
 	return generator.generate_documentation(entities, metadata)
 
 
@@ -73,7 +79,9 @@ def consolidate_paths(paths: list[Path], threshold: float = 0.8) -> list[Path]:
 	from collections import defaultdict
 
 	if not paths:
-		return []
+		msg = "No paths provided"
+		logger.exception(msg)
+		raise ModelRetry(msg)
 
 	# Group paths by their immediate parent directory only
 	dir_to_files: dict[Path, set[Path]] = defaultdict(set)
@@ -199,8 +207,18 @@ async def retrieve_code_context(query: str) -> str:
 				if coverage > 0.5:  # noqa: PLR2004
 					filtered_paths.append(path)
 
+		if len(filtered_paths) == 0:
+			msg = "No relevant code context found"
+			logger.exception(msg)
+			raise ModelRetry(msg)
+
 		consolidated_paths = consolidate_paths(filtered_paths)
 		docs = [gen_doc(path) for path in consolidated_paths]
+
+		if len(docs) == 0:
+			msg = "No relevant code context found"
+			logger.exception(msg)
+			raise ModelRetry(msg)
 
 		# Generate markdown context directly
 		return "\n\n---\n\n".join(docs)
