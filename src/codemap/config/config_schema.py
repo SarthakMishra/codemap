@@ -6,7 +6,9 @@ from pathlib import Path  # noqa: TC003
 from textwrap import dedent
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from codemap.processor.lod import LODLevel
 
 
 # LLM Configuration
@@ -112,13 +114,53 @@ class GenSchema(BaseModel):
 	include_tree: bool = True
 	include_entity_graph: bool = True
 	semantic_analysis: bool = True
-	lod_level: str = "docs"
+	lod_level: LODLevel = LODLevel.DOCS
 	mermaid_entities: list[str] = Field(
 		default_factory=lambda: ["module", "class", "function", "method", "constant", "variable", "import"]
 	)
 	mermaid_relationships: list[str] = Field(default_factory=lambda: ["declares", "imports", "calls"])
 	mermaid_show_legend: bool = True
 	mermaid_remove_unconnected: bool = False
+	mermaid_styled: bool = True
+
+	@field_validator("lod_level", mode="before")
+	@classmethod
+	def validate_lod_level(cls, v: LODLevel | str | int) -> LODLevel:
+		"""Convert string values to LODLevel enum."""
+		if isinstance(v, LODLevel):
+			return v
+		if isinstance(v, str):
+			# Direct mapping approach to avoid enum access issues
+			level_map = {
+				"signatures": LODLevel.SIGNATURES,
+				"structure": LODLevel.STRUCTURE,
+				"docs": LODLevel.DOCS,
+				"skeleton": LODLevel.SKELETON,
+				"full": LODLevel.FULL,
+				"1": LODLevel.SIGNATURES,
+				"2": LODLevel.STRUCTURE,
+				"3": LODLevel.DOCS,
+				"4": LODLevel.SKELETON,
+				"5": LODLevel.FULL,
+			}
+			# Try lowercase first, then original case
+			if v.lower() in level_map:
+				return level_map[v.lower()]
+			if v in level_map:
+				return level_map[v]
+			valid_values = list(level_map.keys())
+			msg = f"Invalid lod_level '{v}'. Valid values are: {valid_values}"
+			raise ValueError(msg)
+		if isinstance(v, int):
+			# Handle numeric values
+			try:
+				return LODLevel(v)
+			except ValueError:
+				valid_numbers = [1, 2, 3, 4, 5]
+				msg = f"Invalid lod_level number '{v}'. Valid numbers are: {valid_numbers}"
+				raise ValueError(msg) from None
+		msg = f"lod_level must be a string, number, or LODLevel enum, got {type(v)}"
+		raise ValueError(msg)
 
 
 class WatcherSchema(BaseModel):

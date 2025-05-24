@@ -165,7 +165,7 @@ jobs:
         run: uv run mike deploy ${{ needs.release.outputs.version }} latest --update-aliases --push
 
   docs-push-pre:
-    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main' && contains(needs.release.outputs.version, 'rc')
+    if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/dev' && contains(needs.release.outputs.version, 'rc')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository

@@ -184,6 +184,7 @@ class TreeSitterAnalyzer:
 		language: str,
 		handler: LanguageSyntaxHandler,
 		parent_node: Node | None = None,
+		processed_nodes: set[int] | None = None,
 	) -> dict:
 		"""
 		Analyze a tree-sitter node and return structured information.
@@ -195,14 +196,30 @@ class TreeSitterAnalyzer:
 		    language: Programming language
 		    handler: Language-specific syntax handler
 		    parent_node: Parent node if any
+		    processed_nodes: Set of node IDs that have already been processed (for deduplication)
 
 		Returns:
 		    Dict with node analysis information
 
 		"""
+		# Initialize processed_nodes set if not provided (root call)
+		if processed_nodes is None:
+			processed_nodes = set()
+
+		# Check if this node has already been processed (deduplication)
+		node_id = id(node)
+		if node_id in processed_nodes:
+			logger.debug(
+				"Skipping already processed node: %s at %s:%s", node.type, node.start_point[0] + 1, node.start_point[1]
+			)
+			return {}
+
 		# Check if we should skip this node
 		if handler.should_skip_node(node):
 			return {}
+
+		# Mark this node as processed to prevent double-processing
+		processed_nodes.add(node_id)
 
 		# Get entity type for this node from the handler
 		entity_type = handler.get_entity_type(node, parent_node, content_bytes)
@@ -271,7 +288,7 @@ class TreeSitterAnalyzer:
 			if docstring_node and child == docstring_node:
 				continue  # Skip docstring node
 
-			child_result = self.analyze_node(child, content_bytes, file_path, language, handler, node)
+			child_result = self.analyze_node(child, content_bytes, file_path, language, handler, node, processed_nodes)
 
 			if child_result:  # Only add non-empty results
 				result["children"].append(child_result)

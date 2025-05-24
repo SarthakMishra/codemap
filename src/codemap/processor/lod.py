@@ -35,7 +35,8 @@ class LODLevel(Enum):
 	SIGNATURES = 1  # Top-level entity names, docstrings, and signatures
 	STRUCTURE = 2  # All entity signatures, indented structure
 	DOCS = 3  # Level 2 + Docstrings for all entities
-	FULL = 4  # Level 3 + Full implementation content
+	SKELETON = 4  # Level 3 + Implementation skeleton (key patterns, control flow, important assignments)
+	FULL = 5  # Level 4 + Full implementation content
 
 
 @dataclass
@@ -107,7 +108,7 @@ class LODGenerator:
 		return self._convert_to_lod(analysis_result, level, file_path)
 
 	def _convert_to_lod(
-		self, analysis_result: dict[str, Any], level: LODLevel, file_path: Path | None = None
+		self, analysis_result: dict[str, Any], level: LODLevel, file_path: Path | None = None, is_root: bool = True
 	) -> LODEntity:
 		"""
 		Convert tree-sitter analysis to LOD format.
@@ -116,6 +117,7 @@ class LODGenerator:
 		    analysis_result: Tree-sitter analysis result
 		    level: Level of detail to generate
 		    file_path: Path to the file being analyzed (present for the root entity)
+		    is_root: Whether the entity is the root entity for the file
 
 		Returns:
 		    LODEntity representation
@@ -131,18 +133,26 @@ class LODGenerator:
 		start_line = location.get("start_line", 1)
 		end_line = location.get("end_line", 1)
 
+		# Get the name from analysis result
+		entity_name = analysis_result.get("name", "")
+
+		# For modules with placeholder names, use the filename instead
+		if entity_type == EntityType.MODULE and entity_name.startswith("<anonymous-") and file_path:
+			entity_name = file_path.stem  # Get filename without extension
+
 		entity = LODEntity(
-			name=analysis_result.get("name", ""),
+			name=entity_name,
 			entity_type=entity_type,
 			start_line=start_line,
 			end_line=end_line,
 			language=analysis_result.get("language", ""),
 		)
 
-		if file_path:  # This indicates it's the root entity for the file
+		# Store file_path for all entities for node ID generation, but mark as root only for the top entity
+		if file_path:
 			entity.metadata["file_path"] = str(file_path)
-			# If full_content_str is available from analyzer, store it in root entity metadata
-			if "full_content_str" in analysis_result:
+			if is_root and "full_content_str" in analysis_result:
+				# If full_content_str is available from analyzer, store it in root entity metadata
 				entity.metadata["full_content_str"] = analysis_result["full_content_str"]
 
 		if level.value >= LODLevel.DOCS.value:
@@ -153,13 +163,13 @@ class LODGenerator:
 			content = analysis_result.get("content", "")
 			entity.signature = self._extract_signature(content, entity_type, entity.language)
 
-		if level.value >= LODLevel.FULL.value or entity_type == EntityType.COMMENT:
+		if level.value >= LODLevel.SKELETON.value or entity_type in {EntityType.COMMENT, EntityType.CONSTANT}:
 			entity.content = analysis_result.get("content", "")
 
-		# Process children recursively (without passing file_path)
+		# Process children recursively (propagate file_path to children but mark as non-root)
 		children = analysis_result.get("children", [])
 		for child in children:
-			child_entity = self._convert_to_lod(child, level)
+			child_entity = self._convert_to_lod(child, level, file_path, is_root=False)
 			entity.children.append(child_entity)
 
 		# Add any additional metadata

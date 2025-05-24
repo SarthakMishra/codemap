@@ -6,12 +6,15 @@ import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
+from codemap.config.config_schema import GenSchema
 from codemap.processor.lod import LODEntity, LODLevel
 from codemap.processor.tree_sitter.base import EntityType
 
-from .models import GenConfig
-
 logger = logging.getLogger(__name__)
+
+# --- Constants --- #
+SMALL_RANGE_THRESHOLD = 5  # Threshold for adding range comments in link styles
+MAX_SKELETON_EARLY_CALLS = 5  # Maximum number of early function calls to show in skeleton
 
 
 # --- Mermaid Helper --- #
@@ -34,20 +37,78 @@ def _escape_mermaid_label(label: str) -> str:
 	return label.replace('"', "#quot;")  # Use HTML entity for quotes
 
 
+def _get_consecutive_ranges(indices: list[int]) -> list[tuple[int, int]]:
+	"""Groups consecutive integers into ranges.
+
+	Args:
+	    indices: List of integers to group into consecutive ranges.
+
+	Returns:
+	    List of tuples where each tuple represents a range (start, end).
+	    For single values, start == end.
+	"""
+	if not indices:
+		return []
+
+	ranges = []
+	start = indices[0]
+	end = indices[0]
+
+	for i in range(1, len(indices)):
+		if indices[i] == end + 1:
+			# Consecutive number, extend current range
+			end = indices[i]
+		else:
+			# Gap found, save current range and start new one
+			ranges.append((start, end))
+			start = indices[i]
+			end = indices[i]
+
+	# Add the final range
+	ranges.append((start, end))
+	return ranges
+
+
+def _add_range_styles(link_styles: list[str], indices: list[int], style_def: str) -> None:
+	"""Adds link styles efficiently by grouping consecutive ranges with comments.
+
+	Args:
+	    link_styles: List to append style declarations to.
+	    indices: List of edge indices to style.
+	    style_def: Style definition string.
+	"""
+	if not indices:
+		return
+
+	sorted_indices = sorted(indices)
+	ranges = _get_consecutive_ranges(sorted_indices)
+
+	for range_start, range_end in ranges:
+		if range_start == range_end:
+			# Single index
+			link_styles.append(f"  linkStyle {range_start} {style_def};")
+		elif range_end - range_start < SMALL_RANGE_THRESHOLD:
+			# Small range, list individually with comment
+			link_styles.append(f"  %% Styles for edges {range_start}-{range_end}")
+			link_styles.extend(f"  linkStyle {idx} {style_def};" for idx in range(range_start, range_end + 1))
+		else:
+			# Large range, add comment to reduce visual clutter
+			link_styles.append(f"  %% Styles for edges {range_start}-{range_end} ({range_end - range_start + 1} edges)")
+			link_styles.extend(f"  linkStyle {idx} {style_def};" for idx in range(range_start, range_end + 1))
+
+
 class CodeMapGenerator:
 	"""Generates code documentation based on LOD (Level of Detail)."""
 
-	def __init__(self, config: GenConfig, output_path: Path) -> None:
+	def __init__(self, config: GenSchema) -> None:
 		"""
 		Initialize the code map generator.
 
 		Args:
 		    config: Generation configuration settings
-		    output_path: Path to write the output
 
 		"""
 		self.config = config
-		self.output_path = output_path
 
 	def _generate_mermaid_diagram(self, entities: list[LODEntity]) -> str:
 		"""Generate a Mermaid diagram string for entity relationships using subgraphs."""
@@ -109,25 +170,80 @@ class CodeMapGenerator:
 		name_to_node_ids: dict[str, list[str]] = {}
 		# Keep track of nodes defined outside any subgraph (like external imports)
 		global_nodes: set[str] = set()
+		# Node ID counter for generating short, sequential IDs
+		node_id_counter = {"count": 0}
+		# Subgraph ID counter for generating short subgraph IDs
+		subgraph_id_counter = {"count": 0}
+		# Mapping from short node ID to entity info for debugging/comments
+		node_id_to_info: dict[str, tuple[str, str, str]] = {}
+		# Map entity unique IDs to their assigned node IDs to prevent duplicates
+		entity_to_node_id: dict[str, str] = {}  # entity_unique_id -> node_id
 
 		internal_paths = {str(e.metadata.get("file_path")) for e in entities if e.metadata.get("file_path")}
 
-		def get_node_id(entity: LODEntity) -> str:
-			"""Generates a unique node ID for an entity in Mermaid diagram format.
+		def get_entity_unique_id(entity: LODEntity) -> str:
+			"""Generate a unique identifier for an entity based on its properties."""
+			file_path = entity.metadata.get("file_path", "unknown")
+			name = entity.name or ""
+			entity_type = entity.entity_type.name
+			start_line = entity.start_line
+			end_line = entity.end_line
+			return f"{file_path}:{start_line}-{end_line}:{entity_type}:{name}"
 
-			The ID is constructed from the entity's file path, start line, and name/type,
-			and is sanitized to be Mermaid-compatible (alphanumeric + underscore only).
+		def get_node_id(entity: LODEntity) -> str:
+			"""Generates a short, unique node ID for an entity in Mermaid diagram format.
+
+			Uses sequential numbering (n1, n2, n3, etc.) to keep node IDs clean and readable.
+			The full path and entity information is preserved in comments and labels.
+			Returns the existing ID if the entity has already been assigned one.
 
 			Args:
 				entity: The entity to generate an ID for.
 
 			Returns:
-				str: A Mermaid-compatible node ID string.
+				str: A short Mermaid-compatible node ID string like 'n1', 'n2', etc.
 			"""
-			file_path_str = entity.metadata.get("file_path", "unknown_file")
-			base_id = f"{file_path_str}_{entity.start_line}_{entity.name or entity.entity_type.name}"
-			# Ensure Mermaid compatibility (alphanumeric + underscore)
-			return "".join(c if c.isalnum() else "_" for c in base_id)
+			# Check if this entity already has an assigned node ID
+			entity_unique_id = get_entity_unique_id(entity)
+			if entity_unique_id in entity_to_node_id:
+				return entity_to_node_id[entity_unique_id]
+
+			node_id_counter["count"] += 1
+			short_id = f"n{node_id_counter['count']}"
+
+			# Store the mapping to prevent duplicates
+			entity_to_node_id[entity_unique_id] = short_id
+
+			# Store mapping for debugging/comments
+			file_path = entity.metadata.get("file_path", "unknown_file")
+			name = entity.name or entity.entity_type.name
+			node_id_to_info[short_id] = (file_path, str(entity.start_line), name)
+
+			return short_id
+
+		def get_subgraph_id(entity: LODEntity) -> str:
+			"""Generates a short, unique subgraph ID for modules and classes.
+
+			Returns the existing ID if the entity has already been assigned one.
+
+			Args:
+				entity: The entity to generate a subgraph ID for.
+
+			Returns:
+				str: A short subgraph ID like 'sg1', 'sg2', etc.
+			"""
+			# Check if this entity already has an assigned node ID
+			entity_unique_id = get_entity_unique_id(entity)
+			if entity_unique_id in entity_to_node_id:
+				return entity_to_node_id[entity_unique_id]
+
+			subgraph_id_counter["count"] += 1
+			short_id = f"sg{subgraph_id_counter['count']}"
+
+			# Store the mapping to prevent duplicates
+			entity_to_node_id[entity_unique_id] = short_id
+
+			return short_id
 
 		def process_entity_recursive(entity: LODEntity, current_subgraph_id: str | None = None) -> None:
 			"""Recursively processes an entity to build Mermaid diagram components.
@@ -157,9 +273,22 @@ class CodeMapGenerator:
 			"""
 			nonlocal processed_ids, connected_ids, global_nodes
 
-			entity_node_id = get_node_id(entity)
+			# Use different ID generation for subgraphs vs nodes
+			if entity.entity_type in (EntityType.MODULE, EntityType.CLASS):
+				entity_node_id = get_subgraph_id(entity)
+			else:
+				entity_node_id = get_node_id(entity)
 
-			if entity.entity_type == EntityType.UNKNOWN or entity_node_id in processed_ids:
+			# Skip if already processed, but allow UNKNOWN entities to process their children
+			if entity_node_id in processed_ids:
+				return
+
+			# For UNKNOWN entities, skip creating nodes but still process children
+			if entity.entity_type == EntityType.UNKNOWN:
+				processed_ids.add(entity_node_id)
+				# Process children recursively even for UNKNOWN entities
+				for child in sorted(entity.children, key=lambda e: e.start_line):
+					process_entity_recursive(child, current_subgraph_id)
 				return
 
 			processed_ids.add(entity_node_id)
@@ -253,13 +382,23 @@ class CodeMapGenerator:
 							connected_ids.add(source_node_id)
 							connected_ids.add(dep_id)
 
-			# --- Process Children Recursively --- #
+			# --- Process Children Recursively and track their node IDs --- #
+			child_node_ids = []  # Track child node IDs for declare edges
 			for child in sorted(entity.children, key=lambda e: e.start_line):
+				# Determine what the child's node ID would be before processing
+				if child.entity_type in (EntityType.MODULE, EntityType.CLASS):
+					child_node_id = get_subgraph_id(child)
+				else:
+					child_node_id = get_node_id(child)
+
+				# Store the child node ID for declare edges (before processing to avoid duplicates)
+				child_node_ids.append((child, child_node_id))
+
+				# Now process the child recursively
 				process_entity_recursive(child, next_subgraph_id)
 
-				# --- Define Parent Edge (Declares) --- #
-				# Edge from container (subgraph) to child node/subgraph
-				child_node_id = get_node_id(child)
+			# --- Define Parent Edges (Declares) using tracked child node IDs --- #
+			for child, child_node_id in child_node_ids:
 				if (
 					next_subgraph_id  # Ensure there is a parent subgraph
 					and child.entity_type != EntityType.UNKNOWN
@@ -316,7 +455,7 @@ class CodeMapGenerator:
 		# --- Assemble Final Mermaid String --- #
 		mermaid_lines = ["graph LR"]  # Or TD for Top-Down if preferred
 
-		# --- Define Style Strings (Instead of classDef) ---
+		# --- Define Style Classes ---
 		style_map = {
 			# Node Styles
 			"funcNode": "fill:#007bff,stroke:#FFF,stroke-width:1px,color:white",  # Blue
@@ -330,11 +469,47 @@ class CodeMapGenerator:
 			"classSubgraph": "fill:#100f5e,color:#FFF",  # Light Green BG
 		}
 
+		# Check if styling is enabled
+		styling_enabled = self.config.mermaid_styled
+
+		# Track nodes by their style class for bulk application
+		nodes_by_class: dict[str, list[str]] = {}
+
 		# --- Render Logic --- #
 		rendered_elements = set()  # Track IDs of things actually rendered
 		output_lines = []
-		style_lines = []  # Collect style commands separately
+		class_def_lines = []  # Collect classDef commands
+		style_lines = []  # Collect individual style commands for subgraphs
 		used_style_keys = set()  # Track which styles (funcNode, classSubgraph etc.) are used
+
+		# Helper function to check if a subgraph has any content after filtering
+		def subgraph_has_content(subgraph_id: str) -> bool:
+			"""Check if a subgraph has any content (nodes or nested subgraphs) after filtering.
+
+			Args:
+				subgraph_id: The ID of the subgraph to check
+
+			Returns:
+				True if the subgraph has any content that would be rendered, False otherwise
+			"""
+			if subgraph_id not in subgraph_definitions:
+				return False
+
+			_, _, contained_node_ids = subgraph_definitions[subgraph_id]
+
+			# Check if any nodes in this subgraph would be rendered
+			for node_id in contained_node_ids:
+				if node_id in node_definitions:
+					# If filtering is disabled, all nodes are rendered
+					if not self.config.mermaid_remove_unconnected:
+						return True
+					# If filtering is enabled, check if node is connected
+					if node_id in connected_ids:
+						return True
+
+			# Check if any nested subgraphs have content
+			nested_subgraphs = [sid for sid, parent_id in subgraph_hierarchy.items() if parent_id == subgraph_id]
+			return any(subgraph_has_content(nested_id) for nested_id in nested_subgraphs)
 
 		# Function to recursively render subgraphs and their nodes
 		def render_subgraph(subgraph_id: str, indent: str = "") -> None:
@@ -355,9 +530,17 @@ class CodeMapGenerator:
 			"""
 			if subgraph_id in rendered_elements:
 				return
+
+			# Skip empty subgraphs when filtering is enabled
+			if self.config.mermaid_remove_unconnected and not subgraph_has_content(subgraph_id):
+				return
+
 			rendered_elements.add(subgraph_id)
 
 			label, sg_type, contained_node_ids = subgraph_definitions[subgraph_id]
+			subgraph_comment = get_subgraph_comment(subgraph_id)
+			if subgraph_comment:
+				output_lines.append(f"{indent}{subgraph_comment}")
 			output_lines.append(f'{indent}subgraph {subgraph_id}["{label}"]')
 			output_lines.append(f"{indent}  direction LR")  # Or TD
 
@@ -372,27 +555,61 @@ class CodeMapGenerator:
 					rendered_elements.add(node_id)
 
 					definition, node_class = node_definitions[node_id]
+					inline_comment = get_inline_comment(node_id)
+					if inline_comment:
+						output_lines.append(f"{indent}  {inline_comment}")
 					output_lines.append(f"{indent}  {definition}")
-					if node_class in style_map:
-						style_lines.append(f"{indent}  style {node_id} {style_map[node_class]}")
+					if node_class in style_map and styling_enabled:
+						# Track nodes by class for bulk application
+						if node_class not in nodes_by_class:
+							nodes_by_class[node_class] = []
+						nodes_by_class[node_class].append(node_id)
 						used_style_keys.add(node_class)  # Track used style
 
 			# Render nested subgraphs
 			nested_subgraphs = [sid for sid, parent_id in subgraph_hierarchy.items() if parent_id == subgraph_id]
 			for nested_id in sorted(nested_subgraphs):  # Sort for consistent output
-				# Apply filtering if enabled - check if the subgraph itself or any node inside it is connected
-				is_nested_connected = subgraph_id in connected_ids or any(
-					nid in connected_ids for nid in subgraph_definitions[nested_id][2]
-				)
-				if self.config.mermaid_remove_unconnected and not is_nested_connected:
+				# Apply filtering if enabled - use the comprehensive content check
+				if self.config.mermaid_remove_unconnected and not subgraph_has_content(nested_id):
 					continue
 				render_subgraph(nested_id, indent + "  ")
 
 			output_lines.append(f"{indent}end")
-			# Apply style definition to subgraph *after* end
+			# Apply style definition to subgraph *after* end (subgraphs still use individual styles)
 			if sg_type in style_map:
-				style_lines.append(f"{indent}style {subgraph_id} {style_map[sg_type]}")
+				style_lines.append(
+					f"  style {subgraph_id} {style_map[sg_type]}"
+				)  # Always use 2-space indent for styles
 				used_style_keys.add(sg_type)  # Track used style
+
+		# Helper function to create standalone comments for nodes
+		def get_inline_comment(node_id: str) -> str:
+			"""Generate a standalone comment for a node ID."""
+			if node_id in node_id_to_info:
+				file_path, line, name = node_id_to_info[node_id]
+				try:
+					from pathlib import Path
+
+					filename = Path(file_path).name
+				except (ValueError, AttributeError, OSError):
+					filename = "unknown"
+				return f"%% {filename}:{line}"
+			return ""
+
+		# Helper function to create standalone comments for subgraphs
+		def get_subgraph_comment(subgraph_id: str) -> str:
+			"""Generate a standalone comment for a subgraph ID."""
+			if subgraph_id in entity_map:
+				entity = entity_map[subgraph_id]
+				file_path = entity.metadata.get("file_path", "unknown")
+				try:
+					from pathlib import Path
+
+					filename = Path(file_path).name
+				except (ValueError, AttributeError, OSError):
+					filename = "unknown"
+				return f"%% {filename}:{entity.start_line}"
+			return ""
 
 		# --- Define Global Nodes (Imports primarily) ---
 		output_lines.append("\n  %% Global Nodes")
@@ -406,22 +623,26 @@ class CodeMapGenerator:
 				rendered_elements.add(node_id)
 
 				definition, node_class = node_definitions[node_id]
+				inline_comment = get_inline_comment(node_id)
+				if inline_comment:
+					output_lines.append(f"  {inline_comment}")
 				output_lines.append(f"  {definition}")
-				if node_class in style_map:
-					style_lines.append(f"  style {node_id} {style_map[node_class]}")
+				if node_class in style_map and getattr(self.config, "mermaid_styled", True):
+					# Track nodes by class for bulk application
+					if nodes_by_class is not None:
+						if node_class not in nodes_by_class:
+							nodes_by_class[node_class] = []
+						nodes_by_class[node_class].append(node_id)
 					used_style_keys.add(node_class)  # Track used style
 
 		# --- Render Top-Level Subgraphs ---
 		output_lines.append("\n  %% Subgraphs")
 		top_level_subgraphs = [sg_id for sg_id in subgraph_definitions if sg_id not in subgraph_hierarchy]
 		for sg_id in sorted(top_level_subgraphs):
-			# Apply filtering if enabled - check if the subgraph itself or any node inside it is connected
-			is_sg_connected = sg_id in connected_ids or any(
-				nid in connected_ids for nid in subgraph_definitions[sg_id][2]
-			)
-			if self.config.mermaid_remove_unconnected and not is_sg_connected:
+			# Apply filtering if enabled - use the comprehensive content check
+			if self.config.mermaid_remove_unconnected and not subgraph_has_content(sg_id):
 				continue
-			render_subgraph(sg_id)
+			render_subgraph(sg_id, "  ")  # Use 2-space base indentation for top-level subgraphs
 
 		# --- Render Edges --- #
 		output_lines.append("\n  %% Edges")
@@ -430,54 +651,86 @@ class CodeMapGenerator:
 		import_edge_indices = []
 		declare_edge_indices = []
 
-		filtered_edges = []
+		# Group edges by type for better organization
+		call_edges = []
+		import_edges = []
+		declare_edges = []
+		other_edges = []
+
 		for _i, (source_id, target_id, label, edge_type) in enumerate(edges):
 			# Ensure both source and target were actually rendered (or are subgraphs that contain rendered nodes)
 			source_exists = source_id in rendered_elements or source_id in subgraph_definitions
 			target_exists = target_id in rendered_elements or target_id in subgraph_definitions
 
 			if source_exists and target_exists:
-				edge_str = ""
-				if edge_type == "import":
-					edge_str = f"  {source_id} -.->|{label}| {target_id}"
-					import_edge_indices.append(len(filtered_edges))  # Index in the filtered list
-				elif edge_type == "call":
+				if edge_type == "call":
 					edge_str = f"  {source_id} -->|{label}| {target_id}"
-					call_edge_indices.append(len(filtered_edges))
+					call_edges.append(edge_str)
+				elif edge_type == "import":
+					edge_str = f"  {source_id} -.->|{label}| {target_id}"
+					import_edges.append(edge_str)
 				elif edge_type == "declare":
 					# Make declare edges less prominent
 					edge_str = f"  {source_id} --- {target_id}"  # Simple line, no label needed visually
-					declare_edge_indices.append(len(filtered_edges))
+					declare_edges.append(edge_str)
 				else:  # Default or unknown edge type
 					edge_str = f"  {source_id} --> {target_id}"
+					other_edges.append(edge_str)
 
-				if edge_str:
-					filtered_edges.append(edge_str)
+		# Track starting indices for link styles
+		edge_counter = 0
 
-		output_lines.extend(sorted(filtered_edges))  # Sort for consistency
+		# Render call edges
+		if call_edges:
+			output_lines.append("  %% Call edges")
+			call_edge_indices = list(range(edge_counter, edge_counter + len(call_edges)))
+			edge_counter += len(call_edges)
+			output_lines.extend(sorted(call_edges))
 
-		# --- Apply Link Styles --- #
-		if call_edge_indices or import_edge_indices or declare_edge_indices:
+		# Render import edges
+		if import_edges:
+			output_lines.append("  %% Import edges")
+			import_edge_indices = list(range(edge_counter, edge_counter + len(import_edges)))
+			edge_counter += len(import_edges)
+			output_lines.extend(sorted(import_edges))
+
+		# Render declare edges
+		if declare_edges:
+			output_lines.append("  %% Declaration edges")
+			declare_edge_indices = list(range(edge_counter, edge_counter + len(declare_edges)))
+			edge_counter += len(declare_edges)
+			output_lines.extend(sorted(declare_edges))
+
+		# Render other edges (if any)
+		if other_edges:
+			output_lines.append("  %% Other edges")
+			output_lines.extend(sorted(other_edges))
+
+		# --- Apply Link Styles (Optimized with Comments for Large Ranges) --- #
+		if styling_enabled and (call_edge_indices or import_edge_indices or declare_edge_indices):
 			output_lines.append("\n  %% Link Styles")
-			link_styles.extend(
-				[f"  linkStyle {idx} stroke:#28a745,stroke-width:2px;" for idx in call_edge_indices]
-			)  # Green
-			link_styles.extend(
-				[
-					f"  linkStyle {idx} stroke:#ffc107,stroke-width:1px,stroke-dasharray: 5 5;"
-					for idx in import_edge_indices
-				]
-			)  # Yellow dashed
-			link_styles.extend(
-				[f"  linkStyle {idx} stroke:#adb5bd,stroke-width:1px;" for idx in declare_edge_indices]
-			)  # Gray thin
+
+			# Use helper function to add styles with range comments for better readability
+			if call_edge_indices:
+				link_styles.append("  %% Call edges (green)")
+				_add_range_styles(link_styles, call_edge_indices, "stroke:#28a745,stroke-width:2px")
+
+			if import_edge_indices:
+				link_styles.append("  %% Import edges (yellow dashed)")
+				_add_range_styles(
+					link_styles, import_edge_indices, "stroke:#ffc107,stroke-width:1px,stroke-dasharray: 5 5"
+				)
+
+			if declare_edge_indices:
+				link_styles.append("  %% Declaration edges (gray)")
+				_add_range_styles(link_styles, declare_edge_indices, "stroke:#adb5bd,stroke-width:1px")
 
 			output_lines.extend(link_styles)
 
 		# --- Generate Dynamic Legend (if enabled) ---
 		legend_lines = []
 		legend_style_lines = []
-		if self.config.mermaid_show_legend and used_style_keys:
+		if self.config.mermaid_show_legend and used_style_keys and styling_enabled:
 			legend_lines.append("\n  %% Legend")
 			legend_lines.append("  subgraph Legend")
 			legend_lines.append("    direction LR")
@@ -498,8 +751,13 @@ class CodeMapGenerator:
 				# Only add legend item if its corresponding style was actually used in the graph
 				if style_key in used_style_keys:
 					legend_lines.append(f"    {legend_id}{definition}")
-					# Also add its style command to the list of styles
-					if style_key in style_map:
+					# Track legend nodes by class for bulk application (except subgraph styles)
+					if style_key in ["funcNode", "constNode", "varNode", "internalImportNode", "externalImportNode"]:
+						if style_key not in nodes_by_class:
+							nodes_by_class[style_key] = []
+						nodes_by_class[style_key].append(legend_id)
+					# Subgraph-style legend items still use individual styles
+					elif style_key in style_map:
 						legend_style_lines.append(f"  style {legend_id} {style_map[style_key]}")
 
 			legend_lines.append("  end")
@@ -509,10 +767,22 @@ class CodeMapGenerator:
 		mermaid_lines.extend(legend_lines)  # Add legend definitions (if any)
 		mermaid_lines.extend(output_lines)  # Add main graph structure and edges
 
-		# Append all collected style commands at the end
+		# --- Add Class Definitions (Consolidated Style Application) --- #
+		if styling_enabled and nodes_by_class:
+			mermaid_lines.append("\n  %% Class Definitions")
+			for style_class, node_ids in sorted(nodes_by_class.items()):
+				if node_ids and style_class in style_map:
+					class_def_lines.append(f"  classDef {style_class} {style_map[style_class]}")
+					# Apply class to all nodes of this type
+					node_list = ",".join(sorted(node_ids))
+					class_def_lines.append(f"  class {node_list} {style_class}")
+
+			mermaid_lines.extend(class_def_lines)
+
+		# Append individual style commands for subgraphs and legend subgraph-style items
 		all_style_lines = style_lines + legend_style_lines
-		if all_style_lines:
-			mermaid_lines.append("\n  %% Styles")
+		if styling_enabled and all_style_lines:
+			mermaid_lines.append("\n  %% Individual Styles")
 			mermaid_lines.extend(sorted(all_style_lines))
 
 		return "\n".join(mermaid_lines)
@@ -644,67 +914,201 @@ class CodeMapGenerator:
 		# Add code documentation grouped by file
 		content.append("\n## Code Documentation")
 
-		# Helper function to format a single entity recursively
-		def format_entity_recursive(entity: LODEntity, level: int) -> list[str]:
-			"""Recursively formats an entity and its children into markdown documentation.
+		# Helper function to get comment syntax for a language
+		def get_comment_syntax(language: str) -> str:
+			"""Get the appropriate comment syntax for a programming language.
 
 			Args:
-				entity: The entity to format
-				level: The current indentation level in the hierarchy
+				language: The programming language name
 
 			Returns:
-				A list of markdown-formatted strings representing the entity and its children
+				The comment prefix for that language
 			"""
-			entity_content = []
-			indent = "  " * level
-			list_prefix = f"{indent}- "
+			language_lower = language.lower() if language else ""
 
-			# Basic entry: Type and Name/Signature
-			entry_line = f"{list_prefix}**{entity.entity_type.name.capitalize()}**: `{entity.name}`"
-			if self.config.lod_level.value >= LODLevel.STRUCTURE.value and entity.signature:
-				entry_line = f"{list_prefix}**{entity.entity_type.name.capitalize()}**: `{entity.signature}`"
-			# Special handling for comments
-			elif entity.entity_type == EntityType.COMMENT and entity.content:
-				comment_lines = entity.content.strip().split("\n")
-				# Format as italicized blockquote
-				entity_content.extend([f"{indent}> *{line.strip()}*" for line in comment_lines])
-				entry_line = None  # Don't print the default entry line
-			elif not entity.name and entity.entity_type == EntityType.MODULE:
-				# Skip module node if it has no name (handled by file heading)
-				# Don't add the list item itself
-				entry_line = None  # Don't print the default entry line
-
-			# Add the generated entry line if it wasn't skipped
-			if entry_line:
-				entity_content.append(entry_line)
-
-			# Add Docstring if level is DOCS or FULL (and not a comment)
-			if (
-				entity.entity_type != EntityType.COMMENT
-				and self.config.lod_level.value >= LODLevel.DOCS.value
-				and entity.docstring
+			# Languages using // for comments
+			if language_lower in (
+				"javascript",
+				"java",
+				"c",
+				"cpp",
+				"c++",
+				"csharp",
+				"c#",
+				"go",
+				"rust",
+				"php",
+				"kotlin",
+				"swift",
+				"typescript",
 			):
-				docstring_lines = entity.docstring.strip().split("\n")
-				# Format docstring lines with proper indentation
-				entity_content.append(f"{indent}  >")
-				entity_content.extend([f"{indent}  > {line}" for line in docstring_lines])
+				return "//"
+			# Languages using -- for comments
+			if language_lower in ("sql", "haskell", "lua"):
+				return "--"
+			# Languages using % for comments
+			if language_lower in ("matlab", "octave"):
+				return "%"
+			# Languages using ; for comments
+			if language_lower in ("assembly", "asm"):
+				return ";"
+			# Default to # for Python, Ruby, Shell, Perl, etc.
+			return "#"
 
-			# Add Content if level is FULL
-			if self.config.lod_level.value >= LODLevel.FULL.value and entity.content:
-				content_lang = entity.language or ""
-				entity_content.append(f"{indent}  ```{content_lang}")
-				# Indent content lines as well
-				content_lines = entity.content.strip().split("\n")
-				entity_content.extend([f"{indent}  {line}" for line in content_lines])
-				entity_content.append(f"{indent}  ```")
+		# Helper function to reconstruct code with LOD filtering
+		def reconstruct_code_with_lod(entity: LODEntity, current_indent: str = "") -> list[str]:
+			"""Reconstructs code content based on LOD level.
 
-			# Recursively format children
-			for child in sorted(entity.children, key=lambda e: e.start_line):
-				# Skip unknown children
-				if child.entity_type != EntityType.UNKNOWN:
-					entity_content.extend(format_entity_recursive(child, level + 1))
+			Args:
+				entity: The entity to process
+				current_indent: Current indentation level
 
-			return entity_content
+			Returns:
+				List of code lines with appropriate LOD filtering
+			"""
+			lines = []
+
+			# Skip certain entity types based on LOD level
+			if entity.entity_type == EntityType.IMPORT and self.config.lod_level.value < LODLevel.FULL.value:
+				return []  # Skip imports except at FULL level
+
+			if entity.entity_type == EntityType.COMMENT and self.config.lod_level.value < LODLevel.FULL.value:
+				return []  # Skip comments except at FULL level
+
+			# Handle different entity types
+			if entity.entity_type == EntityType.MODULE:
+				# For modules, process children without adding module declaration
+				for child in sorted(entity.children, key=lambda e: e.start_line):
+					if child.entity_type != EntityType.UNKNOWN:
+						child_lines = reconstruct_code_with_lod(child, current_indent)
+						lines.extend(child_lines)
+						if child_lines:  # Add spacing between entities
+							lines.append("")
+					else:
+						# For UNKNOWN entities, check if they contain constants/variables as direct children
+						# This handles cases where expression_statement wrappers contain assignment nodes
+						for grandchild in sorted(child.children, key=lambda e: e.start_line):
+							if grandchild.entity_type in (EntityType.CONSTANT, EntityType.VARIABLE):
+								grandchild_lines = reconstruct_code_with_lod(grandchild, current_indent)
+								lines.extend(grandchild_lines)
+								if grandchild_lines:  # Add spacing between entities
+									lines.append("")
+
+			elif entity.entity_type in (EntityType.CLASS, EntityType.FUNCTION, EntityType.METHOD):
+				# Add signature/declaration
+				if entity.signature:
+					lines.append(f"{current_indent}{entity.signature}:")
+				elif entity.content:
+					# Extract first line as signature
+					first_line = entity.content.split("\n")[0].strip()
+					lines.append(f"{current_indent}{first_line}:")
+				else:
+					# Fallback
+					entity_keyword = "class" if entity.entity_type == EntityType.CLASS else "def"
+					lines.append(f"{current_indent}{entity_keyword} {entity.name}:")
+
+				# Add docstring if available and level permits (but not at SKELETON/FULL level)
+				if (
+					entity.docstring
+					and self.config.lod_level.value >= LODLevel.DOCS.value
+					and self.config.lod_level.value < LODLevel.SKELETON.value
+				):
+					lines.append(f'{current_indent}    """')
+					lines.extend(f"{current_indent}    {doc_line}" for doc_line in entity.docstring.strip().split("\n"))
+					lines.append(f'{current_indent}    """')
+
+				# Determine indentation for children
+				child_indent = current_indent + "    "
+
+				if self.config.lod_level.value >= LODLevel.FULL.value:
+					# FULL level: include full implementation
+					if entity.content and entity.entity_type != EntityType.MODULE:
+						content_lines = entity.content.strip().split("\n")
+						# Skip the first line (signature) as we already added it
+						lines.extend(f"{current_indent}{content_line}" for content_line in content_lines[1:])
+				elif self.config.lod_level.value >= LODLevel.SKELETON.value:
+					# SKELETON level: show full content but filter out comments
+					if entity.content and entity.entity_type != EntityType.MODULE:
+						content_lines = entity.content.strip().split("\n")
+						# Skip the first line (signature) as we already added it
+						for content_line in content_lines[1:]:
+							stripped = content_line.strip()
+
+							# Skip lines that are entirely comments
+							if stripped and any(stripped.startswith(prefix) for prefix in ("#", "//", "/*")):
+								continue
+
+							# Handle inline comments by removing them
+							if stripped:
+								cleaned_line = content_line
+								# Remove inline comments (simple approach - look for comment markers)
+								for comment_prefix in ["#", "//"]:
+									if comment_prefix in content_line:
+										# Find the comment position (avoiding strings)
+										comment_pos = content_line.find(comment_prefix)
+										if comment_pos != -1:
+											# Simple check: if not in quotes, it's likely a comment
+											before_comment = content_line[:comment_pos]
+											if (
+												before_comment.count('"') % 2 == 0
+												and before_comment.count("'") % 2 == 0
+											):
+												cleaned_line = before_comment.rstrip()
+												break
+
+								if cleaned_line.strip():  # Only add if there's actual code content
+									lines.append(f"{current_indent}{cleaned_line}")
+							else:  # Keep empty lines for structure
+								lines.append(f"{current_indent}{content_line}")
+				else:
+					# SIGNATURES/STRUCTURE/DOCS: process children as signatures only
+					has_children = False
+					for child in sorted(entity.children, key=lambda e: e.start_line):
+						if child.entity_type != EntityType.UNKNOWN:
+							child_lines = reconstruct_code_with_lod(child, child_indent)
+							if child_lines:
+								lines.extend(child_lines)
+								has_children = True
+						else:
+							# For UNKNOWN entities, check if they contain constants/variables as direct children
+							for grandchild in sorted(child.children, key=lambda e: e.start_line):
+								if grandchild.entity_type in (EntityType.CONSTANT, EntityType.VARIABLE):
+									grandchild_lines = reconstruct_code_with_lod(grandchild, child_indent)
+									if grandchild_lines:
+										lines.extend(grandchild_lines)
+										has_children = True
+
+					# If we have content but not showing full, add truncation comment
+					comment_prefix = get_comment_syntax(entity.language or "")
+					if entity.content and not has_children:
+						lines.append(f"{child_indent}{comment_prefix} truncated for brevity")
+					elif not has_children and entity.entity_type != EntityType.CLASS:
+						# For functions/methods without children, add truncation comment
+						lines.append(f"{child_indent}{comment_prefix} hidden for brevity")
+
+			elif entity.entity_type in (EntityType.VARIABLE, EntityType.CONSTANT):
+				# At FULL level, show everything; at SKELETON+ levels, show the declaration
+				if entity.content:
+					if self.config.lod_level.value >= LODLevel.FULL.value:
+						# Show complete content at FULL level
+						content_lines = entity.content.strip().split("\n")
+						lines.extend(f"{current_indent}{content_line}" for content_line in content_lines)
+					elif self.config.lod_level.value >= LODLevel.SKELETON.value:
+						# Show just the first line (declaration) at SKELETON and higher levels
+						first_line = entity.content.strip().split("\n")[0]
+						lines.append(f"{current_indent}{first_line}")
+				# If no content is available, skip the entity entirely
+
+			elif entity.entity_type == EntityType.IMPORT:
+				if entity.content:
+					lines.append(f"{current_indent}{entity.content.strip()}")
+				else:
+					lines.append(f"{current_indent}import {entity.name}")
+
+			elif entity.entity_type == EntityType.COMMENT and entity.content:
+				lines.extend(f"{current_indent}{comment_line}" for comment_line in entity.content.strip().split("\n"))
+
+			return lines
 
 		first_file = True
 		for i, (file_path, file_entities) in enumerate(sorted(files.items()), 1):
@@ -752,35 +1156,28 @@ class CodeMapGenerator:
 			# Sort top-level entities by line number
 			sorted_entities = sorted(file_entities, key=lambda e: e.start_line)
 
-			if self.config.lod_level == LODLevel.SIGNATURES:
-				# Level 1: Only top-level signatures
+			# Generate code content using LOD-based reconstruction
+			code_lines = []
+			for entity in sorted_entities:
+				# Process all entities and collect code lines
+				entity_lines = reconstruct_code_with_lod(entity)
+				code_lines.extend(entity_lines)
+
+			# Remove trailing empty lines
+			while code_lines and not code_lines[-1].strip():
+				code_lines.pop()
+
+			# Add the code block with proper language detection
+			if code_lines:
+				# Get language from the first entity with language info
+				lang = ""
 				for entity in sorted_entities:
-					if entity.entity_type in (
-						EntityType.CLASS,
-						EntityType.FUNCTION,
-						EntityType.METHOD,
-						EntityType.INTERFACE,
-						EntityType.MODULE,
-					):
-						content.append(f"\n#### {entity.name or '(Module Level)'}")
-						if entity.signature:
-							sig_lang = entity.language or ""
-							content.append(f"\n```{sig_lang}")
-							content.append(entity.signature)
-							content.append("```")
-			else:
-				# Levels 2, 3, 4: Use recursive formatting
-				for entity in sorted_entities:
-					# Process top-level entities (usually MODULE, but could be others if file has only one class/func)
-					if entity.entity_type == EntityType.MODULE:
-						# If it's the module, start recursion from its children
-						for child in sorted(entity.children, key=lambda e: e.start_line):
-							# Skip unknown children
-							if child.entity_type != EntityType.UNKNOWN:
-								content.extend(format_entity_recursive(child, level=0))
-					# Handle cases where the top-level entity isn't MODULE (e.g., a file with just one class)
-					# Skip if unknown
-					elif entity.entity_type != EntityType.UNKNOWN:
-						content.extend(format_entity_recursive(entity, level=0))
+					if entity.language:
+						lang = entity.language
+						break
+
+				content.append(f"\n```{lang}")
+				content.extend(code_lines)
+				content.append("```")
 
 		return "\n".join(content)
