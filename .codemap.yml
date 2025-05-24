@@ -9,7 +9,7 @@ llm:
   temperature: 0.5  # Lower for more deterministic outputs, higher for creativity
   max_input_tokens: 1000000  # Maximum tokens in input
   max_output_tokens: 10000  # Maximum tokens in responses
-  max_requests: 10  # Maximum number of requests
+  max_requests: 25  # Maximum number of requests
 
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
@@ -47,7 +47,7 @@ embedding:
 # RAG (Retrieval Augmented Generation) Configuration
 rag:
   max_context_length: 8000  # Maximum context length for the LLM
-  max_context_results: 20  # Maximum number of context results to return
+  max_context_results: 100  # Maximum number of context results to return
   similarity_threshold: 0.75  # Minimum similarity score (0-1) for relevance
   # system_prompt: null # Optional system prompt to guide the RAG model (leave commented or set if needed)
   include_file_content: true  # Include file content in context
