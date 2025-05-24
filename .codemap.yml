@@ -7,7 +7,9 @@ llm:
   # Format: "provider:model-name", e.g., "openai:gpt-4o", "anthropic:claude-3-opus"
   model: "google-gla:gemini-2.0-flash"
   temperature: 0.5  # Lower for more deterministic outputs, higher for creativity
-  max_output_tokens: 1024  # Maximum tokens in responses
+  max_input_tokens: 1000000  # Maximum tokens in input
+  max_output_tokens: 10000  # Maximum tokens in responses
+  max_requests: 10  # Maximum number of requests
 
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
