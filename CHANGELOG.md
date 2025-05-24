@@ -1,6 +1,258 @@
 # CHANGELOG
 
 
+## v0.3.1-rc.2 (2025-05-24)
+
+### Bug Fixes
+
+- **gen**: Ensure output directory is a string
+  ([`a4affd6`](https://github.com/SarthakMishra/codemap/commit/a4affd6133ce13e9e5b3de016d07fe87606c7cb2))
+
+The GenCommand and process_codebase functions now correctly handle Path objects for the output_dir
+  parameter by converting them to strings. This ensures compatibility with downstream processes that
+  expect string inputs, preventing potential errors during documentation generation.
+
+- **schema**: Set default value for blame list
+  ([`df4aced`](https://github.com/SarthakMishra/codemap/commit/df4aced48f3c4c297c08507c0eb8f7814112e1d0))
+
+The default value ensures that the blame list is initialized even when no blame information is
+  available, preventing potential errors when accessing the list later.
+
+- **tree-sitter**: Prevent double-processing of tree-sitter nodes
+  ([`3f5a564`](https://github.com/SarthakMishra/codemap/commit/3f5a5642235487e7f2e7bc369bcc9115f98569e1))
+
+This commit introduces a mechanism to prevent double-processing of nodes in the TreeSitterAnalyzer.
+  It uses a set to keep track of processed node IDs, skipping nodes that have already been analyzed.
+  This ensures that the analyzer doesn't get stuck in infinite loops or produce duplicate results,
+  especially in cases of complex or circular code structures.
+
+### Chores
+
+- Removed auto generated type stubs
+  ([`d4923c9`](https://github.com/SarthakMishra/codemap/commit/d4923c94cecf08ac394aefef1dd5eead90afbf07))
+
+- Update lock file
+  ([`4285d10`](https://github.com/SarthakMishra/codemap/commit/4285d101c428f56aac7281f05a16f4233b62c24b))
+
+- Update lock file
+  ([`b4e5793`](https://github.com/SarthakMishra/codemap/commit/b4e57934186fc81274d1ebcc25d145417c9f6ff2))
+
+- Update lock file
+  ([`c46239e`](https://github.com/SarthakMishra/codemap/commit/c46239ec8c23bad6f445c3fd16e43fcad88d7f73))
+
+- Upgrade codemap to 0.3.1rc1
+  ([`0eaa4f1`](https://github.com/SarthakMishra/codemap/commit/0eaa4f1cec722da6aaaee0e7d47688647d10e8a8))
+
+- **codemap**: Remove GenConfig from __all__
+  ([`1aa8cdb`](https://github.com/SarthakMishra/codemap/commit/1aa8cdb3c81c1d46ec13a003d09775e5177f5a18))
+
+This commit removes the GenConfig class from the __all__ list in src/codemap/gen/__init__.py. This
+  change cleans up the public interface of the codemap.gen module by removing an unnecessary export.
+
+- **codemap**: Remove retrieval tool
+  ([`0035f52`](https://github.com/SarthakMishra/codemap/commit/0035f52f18553e2375d9ccabdf6d4af0611d3244))
+
+This change removes the `retrieval.py` file, which contained the retrieval tool for PydanticAI
+  agents. The tool was responsible for searching and retrieving code context based on a query. Its
+  removal indicates a change in how code context is handled within the system.
+
+- **config**: Enable entity graph and remove unconnected nodes
+  ([`7dbaf86`](https://github.com/SarthakMishra/codemap/commit/7dbaf8637511badac1af4dca488e3cbfecae5664))
+
+The entity relationship graph is now included in the generated documentation to provide a more
+  comprehensive view of the codebase structure.
+
+Unconnected nodes are removed from the Mermaid diagram for a cleaner and more focused visualization.
+
+The Mermaid diagram legend is hidden to reduce visual clutter.
+
+- **config**: Update lod-level to skeleton for concise output
+  ([`190dcd5`](https://github.com/SarthakMishra/codemap/commit/190dcd5cf6c2f58f5e26482dfd0b672b921b39d1))
+
+The level of detail for code generation was adjusted to 'skeleton' in the configuration files. This
+  change optimizes the output for a more concise and structural overview of the codebase.
+
+- **gen**: Remove unused models file
+  ([`1bca961`](https://github.com/SarthakMishra/codemap/commit/1bca9615e57596c0cf06fce28001de18ee12f51c))
+
+This commit removes the `models.py` file from the `src/codemap/gen/` directory. The file contained
+  data models for the code generation module, but it is no longer needed.
+
+### Continuous Integration
+
+- Update docs-push-pre condition to trigger on dev branch
+  ([`a3aa1a1`](https://github.com/SarthakMishra/codemap/commit/a3aa1a147f950c1355245230ed581c7285742adb))
+
+### Documentation
+
+- **docs**: Restructure tools documentation for clarity
+  ([`c14a84d`](https://github.com/SarthakMishra/codemap/commit/c14a84db1df8ede871da166536f3f3f4190b6dd7))
+
+### Features
+
+- Add pydantic-ai-slim dependency
+  ([`73672f6`](https://github.com/SarthakMishra/codemap/commit/73672f6e1b14a6fd1760348e9c9949a818714b46))
+
+- **codemap**: Enhance code documentation and subgraph rendering
+  ([`b444771`](https://github.com/SarthakMishra/codemap/commit/b444771d09beb6f33fc046bdd27fd239e11b0341))
+
+This commit introduces several enhancements to the code documentation generation and subgraph
+  rendering logic.
+
+- Implemented a function to check if a subgraph has any renderable content after filtering,
+  improving the accuracy of subgraph removal when filtering is enabled. - Enhanced the code
+  documentation generation to reconstruct code content based on the configured level of detail
+  (LOD), allowing for more flexible control over the amount of code included in the documentation. -
+  Added a helper function to determine the comment syntax for different programming languages,
+  ensuring proper comment formatting in the generated code documentation. - Improved the handling of
+  inline comments in the generated code documentation by removing them when the LOD level is set to
+  SKELETON or higher.
+
+- **config**: Add skeleton level of detail to code generation
+  ([`3775904`](https://github.com/SarthakMishra/codemap/commit/3775904664744a3704b72a7722ce08d36687780e))
+
+Adds a skeleton level of detail (LOD) to the code generation configuration.
+
+This new LOD allows users to generate code maps with a simplified representation of the codebase,
+  focusing on the basic structure and relationships between components without including full
+  documentation or signatures. It also updates the valid level numbers to include 5.
+
+- **docs**: Add retrieval page to tools nav
+  ([`9da12e4`](https://github.com/SarthakMishra/codemap/commit/9da12e488865be4a3e08c174ee1b95d810e9fd12))
+
+The navigation menu in mkdocs.yml has been updated to include a new 'Retrieval' page under the
+  'Tools' section. This provides users with direct access to information about retrieval tools
+  within the RAG (Retrieval-Augmented Generation) tools overview, improving discoverability and user
+  experience.
+
+- **llm**: Add read_file tool for PydanticAI agents
+  ([`6eb9ef6`](https://github.com/SarthakMishra/codemap/commit/6eb9ef6e08e64eb78ce0de12ff3d8ea94360a84b))
+
+This commit introduces a new tool for PydanticAI agents that enables them to search for and read
+  file content from the codebase. The tool is designed to handle ambiguous filenames by returning
+  content for all matches, up to a maximum of 5 files. It also includes error handling for file
+  reading and provides syntax highlighting for the file content.
+
+- **llm**: Add web search tool
+  ([`7ca8d2e`](https://github.com/SarthakMishra/codemap/commit/7ca8d2ec34ba2f7d8f29664b889f1339b9d9073b))
+
+- **llm**: Use multiple tools for LLM RAG
+  ([`81bd76c`](https://github.com/SarthakMishra/codemap/commit/81bd76c30b471e33a012c9582ae95bd3df13664d))
+
+The LLM now uses both the read_file_tool and semantic_retrieval_tool to provide more comprehensive
+  answers.
+
+- **lod**: Enhance module name and LOD level config
+  ([`f13b0d6`](https://github.com/SarthakMishra/codemap/commit/f13b0d6fe4988cd41878b3eb7a2d87be2d739806))
+
+The change improves module name handling and LOD level configuration.
+
+- The module name is updated to use the filename if the name starts with <anonymous>. - The LOD
+  level FULL is renamed to SKELETON and the FULL level is moved to level 5. - The content extraction
+  logic is updated to include CONSTANT entity type.
+
+- **lod**: Store file path for all entities and mark root
+  ([`68d4004`](https://github.com/SarthakMishra/codemap/commit/68d4004dd6aad726d6be73df6634853242ee0309))
+
+The file path is now stored for all entities to assist with node ID generation. The root flag
+  ensures full content is only stored in the top-level entity.
+
+- **rag**: Expose read_file and semantic_retrieval tools
+  ([`9368985`](https://github.com/SarthakMishra/codemap/commit/93689855e615dc69afd59896953508069232c8c2))
+
+This commit introduces two new tools, `read_file_tool` and `semantic_retrieval_tool`, to enhance the
+  RAG-commands functionality. These tools are now included in the `__all__` list, making them
+  available for use within the codemap module.
+
+- **rag**: Expose web search tool
+  ([`8ec0fca`](https://github.com/SarthakMishra/codemap/commit/8ec0fca06c25486728a7dabd134d3dc9c1769c09))
+
+This commit introduces a new tool, `web_search_tool`, to enhance the capabilities of the RAG
+  (Retrieval-Augmented Generation) system. The `web_search_tool` allows the system to retrieve
+  information from the web, enabling it to provide more comprehensive and up-to-date answers.
+
+- **web-search**: Add web search tool to enable agents to retrieve information from the web
+  ([`d78359d`](https://github.com/SarthakMishra/codemap/commit/d78359ddc5b36581156e05e33f8663c30429e54b))
+
+### Refactoring
+
+- **codemap**: Improve config loading and schema usage
+  ([`717a345`](https://github.com/SarthakMishra/codemap/commit/717a3452c5a1f49ff04062f90414c410bdded224))
+
+The config loader is now imported locally to prevent circular dependencies and only when needed. The
+  codebase now uses the GenSchema config object instead of the GenConfig object.
+
+- **codemap**: Refactor codebase generation and retrieval
+  ([`57f0db0`](https://github.com/SarthakMishra/codemap/commit/57f0db0e16b5aa81d5d4b272c4b213ebbabb945e))
+
+This commit refactors the codebase generation process by introducing a CodeMapGenerator class and a
+  write_documentation function. It also updates the semantic retrieval tool to use the new codebase
+  processing.
+
+- **codemap**: Remove output path from CodeMapGenerator
+  ([`9290e34`](https://github.com/SarthakMishra/codemap/commit/9290e346dc0eb293f57a42e90598e4b0574fe949))
+
+- **command**: Remove output path from generator initialization
+  ([`a936d37`](https://github.com/SarthakMishra/codemap/commit/a936d3732c0c16f86f04d9aca7180a5ef0000220))
+
+The generator class no longer needs the output path during initialization, as it's passed directly
+  to the generate_documentation method.
+
+- **config**: Improve LOD level handling and add mermaid styling
+  ([`0a26ff2`](https://github.com/SarthakMishra/codemap/commit/0a26ff2cc6e52f501668b56e1c29fd6eb09f0840))
+
+This commit refactors the LOD level handling to directly use the LODLevel enum within the GenSchema,
+  improving type safety and validation. It also introduces a 'mermaid_styled' option to control
+  Mermaid diagram styling.
+
+- **generator**: Improve mermaid diagram readability
+  ([`97e1013`](https://github.com/SarthakMishra/codemap/commit/97e101366d8e724278054921c7c3cc0359765cf7))
+
+This commit introduces several enhancements to the code map generator, focusing on improving the
+  readability and maintainability of the generated Mermaid diagrams. It includes changes such as
+  using shorter node IDs, adding comments to clarify node origins, and optimizing link styles for
+  large graphs. These changes collectively enhance the user experience by producing cleaner and more
+  informative code maps.
+
+- **generator**: Remove output path from CodeMapGenerator
+  ([`c751a7c`](https://github.com/SarthakMishra/codemap/commit/c751a7c8aef8a7d2690071f013909f4a41fb63b6))
+
+The output path is no longer needed during initialization as the generator does not directly handle
+  output writing. This simplifies the generator's interface and reduces dependencies.
+
+- **pre-commit**: Use dedicated task for ruff linting
+  ([`a45d648`](https://github.com/SarthakMishra/codemap/commit/a45d648651f703f22b63c7528b3b10715f127413))
+
+- **python**: Improve python type alias and constant detection
+  ([`2637200`](https://github.com/SarthakMishra/codemap/commit/2637200678451b56e0e5d87194fede28118242e1))
+
+The code now correctly identifies type aliases by checking the right-hand side of assignments for
+  typing-related constructs. This prevents misclassification of regular variables as type aliases.
+  Additionally, the code avoids duplicate classification of expression statements containing
+  assignments.
+
+- **semantic-retrieval**: Rename tool to semantic_retrieval
+  ([`1755356`](https://github.com/SarthakMishra/codemap/commit/17553569f131f344bd128276ac3f6216d2ce3ce0))
+
+- **test**: Move process_codebase import to utils
+  ([`02c2b4f`](https://github.com/SarthakMishra/codemap/commit/02c2b4f8d9433503589f2426c6a440ab0c235974))
+
+This commit refactors the import statements in the test_command.py file to import process_codebase
+  from codemap.gen.utils instead of codemap.gen.command. This change improves the code's
+  organization and maintainability by ensuring that the process_codebase function is imported from
+  its correct location.
+
+### Testing
+
+- **test-generator**: Improve style assertion and shorten node IDs
+  ([`9c5e335`](https://github.com/SarthakMishra/codemap/commit/9c5e33575b4f922c158cd88dad966a47819fa9c5))
+
+This commit refactors the assertion logic for style definitions in Mermaid diagrams. It introduces
+  support for both the old individual style format and the new class-based format, ensuring that the
+  tests can validate diagrams generated using either approach. Additionally, the node IDs in the
+  generated Mermaid diagrams are shortened for better readability and maintainability.
+
+
 ## v0.3.1-rc.1 (2025-05-23)
 
 ### Chores
