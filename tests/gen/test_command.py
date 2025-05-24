@@ -8,7 +8,8 @@ import pytest
 from codemap.config.config_schema import GenSchema as GenConfig
 
 # Correct the import path based on actual project structure if necessary
-from codemap.gen.command import GenCommand, process_codebase
+from codemap.gen.command import GenCommand
+from codemap.gen.utils import process_codebase
 from codemap.processor.lod import LODEntity, LODLevel
 from codemap.processor.tree_sitter.base import EntityType
 from tests.base import CLITestBase, FileSystemTestBase
@@ -186,10 +187,10 @@ class TestProcessCodebase(FileSystemTestBase):
 		self.mock_progress = MagicMock()
 		self.mock_task_id = MagicMock()
 
-	@patch("codemap.gen.command.filter_paths_by_gitignore")
+	@patch("codemap.gen.utils.filter_paths_by_gitignore")
 	@patch("codemap.utils.file_utils.is_binary_file")
-	@patch("codemap.gen.command.generate_tree")
-	@patch("codemap.gen.command.process_files_for_lod")
+	@patch("codemap.gen.utils.generate_tree")
+	@patch("codemap.gen.utils.process_files_for_lod")
 	def test_process_codebase_basic_flow(
 		self,
 		mock_process_files_lod: MagicMock,
@@ -256,10 +257,10 @@ class TestProcessCodebase(FileSystemTestBase):
 		assert metadata["stats"]["total_files_scanned"] == 3  # Using the correct key name
 		assert mock_generate_tree.call_count == 1  # Called once because include_tree=True
 
-	@patch("codemap.gen.command.filter_paths_by_gitignore")
+	@patch("codemap.gen.utils.filter_paths_by_gitignore")
 	@patch("codemap.utils.file_utils.is_binary_file", return_value=False)
-	@patch("codemap.gen.command.logger")
-	@patch("codemap.gen.command.process_files_for_lod")
+	@patch("codemap.gen.utils.logger")
+	@patch("codemap.gen.utils.process_files_for_lod")
 	def test_process_codebase_wait_timeout(
 		self,
 		mock_process_files_lod: MagicMock,
