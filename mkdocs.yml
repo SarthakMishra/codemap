@@ -63,7 +63,6 @@ nav:
     - Gen Overview: api/gen/index.md
     - Command: api/gen/command.md
     - Generator: api/gen/generator.md
-    - Models: api/gen/models.md
     - Utils: api/gen/utils.md
   - Git:
     - Git Overview: api/git/index.md
@@ -125,7 +124,9 @@ nav:
       - Interactive: api/llm/rag/interactive.md
       - Tools:
         - Tools Overview: api/llm/rag/tools/index.md
-        - Retrieval: api/llm/rag/tools/retrieval.md
+        - Read File: api/llm/rag/tools/read_file.md
+        - Semantic Retrieval: api/llm/rag/tools/semantic_retrieval.md
+        - Web Search: api/llm/rag/tools/web_search.md
     - Utils: api/llm/utils.md
   - Processor:
     - Processor Overview: api/processor/index.md

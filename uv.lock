@@ -311,7 +311,7 @@ wheels = [
 
 [[package]]
 name = "codemap"
-version = "0.3.1rc1"
+version = "0.3.1rc2"
 source = { editable = "." }
 dependencies = [
     { name = "aiofiles" },

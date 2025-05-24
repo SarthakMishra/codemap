@@ -1,6 +1,6 @@
-# Retrieval
+# Semantic Retrieval
 
-::: codemap.llm.rag.tools.retrieval
+::: codemap.llm.rag.tools.semantic_retrieval
     options:
       members_order: source
       show_if_no_docstring: true

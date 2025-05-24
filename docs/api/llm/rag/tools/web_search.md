@@ -1,6 +1,6 @@
-# Models
+# Web Search
 
-::: codemap.gen.models
+::: codemap.llm.rag.tools.web_search
     options:
       members_order: source
       show_if_no_docstring: true
