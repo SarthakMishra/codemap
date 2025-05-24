@@ -44,13 +44,35 @@ class GitRepoContext:
 			msg = "Not a git repository"
 			logger.error(msg)
 			raise GitError(msg)
-		return Path(git_dir)
+
+		# discover_repository returns the .git directory path
+		# We need the parent directory (the actual repo root)
+		git_path = Path(git_dir)
+		if git_path.name == ".git":
+			return git_path.parent
+		# For bare repositories, the path itself is the repo root
+		return git_path
 
 	def __init__(self) -> None:
 		"""Initialize the GitRepoContext with the given repository path."""
 		if self.repo_root is None:
 			self.repo_root = self.get_repo_root()
-		self.repo = Repository(str(self.repo_root))
+
+		# Repository() expects the .git directory path, not the repo root
+		git_dir = discover_repository(str(self.repo_root))
+		if git_dir is None:
+			# This can happen in tests with mock paths or if not in a git repo
+			# Fall back to using repo_root directly (for test compatibility)
+			logger.debug(f"Could not discover git directory for {self.repo_root}, using repo_root directly")
+			try:
+				self.repo = Repository(str(self.repo_root))
+			except (OSError, ValueError) as e:
+				msg = f"Could not initialize git repository at {self.repo_root}: {e}"
+				logger.exception(msg)
+				raise GitError(msg) from e
+		else:
+			self.repo = Repository(git_dir)
+
 		self.branch = self.get_current_branch()
 		self.exclude_patterns = self._get_exclude_patterns()
 		self.tracked_files = self._get_tracked_files()

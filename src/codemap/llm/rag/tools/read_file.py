@@ -7,6 +7,8 @@ import aiofiles
 from pydantic_ai import ModelRetry
 from pydantic_ai.tools import Tool
 
+from codemap.utils.git_utils import GitRepoContext
+
 logger = logging.getLogger(__name__)
 
 # Constants
@@ -18,13 +20,17 @@ def search_files_by_name(filename: str, search_root: Path | None = None) -> list
 
 	Args:
 	    filename: Name or partial name of the file to search for
-	    search_root: Root directory to search from (defaults to current working directory)
+	    search_root: Root directory to search from (defaults to git repository root)
 
 	Returns:
 	    List of matching file paths
 	"""
 	if search_root is None:
-		search_root = Path.cwd()
+		# Get repository root using GitRepoContext
+		try:
+			search_root = GitRepoContext.get_repo_root()
+		except (OSError, ValueError, RuntimeError):
+			search_root = Path.cwd()  # Fallback to current directory
 
 	# Handle absolute paths by converting them to relative paths
 	if filename.startswith("/"):
@@ -76,6 +82,12 @@ async def read_file_content(filename: str) -> str:
 	    String containing the file content(s) with formatting
 	"""
 	try:
+		# Get repository root for relative path calculation
+		try:
+			repo_root = GitRepoContext.get_repo_root()
+		except (OSError, ValueError, RuntimeError):
+			repo_root = Path.cwd()  # Fallback to current directory
+
 		# Search for matching files
 		matching_files = search_files_by_name(filename)
 
@@ -98,10 +110,11 @@ async def read_file_content(filename: str) -> str:
 				async with aiofiles.open(file_path, encoding="utf-8") as f:
 					content = await f.read()
 
-				# Get relative path for display
+				# Get relative path for display using repo root
 				try:
-					display_path = file_path.relative_to(Path.cwd())
+					display_path = file_path.relative_to(repo_root)
 				except ValueError:
+					# Fallback to absolute path if file is outside repo
 					display_path = file_path
 
 				# Add file header and content
@@ -137,7 +150,8 @@ read_file_tool = Tool(
 		"Search for and read file content from the codebase by filename. "
 		"Provide the filename or partial filename to search for. "
 		"Returns the complete file content with syntax highlighting. "
-		"Can handle multiple matches if the filename is ambiguous."
+		"Can handle multiple matches if the filename is ambiguous. "
+		"Searches from repository root and shows paths relative to repo root."
 	),
 	prepare=None,
 )
