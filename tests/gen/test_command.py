@@ -5,9 +5,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from codemap.config.config_schema import GenSchema as GenConfig
+
 # Correct the import path based on actual project structure if necessary
 from codemap.gen.command import GenCommand, process_codebase
-from codemap.gen.models import GenConfig
 from codemap.processor.lod import LODEntity, LODLevel
 from codemap.processor.tree_sitter.base import EntityType
 from tests.base import CLITestBase, FileSystemTestBase
@@ -46,7 +47,7 @@ class TestGenCommand(CLITestBase, FileSystemTestBase):
 			lod_level=LODLevel.SIGNATURES,  # Example required field
 			max_content_length=5000,
 			use_gitignore=True,
-			output_dir=temp_dir / "docs",  # Use temp_dir directly
+			output_dir=str(temp_dir / "docs"),  # Convert Path to string
 			semantic_analysis=True,
 			include_tree=False,  # Optional field
 		)
@@ -167,7 +168,7 @@ class TestProcessCodebase(FileSystemTestBase):
 			lod_level=LODLevel.STRUCTURE,  # Example required field
 			max_content_length=5000,
 			use_gitignore=True,
-			output_dir=temp_dir / "docs_proc",  # Use temp_dir directly
+			output_dir=str(temp_dir / "docs_proc"),  # Convert Path to string
 			semantic_analysis=True,
 			include_tree=True,  # Optional field, tested here
 		)
