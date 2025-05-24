@@ -137,14 +137,5 @@ tasks:
   pre-commit:
     desc: Run pre-commit checks on staged files only
     cmds:
-      - |
-        STAGED_FILES=$(git diff --name-only --cached --diff-filter=ACMR | grep -E '\.py$' | tr '\n' ' ')
-        if [ -n "$STAGED_FILES" ]; then
-          echo "Running checks on staged files: $STAGED_FILES"
-          # Only check, don't fix or format here
-          uv run ruff check $STAGED_FILES
-          uv run ruff format $STAGED_FILES --check
-        else
-          echo "No Python files staged for commit"
-        fi
+      - task: lint:ruff
 
