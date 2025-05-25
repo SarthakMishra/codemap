@@ -18,7 +18,9 @@ class LLMSchema(BaseModel):
 	model: str = "openai:gpt-4o-mini"
 	base_url: str | None = None
 	temperature: float = 0.5
-	max_output_tokens: int = 1024
+	max_input_tokens: int = 10000
+	max_output_tokens: int = 5000
+	max_requests: int = 5
 
 
 # Embedding Configuration

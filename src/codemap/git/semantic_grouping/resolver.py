@@ -123,7 +123,7 @@ class FileIntegrityResolver:
 		similarities = []
 		for emb1 in embeddings1:
 			for emb2 in embeddings2:
-				sim = self.cosine_similarity([emb1], [emb2])[0][0]
+				sim = self.cosine_similarity(emb1.reshape(1, -1), emb2.reshape(1, -1))[0][0]
 				similarities.append(sim)
 
 		# Return average similarity
@@ -167,7 +167,7 @@ class FileIntegrityResolver:
 			group_indices = violations[file]
 
 			# Try to find groups to merge based on similarity
-			max_similarity = 0
+			max_similarity = 0.0
 			groups_to_merge = None
 
 			# Calculate similarities between all pairs of groups containing this file

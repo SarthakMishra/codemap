@@ -174,7 +174,7 @@ class TreeSitterAnalyzer:
 		handler_class = LANGUAGE_HANDLERS.get(language)
 		if not handler_class:
 			return None
-		return handler_class()
+		return handler_class()  # type: ignore[abstract]
 
 	def analyze_node(
 		self,

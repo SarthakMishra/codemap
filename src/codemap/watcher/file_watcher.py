@@ -38,7 +38,7 @@ class FileChangeHandler(FileSystemEventHandler):
 		self._last_event_time: float = 0
 		self._debounce_task: asyncio.Task | None = None
 		# Set up a thread-safe way to communicate with the event loop
-		self._event_queue = queue.Queue()
+		self._event_queue: queue.Queue[str] = queue.Queue()
 		self._event_processed = threading.Event()
 		# Store or get the event loop
 		self._event_loop = event_loop or asyncio.get_event_loop()

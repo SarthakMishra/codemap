@@ -524,7 +524,7 @@ class QdrantManager:
 				qdrant_ids: list[ExtendedPointId] = [cast("ExtendedPointId", pid) for pid in point_ids]
 
 				# Create points selector with IDs
-				points_selector = models.PointIdsList(points=qdrant_ids)
+				points_selector: models.PointIdsList | models.FilterSelector = models.PointIdsList(points=qdrant_ids)
 
 				await self.client.set_payload(
 					collection_name=self.collection_name,
@@ -585,7 +585,7 @@ class QdrantManager:
 				qdrant_ids: list[ExtendedPointId] = [cast("ExtendedPointId", pid) for pid in point_ids]
 
 				# Create points selector with IDs
-				points_selector = models.PointIdsList(points=qdrant_ids)
+				points_selector: models.PointIdsList | models.FilterSelector = models.PointIdsList(points=qdrant_ids)
 
 				await self.client.overwrite_payload(
 					collection_name=self.collection_name,
@@ -638,7 +638,7 @@ class QdrantManager:
 				qdrant_ids: list[ExtendedPointId] = [cast("ExtendedPointId", pid) for pid in point_ids]
 
 				# Create points selector with IDs
-				points_selector = models.PointIdsList(points=qdrant_ids)  # type: ignore[arg-type]
+				points_selector: models.PointIdsList | models.FilterSelector = models.PointIdsList(points=qdrant_ids)
 
 				await self.client.clear_payload(
 					collection_name=self.collection_name,
@@ -697,7 +697,7 @@ class QdrantManager:
 				qdrant_ids: list[ExtendedPointId] = [cast("ExtendedPointId", pid) for pid in point_ids]
 
 				# Create points selector with IDs
-				points_selector = models.PointIdsList(points=qdrant_ids)
+				points_selector: models.PointIdsList | models.FilterSelector = models.PointIdsList(points=qdrant_ids)
 
 				await self.client.delete_payload(
 					collection_name=self.collection_name,
@@ -736,7 +736,7 @@ class QdrantManager:
 			msg = "Client should be initialized here"
 			raise RuntimeError(msg)
 
-		content_hashes = set()
+		content_hashes: set[str] = set()
 
 		try:
 			# Get all payloads for deduplication check

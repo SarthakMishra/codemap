@@ -7,13 +7,15 @@ llm:
   # Format: "provider:model-name", e.g., "openai:gpt-4o", "anthropic:claude-3-opus"
   model: "google-gla:gemini-2.0-flash"
   temperature: 0.5  # Lower for more deterministic outputs, higher for creativity
-  max_output_tokens: 1024  # Maximum tokens in responses
+  max_input_tokens: 1000000  # Maximum tokens in input
+  max_output_tokens: 10000  # Maximum tokens in responses
+  max_requests: 25  # Maximum number of requests
 
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
   # Recommended models: "minishlab/potion-base-8M3", Only Model2Vec static models are supported
-  model_name: "minishlab/potion-retrieval-32M"
-  dimension: 512
+  model_name: "sarthak1/gte-Qwen2-7B-instruct-M2V-Distilled"
+  dimension: 256
   # dimension_metric: "cosine" # Metric for dimension calculation (e.g., "cosine", "euclidean")
   # max_retries: 3 # Maximum retries for embedding requests
   # retry_delay: 5 # Delay in seconds between retries
@@ -45,7 +47,7 @@ embedding:
 # RAG (Retrieval Augmented Generation) Configuration
 rag:
   max_context_length: 8000  # Maximum context length for the LLM
-  max_context_results: 20  # Maximum number of context results to return
+  max_context_results: 100  # Maximum number of context results to return
   similarity_threshold: 0.75  # Minimum similarity score (0-1) for relevance
   # system_prompt: null # Optional system prompt to guide the RAG model (leave commented or set if needed)
   include_file_content: true  # Include file content in context

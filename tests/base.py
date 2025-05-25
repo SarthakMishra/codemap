@@ -33,7 +33,7 @@ class GitTestBase:
 	def setup_git_mocks(self, mock_git_utils: dict[str, Mock]) -> None:
 		"""Set up Git mocks."""
 		self.git_utils = mock_git_utils
-		self._patchers = []
+		self._patchers: list[Any] = []
 
 	def mock_repo_path(self, path: str = "/mock/repo") -> None:
 		"""

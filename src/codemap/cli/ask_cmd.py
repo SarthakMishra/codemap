@@ -16,6 +16,10 @@ QuestionArg = Annotated[
 
 InteractiveFlag = Annotated[bool, typer.Option("--interactive", "-i", help="Start an interactive chat session.")]
 
+UsageFlag = Annotated[
+	bool, typer.Option("--usage", "-u", help="Show comprehensive usage summary (tokens, cost, tool calls).")
+]
+
 
 # --- Registration Function ---
 
@@ -28,12 +32,14 @@ def register_command(app: typer.Typer) -> None:
 	async def ask_command(
 		question: QuestionArg = None,
 		interactive: InteractiveFlag = False,
+		usage: UsageFlag = False,
 	) -> None:
 		"""Ask questions about the codebase using Retrieval-Augmented Generation (RAG)."""
 		# Defer heavy imports and logic to the implementation function
 		await _ask_command_impl(
 			question=question,
 			interactive=interactive,
+			usage=usage,
 		)
 
 
@@ -43,6 +49,7 @@ def register_command(app: typer.Typer) -> None:
 async def _ask_command_impl(
 	question: str | None = None,
 	interactive: bool = False,
+	usage: bool = False,
 ) -> None:
 	"""Implementation of the ask command with heavy imports deferred."""
 	# Import heavy dependencies here instead of at the top
@@ -71,24 +78,28 @@ async def _ask_command_impl(
 
 		if is_interactive:
 			typer.echo("Starting interactive chat session. Type 'exit' or 'quit' to end.")
+			typer.echo("Additional commands: 'usage' - show usage summary")
 			while True:
 				user_input = Prompt.ask("\nAsk a question")
 				user_input_lower = user_input.lower().strip()
 				if user_input_lower in ("exit", "quit"):
 					typer.echo("Exiting interactive session.")
 					break
+				if user_input_lower == "usage":
+					command.show_usage_summary()
+					continue
 				if not user_input.strip():
 					continue
 
 				# Use await for the async run method
-				result = await command.run(question=user_input)
+				result = await command.run(question=user_input, show_usage=usage)
 				ui.print_ask_result(cast("dict[str, Any]", result))
 		else:
 			# Single question mode
 			if question is None:
 				exit_with_error("Internal error: Question is unexpectedly None in single-question mode.")
 			# Use await for the async run method
-			result = await command.run(question=cast("str", question))
+			result = await command.run(question=cast("str", question), show_usage=usage)
 			ui.print_ask_result(cast("dict[str, Any]", result))
 
 	except KeyboardInterrupt:

@@ -21,7 +21,7 @@ class ModelForValidation(BaseModel):
 
 
 @pytest.fixture
-def mock_config_loader():
+def mock_config_loader() -> Mock:
 	"""Fixture to create a mock ConfigLoader."""
 	mock_loader = Mock(spec=ConfigLoader)
 
@@ -29,10 +29,12 @@ def mock_config_loader():
 	mock_get = Mock()
 	mock_llm = Mock()
 
-	# Set up the llm config properties
+	# Set up the llm config properties with all required values
 	mock_llm.model = "openai:gpt-4o-mini"
 	mock_llm.temperature = 0.7
 	mock_llm.max_output_tokens = 1000
+	mock_llm.max_input_tokens = 10000  # Add missing required property
+	mock_llm.max_requests = 5  # Add missing required property
 
 	# Attach the llm config to the get property
 	mock_get.llm = mock_llm
@@ -42,7 +44,7 @@ def mock_config_loader():
 
 
 @pytest.mark.unit
-def test_call_llm_api_pydantic_ai_not_installed():
+def test_call_llm_api_pydantic_ai_not_installed() -> None:
 	"""Test handling of missing pydantic-ai dependency."""
 	with (
 		patch("codemap.llm.api.Agent", None),
@@ -55,7 +57,7 @@ def test_call_llm_api_pydantic_ai_not_installed():
 
 
 @pytest.mark.unit
-def test_call_llm_api_success(mock_config_loader):
+def test_call_llm_api_success(mock_config_loader: MagicMock) -> None:
 	"""Test successful API call."""
 	# Create a mock run result
 	mock_run = MagicMock()
@@ -84,7 +86,7 @@ def test_call_llm_api_success(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_call_llm_api_with_system_prompt(mock_config_loader):
+def test_call_llm_api_with_system_prompt(mock_config_loader: MagicMock) -> None:
 	"""Test API call with a system prompt."""
 	# Create a mock run result
 	mock_run = MagicMock()
@@ -118,7 +120,7 @@ def test_call_llm_api_with_system_prompt(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_call_llm_api_with_pydantic_model(mock_config_loader):
+def test_call_llm_api_with_pydantic_model(mock_config_loader: MagicMock) -> None:
 	"""Test API call with Pydantic model for structured output."""
 	# Create a mock structured output
 	test_data = {"answer": "Yes", "confidence": 0.9}
@@ -136,7 +138,7 @@ def test_call_llm_api_with_pydantic_model(mock_config_loader):
 		patch("codemap.llm.api.End"),
 		patch("codemap.llm.api.FinalResult"),
 		patch("codemap.llm.api.ModelSettings"),
-		patch("codemap.llm.api.validate_schema", return_value=ModelForValidation(**test_data)),
+		patch("codemap.llm.api.validate_schema", return_value=ModelForValidation(answer="Yes", confidence=0.9)),
 	):
 		result = call_llm_api(
 			messages=[{"role": "user", "content": "Test prompt"}],
@@ -154,7 +156,7 @@ def test_call_llm_api_with_pydantic_model(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_call_llm_api_no_user_content(mock_config_loader):
+def test_call_llm_api_no_user_content(mock_config_loader: MagicMock) -> None:
 	"""Test handling when no user content is provided."""
 	with (
 		patch("codemap.llm.api.Agent"),
@@ -170,7 +172,7 @@ def test_call_llm_api_no_user_content(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_call_llm_api_last_message_not_user(mock_config_loader):
+def test_call_llm_api_last_message_not_user(mock_config_loader: MagicMock) -> None:
 	"""Test handling when the last message is not from the user."""
 	with (
 		patch("codemap.llm.api.Agent"),
@@ -189,7 +191,7 @@ def test_call_llm_api_last_message_not_user(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_call_llm_api_empty_response(mock_config_loader):
+def test_call_llm_api_empty_response(mock_config_loader: MagicMock) -> None:
 	"""Test handling of empty response."""
 	# Create a mock run result with None output
 	mock_run = MagicMock()
@@ -213,7 +215,7 @@ def test_call_llm_api_empty_response(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_call_llm_api_error(mock_config_loader):
+def test_call_llm_api_error(mock_config_loader: MagicMock) -> None:
 	"""Test handling of API call errors."""
 	# Create a mock agent that raises an exception
 	mock_agent = MagicMock()

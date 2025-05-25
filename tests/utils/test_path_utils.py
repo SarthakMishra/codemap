@@ -6,14 +6,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
+import pathspec
 import pytest
-
-# Check if pathspec is installed, skip tests if not
-try:
-	import pathspec
-except ImportError:
-	pathspec = None
-
 
 from codemap.utils.path_utils import (
 	filter_paths_by_gitignore,

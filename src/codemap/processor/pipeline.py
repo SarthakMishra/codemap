@@ -592,21 +592,45 @@ class ProcessingPipeline:
 
 		# Check for clause-based filter (must, should, must_not)
 		if any(key in filter_params for key in ["must", "should", "must_not"]):
-			filter_obj = {}
+			# Build conditions for each clause type
+			must_conditions: list[Any] | None = None
+			should_conditions: list[Any] | None = None
+			must_not_conditions: list[Any] | None = None
 
 			# Process must conditions (AND)
 			if "must" in filter_params:
-				filter_obj["must"] = [self._build_qdrant_filter(cond) for cond in filter_params["must"]]
+				must_conditions = []
+				for cond in filter_params["must"]:
+					if isinstance(cond, dict):
+						# Recursively build nested filters
+						nested_filter = self._build_qdrant_filter(cond)
+						must_conditions.append(nested_filter)
+					else:
+						must_conditions.append(cond)
 
 			# Process should conditions (OR)
 			if "should" in filter_params:
-				filter_obj["should"] = [self._build_qdrant_filter(cond) for cond in filter_params["should"]]
+				should_conditions = []
+				for cond in filter_params["should"]:
+					if isinstance(cond, dict):
+						# Recursively build nested filters
+						nested_filter = self._build_qdrant_filter(cond)
+						should_conditions.append(nested_filter)
+					else:
+						should_conditions.append(cond)
 
 			# Process must_not conditions (NOT)
 			if "must_not" in filter_params:
-				filter_obj["must_not"] = [self._build_qdrant_filter(cond) for cond in filter_params["must_not"]]
+				must_not_conditions = []
+				for cond in filter_params["must_not"]:
+					if isinstance(cond, dict):
+						# Recursively build nested filters
+						nested_filter = self._build_qdrant_filter(cond)
+						must_not_conditions.append(nested_filter)
+					else:
+						must_not_conditions.append(cond)
 
-			return qdrant_models.Filter(**filter_obj)
+			return qdrant_models.Filter(must=must_conditions, should=should_conditions, must_not=must_not_conditions)
 
 		# Check for condition-based filter (match, range, etc.)
 		if "match" in filter_params:
@@ -640,11 +664,13 @@ class ProcessingPipeline:
 			)
 
 		# Default: treat as simple field-value pairs (exact match)
-		must_conditions = []
+		default_conditions: list[Any] = []
 		for field, value in filter_params.items():
-			must_conditions.append(qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value)))
+			default_conditions.append(
+				qdrant_models.FieldCondition(key=field, match=qdrant_models.MatchValue(value=value))
+			)
 
-		return qdrant_models.Filter(must=must_conditions)
+		return qdrant_models.Filter(must=default_conditions)
 
 	# Context manager support for async operations
 	async def __aenter__(self) -> Self:

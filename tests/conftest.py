@@ -343,9 +343,11 @@ def mock_config_loader():
 	# Mock the LLMSchema for the .llm attribute of AppConfigSchema
 	mock_llm_settings = Mock(spec=LLMSchema)
 	# Preserve test values, adapt to new schema (provider merged into model, max_tokens -> max_output_tokens)
-	mock_llm_settings.model = "openai:gpt-4"
+	mock_llm_settings.model = "openai:gpt-4o-mini"  # Fix model name format and use consistent model
 	mock_llm_settings.temperature = 0.7
 	mock_llm_settings.max_output_tokens = 1000
+	mock_llm_settings.max_input_tokens = 10000  # Add missing required property
+	mock_llm_settings.max_requests = 5  # Add missing required property
 
 	# Assign the mocked LLMSchema to the .llm attribute of the mocked AppConfigSchema
 	mock_app_config.llm = mock_llm_settings

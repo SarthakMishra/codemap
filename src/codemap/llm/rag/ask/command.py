@@ -6,10 +6,14 @@ from typing import Any, TypedDict
 
 from codemap.config import ConfigLoader
 from codemap.db.client import DatabaseClient
-from codemap.llm.api import MessageDict
 from codemap.llm.client import LLMClient
 from codemap.llm.rag.interactive import RagUI
-from codemap.llm.rag.tools import read_file_tool, semantic_retrieval_tool, web_search_tool
+from codemap.llm.rag.tools import (
+	codebase_summary_tool,
+	search_file_tool,
+	semantic_retrieval_tool,
+	web_search_tool,
+)
 from codemap.processor.pipeline import ProcessingPipeline
 from codemap.utils.cli_utils import progress_indicator
 
@@ -124,7 +128,7 @@ class AskCommand:
 		else:
 			logger.info("AskCommand async components already initialized.")
 
-	async def run(self, question: str) -> AskResult:
+	async def run(self, question: str, show_usage: bool = False) -> AskResult:
 		"""Executes one turn of the ask command, returning the answer and context."""
 		logger.info(f"Processing question for session {self.session_id}: '{question}'")
 
@@ -133,12 +137,6 @@ class AskCommand:
 
 		if not self.pipeline:
 			return AskResult(answer="Processing pipeline not available.", context=[])
-
-		# Construct prompt text from the context and question
-		messages: list[MessageDict] = [
-			{"role": "system", "content": SYSTEM_PROMPT},
-			{"role": "user", "content": f"Here's my question about the codebase: {question}"},
-		]
 
 		# Store user query in DB
 		db_entry_id = None
@@ -152,23 +150,46 @@ class AskCommand:
 		except Exception:
 			logger.exception("Failed to store current query turn in DB")
 
-		# Call LLM with context
 		try:
-			with progress_indicator("Waiting for LLM response..."):
-				answer = self.llm_client.completion(
-					messages=messages,
-					tools=[read_file_tool, semantic_retrieval_tool, web_search_tool()],
-				)
-			logger.debug(f"LLM response: {answer}")
+			# Reset usage tracking for this question
+			self.llm_client.reset_usage_tracking()
+
+			# Use the new iterative completion method
+			# Create tools with proper dependencies
+			tools_with_deps = [
+				codebase_summary_tool,
+				search_file_tool,
+				semantic_retrieval_tool,
+				web_search_tool(),
+			]
+
+			final_answer = self.llm_client.iterative_completion(
+				question=question,
+				system_prompt=SYSTEM_PROMPT,
+				tools=tools_with_deps,
+				max_iterations=4,
+			)
+
+			logger.debug(f"Final LLM response: {final_answer}")
+
+			# Show usage summary if requested
+			if show_usage:
+				usage_summary = self.llm_client.get_usage_summary()
+				self.ui.print_usage_summary(usage_summary)
 
 			# Update DB with answer using the dedicated client method
-			if db_entry_id and answer:
-				# The update_chat_response method handles its own exceptions and returns success/failure
-				success = self.db_client.update_chat_response(message_id=db_entry_id, ai_response=answer)
+			if db_entry_id and final_answer:
+				success = self.db_client.update_chat_response(message_id=db_entry_id, ai_response=final_answer)
 				if not success:
 					logger.warning(f"Failed to update DB entry {db_entry_id} via client method.")
 
-			return AskResult(answer=answer, context=[])
+			return AskResult(answer=final_answer, context=[])
+
 		except Exception as e:  # Keep the outer exception for LLM call errors
 			logger.exception("Error during LLM completion")
 			return AskResult(answer=f"Error: {e!s}", context=[])
+
+	def show_usage_summary(self) -> None:
+		"""Display the current usage summary."""
+		usage_summary = self.llm_client.get_usage_summary()
+		self.ui.print_usage_summary(usage_summary)

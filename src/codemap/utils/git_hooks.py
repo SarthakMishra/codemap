@@ -81,6 +81,34 @@ def run_hook(hook_type: HOOK_TYPES, repo_root: Path | None = None) -> int:
 		return 1
 
 
+def run_hook_with_output(hook_type: HOOK_TYPES, repo_root: Path | None = None) -> tuple[int, str, str]:
+	"""
+	Run the specified git hook and capture its output.
+
+	Args:
+	    hook_type: The hook type ("pre-commit" or "pre-push").
+	    repo_root: Path to the repo root. Defaults to cwd.
+
+	Returns:
+	    Tuple of (exit_code, stdout, stderr).
+	"""
+	hooks_dir = get_git_hooks_dir(repo_root)
+	hook_path = hooks_dir / hook_type
+	if not hook_path.exists():
+		logger.debug(f"{hook_type} hook not found at {hook_path}")
+		return 0, "", ""
+	if not (hook_path.stat().st_mode & 0o111):
+		logger.warning(f"{hook_type} hook at {hook_path} is not executable")
+		return 1, "", f"{hook_type} hook is not executable"
+	try:
+		logger.info(f"Running git hook: {hook_path}")
+		result = subprocess.run(["bash", str(hook_path)], capture_output=True, text=True, check=False)  # noqa: S603, S607
+		return result.returncode, result.stdout or "", result.stderr or ""
+	except Exception as e:
+		logger.exception(f"Failed to run {hook_type} hook")
+		return 1, "", f"Failed to run {hook_type} hook: {e}"
+
+
 def run_all_hooks(repo_root: Path | None = None) -> dict[str, int]:
 	"""
 	Run all supported hooks (pre-commit, pre-push) if they exist.

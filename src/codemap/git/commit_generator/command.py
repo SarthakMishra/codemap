@@ -21,6 +21,7 @@ from codemap.git.utils import (
 	ExtendedGitRepoContext,
 	GitDiff,
 	GitError,
+	GitHookError,
 )
 from codemap.llm import LLMError
 from codemap.utils.cli_utils import progress_indicator
@@ -318,6 +319,27 @@ class CommitCommand:
 			self.git_context.commit_only_files(chunk.files, message, ignore_hooks=self.bypass_hooks)
 			self.ui.show_success(f"Committed {len(chunk.files)} files.")
 			return True
+		except GitHookError as e:
+			# Handle git hook failures gracefully
+			self.ui.display_hook_failure(e.hook_type, e.exit_code, e.stdout, e.stderr)
+
+			# Ask user if they want to bypass hooks
+			if self.ui.confirm_bypass_hooks(e.hook_type):
+				try:
+					# Retry commit with hooks bypassed
+					self.git_context.commit_only_files(chunk.files, message, ignore_hooks=True)
+					self.ui.show_success(f"Committed {len(chunk.files)} files (hooks bypassed).")
+					return True
+				except GitError as retry_error:
+					error_msg = f"Error during commit (even with hooks bypassed): {retry_error}"
+					self.ui.show_error(error_msg)
+					logger.exception(error_msg)
+					self.error_state = "failed"
+					return False
+			else:
+				# User chose not to bypass hooks
+				self.ui.show_message("Commit aborted due to hook failure.")
+				return True  # Return True to continue with next chunk, not abort entire process
 		except GitError as e:
 			error_msg = f"Error during commit: {e}"
 			self.ui.show_error(error_msg)
@@ -1079,6 +1101,25 @@ class SemanticCommitCommand(CommitCommand):
 			self.git_context.commit_only_files(group_files, group.message or "", ignore_hooks=self.bypass_hooks)
 			self.committed_files.update(group_files)
 			return True
+		except GitHookError as e:
+			# Handle git hook failures gracefully
+			self.ui.display_hook_failure(e.hook_type, e.exit_code, e.stdout, e.stderr)
+
+			# Ask user if they want to bypass hooks
+			if self.ui.confirm_bypass_hooks(e.hook_type):
+				try:
+					# Retry commit with hooks bypassed
+					self.git_context.commit_only_files(group_files, group.message or "", ignore_hooks=True)
+					self.committed_files.update(group_files)
+					self.ui.show_success(f"Committed {len(group_files)} files (hooks bypassed).")
+					return True
+				except GitError as retry_error:
+					self.ui.show_error(f"Failed to commit even with hooks bypassed: {retry_error}")
+					return False
+			else:
+				# User chose not to bypass hooks
+				self.ui.show_message("Commit aborted due to hook failure.")
+				return False  # For semantic groups, we should return False to indicate failure
 		except GitError as commit_error:
 			self.ui.show_error(f"Failed to commit: {commit_error}")
 			return False
