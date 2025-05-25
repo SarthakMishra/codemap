@@ -217,7 +217,7 @@ async def retrieve_code_context(query: str) -> str:
 
 			try:
 				# Read the file once for all chunks from this file
-				async with aiofiles.open(file_path_abs, encoding="utf-8") as f:
+				async with aiofiles.open(file_path_abs, encoding="utf-8") as f:  # type: ignore[async]
 					file_lines = await f.readlines()
 
 				# Process each merged chunk
