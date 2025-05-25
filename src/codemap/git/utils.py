@@ -12,7 +12,7 @@ from pygit2 import (
 	Patch,
 )
 
-from codemap.utils.git_hooks import hook_exists, run_hook
+from codemap.utils.git_hooks import hook_exists, run_hook, run_hook_with_output
 from codemap.utils.git_utils import GitRepoContext
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,37 @@ class GitDiff:
 
 class GitError(Exception):
 	"""Custom exception for Git-related errors."""
+
+
+class GitHookError(GitError):
+	"""Custom exception for Git hook failures with captured output."""
+
+	def __init__(self, hook_type: str, exit_code: int, stdout: str, stderr: str) -> None:
+		"""
+		Initialize the GitHookError with hook details.
+
+		Args:
+		    hook_type: The type of hook that failed
+		    exit_code: The exit code returned by the hook
+		    stdout: Standard output from the hook
+		    stderr: Standard error from the hook
+		"""
+		self.hook_type = hook_type
+		self.exit_code = exit_code
+		self.stdout = stdout
+		self.stderr = stderr
+
+		# Create a comprehensive error message
+		output_parts: list[str] = []
+		if stdout.strip():
+			output_parts.append(f"STDOUT:\n{stdout}")
+		if stderr.strip():
+			output_parts.append(f"STDERR:\n{stderr}")
+
+		output_text = "\n\n".join(output_parts) if output_parts else "No output captured"
+		message = f"{hook_type} hook failed with exit code {exit_code}\n\n{output_text}"
+
+		super().__init__(message)
 
 
 class ExtendedGitRepoContext(GitRepoContext):
@@ -132,11 +163,11 @@ class ExtendedGitRepoContext(GitRepoContext):
 
 		# Run pre-commit hook if not ignored
 		if not ignore_hooks and hook_exists("pre-commit"):
-			exit_code = run_hook("pre-commit")
+			exit_code, stdout, stderr = run_hook_with_output("pre-commit")
 			if exit_code != 0:
-				error_msg = "pre-commit hook failed, aborting commit."
-				logger.error(error_msg)
-				raise RuntimeError(error_msg)
+				logger.error("pre-commit hook failed, aborting commit.")
+				msg = "pre-commit"
+				raise GitHookError(msg, exit_code, stdout, stderr)
 		try:
 			# Prepare commit-msg hook: write message to a temp file if needed
 			commit_msg_file = None
@@ -144,13 +175,15 @@ class ExtendedGitRepoContext(GitRepoContext):
 				with tempfile.NamedTemporaryFile("w+", delete=False) as f:
 					f.write(message)
 					commit_msg_file = f.name
-				exit_code = run_hook("commit-msg", repo_root=None)  # Could pass file as env var if needed
+				exit_code, stdout, stderr = run_hook_with_output(
+					"commit-msg", repo_root=None
+				)  # Could pass file as env var if needed
 				if exit_code != 0:
-					error_msg = "commit-msg hook failed, aborting commit."
-					logger.error(error_msg)
+					logger.error("commit-msg hook failed, aborting commit.")
 					if commit_msg_file:
 						Path(commit_msg_file).unlink()
-					raise RuntimeError(error_msg)
+					msg = "commit-msg"
+					raise GitHookError(msg, exit_code, stdout, stderr)
 			# self.stage_files(files) # Removed: Index is already prepared by the caller
 			other_staged = self.get_other_staged_files(files)
 			try:
