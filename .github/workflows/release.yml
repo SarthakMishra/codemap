@@ -119,6 +119,8 @@ jobs:
         run: uv publish
 
   sync-branch: 
+    name: Sync main to dev
+    needs: release
     if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:  
@@ -129,6 +131,8 @@ jobs:
           head: main
 
   docs-push:
+    name: Push latest docs
+    needs: release
     if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/main' && !contains(needs.release.outputs.version, 'rc')
     runs-on: ubuntu-latest
     steps:
@@ -165,6 +169,8 @@ jobs:
         run: uv run mike deploy ${{ needs.release.outputs.version }} latest --update-aliases --push
 
   docs-push-pre:
+    name: Push pre-release docs
+    needs: release
     if: needs.release.outputs.released == 'true' && github.ref == 'refs/heads/dev' && contains(needs.release.outputs.version, 'rc')
     runs-on: ubuntu-latest
     steps:
