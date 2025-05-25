@@ -10,8 +10,7 @@ from codemap.llm.client import LLMClient
 from codemap.llm.rag.interactive import RagUI
 from codemap.llm.rag.tools import (
 	codebase_summary_tool,
-	pattern_search_tool,
-	read_file_tool,
+	search_file_tool,
 	semantic_retrieval_tool,
 	web_search_tool,
 )
@@ -161,8 +160,7 @@ class AskCommand:
 				system_prompt=SYSTEM_PROMPT,
 				tools=[
 					codebase_summary_tool,
-					pattern_search_tool,
-					read_file_tool,
+					search_file_tool,
 					semantic_retrieval_tool,
 					web_search_tool(),
 				],
