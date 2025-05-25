@@ -165,6 +165,7 @@ jobs:
             git push origin HEAD:${GITHUB_REF#refs/heads/}
           else
             echo "No documentation changes to commit."
+          fi
       - name: Deploy docs (stable)
         run: uv run mike deploy ${{ needs.release.outputs.version }} latest --update-aliases --push
 
@@ -203,5 +204,6 @@ jobs:
             git push origin HEAD:${GITHUB_REF#refs/heads/}
           else
             echo "No documentation changes to commit."
+          fi
       - name: Deploy docs (pre-release)
         run: DOCS_PRERELEASE=true uv run mike deploy ${{ needs.release.outputs.version }} pre-release --update-aliases --push
