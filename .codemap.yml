@@ -14,7 +14,7 @@ llm:
 # Embedding Configuration - Controls vector embedding behavior
 embedding:
   # Recommended models: "minishlab/potion-base-8M3", Only Model2Vec static models are supported
-  model_name: "sarthak1/Qodo-Embed-M-1-1.5B-M2V-Distilled"
+  model_name: "sarthak1/gte-Qwen2-7B-instruct-M2V-Distilled"
   dimension: 256
   # dimension_metric: "cosine" # Metric for dimension calculation (e.g., "cosine", "euclidean")
   # max_retries: 3 # Maximum retries for embedding requests
