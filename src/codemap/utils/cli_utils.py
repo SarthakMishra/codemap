@@ -192,7 +192,11 @@ def progress_indicator(
 	    For progress bars, it accepts description, completed, and total (all optional).
 	"""
 	if os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("CI"):
-		yield lambda _d=None, _c=None, _t=None: None
+
+		def noop_updater(_d: str | None = None, _c: int | None = None, _t: int | None = None) -> None:
+			pass
+
+		yield noop_updater
 		return
 
 	spinner_state = SpinnerState()
@@ -200,7 +204,11 @@ def progress_indicator(
 	if style == "spinner":
 		spinner_state.start_new_spinner(message)
 		try:
-			yield lambda _d=None, _c=None, _t=None: None  # No-op for spinner
+
+			def noop_updater(_d: str | None = None, _c: int | None = None, _t: int | None = None) -> None:
+				pass
+
+			yield noop_updater  # No-op for spinner
 		finally:
 			spinner_state.stop_current_spinner_and_resume_parent()
 	elif style == "progress":
@@ -217,12 +225,18 @@ def progress_indicator(
 			)
 			with progress:  # Progress context manager handles its own start/stop
 				task_id = progress.add_task(message, total=total)  # total can be None for indeterminate
-				yield lambda description=None, completed=None, new_total=None: progress.update(
-					task_id,
-					description=description,
-					completed=completed,
-					total=new_total if new_total is not None else total,  # Use new_total if provided
-				)
+
+				def progress_updater(
+					description: str | None = None, completed: int | None = None, new_total: int | None = None
+				) -> None:
+					progress.update(
+						task_id,
+						description=description,
+						completed=completed,
+						total=new_total if new_total is not None else total,  # Use new_total if provided
+					)
+
+				yield progress_updater
 		finally:
 			# Progress bar's 'with' context has exited.
 			# If a spinner was active before this progress bar, try to resume it.

@@ -56,7 +56,7 @@ class WorkflowStrategy(ABC):
 		return f"{prefix}{clean_description}"
 
 	@abstractmethod
-	def get_branch_prefix(self, branch_type: str) -> str:
+	def get_branch_prefix(self, branch_type: str | None) -> str:
 		"""
 		Get the branch name prefix for a given branch type.
 
@@ -566,7 +566,7 @@ def create_strategy(strategy_name: str) -> WorkflowStrategy:
 
 # Utility functions, now using PRGitUtils
 def branch_exists(
-	branch_name: str,
+	branch_name: str | None,
 	pgu_instance: PRGitUtils | None = None,
 	remote_name: str = "origin",
 	include_remote: bool = True,

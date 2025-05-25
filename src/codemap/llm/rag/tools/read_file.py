@@ -202,7 +202,7 @@ async def _search_file_contents_async(
 		pattern = None
 
 	# Collect files to search
-	files_to_search = []
+	files_to_search: list[Path] = []
 	for file_path in search_root.rglob("*"):
 		if (
 			file_path.is_file()

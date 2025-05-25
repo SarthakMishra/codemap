@@ -36,7 +36,7 @@ class PRGitUtils(ExtendedGitRepoContext):
 		"""Initialize the PRGitUtils with the given repository path."""
 		super().__init__()
 
-	def create_branch(self, branch_name: str, from_reference: str | None = None) -> None:
+	def create_branch(self, branch_name: str | None, from_reference: str | None = None) -> None:
 		"""
 		Create a new branch and switch to it using pygit2.
 
@@ -49,6 +49,11 @@ class PRGitUtils(ExtendedGitRepoContext):
 		    GitError: If branch creation or checkout fails.
 		"""
 		try:
+			if not branch_name:
+				msg = "Branch name is None/empty, cannot create branch."
+				logger.error(msg)
+				raise GitError(msg)
+
 			if from_reference:
 				commit_obj = self.repo.revparse_single(from_reference)
 				if not commit_obj:
@@ -75,7 +80,7 @@ class PRGitUtils(ExtendedGitRepoContext):
 			logger.exception(msg)
 			raise GitError(msg) from e
 
-	def checkout_branch(self, branch_name: str) -> None:
+	def checkout_branch(self, branch_name: str | None) -> None:
 		"""
 		Checkout an existing branch using pygit2.
 
@@ -86,6 +91,11 @@ class PRGitUtils(ExtendedGitRepoContext):
 		    GitError: If checkout fails.
 		"""
 		try:
+			if not branch_name:
+				msg = "Branch name is None/empty, cannot checkout branch."
+				logger.error(msg)
+				raise GitError(msg)
+
 			# Construct the full ref name
 			ref_name = f"refs/heads/{branch_name}"
 			branch_obj = self.repo.lookup_reference(ref_name)

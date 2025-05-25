@@ -3,7 +3,7 @@
 import logging
 from enum import Enum
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import asyncer
 import typer
@@ -509,7 +509,7 @@ async def _pr_command_impl(
 		options: PROptions, title_strategy: str, commits: list[str], branch_name: str, branch_type: str
 	) -> str:
 		"""Generate PR title based on the chosen strategy."""
-		if options.title:
+		if options.title is not None:
 			return options.title
 
 		if not commits:  # Handle empty commits case
@@ -672,7 +672,7 @@ async def _pr_command_impl(
 				try:
 					remote_branches = strategy.get_remote_branches()
 					# Filter out the current branch itself from choices
-					choices = sorted([b for b in remote_branches if b != final_branch_name])
+					choices: list[Any] = sorted([b for b in remote_branches if b != final_branch_name])
 					default_choice = final_base_branch if final_base_branch in choices else None
 					if choices:
 						selected_base = questionary.select(
@@ -734,9 +734,10 @@ async def _pr_command_impl(
 			)
 
 			# 5f. Interactive Review (if applicable)
-			final_title, final_description = initial_title, initial_description
+			final_title = initial_title
+			final_description = initial_description
 			if opts.interactive:
-				final_title, final_description = _interactive_pr_review(
+				reviewed_title, reviewed_description = _interactive_pr_review(
 					initial_title,
 					initial_description,
 					opts,
@@ -747,8 +748,10 @@ async def _pr_command_impl(
 					content_config,
 					opts.workflow_strategy_name,
 				)
-				if final_title is None or final_description is None:
+				if reviewed_title is None or reviewed_description is None:
 					_exit_command(0)  # User cancelled
+				final_title = cast("str", reviewed_title)
+				final_description = cast("str", reviewed_description)
 
 			# 5g. Create PR using PRWorkflowCommand
 			console.print(Rule("Creating Pull Request", style="bold blue"))

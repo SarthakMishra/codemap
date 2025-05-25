@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import Mock, patch
 
 import pytest
@@ -15,7 +15,7 @@ from codemap.llm.errors import LLMError
 
 
 @pytest.fixture
-def mock_config_loader():
+def mock_config_loader() -> Mock:
 	"""Fixture to create a mock ConfigLoader."""
 	mock_config = Mock()
 	# Mock the pydantic schema structure
@@ -37,13 +37,13 @@ def mock_config_loader():
 
 
 @pytest.fixture
-def llm_client(mock_config_loader):
+def llm_client(mock_config_loader: Mock) -> LLMClient:
 	"""Fixture to create an LLMClient with mocked dependencies."""
 	return LLMClient(config_loader=mock_config_loader)
 
 
 @pytest.mark.unit
-def test_llm_client_initialization(mock_config_loader):
+def test_llm_client_initialization(mock_config_loader: Mock) -> None:
 	"""Test that the LLMClient initializes correctly with various parameters."""
 	# Test with config_loader
 	client = LLMClient(config_loader=mock_config_loader)
@@ -52,7 +52,7 @@ def test_llm_client_initialization(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_template_management():
+def test_template_management() -> None:
 	"""Test template setting and retrieval."""
 	# Create a config loader mock
 	mock_config = Mock(spec=ConfigLoader)
@@ -74,7 +74,7 @@ def test_template_management():
 
 
 @pytest.mark.unit
-def test_completion(llm_client):
+def test_completion(llm_client: LLMClient) -> None:
 	"""Test completion with LLM API."""
 	messages: list[MessageDict] = [{"role": "user", "content": "Test prompt"}]
 
@@ -98,7 +98,7 @@ def test_completion(llm_client):
 
 
 @pytest.mark.unit
-def test_completion_with_pydantic_model(llm_client):
+def test_completion_with_pydantic_model(llm_client: LLMClient) -> None:
 	"""Test completion with Pydantic model validation."""
 
 	# Define a simple Pydantic model for testing
@@ -131,7 +131,7 @@ def test_completion_with_pydantic_model(llm_client):
 
 
 @pytest.mark.unit
-def test_completion_error(mock_config_loader):
+def test_completion_error(mock_config_loader: Mock) -> None:
 	"""Test error handling during completion."""
 	client = LLMClient(config_loader=mock_config_loader)
 	messages: list[MessageDict] = [{"role": "user", "content": "Test prompt"}]
@@ -146,7 +146,7 @@ def test_completion_error(mock_config_loader):
 
 
 @pytest.mark.unit
-def test_iterative_completion_first_iteration_complete(llm_client):
+def test_iterative_completion_first_iteration_complete(llm_client: LLMClient) -> None:
 	"""Test iterative completion that completes on the first iteration."""
 	question = "What is this code doing?"
 	system_prompt = "You are a code analysis assistant."
@@ -182,7 +182,7 @@ def test_iterative_completion_first_iteration_complete(llm_client):
 
 
 @pytest.mark.unit
-def test_iterative_completion_multiple_iterations(llm_client):
+def test_iterative_completion_multiple_iterations(llm_client: LLMClient) -> None:
 	"""Test iterative completion that requires multiple iterations."""
 	question = "Analyze this complex codebase"
 	system_prompt = "You are a comprehensive code analyzer."
@@ -219,7 +219,7 @@ def test_iterative_completion_multiple_iterations(llm_client):
 
 
 @pytest.mark.unit
-def test_iterative_completion_max_iterations_reached(llm_client):
+def test_iterative_completion_max_iterations_reached(llm_client: LLMClient) -> None:
 	"""Test iterative completion that reaches max iterations without completion."""
 	question = "Complex analysis task"
 	system_prompt = "Analyze everything in detail."
@@ -255,11 +255,11 @@ def test_iterative_completion_max_iterations_reached(llm_client):
 
 
 @pytest.mark.unit
-def test_iterative_completion_with_tools(llm_client):
+def test_iterative_completion_with_tools(llm_client: LLMClient) -> None:
 	"""Test iterative completion with tools provided."""
 	question = "Search and analyze code patterns"
 	system_prompt = "Use tools to analyze the codebase."
-	mock_tools = [Mock(), Mock()]
+	mock_tools: list[Any] = [Mock(), Mock()]
 
 	with (
 		patch("codemap.llm.client.LLMClient.completion") as mock_completion,
@@ -270,7 +270,7 @@ def test_iterative_completion_with_tools(llm_client):
 			is_complete=True, final_response="Tool-based analysis shows good code patterns."
 		)
 
-		result = llm_client.iterative_completion(question=question, system_prompt=system_prompt, tools=mock_tools)
+		result = llm_client.iterative_completion(question=question, system_prompt=system_prompt, tools=mock_tools)  # type: ignore[arg-type]
 
 		# Verify tools were passed to completion
 		call_args = mock_completion.call_args[1]
@@ -280,7 +280,7 @@ def test_iterative_completion_with_tools(llm_client):
 
 
 @pytest.mark.unit
-def test_iterative_completion_no_final_response_in_status(llm_client):
+def test_iterative_completion_no_final_response_in_status(llm_client: LLMClient) -> None:
 	"""Test iterative completion when completion status has no final response."""
 	question = "Simple question"
 	system_prompt = "Simple analysis."
@@ -302,7 +302,7 @@ def test_iterative_completion_no_final_response_in_status(llm_client):
 
 
 @pytest.mark.unit
-def test_iterative_completion_conversation_history(llm_client):
+def test_iterative_completion_conversation_history(llm_client: LLMClient) -> None:
 	"""Test that conversation history is maintained correctly across iterations."""
 	question = "Multi-step analysis"
 	system_prompt = "Analyze step by step."
@@ -335,7 +335,7 @@ def test_iterative_completion_conversation_history(llm_client):
 
 
 @pytest.mark.unit
-def test_iterative_completion_empty_messages_fallback(llm_client):
+def test_iterative_completion_empty_messages_fallback(llm_client: LLMClient) -> None:
 	"""Test fallback behavior when no messages are available."""
 	question = "Test question"
 	system_prompt = "Test prompt"

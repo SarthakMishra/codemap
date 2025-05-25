@@ -384,10 +384,10 @@ class JavaScriptSyntaxHandler(LanguageSyntaxHandler):
 			target_node_types = ["method_definition"]
 		elif target_type == EntityType.MODULE:
 			# Module is typically the root 'program' node
-			current = node
-			while current.parent:
+			current: Node | None = node
+			while current and current.parent:
 				current = current.parent
-			return current if current.type == "program" else None
+			return current if current and current.type == "program" else None
 		# Add other types if needed (e.g., INTERFACE for TS)
 
 		if not target_node_types:

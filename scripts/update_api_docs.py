@@ -129,9 +129,9 @@ def create_package_index_content(module_id: str, title: str, description: str, c
 	return "\n".join(content)
 
 
-def build_nested_nav(structure: dict[str, Any], current_rel_path: Path) -> list[Any]:
+def build_nested_nav(structure: dict[str, Any], current_rel_path: Path) -> list[dict[str, Any]]:
 	"""Recursively builds the nested list structure for MkDocs nav."""
-	nav_list = []
+	nav_list: list[dict[str, Any]] = []
 
 	logger.debug(f"Building nav for path: {current_rel_path}, keys: {list(structure.keys())}")
 
@@ -169,7 +169,7 @@ def build_nested_nav(structure: dict[str, Any], current_rel_path: Path) -> list[
 
 		if is_package:
 			index_md_path = (item_rel_path / "index.md").as_posix()
-			package_nav_list = [{f"{title} Overview": index_md_path}]
+			package_nav_list: list[dict[str, Any]] = [{f"{title} Overview": index_md_path}]
 			if children_structure:
 				package_nav_list.extend(build_nested_nav(children_structure, item_rel_path))
 			if len(package_nav_list) > 1:  # Only add package section if it has children besides Overview
@@ -199,7 +199,7 @@ def build_nested_nav(structure: dict[str, Any], current_rel_path: Path) -> list[
 
 def discover_modules(src_package_dir: Path) -> dict[str, Any]:
 	"""Discovers Python modules and packages using a two-pass approach."""
-	module_structure = {}
+	module_structure: dict[str, Any] = {}
 	all_py_files = list(src_package_dir.rglob("*.py"))  # Get all files first
 
 	# Pass 1: Build the nested dictionary structure

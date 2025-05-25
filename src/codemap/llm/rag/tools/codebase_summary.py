@@ -13,6 +13,7 @@ from codemap.config import ConfigLoader
 from codemap.config.config_schema import GenSchema
 from codemap.gen.generator import CodeMapGenerator
 from codemap.gen.utils import process_codebase
+from codemap.processor.lod import LODLevel
 from codemap.utils.file_utils import is_binary_file
 from codemap.utils.git_utils import GitRepoContext
 from codemap.utils.path_utils import filter_paths_by_gitignore
@@ -436,8 +437,18 @@ async def generate_codebase_summary(
 		logger.info(f"Determined LOD level: {lod_level} (depth: {depth})")
 
 		# Configure generation based on analysis
+		# Convert string to LODLevel enum
+		lod_level_mapping = {
+			"signatures": LODLevel.SIGNATURES,
+			"structure": LODLevel.STRUCTURE,
+			"docs": LODLevel.DOCS,
+			"skeleton": LODLevel.SKELETON,
+			"full": LODLevel.FULL,
+		}
+		lod_enum = lod_level_mapping.get(lod_level, LODLevel.DOCS)
+
 		config = GenSchema(
-			lod_level=lod_level,
+			lod_level=lod_enum,
 			include_entity_graph=False,  # No entity graph needed for summaries
 			include_tree=True,  # Include file tree for better understanding
 		)

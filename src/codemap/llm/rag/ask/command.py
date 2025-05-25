@@ -155,15 +155,18 @@ class AskCommand:
 			self.llm_client.reset_usage_tracking()
 
 			# Use the new iterative completion method
+			# Create tools with proper dependencies
+			tools_with_deps = [
+				codebase_summary_tool,
+				search_file_tool,
+				semantic_retrieval_tool,
+				web_search_tool(),
+			]
+
 			final_answer = self.llm_client.iterative_completion(
 				question=question,
 				system_prompt=SYSTEM_PROMPT,
-				tools=[
-					codebase_summary_tool,
-					search_file_tool,
-					semantic_retrieval_tool,
-					web_search_tool(),
-				],
+				tools=tools_with_deps,
 				max_iterations=4,
 			)
 

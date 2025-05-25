@@ -7,22 +7,15 @@ from typing import TYPE_CHECKING, Literal, TypedDict, TypeVar, cast
 
 from pydantic import BaseModel, ValidationError
 
+# Import Pydantic-AI
+from pydantic_ai import Agent
+from pydantic_ai.result import FinalResult
+from pydantic_ai.settings import ModelSettings
+from pydantic_ai.usage import UsageLimits
+from pydantic_graph import End
+
 from codemap.config import ConfigLoader
 from codemap.llm.utils import is_ollama_model
-
-# Import Pydantic-AI
-try:
-	from pydantic_ai import Agent
-	from pydantic_ai.result import FinalResult
-	from pydantic_ai.settings import ModelSettings
-	from pydantic_ai.usage import UsageLimits
-	from pydantic_graph import End
-except ImportError:
-	Agent = None
-	FinalResult = None
-	End = None
-	ModelSettings = None
-	UsageLimits = None
 
 from .errors import LLMError
 
@@ -149,9 +142,9 @@ def call_llm_api(
 
 	# Determine system prompt from messages
 	system_prompt_str = None
-	for msg in messages:
-		if msg["role"] == "system":
-			system_prompt_str = msg["content"]
+	for message in messages:
+		if message["role"] == "system":
+			system_prompt_str = message["content"]
 			break
 
 	# Determine the output_type for the Pydantic-AI Agent
@@ -167,22 +160,22 @@ def call_llm_api(
 				output_type=agent_output_type,
 			)
 
-		if not any(msg.get("role") == "user" for msg in messages):
-			msg = "No user content found in messages for Pydantic-AI agent."
-			logger.exception(msg)
-			raise LLMError(msg)
+		if not any(message.get("role") == "user" for message in messages):
+			error_msg = "No user content found in messages for Pydantic-AI agent."
+			logger.exception(error_msg)
+			raise LLMError(error_msg)
 
 		if not messages or messages[-1].get("role") != "user":
-			msg = "Last message is not an user prompt"
-			logger.exception(msg)
-			raise LLMError(msg)
+			error_msg = "Last message is not an user prompt"
+			logger.exception(error_msg)
+			raise LLMError(error_msg)
 
 		user_prompt = messages[-1]["content"]
 
 		if ModelSettings is None:
-			msg = "ModelSettings not found in pydantic-ai. Install the correct version."
-			logger.exception(msg)
-			raise LLMError(msg)
+			error_msg = "ModelSettings not found in pydantic-ai. Install the correct version."
+			logger.exception(error_msg)
+			raise LLMError(error_msg)
 
 		# Run the agent and validate the output
 		model_settings = ModelSettings(
