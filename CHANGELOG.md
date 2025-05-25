@@ -1,6 +1,340 @@
 # CHANGELOG
 
 
+## v0.3.1-rc.3 (2025-05-25)
+
+### Bug Fixes
+
+- **semantic-retrieval**: Add type ignore comment to aiofiles
+  ([`8af11d2`](https://github.com/SarthakMishra/codemap/commit/8af11d2300e8d8fb6713e7c7d5ed1ccb5df49835))
+
+The type ignore comment is added to silence mypy.
+
+### Chores
+
+- Update dependencies
+  ([`3dc08b5`](https://github.com/SarthakMishra/codemap/commit/3dc08b526796582c00a1152b1b8554b318d31465))
+
+Update dependencies in uv.lock.
+
+- Update dependencies in uv.lock and pyproject.toml
+  ([`49aea70`](https://github.com/SarthakMishra/codemap/commit/49aea703aba53c2f061e40d3b84e3a55ce7c53e5))
+
+This commit updates the uv.lock file to include mypy and remove pyrefly, radon, mando, and vulture.
+  It also updates the pyproject.toml file to include mypy as a development dependency. These changes
+  are necessary to ensure that the project is compatible with the latest version of mypy and that
+  unnecessary dependencies are removed.
+
+- Update lock file dependencies
+  ([`ecfd084`](https://github.com/SarthakMishra/codemap/commit/ecfd084c856751f38b1d286efea4963f9b9ad0d4))
+
+Update dependencies in uv.lock.
+
+- **ci**: Add names to CI workflow jobs
+  ([`c890547`](https://github.com/SarthakMishra/codemap/commit/c890547c2b832d3a548838bab34f58874435ab37))
+
+- **codemap**: Remove unused semantic search module
+  ([`bf6bff5`](https://github.com/SarthakMishra/codemap/commit/bf6bff57a74a9cfcf948bbcb45182f11c6acefb9))
+
+The module was removed as it's no longer needed.
+
+- **config**: Update llm configuration parameters
+  ([`89c6759`](https://github.com/SarthakMishra/codemap/commit/89c6759db00b4a0aa703261d0e2bba15f3da8efa))
+
+The configuration file has been updated to include maximum input tokens and maximum requests for
+  LLM, and to increase the maximum output tokens. The config schema has been updated to reflect
+  these changes.
+
+- **llm**: Remove pattern search tool and ast-grep engine
+  ([`b47eb54`](https://github.com/SarthakMishra/codemap/commit/b47eb5462dc8dd914bac529f3f9fea04b5e05e7c))
+
+This commit removes the pattern search tool and its associated engine. The functionality is likely
+  being replaced or removed entirely.
+
+- **llm**: Update LLM model prices and context windows
+  ([`0851b9d`](https://github.com/SarthakMishra/codemap/commit/0851b9d531ad5dfe3b70f5df1c316702359cf516))
+
+The json file contains configurations like cost per token, max input tokens, max output tokens for
+  each model.
+
+- **lockfile**: Remove unused dependencies
+  ([`321fe51`](https://github.com/SarthakMishra/codemap/commit/321fe5156121a54a81559957683a678c0ac2a60e))
+
+Remove outdated dependencies to streamline the project and reduce potential conflicts.
+
+- **semantic-search**: Remove redundant module docstring
+  ([`41cbc99`](https://github.com/SarthakMishra/codemap/commit/41cbc99ad7e272612fc90317fc341ca61c5593a9))
+
+- **test**: Remove test file for deprecated AstGrepEngine
+  ([`6981851`](https://github.com/SarthakMishra/codemap/commit/69818510c776f97e69c6afa38c6822f20ec33c2c))
+
+This commit removes the test file for the AstGrepEngine class, as the class itself has been removed.
+  The tests are no longer needed.
+
+- **vscode**: Enable experimental completions
+  ([`0d7b7a7`](https://github.com/SarthakMishra/codemap/commit/0d7b7a7924b164e8d422bac08afbdcde0716b465))
+
+### Documentation
+
+- Auto generated docs
+  ([`b404384`](https://github.com/SarthakMishra/codemap/commit/b404384417a3b2da4e020b8ac8e5aabec91a893d))
+
+### Features
+
+- Add ast-grep-py and tokencost dependencies
+  ([`d404546`](https://github.com/SarthakMishra/codemap/commit/d4045462076211d1d6142133ad4465e50a4a4b29))
+
+- **all**: Enhance codebase functionality and improve code quality
+  ([`60d1ada`](https://github.com/SarthakMishra/codemap/commit/60d1ada1f61161d56f64171b224dba4e34f07179))
+
+This commit introduces several enhancements and bug fixes across the codebase, focusing on improving
+  functionality and code quality. It includes updates to API documentation, command-line interface
+  improvements, database model adjustments, Git-related utilities, LLM integration enhancements,
+  processor pipeline modifications, and various testing improvements. These changes collectively
+  contribute to a more robust and maintainable system.
+
+- **ask-command**: Add pattern search and usage summary
+  ([`efa5c95`](https://github.com/SarthakMishra/codemap/commit/efa5c95d4b0cfd9e7db3f5fb7bcb2036e950142a))
+
+Adds a pattern search tool to the available tools for the ask command, allowing for more
+  comprehensive code searches.
+
+Adds a flag to the run method to optionally display usage summary after each question. Also creates
+  a dedicated method to show the usage summary.
+
+Resets usage tracking at the beginning of each question to have accurate information for each
+  question.
+
+- **cli**: Add usage flag to ask command
+  ([`1a0a54d`](https://github.com/SarthakMishra/codemap/commit/1a0a54d7028eb93e1c09d387f324398b545021a8))
+
+This commit introduces a new `--usage` flag to the `ask` command. When used, the command will
+  display a comprehensive usage summary, including token usage, cost, and tool calls, after each
+  question is answered. This flag is available in both single-question mode and interactive mode.
+
+- **codemap**: Add codebase summary tool for PydanticAI agents
+  ([`e8134f9`](https://github.com/SarthakMishra/codemap/commit/e8134f9efca4309e7eb24f5e232c40e859021703))
+
+This tool processes the complete codebase at the structure level and returns a formatted
+  documentation string with file tree included.
+
+- **codemap**: Add pattern-based code search with ast-grep
+  ([`2f78c99`](https://github.com/SarthakMishra/codemap/commit/2f78c99131777964295747642efdc798f64b76e9))
+
+This commit introduces a new pattern-based code search tool using ast-grep. It enables searching
+  code using AST patterns with meta variables as placeholders.
+
+The AstGrepEngine class provides a minimal semantic code search engine using ast-grep pattern
+  matching. It supports searching for patterns across files, with optional constraints and language
+  overrides.
+
+- **git**: Capture and expose git hook output for better diagnostics
+  ([`8246ad9`](https://github.com/SarthakMishra/codemap/commit/8246ad91d08e1d6c43570eb91e5af80fcd02e1ce))
+
+This commit introduces a more robust mechanism for handling Git hooks by capturing and exposing
+  their output (stdout and stderr).
+
+Previously, hook failures were only reported with a generic error message, making it difficult to
+  diagnose the root cause. The new GitHookError exception, along with the `run_hook_with_output`
+  function, provides detailed information about the hook's execution, including the exit code and
+  any output it generated. This enables better debugging and troubleshooting of Git hook-related
+  issues.
+
+The changes also ensure that the pre-commit and commit-msg hooks are properly executed and their
+  results are checked, raising the GitHookError exception when appropriate.
+
+- **git**: Handle Git hook failures and prompt to bypass
+  ([`857db92`](https://github.com/SarthakMishra/codemap/commit/857db92ab284ba68b66cfe4578ffbc5ff397a9f6))
+
+This change introduces a mechanism to handle Git hook failures gracefully. When a Git hook fails,
+  the user is prompted to bypass the hooks and retry the commit. This ensures that commits are not
+  blocked by failing hooks and provides a way to proceed with the commit even if hooks are
+  misconfigured or failing.
+
+The implementation involves catching the GitHookError, displaying the hook failure details to the
+  user, and prompting them to bypass the hooks. If the user chooses to bypass, the commit is retried
+  with the ignore_hooks flag set to True. If the retry is successful, a success message is
+  displayed; otherwise, an error message is shown. If the user chooses not to bypass the hooks, the
+  commit is aborted.
+
+- **llm**: Enhance llm client with agent caching and iterative completion
+  ([`61f6c9b`](https://github.com/SarthakMishra/codemap/commit/61f6c9b890e61fd8b4736c6331710824e61a84f2))
+
+This commit introduces several enhancements to the LLM client and API:
+
+- Adds agent caching to improve performance by reusing agents with the same configuration. -
+  Implements iterative completion with automatic completion checking, allowing for more complex
+  tasks to be handled. - Introduces a CompletionStatus model to structure the response from the
+  completion check. - Improves system prompt extraction for better context management. - Adds usage
+  limits for the agent to control resource consumption.
+
+- **llm**: Improve clarity and thoroughness of ask command prompt
+  ([`aa49e48`](https://github.com/SarthakMishra/codemap/commit/aa49e48c96e150f969a7b4fd2e7c6b52687e6ebb))
+
+The prompt for the ask command has been updated to provide more context and instructions for the AI
+  assistant. The updated prompt instructs the AI to act as a senior developer, include file paths
+  and code snippets, call tools to get more information, and provide relevant, clear, and concise
+  answers.
+
+- **llm**: Improve prompts for ask command
+  ([`3e3cd7c`](https://github.com/SarthakMishra/codemap/commit/3e3cd7c9b7c0d398168250223766a1dd3a61d468))
+
+This commit adds detailed guidelines and examples for using ast-grep patterns within the
+  `pattern_search` tool, along with common pitfalls to avoid. It also clarifies the task
+  instructions and emphasizes the inclusion of file paths and code snippets in responses. It limits
+  the number of tool calls to a maximum of 3 and encourages thorough analysis and actionable
+  responses.
+
+- **llm**: Use iterative completion for LLM responses
+  ([`141b4d6`](https://github.com/SarthakMishra/codemap/commit/141b4d6e0200b1216ec81d6ab382aee58cfabd43))
+
+The LLM client's completion method has been replaced with a new iterative completion method. This
+  allows for more complex reasoning and better responses to user queries. The codebase_summary_tool
+  has been added to the list of tools used by the LLM.
+
+- **llm-client**: Add detailed usage tracking for LLM interactions
+  ([`12007ff`](https://github.com/SarthakMishra/codemap/commit/12007ff7eaf1f01572bb1c334bc77b7f27a10256))
+
+This commit introduces comprehensive usage tracking for LLM interactions within the codemap module.
+  It includes detailed statistics on token usage, request counts, tool call summaries, cost
+  estimation, and timing information. The implementation leverages Pydantic models for structured
+  data representation and adds methods to accumulate usage data, estimate costs based on internal
+  pricing data and the `tokencost` library, and track individual tool calls with success/failure
+  metrics. Additionally, the LLMClient class is updated to integrate this tracking, providing
+  methods to get usage summaries and reset tracking for new sessions. The changes also include
+  enhancements to the iterative completion process to calculate and incorporate response times and
+  iteration counts into the usage summary.
+
+- **llm/rag/tools**: Enhance file search with flexible queries and content search
+  ([`8936780`](https://github.com/SarthakMishra/codemap/commit/893678051ca95ec57191013dfad13d2e9c0d09f1))
+
+This commit introduces a new `search_file` tool that replaces the old `read_file` tool. The new tool
+  offers more comprehensive search capabilities, including filename, path, extension, and
+  content-based searches. It also improves performance by using concurrent processing for file
+  content searches.
+
+- **rag**: Add formatted usage summary printing
+  ([`f2c798a`](https://github.com/SarthakMishra/codemap/commit/f2c798a740c2efe478c31bd40ed627638d60574a))
+
+This commit introduces a new function, `print_usage_summary`, to provide a formatted display of
+  usage statistics. It includes metrics such as token usage, API requests, response times, tool call
+  details, and cost estimation. The function utilizes the Rich library for enhanced formatting and
+  visual presentation of the data.
+
+- **rag**: Expose pattern search tool
+  ([`b9d9c34`](https://github.com/SarthakMishra/codemap/commit/b9d9c340fb938fe109ed32770272b73f76a294d3))
+
+The pattern search tool has been added to the __all__ list to make it available for use.
+
+- **rag/tools**: Expose codebase summary tool
+  ([`585292e`](https://github.com/SarthakMishra/codemap/commit/585292e572cda318181de6b0efec40e6cc2d1ce0))
+
+This commit introduces the `codebase_summary_tool` to the RAG tools, enabling the summarization of
+  the codebase.
+
+- **read-file**: Enhance file search to handle paths
+  ([`c9477e8`](https://github.com/SarthakMishra/codemap/commit/c9477e83ca44114c141178891917337cb6a8fb67))
+
+The file search functionality is enhanced to handle absolute paths and path patterns. This allows
+  users to specify files using their full or partial paths, making the search more flexible and
+  accurate.
+
+- **read-file**: Improve file path handling in read-file tool
+  ([`f676f35`](https://github.com/SarthakMishra/codemap/commit/f676f35ebefd618522808ba3acfdfd458d24148a))
+
+The file reading tool now correctly identifies the repository root, ensuring that file paths are
+  displayed relative to the repository's base directory. This change enhances the user experience by
+  providing more contextually relevant file paths in search results. The update to `GitRepoContext`
+  ensures correct identification of the repository root directory, handling cases for both standard
+  and bare repositories. The tool also now gracefully falls back to the current working directory if
+  it can't find the git repository root.
+
+- **tools**: Enhance codebase summary and semantic retrieval tools
+  ([`454dcd0`](https://github.com/SarthakMishra/codemap/commit/454dcd0996aec97ab6e6718503a2db55dd11691c))
+
+This commit introduces several improvements to the codebase summary and semantic retrieval tools.
+
+- Enhanced codebase summary tool with fuzzy path matching and level of detail analysis for better
+  context. - Improved semantic retrieval tool by merging overlapping code chunks for more coherent
+  results. - Added detailed logging and error handling for increased stability and better debugging.
+
+### Refactoring
+
+- **embedding**: Refactor embedding model and fix similarity calculation
+  ([`7f8752b`](https://github.com/SarthakMishra/codemap/commit/7f8752bd513f48613ef6113c4a0096a0be925fec))
+
+The model name and dimension have been updated in .codemap.yml to enhance embedding performance.
+  Additionally, the cosine similarity calculation in FileIntegrityResolver has been corrected by
+  reshaping the embedding vectors to ensure compatibility with the cosine_similarity function. Also,
+  max_similarity is explicitly initialized as a float to ensure the correct type.
+
+- **embedding**: Update embedding model
+  ([`2ee8a3b`](https://github.com/SarthakMishra/codemap/commit/2ee8a3bfc9fc8c0ac71f59edccd8ab03816b8480))
+
+Update embedding model to improve code search accuracy and reduce latency.
+
+- **git**: Improve error and hook failure messages
+  ([`f05400c`](https://github.com/SarthakMishra/codemap/commit/f05400c760123ed34e69fd1af35cf07d820ea03f))
+
+Refactors the display of error messages and introduces a new method for handling Git hook failures,
+  providing more detailed information to the user and simplifying the bypass process.
+
+- **processor**: Remove search result data structure
+  ([`6649276`](https://github.com/SarthakMishra/codemap/commit/6649276a4cd813f72576cc36870f3929c1967e83))
+
+It is no longer needed as the semantic search functionality has been moved.
+
+- **prompts**: Streamline the system prompt for clarity
+  ([`1849ebd`](https://github.com/SarthakMishra/codemap/commit/1849ebd58bc77f9e9f9b372361bd501806accc03))
+
+The prompt was updated to remove the pattern search guidelines and instructions. Instead, the prompt
+  now instructs the model to use the `search_file` tool to search for keywords in the codebase.
+
+- **rag**: Improve error handling with ModelRetry exceptions
+  ([`596848a`](https://github.com/SarthakMishra/codemap/commit/596848a4ab38cf02de5439ae12505dbee9cdc9ae))
+
+This change introduces ModelRetry exceptions in several functions to handle cases where no relevant
+  code context is found or when file reading fails. This ensures that the tool can gracefully handle
+  these situations and retry the operation.
+
+- **rag**: Replace pattern and read file tools with search file tool
+  ([`bef7385`](https://github.com/SarthakMishra/codemap/commit/bef7385aa71313c65c442779a7670b0616ccaeeb))
+
+This change replaces the 'pattern_search_tool' and 'read_file_tool' with a new 'search_file_tool'.
+  This simplifies the available tools and improves search functionality.
+
+- **web-search**: Refactor imports for clarity
+  ([`543f65c`](https://github.com/SarthakMishra/codemap/commit/543f65c765613d764f77363b5e3081c5630982d0))
+
+### Testing
+
+- **llm**: Add unit tests for the LLM client
+  ([`38e05f5`](https://github.com/SarthakMishra/codemap/commit/38e05f5045aad6f30a464f158998e90643215589))
+
+This commit introduces several unit tests for the LLM client, covering initialization, template
+  management, completion, and iterative completion scenarios.
+
+The tests ensure the client functions correctly with various configurations, including Pydantic
+  models and error handling. Iterative completion tests cover different scenarios like first
+  iteration completion, multiple iterations, max iterations reached, usage of tools, and
+  conversation history.
+
+- **processor**: Add tests for SearchResult class
+  ([`f58966a`](https://github.com/SarthakMishra/codemap/commit/f58966aae869c3679e73f418c3bad0df928b5ed9))
+
+This commit introduces tests for the SearchResult class, covering various scenarios such as creation
+  from ast-grep matches, handling file errors, formatting output, language detection based on file
+  extensions, and dataclass equality.
+
+- **semantic-search**: Add tests for semantic search module
+  ([`62abfbd`](https://github.com/SarthakMishra/codemap/commit/62abfbde10d40ce5dc1dcde15beee33bd7be44f0))
+
+- **semantic-search**: Remove test file for SearchResult class
+  ([`bdd7b9f`](https://github.com/SarthakMishra/codemap/commit/bdd7b9f1a24f065942d4b3a0c8179c410d821f33))
+
+This commit removes the test file for the SearchResult class.
+
+
 ## v0.3.1-rc.2 (2025-05-24)
 
 ### Bug Fixes
