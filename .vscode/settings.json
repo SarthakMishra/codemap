@@ -16,6 +16,7 @@
         "**/scripts/**",
         "**/typings/**"
     ],
+    "ty.experimental.completions.enable": true,
     "terminal.integrated.suggest.enabled": true,
     "terminal.integrated.suggest.enableExtensionCompletions": true,
 }
