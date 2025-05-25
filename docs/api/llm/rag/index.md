@@ -6,4 +6,4 @@ RAG (Retrieval-Augmented Generation) functionalities for CodeMap.
 - [Ask](ask/index.md) - Ask command for the RAG.
 - [Do](do/index.md) - Do command for the RAG.
 - [Interactive](interactive.md) - Interactive LLM interface for CodeMap.
-- [Tools](tools/index.md) - Tool Implementations for the RAG-commands.
+- [Tools](tools/index.md) - LLM tools for the RAG system.

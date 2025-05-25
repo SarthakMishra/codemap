@@ -124,6 +124,7 @@ nav:
       - Interactive: api/llm/rag/interactive.md
       - Tools:
         - Tools Overview: api/llm/rag/tools/index.md
+        - Codebase Summary: api/llm/rag/tools/codebase_summary.md
         - Read File: api/llm/rag/tools/read_file.md
         - Semantic Retrieval: api/llm/rag/tools/semantic_retrieval.md
         - Web Search: api/llm/rag/tools/web_search.md
