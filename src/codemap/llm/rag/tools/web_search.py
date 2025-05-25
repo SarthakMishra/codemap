@@ -1,6 +1,7 @@
 """Web search tool for PydanticAI agents to search the web."""
 
-from pydantic_ai.common_tools.duckduckgo import DDGS, DuckDuckGoSearchTool
+from duckduckgo_search import DDGS
+from pydantic_ai.common_tools.duckduckgo import DuckDuckGoSearchTool
 from pydantic_ai.tools import Tool
 
 
