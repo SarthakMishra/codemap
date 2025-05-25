@@ -18,7 +18,7 @@ tasks:
     desc: Run all linting checks
     cmds:
       - task: lint:ruff
-      - task: lint:pyrefly
+      - task: type:check
 
   lint:ruff:
     desc: Run ruff linter
@@ -35,10 +35,10 @@ tasks:
     cmds:
       - uv run ruff check --fix --unsafe-fixes {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
-  lint:pyrefly:
-    desc: Run pyrefly type checker
+  type:check:
+    desc: Run type checker
     cmds:
-      - uv run pyrefly check {{.SRC_DIR}}
+      - uv run mypy {{.SRC_DIR}} {{.TESTS_DIR}} {{.SCRIPT_DIR}}
 
   format:
     desc: Run all formatters

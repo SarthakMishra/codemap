@@ -70,9 +70,9 @@ Issues = "https://github.com/SarthakMishra/codemap/issues"
 dev = [
     "build>=1.2.2.post1",
     "interrogate[png]>=1.7.0",
+    "mypy>=1.15.0",
     "packaging>=25.0",
     "pre-commit>=4.2.0",
-    "pyrefly>=0.16.2",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "pytest-cov>=6.1.1",
@@ -80,10 +80,8 @@ dev = [
     "pytest-sugar>=1.0.0",
     "pytest-xdist[psutil]>=3.6.1",
     "python-semantic-release>=9.3.1",
-    "radon>=6.0.1",
     "ruff>=0.11.6",
     "twine>=6.1.0",
-    "vulture>=2.14",
 ]
 docs = [
     "mike>=2.1.3",
@@ -92,11 +90,8 @@ docs = [
     "mkdocstrings-python>=1.16.10",
 ]
 
-[tool.pyrefly]
-project_includes = [
-    "src",
-]
-project_excludes = [
+[tool.mypy]
+exclude = [
     ".git",
     ".ruff_cache",
     ".venv",
@@ -105,11 +100,8 @@ project_excludes = [
     "build",
     "dist",
     "vendor",
-    "tests",
-    "scripts",
 ]
-search_path = ["src"]
-python_version = "3.12.0"
+follow_untyped_imports = true
 
 [project.scripts]
 codemap = "codemap.cli:main"
