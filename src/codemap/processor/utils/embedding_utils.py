@@ -17,6 +17,11 @@ if TYPE_CHECKING:
 # Global cache for loaded models
 _model_cache: dict[str, object] = {}
 
+# Default instruction prompt for queries (matches original gte-Qwen2-7B-instruct)
+DEFAULT_QUERY_INSTRUCTION = (
+	"Instruct: Given a web search query, retrieve relevant passages that answer the query\nQuery: "
+)
+
 
 class ModelLoadTimeoutError(Exception):
 	"""Raised when model loading times out."""
@@ -89,13 +94,23 @@ def _get_cached_model(model_name: str) -> object:
 			signal.signal(signal.SIGALRM, old_handler)
 
 
-def generate_embedding(texts: list[str], config_loader: "ConfigLoader") -> list[list[float]]:
+def generate_embedding(
+	texts: list[str], config_loader: "ConfigLoader", is_query: bool = False, custom_instruction: str | None = None
+) -> list[list[float]]:
 	"""
 	Generate embeddings for a list of texts using model2vec.
+
+	This function now supports query vs document differentiation by adding
+	instruction prefixes to queries, matching the behavior of the original
+	gte-Qwen2-7B-instruct model.
 
 	Args:
 		texts: List of text strings to embed.
 		config_loader: ConfigLoader instance used to load embedding model configuration.
+		is_query: Whether the texts are search queries (True) or documents (False).
+		          When True, adds instruction prefix to match original model behavior.
+		custom_instruction: Custom instruction prefix to use instead of default.
+		                   Only used when is_query=True.
 
 	Returns:
 		List of embeddings (each embedding is a list of floats)
@@ -113,9 +128,16 @@ def generate_embedding(texts: list[str], config_loader: "ConfigLoader") -> list[
 			logger.exception("Failed to load embedding model")
 			raise
 
+	# Pre-process texts based on whether they are queries or documents
+	processed_texts = texts
+	if is_query:
+		instruction = custom_instruction or DEFAULT_QUERY_INSTRUCTION
+		processed_texts = [f"{instruction}{text}" for text in texts]
+		logger.debug(f"Applied query instruction prefix to {len(texts)} texts")
+
 	with progress_indicator("Generating embeddings..."):
 		try:
-			embeddings = model.encode(texts)  # type: ignore[attr-defined]
+			embeddings = model.encode(processed_texts)  # type: ignore[attr-defined]
 			return embeddings.tolist()  # Convert np.ndarray to list of lists
 		except Exception:
 			logger.exception("Error generating embeddings")

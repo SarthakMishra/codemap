@@ -528,7 +528,7 @@ class ProcessingPipeline:
 
 		try:
 			# 1. Generate query embedding (must be async)
-			query_embedding = generate_embedding([query], self.config_loader)
+			query_embedding = generate_embedding([query], self.config_loader, is_query=True)
 			if query_embedding is None:
 				logger.error("Failed to generate embedding for query.")
 				return None
